@@ -83,8 +83,11 @@ jobs:
           cat > notes.md <<NOTES
           Built by GitHub Actions on Ubuntu 22.04 from commit \`$GITHUB_SHA\` (verify passed: $VERIFY_URL).
 
-          The repository is private: download while signed in to GitHub, for example
-          \`gh release download $TAG -R $GITHUB_REPOSITORY\`.
+          Download it with, for example, \`gh release download $TAG -R $GITHUB_REPOSITORY\`.
+
+          Upgrading: every chain now pads every hop to constant cells, and a chain signed
+          by an earlier release is refused at connect. Re-sign it (\`avpn cloud chain --apply\`,
+          or \`avpn init\`) and enroll the new bundles with \`--replace\`.
 
           Check the download: \`sha256sum -c SHA256SUMS\`. Then unpack it, and either
           install the command line for yourself (an operator machine) with
