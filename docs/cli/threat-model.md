@@ -29,8 +29,7 @@ third-party egress). This design is the same shape, built for one owner:
   providers**, so no one provider holds both halves.
 - **The MASQUE transport mechanism.** Inner IP packets travel as unreliable QUIC
   datagrams, never as a stream, so there is no TCP-over-TCP collapse and no
-  head-of-line blocking — the property MASQUE (RFC 9298/9484) was built for. With
-  `transport = masque` the outer hop is literal HTTP/3 CONNECT-IP.
+  head-of-line blocking — the property MASQUE (RFC 9298/9484) was built for.
 - **Post-quantum, mutually authenticated.** Every hop is X25519MLKEM768 key exchange
   with ML-DSA-65 certificates, pinned to the exact enrolled peer. The commercial
   systems above authenticate with classical WebPKI.
@@ -48,6 +47,14 @@ constant-cell mode (`avpn init --padding cells`) pads **every** hop's datagrams 
 size, so inner packet sizes do not leak on the outer path at all — not just on the
 first link. See the cost note there before turning it on.
 
+## Roaming between networks
+
+Switching Wi-Fi, cellular or Ethernet does not drop the chain. The WireGuard carrier
+to the first hop keeps a persistent keepalive, so when your address changes the first
+hop re-learns it from the next authenticated packet. The inner QUIC layers ride on the
+carrier's stable overlay addresses and never see the change. Nothing falls back to an
+unprotected path while this happens — the kill switch holds throughout.
+
 ## What it does not stop
 
 - **A global passive adversary** who can watch both ends of the chain at once can
@@ -64,13 +71,6 @@ first link. See the cost note there before turning it on.
 - **Who calls the cloud API.** Creating or changing a server records your address in
   the provider's audit log. Run `avpn cloud` while connected through the chain so the
   exit is the caller instead (`avpn help cloud`).
-- **A censor doing deep protocol analysis.** `transport = masque` makes the traffic
-  genuine HTTP/3 to a proxy, which defeats classifiers that key on the protocol
-  structure or on the old `advanced-vpn/1` label. It does **not** make the TLS
-  handshake byte-identical to a public CDN's — the ML-DSA certificates differ from
-  what browsers and CDNs serve. Hiding post-quantum authentication behind a classical
-  fingerprint is an arms race this design does not enter; keeping the post-quantum,
-  zero-trust authentication is the deliberate trade.
 
 ## Why self-hosted, and not a big provider
 

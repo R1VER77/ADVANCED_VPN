@@ -127,6 +127,13 @@ fn material(
     Ok((vec![cert], PrivatePkcs8KeyDer::from(key).into()))
 }
 /// QUIC transport settings: datagrams only (no streams), sized to `mtu`, with keep-alives.
+///
+/// Roaming between networks is handled below the QUIC layers: the inner layers ride on
+/// the WireGuard carrier's stable overlay addresses, and the carrier (persistent
+/// keepalive) re-learns the client's new address after a physical network change, so a
+/// handover does not renegotiate the chain. The QUIC idle timeout stays short (10 s) so
+/// a server frees a stale session quickly and the client can reconnect at once; keep-
+/// alives every 2 s hold the path open through NAT. See `avpn help threat-model`.
 pub fn transport(mtu: u16) -> Arc<TransportConfig> {
     let mut t = TransportConfig::default();
     t.max_concurrent_bidi_streams(0u8.into())

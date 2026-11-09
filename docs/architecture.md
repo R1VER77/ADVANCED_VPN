@@ -20,7 +20,8 @@ flowchart LR
 See `avpn help chains`:
 - one QUIC layer per server hop (X25519MLKEM768, ML-DSA-65), nested inside-out;
 - the WireGuard + DAITA carrier innermost on the client's link;
-- the inner IP MTU is 1100 for every chain length.
+- the inner IP MTU is 1100 for every chain length;
+- the WireGuard carrier keeps a persistent keepalive, so the chain survives roaming between networks (`avpn help threat-model`).
 
 ## Threat model
 
@@ -29,8 +30,8 @@ See `avpn help threat-model`:
   QUIC-datagram mechanism, with post-quantum mutual authentication and DAITA traffic
   shaping that OHTTP, MASQUE and Private Relay do not have;
 - the honest limits are global-passive flow correlation (DeepCorr/Var-CNN) and the
-  non-collusion assumption; constant-cell padding and `masque` transport reduce, but do
-  not erase, what an observer can learn.
+  non-collusion assumption; constant-cell padding reduces, but does not erase, what an
+  observer can learn.
 
 ## Keys
 
