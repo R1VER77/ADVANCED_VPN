@@ -73,7 +73,8 @@ jobs:
           sudo python3 tools/install.py --apply --role client --protect none
           sudo avpn --version | grep -qx "avpn ${TAG#v}"
           test "$(readlink -f "$(sudo sh -c 'command -v avpn')")" = /opt/advanced-vpn/bin/avpn
-          sudo test -f /root/advanced-vpn-client.req
+          # The public request is handed to the user who ran sudo, in their home.
+          test "$(stat -c %U "$HOME/advanced-vpn-client.req")" = "$(id -un)"
           sudo avpn --json info | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["info"]["role"] == "client", d'
           test "$(systemctl is-enabled advanced-vpn.service || true)" = disabled
           sudo python3 tools/install.py --apply --role client --protect none | grep -q "already has keys"
