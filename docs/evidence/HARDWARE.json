@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "separate_advanced_vpn_rp": true,
+  "existing_credentials_preserved": true,
+  "pin_changed": false,
+  "user_verification_and_touch_required": true,
+  "client_keys_hardware_sealed": true,
+  "encrypted_recovery_decrypted_and_compared": true,
+  "plaintext_client_keys_removed": true,
+  "immutable_memfd_rust_configuration_check_passed": true,
+  "hardware_leaf_keys_nonexportable": false,
+  "live_hardware_tunnel_tested": false,
+  "software_tunnel_and_hardware_handoff_tested_separately": true
+}

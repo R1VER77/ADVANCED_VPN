@@ -1,0 +1,143 @@
+{
+  "schema": 1,
+  "date": "2026-11-08",
+  "namespace_chains": {
+    "disk2-3-2": [
+      {
+        "hops": 3,
+        "switched": false,
+        "mbit_s": 165.89,
+        "sha256_verified": true,
+        "onion": {
+          "marker_seen_by_any_server": false,
+          "client_ip_seen_beyond_first_hop": false,
+          "first_hop_sees_client": true,
+          "ingress_sources": {
+            "relay": [
+              "192.0.2.2"
+            ],
+            "middle": [
+              "198.18.0.1"
+            ],
+            "exit": [
+              "198.51.100.1"
+            ]
+          }
+        },
+        "disk": {
+          "server_files_written": [],
+          "client_files_written": [
+            "network-before.json"
+          ],
+          "client_ip_or_payload_in_server_state": []
+        },
+        "blocked_while_switching": true
+      },
+      {
+        "hops": 2,
+        "switched": true,
+        "mbit_s": 258.04,
+        "sha256_verified": true,
+        "onion": {
+          "marker_seen_by_any_server": false,
+          "client_ip_seen_beyond_first_hop": false,
+          "first_hop_sees_client": true,
+          "ingress_sources": {
+            "relay": [
+              "192.0.2.2"
+            ],
+            "exit": [
+              "198.18.0.1"
+            ]
+          }
+        },
+        "disk": {
+          "server_files_written": [],
+          "client_files_written": [],
+          "client_ip_or_payload_in_server_state": []
+        },
+        "blocked_while_switching": null
+      }
+    ],
+    "disk2-1-3": [
+      {
+        "hops": 1,
+        "switched": false,
+        "mbit_s": 361.83,
+        "sha256_verified": true,
+        "onion": {
+          "marker_seen_by_any_server": false,
+          "client_ip_seen_beyond_first_hop": false,
+          "first_hop_sees_client": true,
+          "ingress_sources": {
+            "exit": [
+              "192.0.2.2"
+            ]
+          }
+        },
+        "disk": {
+          "server_files_written": [],
+          "client_files_written": [
+            "network-before.json"
+          ],
+          "client_ip_or_payload_in_server_state": []
+        },
+        "blocked_while_switching": true
+      },
+      {
+        "hops": 3,
+        "switched": true,
+        "mbit_s": 165.59,
+        "sha256_verified": true,
+        "onion": {
+          "marker_seen_by_any_server": false,
+          "client_ip_seen_beyond_first_hop": false,
+          "first_hop_sees_client": true,
+          "ingress_sources": {
+            "relay": [
+              "192.0.2.2"
+            ],
+            "middle": [
+              "198.18.0.1"
+            ],
+            "exit": [
+              "198.51.100.1"
+            ]
+          }
+        },
+        "disk": {
+          "server_files_written": [],
+          "client_files_written": [],
+          "client_ip_or_payload_in_server_state": []
+        },
+        "blocked_while_switching": null
+      }
+    ]
+  },
+  "installed_vm": {
+    "run": "run-10",
+    "no_retained_data": {
+      "relay": {
+        "persistent_files_written": [],
+        "journal_lines": 0,
+        "runtime_dirs_in_ram": 1
+      },
+      "exit": {
+        "persistent_files_written": [],
+        "journal_lines": 0,
+        "runtime_dirs_in_ram": 1
+      }
+    },
+    "boot_order_from_systemd_timestamps": {
+      "guard_active_us": 5742904,
+      "networkd_start_us": 6323468,
+      "guard_before_network": true
+    },
+    "whole_device_frames_outside_policy": {},
+    "internet_via_exit": {
+      "https_status": "200",
+      "dns_over_tls_quad9": true
+    }
+  },
+  "notes": "Marker = random bytes in every payload block; observers are raw AF_PACKET sockets on each server ingress link."
+}

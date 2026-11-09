@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "rustsec_vulnerabilities": 0,
+  "warnings": {},
+  "database": {
+    "advisory-count": 1422,
+    "last-commit": "309392b18f6b17022f82c701f300433126901068",
+    "last-updated": "2026-11-06T16:34:32+01:00"
+  }
+}

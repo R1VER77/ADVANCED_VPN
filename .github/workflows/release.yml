@@ -1,0 +1,91 @@
+name: release
+# A version tag (vX.Y.Z) that matches Cargo.toml builds the release package on GitHub,
+# but only for a commit whose `verify` run passed. The package is smoke-tested by its
+# own user installation, then published with SHA256 checksums. Build-provenance
+# attestations need GitHub Enterprise Cloud for private repositories, so the release
+# notes record the exact commit and verify run instead.
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+jobs:
+  package:
+    # The oldest supported C library (Ubuntu 22.04, glibc 2.35), so the binaries also
+    # run on Debian 12/13 and newer Ubuntu releases.
+    runs-on: ubuntu-22.04
+    timeout-minutes: 75
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Tag matches the crate version
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)
+          test "$TAG" = "v$version" || { echo "tag $TAG does not match Cargo.toml version $version"; exit 1; }
+      - name: Only release a commit whose verify run passed
+        run: |
+          for _ in $(seq 1 90); do
+            result=$(gh run list -R "$GITHUB_REPOSITORY" --workflow verify.yml --commit "$GITHUB_SHA" \
+              --json status,conclusion,url --jq '[.[] | select(.status == "completed")] | map(select(.conclusion == "success")) | .[0].url // ""')
+            if [ -n "$result" ]; then echo "verify passed: $result"; echo "VERIFY_URL=$result" >> "$GITHUB_ENV"; exit 0; fi
+            failed=$(gh run list -R "$GITHUB_REPOSITORY" --workflow verify.yml --commit "$GITHUB_SHA" \
+              --json status,conclusion --jq '[.[] | select(.status == "completed" and .conclusion != "success")] | length')
+            pending=$(gh run list -R "$GITHUB_REPOSITORY" --workflow verify.yml --commit "$GITHUB_SHA" \
+              --json status --jq '[.[] | select(.status != "completed")] | length')
+            if [ "$pending" = "0" ] && [ "$failed" != "0" ]; then echo "verify failed for $GITHUB_SHA"; exit 1; fi
+            sleep 30
+          done
+          echo "verify did not finish for $GITHUB_SHA"; exit 1
+      - name: Build
+        run: |
+          rustup toolchain install 1.95.0 --profile minimal
+          cargo build --release --locked
+      - name: Package
+        run: |
+          mkdir dist
+          name=advanced-vpn-$TAG-x86_64-linux-gnu.tar.gz
+          python3 tools/install.py --pack "dist/$name"
+          (cd dist && sha256sum "$name" > SHA256SUMS)
+      - name: Smoke-test the package's own user installation
+        run: |
+          sudo apt-get install -y -qq python3-venv >/dev/null
+          home=$RUNNER_TEMP/home; mkdir -p "$home" "$RUNNER_TEMP/pkg"
+          tar -C "$RUNNER_TEMP/pkg" -xzf dist/*.tar.gz
+          (cd "$RUNNER_TEMP/pkg" && HOME=$home XDG_DATA_HOME="" python3 tools/install.py --user)
+          avpn="$home/.local/bin/avpn"
+          HOME=$home "$avpn" --version | grep -qx "avpn ${TAG#v}"
+          HOME=$home "$avpn" help privacy | head -1 | grep -q "Privacy and your source address"
+          HOME=$home "$avpn" --json --state "$RUNNER_TEMP/none" hops | python3 -c 'import json,sys; assert json.load(sys.stdin)["ok"]'
+          HOME=$home "$avpn" --json cloud status | python3 -c 'import json,sys; assert json.load(sys.stdin)["ok"]'
+      - name: Smoke-test the one-step system installation as root
+        run: |
+          cd "$RUNNER_TEMP/pkg"
+          sudo python3 tools/install.py --apply --role client --protect none
+          sudo avpn --version | grep -qx "avpn ${TAG#v}"
+          test "$(readlink -f "$(sudo sh -c 'command -v avpn')")" = /opt/advanced-vpn/bin/avpn
+          sudo test -f /root/advanced-vpn-client.req
+          sudo avpn --json info | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["info"]["role"] == "client", d'
+          test "$(systemctl is-enabled advanced-vpn.service || true)" = disabled
+          sudo python3 tools/install.py --apply --role client --protect none | grep -q "already has keys"
+      - name: Publish
+        run: |
+          cat > notes.md <<NOTES
+          Built by GitHub Actions on Ubuntu 22.04 from commit \`$GITHUB_SHA\` (verify passed: $VERIFY_URL).
+
+          The repository is private: download while signed in to GitHub, for example
+          \`gh release download $TAG -R $GITHUB_REPOSITORY\`.
+
+          Check the download: \`sha256sum -c SHA256SUMS\`. Then unpack it, and either
+          install the command line for yourself (an operator machine) with
+          \`python3 tools/install.py --user\`, or install the VPN system-wide (client or
+          server) with \`sudo python3 tools/install.py --apply --role client --protect nitrokey\`
+          (servers: \`--protect systemd-creds\`). That also puts \`avpn\` on root's PATH,
+          creates the device's Nitrokey vault and generates its keys. The service is never
+          enabled by the installer.
+          NOTES
+          gh release create "$TAG" dist/* --verify-tag --title "ADVANCED_VPN $TAG" --notes-file notes.md

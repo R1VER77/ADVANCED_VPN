@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "same_host": true,
+  "independent_source_and_build_directories": true,
+  "source_prefix_remapped": true,
+  "sha256": [
+    "c3598e8bc3374920f95f60ed7b7bdc6edb41119dc84cadca231b2300f57e19d6",
+    "c3598e8bc3374920f95f60ed7b7bdc6edb41119dc84cadca231b2300f57e19d6"
+  ],
+  "match": true
+}

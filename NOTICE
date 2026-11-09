@@ -1,0 +1,9 @@
+ADVANCED_VPN
+Copyright 2026 ADVANCED_VPN contributors
+
+Original application code is licensed under Apache-2.0. Dependency license
+obligations remain separate; Cargo.lock pins the dependency graph. Unmodified
+GotaTun (Mullvad, MPL-2.0) and Maybenot components are dependencies; see
+third_party/SOURCES.json and the included MPL license. No VP.NET, IVPN, Tor or
+Quincy application implementation is copied. Names identify upstream/research
+sources, not affiliation, endorsement or inherited security assurances.

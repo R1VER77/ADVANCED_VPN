@@ -1,0 +1,22 @@
+[Unit]
+Description=ADVANCED_VPN early whole-device privacy guard
+DefaultDependencies=no
+After=local-fs.target
+Before=network-pre.target NetworkManager.service systemd-networkd.service advanced-vpn.service
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/advanced-vpn/bin/avpnctl guard
+RemainAfterExit=yes
+UMask=0077
+NoNewPrivileges=yes
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_SYS_ADMIN
+LimitCORE=0
+StandardOutput=null
+StandardError=null
+# No logs at all: also suppresses the service manager's own messages about this unit.
+LogLevelMax=emerg
+
+[Install]
+WantedBy=multi-user.target

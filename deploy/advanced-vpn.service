@@ -1,0 +1,39 @@
+[Unit]
+Description=ADVANCED_VPN managed privacy supervisor
+Requires=advanced-vpn-guard.service
+After=advanced-vpn-guard.service network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+ExecStart=/opt/advanced-vpn/bin/avpnctl connect
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=yes
+# CAP_KILL: the supervisor must signal its children, which run as the service UID.
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_SYS_ADMIN CAP_SETPCAP CAP_SETUID CAP_SETGID CAP_CHOWN CAP_DAC_OVERRIDE CAP_KILL
+# Named network namespace handles must be visible to independent CLI launches.
+# Do not add PrivateTmp/ProtectSystem/PrivateDevices: they imply a private mount
+# namespace. The supervisor is local-only; data-plane children drop all caps.
+PrivateMounts=no
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+MemoryMax=512M
+MemorySwapMax=0
+CPUQuota=100%
+TasksMax=64
+LimitNOFILE=256
+LimitCORE=0
+StandardOutput=null
+StandardError=null
+# No logs at all: also suppresses the service manager's own messages about this unit.
+LogLevelMax=emerg
+
+[Install]
+WantedBy=multi-user.target

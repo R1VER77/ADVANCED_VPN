@@ -1,0 +1,84 @@
+{
+  "schema": 1,
+  "date": "2026-11-08",
+  "wan_tested": true,
+  "chain": "2 hops: local Debian 13 client VM (home internet via a consumer VPN) -> AWS relay avpn-relay (eu-north-1, t3.micro, NitroTPM 2.0) -> OCI exit (me-dubai-1, Ubuntu 22.04)",
+  "built_with": {
+    "relay": "avpn cloud aws relay --apply (tagged; IMDSv2 required, standard credits, encrypted gp3, UDP 41194 and SSH from one address only)",
+    "relay_host": "avpn cloud host setup (TSS2 libraries, journal in RAM, package installed, keys sealed host+tpm2)",
+    "exit_firewall": "avpn cloud oci allow --apply (UDP 4444 from the relay only; other rules unchanged) plus a runtime host accept for the relay only",
+    "operator": "Nitrokey FIDO2 Ed25519 assertion + sealed ML-DSA-65 (one PIN + touch)"
+  },
+  "verified_in_aws": {
+    "boot_mode": "uefi",
+    "tpm_support": "v2.0",
+    "imds_http_tokens": "required",
+    "imds_hop_limit": 1,
+    "instance_profile": null,
+    "cpu_credits": "standard",
+    "root_volume": "gp3, 8 GiB, encrypted",
+    "security_group_ingress": [
+      [
+        "udp",
+        41194,
+        "client egress /32"
+      ],
+      [
+        "tcp",
+        22,
+        "admin /32"
+      ]
+    ],
+    "intermediate_image_deregistered": true,
+    "other_instances_untouched": true
+  },
+  "protection": {
+    "relay": "systemd-creds host+tpm2 (keys generated on the relay)",
+    "client": "systemd-creds (keys generated on the client)",
+    "exit": "none: Ubuntu 22.04 systemd 249 predates systemd-creds; keys generated on the exit, root-only files"
+  },
+  "results": {
+    "internet_sees_exit_ip": true,
+    "exit_ip": "203.0.113.80",
+    "direct_ip_differs": true,
+    "dns_through_tunnel": true,
+    "https_status": 200,
+    "download_mbit_s": 9.2,
+    "tcp_rtt_ms": 389,
+    "blocked_after_disconnect": {
+      "dns": true,
+      "https": true
+    },
+    "reconnected_to_exit_ip": true
+  },
+  "onion_capture": {
+    "exit_udp_4444_sources": [
+      "relay 198.51.100.81",
+      "exit's own private address"
+    ],
+    "exit_saw_client_address": false,
+    "relay_remote_peers": [
+      "client egress",
+      "exit 203.0.113.80"
+    ],
+    "relay_contacted_destinations": false
+  },
+  "no_retained_data": {
+    "relay": {
+      "state_files_written": 0,
+      "vpn_unit_journal_lines": 0,
+      "runtime_in_ram": true,
+      "finding": "the persistent system journal held sshd records of the admin's address (the user's own address)",
+      "fix": "journal in RAM only (Storage=volatile), now part of avpn cloud host setup",
+      "after_fix_files_on_disk_naming_client_address": 0
+    },
+    "exit": {
+      "state_files_written": 0,
+      "vpn_unit_journal_lines": 0,
+      "runtime_in_ram": true,
+      "journal_and_text_logs_naming_client_or_relay_address_excluding_sudo": 0,
+      "note": "sudo logs the admin's own command lines on this shared host; system logging there was left unchanged"
+    }
+  },
+  "published_redactions": "Public addresses, host names and key fingerprints were replaced with documentation values (RFC 5737) before publication; the measurements are unchanged."
+}

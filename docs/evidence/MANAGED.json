@@ -1,0 +1,51 @@
+{
+  "schema": 2,
+  "wireguard_implementation": "GotaTun 0.10.2",
+  "daita_framework": "Maybenot 2.2.2",
+  "dual_hybrid_pq_retained": true,
+  "signed_enrollment_verified": true,
+  "automatic_network_setup": true,
+  "dns_tls_verified": true,
+  "system_resolver_inside_namespace": true,
+  "dns_bypass_rejected": true,
+  "ipv6_leak_rejected": true,
+  "carrier_padding_and_decoys_verified": true,
+  "wireguard_data_sizes": [
+    1372
+  ],
+  "private_marker_absent_from_physical_capture": true,
+  "carrier_stats": {
+    "daita": true,
+    "handshake": true,
+    "rx_bytes": 63072,
+    "rx_decoy_bytes": 22780,
+    "rx_padding_bytes": 32680,
+    "schema": 1,
+    "tx_bytes": 141496,
+    "tx_decoy_bytes": 91120,
+    "tx_padding_bytes": 31613
+  },
+  "child_crash_recovered": true,
+  "supervisor_crash_guard_persisted": true,
+  "disconnected_namespace_blocked": true,
+  "data_plane_dies_with_supervisor": true,
+  "automatic_leaf_rotation_verified": true,
+  "strong_profile_connected": true,
+  "explicit_unlock_restores_route": true,
+  "data_plane_uid": 1,
+  "data_plane_capabilities_zero": true,
+  "private_keys_fd_only": true,
+  "whole_device_guard_blocks_working_fallback_route": true,
+  "host_network_changed": false,
+  "host_dns_changed": false,
+  "classifier_resistance_measured": false,
+  "wan_tested": false,
+  "version": "0.2.0",
+  "rust_tests": 4,
+  "python_tests": 18,
+  "binary_sha256": {
+    "advanced-vpn": "becea267ce3f69a985cc3c66716fc5b81e0a89815a157bbb55cdcfef48e3a45c",
+    "advanced-vpn-wireguard": "bed51505e9160c2e4a1b4ddf6b4386e1967cc1050ec595898b819b52f4678014",
+    "advanced-vpn-dns": "1fceecccae10b5deba6482c1eb3e12b24412390dd65e1529a73b4392c1e30493"
+  }
+}

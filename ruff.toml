@@ -1,0 +1,28 @@
+# Python tooling for ADVANCED_VPN (tools/). Servers may run Python 3.10.
+target-version = "py310"
+line-length = 120
+
+[lint]
+# Pyflakes, real errors, bugbear, the bandit-derived security rules, and docstrings:
+# every public module, class, method and function is documented (D1).
+select = ["E9", "F", "B", "S", "PLE", "D1"]
+ignore = [
+  "D105",  # magic methods document themselves
+  "D107",  # __init__: the class docstring describes construction
+  "S603",  # subprocess without a shell is the intended pattern (argument lists only)
+  "S606",  # exec without a shell is the intended pattern (e.g. running the protected app)
+]
+
+[lint.per-file-ignores]
+# Tests and lab harnesses: asserts, fixed lab paths and broad assertRaises are intended.
+# Their test names describe them, so only the module docstring (D100) is required.
+"tools/test_*.py" = ["S101", "S108", "S607", "B017", "D101", "D102", "D103"]
+"tools/*_test.py" = ["S101", "S108", "S607", "D101", "D102", "D103"]
+"tools/throughput_bench.py" = ["S101", "S108", "S607", "D101", "D102", "D103"]
+"tools/vm_validation.py" = ["S101", "S108", "S607", "S104", "D101", "D102", "D103"]
+"tools/lab_peer.py" = ["S104", "B023", "D101", "D102", "D103"]
+"tools/managed_lab_peer.py" = ["S104", "D101", "D102", "D103"]
+"tools/reproduce.py" = ["S607", "D101", "D102", "D103"]
+"tools/start_client.py" = ["D103"]
+# The binary path of systemd-ask-password is not a credential.
+"tools/keyguard.py" = ["S105"]

@@ -1,0 +1,13 @@
+/target/
+/state/
+/evidence/
+*.key
+*.der
+*.sealed.json
+*.age
+*.pcap
+credential.json
+*.avpn
+*.bin
+__pycache__/
+.venv/

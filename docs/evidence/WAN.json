@@ -1,0 +1,128 @@
+{
+  "schema": 1,
+  "date": "2026-11-08",
+  "wan_tested": true,
+  "chain": "1 hop: local Debian 13 client VM (home internet via a consumer VPN) -> OCI exit (me-dubai-1, VM.Standard.E2.1.Micro, Ubuntu 22.04)",
+  "operator": "Nitrokey FIDO2 Ed25519 assertion + sealed ML-DSA-65 (one PIN + touch)",
+  "exit_protection": "none (Ubuntu 22.04 systemd 249 predates systemd-creds); keys generated on the exit, never transferred",
+  "results": {
+    "internet_sees_exit_ip": true,
+    "exit_ip": "203.0.113.80",
+    "direct_ip_differs": true,
+    "dns_through_tunnel": true,
+    "https_status": 200,
+    "download_mbit_s": 12.3,
+    "tcp_rtt_ms": 343,
+    "blocked_after_disconnect": {
+      "dns": true,
+      "https": true
+    },
+    "carrier": {
+      "handshake": true,
+      "daita_padding_and_decoys": true
+    }
+  },
+  "exit_after_traffic": {
+    "persistent_files_written": [],
+    "journal_lines": 0,
+    "client_ip_in_state_files": 0,
+    "co_hosted_services_still_active": true,
+    "mem_available_mb_before": 443,
+    "mem_available_mb_after": 406
+  },
+  "defects_found": [
+    "app-mode DNS leak: nss-resolve and D-Bus reach the host systemd-resolved over Unix sockets, bypassing the app network namespace (fixed: resolver sockets hidden in the app mount namespace; regression test with fake sockets, mutation-checked)",
+    "desktop PIN prompt regression: desktop apps run in systemd scopes (INVOCATION_ID set), which diverted the PIN to systemd-ask-password (fixed: desktop before service; regression test, mutation-checked)",
+    "hash lock not installable on Python 3.10 (pycparser 3.12 needs >=3.11; typing-extensions needed <3.11) (fixed with version markers; suite passes on 3.10)",
+    "binaries built on Debian 13 need glibc 2.38 (built for the exit in an Ubuntu 22.04 container: glibc 2.34)",
+    "hosts with a default-drop iptables INPUT/FORWARD (OCI Ubuntu images) also need accepts for the carrier port, avwg0:4433, avpn0:1053 and avpn0 forwarding"
+  ],
+  "not_tested": [
+    "2 and 3 hops over the internet (AWS relay pending aws login)",
+    "installed boot on the exit host (exit started, not enabled)"
+  ],
+  "two_hop": {
+    "chain": "2 hops: local client VM (home, via a consumer VPN) -> AWS relay eu-north-1 (t3.micro, Debian 13, UEFI NitroTPM AMI, systemd-creds host+tpm2) -> OCI exit me-dubai-1",
+    "operator": "same Nitrokey operator identity (one PIN + touch)",
+    "switched_with": "enroll --replace on client and exit (device keys kept)",
+    "results": {
+      "internet_sees_exit_ip": true,
+      "dns_through_tunnel": true,
+      "https_status": 200,
+      "tcp_rtt_ms": 400,
+      "download_mbit_s": 4.2,
+      "blocked_after_disconnect": {
+        "dns": true,
+        "https": true
+      }
+    },
+    "onion_on_real_internet": {
+      "exit_ingress_sources_udp4444": [
+        "198.51.100.80 (relay)",
+        "10.0.1.10 (exit itself, outbound)"
+      ],
+      "client_ip_seen_by_exit": false,
+      "relay_sees_client": true
+    },
+    "no_retained_data": {
+      "relay": {
+        "persistent_files_written": [],
+        "journal_lines": 0,
+        "client_ip_in_state": 0
+      },
+      "exit": {
+        "persistent_files_written": [],
+        "journal_lines": 0,
+        "client_ip_in_state": 0
+      }
+    },
+    "captures": "taken to /dev/shm (RAM) and deleted after counting sources",
+    "defects_found": [
+      "systemd-creds --with-key=auto silently used the host key when TSS2 libraries were missing (fixed: explicit host+tpm2 when systemd-analyze has-tpm2 passes; recorded in protection.json)",
+      "public hop listeners bound the public IP, which 1:1-NAT clouds do not put on the interface (fixed: middle/exit bind 0.0.0.0:<port>)"
+    ]
+  },
+  "three_hop": {
+    "chain": "3 hops: client VM (home) -> AWS relay eu-north-1 (198.51.100.80) -> AWS middle eu-north-1 (198.51.100.82, t3.micro, NitroTPM, keys host+tpm2) -> OCI exit me-dubai-1",
+    "switched_with": "enroll --replace on client, relay and exit; middle enrolled new; device keys kept",
+    "results": {
+      "internet_sees_exit_ip": true,
+      "dns_through_tunnel": true,
+      "https_status": 200,
+      "tcp_rtt_ms": 397,
+      "download_mbit_s": 2.1,
+      "blocked_after_disconnect": {
+        "dns": true,
+        "https": true
+      }
+    },
+    "onion_on_real_internet": {
+      "exit_inbound_sources": {
+        "198.51.100.82 (middle)": 3000
+      },
+      "middle_inbound_sources": {
+        "198.51.100.80 (relay)": 1114
+      },
+      "client_ip_seen_beyond_first_hop": false
+    },
+    "no_retained_data": {
+      "relay": {
+        "persistent_files_written": [],
+        "journal_lines": 0,
+        "client_ip_in_state": 0
+      },
+      "middle": {
+        "persistent_files_written": [],
+        "journal_lines": 0,
+        "client_ip_in_state": 0
+      },
+      "exit": {
+        "persistent_files_written": [],
+        "journal_lines": 0,
+        "client_ip_in_state": 0
+      }
+    },
+    "note": "Middle and exit in different providers; relay and middle both AWS for this test."
+  },
+  "published_redactions": "Public addresses, host names and key fingerprints were replaced with documentation values (RFC 5737) before publication; the measurements are unchanged."
+}

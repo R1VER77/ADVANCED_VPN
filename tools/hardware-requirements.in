@@ -1,0 +1,2 @@
+cryptography==50.0.0
+fido2==2.2.1

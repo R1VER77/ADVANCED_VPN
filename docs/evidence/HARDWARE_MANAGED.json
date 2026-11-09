@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "hardware_unlocked_managed_session": true,
+  "sealed_envelopes": [
+    "inner-key.sealed.json",
+    "outer-key.sealed.json",
+    "wireguard-key.sealed.json"
+  ],
+  "plaintext_keys_on_disk": [],
+  "generated_on_device": true,
+  "bundles_contain_private_keys": false,
+  "operator_signature": "FIDO2 assertion (Ed25519) + sealed ML-DSA-65",
+  "kem_key_removed_after_enroll": true,
+  "traffic_through_tunnel": true,
+  "supervisor_bounded_to_unit_capabilities": true,
+  "data_plane_non_dumpable": true,
+  "authentication": "ML-DSA-65",
+  "note": "FIDO2 hmac-secret unseals keys into memory at cold start; data-plane keys are not hardware-resident"
+}

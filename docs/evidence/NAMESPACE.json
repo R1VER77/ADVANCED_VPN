@@ -1,0 +1,44 @@
+{
+  "schema": 1,
+  "profile": "nested QUIC DATAGRAM, TLS1.3 hybrid X25519MLKEM768, AES256GCM",
+  "isolated_namespaces": true,
+  "host_routes_changed": false,
+  "owned_exit_forwarding": true,
+  "owned_exit_nat": true,
+  "inner_mtu": 1280,
+  "mtu_boundary_passed": true,
+  "relay_capture_bytes": 1231275,
+  "private_marker_absent_at_relay": true,
+  "private_marker_seen_at_destination": true,
+  "duplicate_ciphertext_replay_rejected": true,
+  "tampered_ciphertext_rejected": true,
+  "fail_closed_on_drop_and_relay_loss": true,
+  "reconnect_after_relay_restart": true,
+  "revoked_peer_rejected": true,
+  "negative_identities": {
+    "unlisted": true,
+    "untrusted": true,
+    "expired": true,
+    "wrong_inner_pin": true
+  },
+  "app_has_only_loopback_and_tun": true,
+  "ping_samples": 100,
+  "rtt_ms": {
+    "p50": 1.0350000000000001,
+    "p95": 1.8,
+    "p99": 2.48
+  },
+  "tcp_stream": {
+    "bytes": 1048576,
+    "seconds": 0.3046011679980438,
+    "sha256_verified": true
+  },
+  "rss_kib": {
+    "client": 6240,
+    "relay": 6100,
+    "exit": 6144
+  },
+  "binary_sha256": "c2d8beb8d72e0f236320201325f51bacfe572aebc83554af78f84244104c93cb",
+  "wan_tested": false,
+  "hardware_tested": false
+}

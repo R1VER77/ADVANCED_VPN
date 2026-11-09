@@ -1,0 +1,19 @@
+{
+  "gotatun": {
+    "version": "0.10.2",
+    "license": "MPL-2.0",
+    "source": "https://crates.io/crates/gotatun/0.10.2",
+    "revision": "1d46b779f5e0743f30a13cc2c325b8114b901fb9",
+    "modified": false
+  },
+  "maybenot": {
+    "version": "2.2.2",
+    "license": "MIT OR Apache-2.0",
+    "source": "https://crates.io/crates/maybenot/2.2.2"
+  },
+  "maybenot_machines": {
+    "version": "1.0.1",
+    "license": "MIT OR Apache-2.0",
+    "source": "https://crates.io/crates/maybenot-machines/1.0.1"
+  }
+}
