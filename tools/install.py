@@ -328,7 +328,8 @@ def main():
     print(
         ("Upgraded" if upgraded else "Installed")
         + " /opt/advanced-vpn without activation; "
-        + ("`sudo avpn` now works." if linked else "see the warning above about /usr/local/bin.")
+        + ("`sudo avpn` now works." if linked else "see the warning above about /usr/local/bin."),
+        flush=True,
     )
     if a.role:
         prepare_device(target, a.role, a.protect, a.vault)

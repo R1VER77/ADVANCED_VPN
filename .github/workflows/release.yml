@@ -64,6 +64,11 @@ jobs:
           HOME=$home "$avpn" --json cloud status | python3 -c 'import json,sys; assert json.load(sys.stdin)["ok"]'
       - name: Smoke-test the one-step system installation as root
         run: |
+          # Hosted runners leave /opt writable by the runner user; the installer rightly
+          # refuses that (it would let someone replace root-run code). Give this
+          # throwaway machine a normal system's /opt first, and show what it was.
+          echo "runner /opt before: $(stat -c '%U:%G %a' /opt)"
+          sudo chown root:root /opt && sudo chmod 755 /opt
           cd "$RUNNER_TEMP/pkg"
           sudo python3 tools/install.py --apply --role client --protect none
           sudo avpn --version | grep -qx "avpn ${TAG#v}"
