@@ -83,9 +83,9 @@ reference pages in one package, with SHA256 checksums. The repository is private
 download while signed in to GitHub:
 
 ```bash
-gh release download v0.4.0 -R R1VER77/ADVANCED_VPN
+gh release download v0.5.0 -R R1VER77/ADVANCED_VPN
 sha256sum -c SHA256SUMS
-mkdir advanced-vpn && tar -C advanced-vpn -xzf advanced-vpn-v0.4.0-x86_64-linux-gnu.tar.gz && cd advanced-vpn
+mkdir advanced-vpn && tar -C advanced-vpn -xzf advanced-vpn-v0.5.0-x86_64-linux-gnu.tar.gz && cd advanced-vpn
 ```
 
 There are two ways to install from there:
@@ -108,7 +108,7 @@ Both need Python 3.10+ with `venv` (`sudo apt install python3-venv`). The binari
 built on Ubuntu 22.04, so they run on Ubuntu 22.04+ and Debian 12/13 (x86-64).
 
 To cut a release: bump `version` in `Cargo.toml`, commit, and push a matching tag
-(`git tag -s v0.4.0 && git push origin v0.4.0`). The release workflow builds only if the
+(`git tag -s v0.5.0 && git push origin v0.5.0`). The release workflow builds only if the
 tag matches the version and that commit's `verify` run passed.
 
 ## Build and verify

@@ -89,6 +89,10 @@ jobs:
           by an earlier release is refused at connect. Re-sign it (\`avpn cloud chain --apply\`,
           or \`avpn init\`) and enroll the new bundles with \`--replace\`.
 
+          Servers now keep every log in RAM and refuse to start while any would reach the
+          disk (\`avpn help retention\`). Servers created by \`avpn cloud\` are hardened at first
+          boot; run \`avpn cloud host setup\` on others, or rebuild them fresh.
+
           Check the download: \`sha256sum -c SHA256SUMS\`. Then unpack it, and either
           install the command line for yourself (an operator machine) with
           \`python3 tools/install.py --user\`, or install the VPN system-wide (client or
