@@ -239,7 +239,10 @@ async fn tunnel(
     let mut counts = Counts::default();
     let mut up = Budget::new(c.packets_per_second, c.bytes_per_second);
     let mut down = Budget::new(c.packets_per_second, c.bytes_per_second);
-    let cell = cell_size(c.cells, tls::layer_payload(c.mtu, c.layers, c.layers - 1) as usize);
+    let cell = cell_size(
+        c.cells,
+        tls::layer_payload(c.mtu, c.layers, c.layers - 1) as usize,
+    );
     let deadline = sleep(life.min(Duration::from_secs(c.session_seconds)));
     tokio::pin!(deadline);
     println!("{{\"event\":\"tunnel_ready\",\"kx\":\"X25519MLKEM768\",\"cipher\":\"AES_256_GCM\"}}");
@@ -332,7 +335,7 @@ fn bridge(
         loop {
             tokio::select! {
                 r=socket.recv(&mut buf)=>{let n=r?;if n>0 && n<=max_datagram && up.admit(cell.unwrap_or(n)) {let f=frame(&buf[..n],cells,cell);audit("bridge",f.len());let _=parent.send_datagram(f);}}
-                r=parent.read_datagram()=>{let d=r?;if down.admit(d.len()){if let Some(p)=unframe(&d,cells){if !p.is_empty() && p.len()<=max_datagram {socket.send(p).await?;}}}}
+                r=parent.read_datagram()=>{let d=r?;if down.admit(d.len()) && let Some(p)=unframe(&d,cells) && !p.is_empty() && p.len()<=max_datagram {socket.send(p).await?;}}
             }
         }
     })
@@ -464,7 +467,11 @@ mod tests {
         let small = frame(b"short", true, Some(cell));
         let big = frame(&vec![7u8; 900], true, Some(cell));
         assert_eq!(small.len(), cell);
-        assert_eq!(big.len(), cell, "every cell is one size regardless of payload");
+        assert_eq!(
+            big.len(),
+            cell,
+            "every cell is one size regardless of payload"
+        );
         assert_eq!(unframe(&small, true), Some(&b"short"[..]));
         assert_eq!(unframe(&big, true), Some(&vec![7u8; 900][..]));
         // The padding really is beyond the real bytes.
