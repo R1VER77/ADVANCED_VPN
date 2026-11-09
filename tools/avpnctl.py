@@ -1298,6 +1298,12 @@ def build_parser():
         "--defense", choices=["balanced", "strong"], default="balanced", help="DAITA traffic-analysis defense"
     )
     init.add_argument(
+        "--padding",
+        choices=["off", "cells"],
+        default="off",
+        help="constant-cell padding on every hop (hides packet sizes; higher overhead)",
+    )
+    init.add_argument(
         "--daily-limit-mib", type=int, default=None, help="optional fail-closed daily carrier cap; default none"
     )
     imp = s.add_parser("enroll", help="verify and install this device's signed bundle")
@@ -1386,6 +1392,7 @@ def main():
             daily_mib=a.daily_limit_mib,
             hops=a.hops,
             middle=a.middle,
+            cells=a.padding == "cells",
         )
         emit(
             a,

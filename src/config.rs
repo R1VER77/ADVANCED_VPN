@@ -77,6 +77,10 @@ pub struct Config {
     /// Nested QUIC layers in this chain (1-3 hops; legacy profiles are 2).
     #[serde(default = "two_layers")]
     pub layers: usize,
+    /// Constant-cell padding: pad every datagram on every hop to one size so inner
+    /// packet sizes do not leak (`avpn help threat-model`). Off by default.
+    #[serde(default)]
+    pub cells: bool,
 }
 fn two_layers() -> usize {
     2

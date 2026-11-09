@@ -39,6 +39,9 @@ SOURCES = ["tools", "deploy", "third_party", "docs/cli", "README.md", "LICENSE",
 PIP_PATIENCE = ["--retries", "10", "--timeout", "60"]
 
 
+SUGGEST = "No servers yet? avpn cloud suggest lists free places to run them; avpn cloud chain --apply joins them."
+
+
 def pack(root, out):
     """Write the release package: SOURCES plus target/release/BINARIES, no caches."""
     import tarfile
@@ -213,6 +216,8 @@ def prepare_device(target, role, protect, vault=None):
         argv += ["--vault", str(vault)]
     subprocess.run(argv, check=True)
     print("Next: give %s to the operator (avpn init), then: sudo avpn enroll BUNDLE --operator-key operator.pub" % out)
+    if role == "client":
+        print(SUGGEST)
 
 
 def main():
@@ -248,6 +253,7 @@ def main():
         print("Installed %s for this user: %s (command: %s)" % (version, app, bin_dir / "avpn"))
         if str(bin_dir) not in os.environ.get("PATH", "").split(":"):
             print("Add %s to PATH to run avpn." % bin_dir)
+        print(SUGGEST)
         return
     if a.out is None:
         import tempfile

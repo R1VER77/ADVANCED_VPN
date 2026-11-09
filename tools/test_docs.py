@@ -8,6 +8,7 @@ import unittest
 
 import avpnctl
 import cloud
+import providers
 
 DOCS = Path(__file__).resolve().parents[1] / "docs" / "cli"
 # Options that belong to the Rust front end rather than the controller.
@@ -82,6 +83,17 @@ class DocsGate(unittest.TestCase):
             for ref in re.findall(r"avpn help ([a-z-]+)", page.read_text()):
                 if ref not in ("COMMAND", "TOPIC"):
                     self.assertIn(ref, names, "%s.md refers to missing topic %s" % (page.stem, ref))
+
+
+class CatalogGate(unittest.TestCase):
+    def test_get_started_cell_is_generated_from_the_catalog(self):
+        shipped = (DOCS.parents[1] / "src/bin/avpn/get_started.txt").read_text()
+        self.assertEqual(shipped, providers.get_started_text(), "regenerate: python3 tools/providers.py --generate")
+
+    def test_endpoints_page_is_generated_from_the_catalog(self):
+        self.assertEqual((DOCS / "endpoints.md").read_text(), providers.endpoints_page(), "run providers.py --generate")
+        for p in providers.PROVIDERS:
+            self.assertIn(p["name"], providers.endpoints_page())
 
 
 if __name__ == "__main__":

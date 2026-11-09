@@ -50,8 +50,31 @@ same pages are in [`docs/cli/`](docs/cli/). [`docs/architecture.md`](docs/archit
 explains how the pieces fit together.
 
 - **Layering:** `avpn` renders results. The privileged controller (`avpnctl`) does all the work and validates every option.
-- **Cloud:** `avpn cloud` creates, inspects and removes the chain's cloud servers with your own `aws`/`oci` sign-in.
+- **Cloud:** `avpn cloud` finds free places to run servers, creates them with your own `aws`/`oci` sign-in (or records servers you already have, over SSH), and joins them into one multi-hop chain.
 - **Style:** the layout and colour rules follow the OpenAI Codex CLI's terminal style (Apache-2.0). Only the design rules were followed; no code was copied.
+
+## Getting started: free servers, one chain
+
+After installing, `avpn` on a device that is not enrolled yet lists free places to
+run the servers (`avpn help endpoints`): Oracle Cloud Always Free (no expiry, 10
+TiB/month out) is the best exit, and the AWS free plan (6 months, 100 GiB/month) a
+good entry relay on a second provider.
+
+```
+avpn cloud suggest                                    # ranked, with your sign-ins checked
+avpn cloud oci server --apply --name avpn-exit        # or: aws relay, or host add for your own
+avpn cloud aws relay --apply --name avpn-relay --profile P
+avpn cloud chain --apply --client-request ~/advanced-vpn-client.req --vault VAULT
+sudo avpn enroll ~/.config/advanced-vpn/chains/*/bundles/client.avpn --operator-key .../operator.pub --replace
+sudo avpn connect
+```
+
+`chain` orders the servers (the largest allowance at the exit, a different provider
+at the entry), installs them, signs once with your Nitrokey and starts them. The
+first hop is open to any address, because WireGuard never answers a peer it was not
+enrolled with, so no provider's firewall configuration names you. Providers still
+record who calls their API and see their own hop; `avpn help privacy` lists exactly
+what each can see.
 
 ## Install
 

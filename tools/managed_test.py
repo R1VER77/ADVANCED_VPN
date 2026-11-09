@@ -8,7 +8,9 @@ import json
 import os
 from pathlib import Path
 import signal
+import socket
 import subprocess
+import tempfile
 import sys
 import time
 
@@ -76,6 +78,85 @@ def stop(p):
             p.wait(timeout=3)
 
 
+# Runs in av-upstream as 192.0.2.4, a peer the relay has never been told about.
+PROBE = r"""
+import hashlib, json, os, socket, sys
+relay = ("192.0.2.1", int(sys.argv[3]))
+public, replay = bytes.fromhex(sys.argv[1]), bytes.fromhex(sys.argv[2])
+def mac1(msg):
+    # WireGuard: MAC1 = BLAKE2s-128 keyed with BLAKE2s-256("mac1----" || responder public key).
+    key = hashlib.blake2s(b"mac1----" + public).digest()
+    return hashlib.blake2s(msg, key=key, digest_size=16).digest()
+body = b"\x01\0\0\0" + os.urandom(112)
+probes = [os.urandom(n) for n in (1, 16, 32, 64, 92, 148, 1200)] + [
+    b"\x01\0\0\0" + os.urandom(144),         # handshake initiation, invalid MAC1
+    body + mac1(body) + bytes(16),               # valid MAC1 (knows the public key), forged contents
+    b"\x02\0\0\0" + os.urandom(88),          # unsolicited handshake response
+    b"\x03\0\0\0" + os.urandom(60),          # cookie reply
+    b"\x04\0\0\0" + os.urandom(48),          # transport data for an unknown session
+    replay,                                      # the client's real, already-used initiation
+]
+s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+s.bind(("192.0.2.4", 0))
+s.settimeout(0.3)
+got = 0
+for p in probes * 5:
+    s.sendto(p, relay)
+    try:
+        s.recv(65536)
+        got += 1
+    except socket.timeout:
+        pass
+print(json.dumps(dict(sent=len(probes) * 5, received=got)))
+"""
+
+
+def last_initiation(capture, source="192.0.2.2", port=41194):
+    """The newest WireGuard handshake initiation from `source` in the observer's raw
+    frame stream (Ethernet frames written back to back)."""
+    data, i, found = capture.read_bytes(), 0, None
+    while i + 34 <= len(data) and data[i + 12 : i + 14] == b"\x08\x00" and data[i + 14] >> 4 == 4:
+        total = int.from_bytes(data[i + 16 : i + 18], "big")
+        frame = data[i : i + 14 + total]
+        ihl = (frame[14] & 15) * 4
+        udp = 14 + ihl
+        if frame[23] == 17 and socket.inet_ntoa(frame[26:30]) == source:
+            if int.from_bytes(frame[udp + 2 : udp + 4], "big") == port:
+                payload = frame[udp + 8 :]
+                if len(payload) == 148 and payload[:4] == b"\x01\0\0\0":
+                    found = payload
+        i += 14 + total
+    if found is None:
+        raise RuntimeError("no client handshake initiation in the capture")
+    return found
+
+
+def probe_first_hop(state, run):
+    """Prove the first hop never answers a peer it has not been enrolled with: garbage,
+    forged and replayed handshakes all get nothing back. A closed port on the same host
+    must answer (ICMP), which proves the counter would have seen a reply."""
+    public = json.loads((state / "relay" / "request.json").read_text())["wireguard_public_hex"]
+    replay = last_initiation(state / "physical-capture.bin")
+    nft = ("ip", "netns", "exec", "av-relay", "/usr/sbin/nft")
+
+    def answered():
+        out = run(*nft, "-j", "list", "counters").stdout
+        rows = [x["counter"] for x in json.loads(out)["nftables"] if "counter" in x]
+        return next(r["packets"] for r in rows if r["table"] == "seen" and r["name"] == "answered")
+
+    run(*nft, "reset", "counters", "table", "inet", "seen")
+    out = run(
+        "ip", "netns", "exec", "av-upstream", sys.executable, "-c", PROBE, public, replay.hex(), "41194", timeout=60
+    )
+    probe = json.loads(out.stdout)
+    silent = answered()
+    assert probe["received"] == 0 and silent == 0, ("the first hop answered a stranger", probe, silent)
+    # Control: the same stranger, a closed port. The kernel must reply (port unreachable).
+    run("ip", "netns", "exec", "av-upstream", sys.executable, "-c", PROBE, public, replay.hex(), "41195", timeout=60)
+    assert answered() > 0, "control failed: a closed port produced no reply, so the counter proves nothing"
+    return dict(probes=probe["sent"], replies=silent, control_replies=answered())
+
+
 def main():
     import argparse
 
@@ -84,8 +165,16 @@ def main():
     p.add_argument(
         "--hardware-vault", type=Path, help="client keys and operator signature on this FIDO2 vault (PIN+touch 4 times)"
     )
+    p.add_argument("--cells", action="store_true", help="constant-cell padding on every hop")
     a = p.parse_args()
     os.umask(0o077)
+    audit_dir = None
+    if a.cells:
+        # The data plane runs as an unprivileged service UID, so the audit must land
+        # somewhere it can write (the state dir is root-owned 0700).
+        audit_dir = Path(tempfile.mkdtemp(prefix="avpn-cellaudit-"))
+        audit_dir.chmod(0o777)
+        os.environ["AVPN_CELL_AUDIT"] = str(audit_dir / "cellaudit")
     from avpnctl import lab_guard, identity_of, runtime_dir
 
     lab_guard()
@@ -124,6 +213,7 @@ def main():
         protect={"client": "nitrokey"} if a.hardware_vault else None,
         vault=a.hardware_vault.resolve() if a.hardware_vault else None,
         operator=HardwareOperator(a.hardware_vault) if a.hardware_vault else None,
+        cells=a.cells,
     )
     bundles = [f.name for f in ops.glob("*.avpn")]
     import zipfile
@@ -249,6 +339,8 @@ def main():
             run("ip", "-n", "av-lan", "link", "set", port, "master", "br0", "up")
             run("ip", "-n", ns, "address", "add", addr, "dev", dev)
             run("ip", "-n", ns, "link", "set", dev, "up")
+        # An internet stranger on the same segment probes the first hop from 192.0.2.4.
+        run("ip", "-n", "av-upstream", "address", "add", "192.0.2.4/29", "dev", "ub")
         links = [
             ("av-relay", "r1", "198.51.100.1/30", "av-exit", "e0", "198.51.100.2/30"),
             ("av-exit", "e1", "203.0.113.1/30", "av-destination", "d0", "203.0.113.2/30"),
@@ -278,7 +370,7 @@ def main():
             "/usr/sbin/nft",
             "-f",
             "-",
-            input='table ip nat {\n chain post { type nat hook postrouting priority 100; policy accept;\n  oifname "ub" masquerade\n }\n}\n',
+            input='table ip nat {\n chain post { type nat hook postrouting priority 100; policy accept;\n  oifname "ub" ip saddr != 192.0.2.4 masquerade\n }\n}\n',
         )
         # The relay counts first-hop packets by source: direct (the client's own address)
         # or through the upstream (the provider's address).
@@ -290,10 +382,12 @@ def main():
             "/usr/sbin/nft",
             "-f",
             "-",
-            input="table inet seen {\n counter direct {\n }\n counter upstream {\n }\n"
+            input="table inet seen {\n counter direct {\n }\n counter upstream {\n }\n counter answered {\n }\n"
             " chain in { type filter hook input priority -300; policy accept;\n"
             "  ip saddr 192.0.2.2 udp dport 41194 counter name direct\n"
-            "  ip saddr 192.0.2.3 udp dport 41194 counter name upstream\n }\n}\n",
+            "  ip saddr 192.0.2.3 udp dport 41194 counter name upstream\n }\n"
+            " chain out { type filter hook output priority -300; policy accept;\n"
+            "  ip daddr 192.0.2.4 counter name answered\n }\n}\n",
         )
         # A working unencrypted fallback route is present, so the whole-device leak test is meaningful.
         run("ip", "-n", "av-client", "route", "add", "default", "via", "192.0.2.1")
@@ -310,6 +404,23 @@ def main():
         spawn(
             "av-relay", [sys.executable, ROOT / "tools/managed_lab_peer.py", "observer", "--state", state], "observer"
         )
+        # Watch the relay -> exit link (raw QUIC, no WireGuard carrier). With cells on,
+        # the data-bearing packets there must collapse to a single size.
+        spawn(
+            "av-exit",
+            [
+                sys.executable,
+                ROOT / "tools/managed_lab_peer.py",
+                "quicsizes",
+                "--state",
+                state,
+                "--iface",
+                "e0",
+                "--out",
+                state / "interhop.json",
+            ],
+            "interhop",
+        )
         if a.hardware_vault:
             plaintext = [
                 n
@@ -322,6 +433,7 @@ def main():
         manager("exit")
         client = manager("client")
         wait_online(client, 240 if a.hardware_vault else 25)
+        silence = probe_first_hop(state, run)
         if a.hardware_vault:
             marker = "PRIVATE-HARDWARE-" + os.urandom(16).hex()
             app(
@@ -576,6 +688,22 @@ def main():
             "--allow-cleartext",
         )
         run("ip", "netns", "exec", "av-client", "ping", "-n", "-c", "1", "-W", "1", "203.0.113.2")
+        # Wire capture on the relay->exit link, kept for the record (QUIC header jitter
+        # and receive offload mean it is not byte-uniform; the datagram audit below is
+        # the exact proof).
+        inter_sizes = json.loads((state / "interhop.json").read_text()) if (state / "interhop.json").exists() else []
+        inter_hop = sorted(set(inter_sizes))
+        # Every hop that sent data must have padded every datagram to one size.
+        cell_audit = {}
+        if a.cells:
+            for f in audit_dir.glob("cellaudit.*"):
+                cell_audit[f.suffix[1:]] = json.loads(f.read_text())
+            assert {"client", "relay", "exit", "bridge"} <= set(cell_audit), (
+                "missing audited layers",
+                sorted(cell_audit),
+            )
+            for role, sizes in cell_audit.items():
+                assert len(sizes) == 1, ("%s sent more than one datagram size under padding" % role, sizes)
         result = dict(
             schema=2,
             wireguard_implementation="GotaTun 0.10.2",
@@ -609,6 +737,9 @@ def main():
             upstream_entry_first_hop_sees_only_upstream=True,
             upstream_entry_fails_closed_when_upstream_drops=True,
             upstream_entry_missing_interface_refused=True,
+            first_hop_silent_to_unauthenticated=silence,
+            inter_hop_cell_sizes=inter_hop,
+            datagram_sizes_per_role=cell_audit,
             host_network_changed=False,
             host_dns_changed=False,
             classifier_resistance_measured=False,

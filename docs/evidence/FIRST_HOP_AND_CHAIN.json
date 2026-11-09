@@ -1,0 +1,58 @@
+{
+  "schema": 1,
+  "date": "2026-11-09",
+  "published_redactions": "real server, client and provider addresses are replaced with RFC 5737 documentation addresses",
+  "first_hop_silence": {
+    "lab": {
+      "test": "tools/managed_test.py probe_first_hop",
+      "probes": 65,
+      "replies": 0,
+      "control_replies": 25,
+      "probe_kinds": [
+        "random datagrams (1-1200 bytes)",
+        "initiation with invalid MAC1",
+        "initiation with valid MAC1 and forged contents",
+        "unsolicited handshake response",
+        "cookie reply",
+        "transport data for an unknown session",
+        "the client's real, already-used initiation replayed from another address"
+      ],
+      "control": "the same stranger to a closed port: the kernel's ICMP replies were counted"
+    },
+    "live": {
+      "relay": "198.51.100.10:41194 (AWS, eu-north-1)",
+      "probes": 24,
+      "arrived_at_relay": 24,
+      "sent_back": 0,
+      "method": "tcpdump on the relay while a stranger sent garbage and forged/valid-MAC1 handshakes"
+    }
+  },
+  "chain_build": {
+    "command": "avpn cloud chain --apply (2 hops: AWS relay, OCI exit as a shared host-added server)",
+    "keys": "kept on both servers (roles unchanged)",
+    "relay_security_group_after": {
+      "udp_41194": [
+        "0.0.0.0/0"
+      ],
+      "tcp_22": [
+        "203.0.113.40/32 (the exit)"
+      ]
+    },
+    "client_address_in_final_rules": false,
+    "cloudtrail": {
+      "caller_recorded": "the operator's address (the build ran while not connected through a chain)",
+      "rule_changes_naming_the_operator": "2 revocations, removing the operator's old address from the rules"
+    },
+    "client_vm": {
+      "egress": "203.0.113.40 (the exit)",
+      "https_ok": "3/3",
+      "download_mbit_s": 5.6,
+      "kill_switch_after_stop": "no connection (000)",
+      "ssh_relay_through_chain": "reachable (arrives from the exit's address)",
+      "ssh_exit_public_address_through_chain": "timed out (cloud servers do not hold it locally)",
+      "ssh_exit_tunnel_address_10_77_0_1": "reachable"
+    },
+    "operator_ssh_to_relay_after": "timed out (closed to the operator's address)"
+  },
+  "glibc_guard": "a local Debian 13 build needs glibc 2.38/2.39; the Ubuntu 22.04 exit has 2.35. host setup now refuses before uploading; the live run used an Ubuntu 22.04 build (glibc 2.34)"
+}

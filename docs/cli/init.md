@@ -7,7 +7,7 @@ bundle per device.
 
     avpn init --out DIR --hops N --exit IP:PORT [--relay IP:PORT] [--middle IP:PORT] \
         --request ROLE=FILE ... (--vault DIR | --software-operator DIR) \
-        [--defense balanced|strong] [--daily-limit-mib N]
+        [--defense balanced|strong] [--padding off|cells] [--daily-limit-mib N]
 
 ## Options
 
@@ -20,6 +20,7 @@ bundle per device.
 - `--vault DIR`: production. Signs with the Nitrokey's FIDO2 Ed25519 credential plus the ML-DSA-65 operator key sealed in the vault (PIN + touch).
 - `--software-operator DIR`: LAB ONLY. Plaintext operator keys.
 - `--defense`: the initial DAITA defense (see `avpn help preferences`).
+- `--padding`: `cells` pads every datagram on every hop to one size, so inner packet sizes do not leak on any link, not just the client→relay carrier (`avpn help threat-model`). It roughly doubles the overhead of small packets and is fixed for the chain, so it is chosen here, not as a runtime preference. Default `off`.
 - `--daily-limit-mib N`: an optional fail-closed daily cap for the client.
 
 ## What it changes

@@ -30,11 +30,39 @@ def answer(query):
     return response
 
 
+STRANGER = bytes([192, 0, 2, 4])
+
+
+def quic_sizes(iface, out):
+    """Record UDP payload sizes on `iface` to `out` (inter-server QUIC links carry raw
+    QUIC, not WireGuard). With constant-cell padding the data-bearing packets collapse
+    to one size; without it they vary with the inner packet."""
+    s = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.htons(3))
+    s.bind((iface, 0))
+    s.settimeout(0.2)
+    sizes = []
+    while True:
+        try:
+            b = s.recv(65536)
+        except socket.timeout:
+            out.write_text(json.dumps(sizes))
+            continue
+        if len(b) < 42 or b[12:14] != b"\x08\x00" or b[23] != 17:
+            continue
+        ihl = (b[14] & 15) * 4
+        sizes.append(len(b[14 + ihl + 8 :]))
+
+
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("role", choices=["dot", "observer", "echo"])
+    p.add_argument("role", choices=["dot", "observer", "echo", "quicsizes"])
     p.add_argument("--state", type=Path, required=True)
+    p.add_argument("--iface")
+    p.add_argument("--out", type=Path)
     a = p.parse_args()
+    if a.role == "quicsizes":
+        quic_sizes(a.iface, a.out)
+        return
     if a.role == "dot":
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         context.minimum_version = ssl.TLSVersion.TLSv1_3
@@ -76,6 +104,9 @@ def main():
                 except socket.timeout:
                     continue
                 if len(b) < 42 or b[12:14] != b"\x08\x00" or b[23] != 17:
+                    continue
+                # The first-hop probe's stranger (192.0.2.4) is not part of the tunnel.
+                if STRANGER in (b[26:30], b[30:34]):
                     continue
                 ihl = (b[14] & 15) * 4
                 udp = 14 + ihl

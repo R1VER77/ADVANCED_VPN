@@ -1,0 +1,9 @@
+Get started
+this device is not enrolled yet
+Oracle Cloud: no expiry	10 TiB/month out
+AWS: 6 months of credits	100 GiB/month out
+Azure: 12 months	outbound allowance unconfirmed
+Your own server	your own bandwidth
+details	avpn help endpoints
+next	avpn cloud suggest  (checks your sign-ins)
+then	avpn cloud chain --apply  (one multi-hop chain)

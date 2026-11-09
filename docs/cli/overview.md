@@ -33,7 +33,7 @@ Setup:
 - `request`: generate this device's keys and a public request
 - `init`: operator only; sign a chain from the requests
 - `enroll`: install this device's signed bundle
-- `cloud`: create, inspect and remove the cloud servers for a chain
+- `cloud`: find free servers, create or record them, and join them into one chain (`cloud suggest`, `cloud chain`)
 
 Maintenance:
 
@@ -44,7 +44,7 @@ Maintenance:
 ## Help topics
 
 `avpn help COMMAND` shows a command's page. These concept topics are also available:
-`chains`, `keys`, `privacy`, `retention`, `interactive`.
+`chains`, `endpoints`, `keys`, `privacy`, `threat-model`, `retention`, `interactive`.
 
 ## Privileges
 

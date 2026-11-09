@@ -8,4 +8,6 @@ The servers are built so that there is nothing to hand over.
 - Servers keep no byte counters. The optional daily cap lives on the client only.
 - The only thing on a server's disk is its enrollment: public certificates and its own sealed keys.
 
+The providers under the servers still keep some records of their own; `avpn help privacy` lists them.
+
 The no-retained-data audit (`tools/throughput_bench.py`) checks this on every CI run.

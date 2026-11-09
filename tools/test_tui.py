@@ -21,6 +21,9 @@ case "$*" in
   *doctor*) echo '{"ok": true, "healthy": true, "checks": [{"check": "trusted nft", "ok": true, "detail": "/usr/sbin/nft"}]}' ;;
 esac
 """
+UNENROLLED = """#!/bin/sh
+echo '{"ok": true, "info": {"enrolled": false}}'
+"""
 
 
 def screen(stream, rows=30, cols=100):
@@ -70,10 +73,10 @@ class InteractiveView(unittest.TestCase):
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("/opt/advanced-vpn/bin/avpnctl", r.stderr)
 
-    def drive(self, keys, colour=True):
+    def drive(self, keys, colour=True, controller=CTL):
         with tempfile.TemporaryDirectory() as d:
             ctl = Path(d) / "avpnctl"
-            ctl.write_text(CTL)
+            ctl.write_text(controller)
             ctl.chmod(0o755)
             env = dict(os.environ, AVPN_CONTROLLER=str(ctl), TERM="xterm-256color", COLUMNS="100", LINES="30")
             env.pop("NO_COLOR", None)
@@ -124,6 +127,21 @@ class InteractiveView(unittest.TestCase):
         self.assertEqual(s[29], " c connect · d disconnect · h hops · s status · i info · o doctor · ? help · q quit")
         self.assertIn("\x1b[?1049h", out, "alternate screen entered")
         self.assertIn("\x1b[?1049l", out, "alternate screen left on quit")
+
+    def test_a_device_that_is_not_enrolled_is_shown_where_to_start(self):
+        out, code = self.drive(["q"], controller=UNENROLLED)
+        self.assertEqual(code, 0)
+        text = "\n".join(screen(out))
+        for expected in [
+            "chain:      not enrolled",
+            "• Get started  this device is not enrolled yet",
+            "Oracle Cloud: no expiry   10 TiB/month out",
+            "avpn cloud suggest",
+            "avpn cloud chain --apply",
+        ]:
+            self.assertIn(expected, text)
+        # Google's free tier cannot carry a hop, so it is not suggested here.
+        self.assertNotIn("Google", text)
 
     def test_help_key_lists_every_key(self):
         s = screen(self.drive(["?", "q"])[0])

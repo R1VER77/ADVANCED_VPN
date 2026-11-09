@@ -102,8 +102,13 @@ pub const TOPICS: &[Topic] = &[
     },
     Topic {
         name: "cloud",
-        summary: "create, inspect and remove the chain's cloud servers",
+        summary: "find, create and record servers, and join them into a chain",
         body: include_str!("../../../docs/cli/cloud.md"),
+    },
+    Topic {
+        name: "endpoints",
+        summary: "free places to run the chain's servers",
+        body: include_str!("../../../docs/cli/endpoints.md"),
     },
     Topic {
         name: "chains",
@@ -119,6 +124,11 @@ pub const TOPICS: &[Topic] = &[
         name: "privacy",
         summary: "what each hop can know; hiding your address",
         body: include_str!("../../../docs/cli/privacy.md"),
+    },
+    Topic {
+        name: "threat-model",
+        summary: "what the design stops, where it sits, and its honest limits",
+        body: include_str!("../../../docs/cli/threat-model.md"),
     },
     Topic {
         name: "retention",

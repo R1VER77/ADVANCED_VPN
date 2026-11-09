@@ -21,6 +21,28 @@ use crate::cells::{Cell, Row, chain_short, render};
 use crate::controller::Controller;
 use crate::theme::Theme;
 
+/// Shown once on a device that is not enrolled yet. Generated from the endpoint catalog
+/// (`tools/providers.py`); the test suite fails if the two differ.
+const GET_STARTED: &str = include_str!("get_started.txt");
+
+/// The "Get started" cell: free places to run servers, and the next commands.
+pub fn get_started() -> Cell {
+    let mut lines = GET_STARTED.lines();
+    let title = lines.next().unwrap_or("Get started").to_string();
+    let summary = lines.next().map(str::to_string);
+    let rows = lines
+        .map(|l| match l.split_once('\t') {
+            Some((label, value)) => Row::pair(label, value),
+            None => Row::detail(l),
+        })
+        .collect();
+    Cell::Result {
+        title,
+        summary,
+        rows,
+    }
+}
+
 /// A finished background action: whether to refresh the header, and its result.
 type Finished = (bool, Done);
 
@@ -298,6 +320,9 @@ pub fn run(ctrl: Controller, theme: Theme, reduced_motion: bool) -> Result<()> {
         .map(|o| Header::from_info(&o.value))
         .unwrap_or_default();
     let mut app = App::new(theme, reduced_motion, header);
+    if app.header.chain == "not enrolled" {
+        app.history.push(get_started());
+    }
     let (tx, rx): (Sender<Finished>, Receiver<Finished>) = channel();
     let mut terminal = ratatui::try_init()?;
     let result = (|| -> Result<()> {
@@ -474,6 +499,25 @@ mod tests {
         let mut still = App::new(Theme::plain(), true, Header::default());
         still.start("doctor");
         assert_eq!(still.status_line(later).spans[0].content, " • ");
+    }
+
+    #[test]
+    fn get_started_lists_free_endpoints_and_the_next_commands() {
+        let app = {
+            let mut a = App::new(Theme::plain(), true, Header::from_info(&Value::Null));
+            a.history.push(get_started());
+            a
+        };
+        let text = screen(&app, 110, 24).join("\n");
+        for expected in [
+            "• Get started  this device is not enrolled yet",
+            "Oracle Cloud: no expiry",
+            "10 TiB/month out",
+            "avpn cloud suggest",
+            "avpn cloud chain --apply",
+        ] {
+            assert!(text.contains(expected), "missing {expected:?} in\n{text}");
+        }
     }
 
     #[test]

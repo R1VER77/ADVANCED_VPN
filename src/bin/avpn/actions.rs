@@ -60,6 +60,10 @@ pub fn not_enrolled_steps(has_keys: bool) -> Vec<String> {
         "give the public request to the operator, who signs a chain with it (avpn init)".into(),
     );
     steps.push(
+        "no servers yet? avpn cloud suggest lists free ones; avpn cloud chain --apply joins them"
+            .into(),
+    );
+    steps.push(
         "then: sudo avpn enroll client.avpn --operator-key operator.pub && sudo avpn connect"
             .into(),
     );

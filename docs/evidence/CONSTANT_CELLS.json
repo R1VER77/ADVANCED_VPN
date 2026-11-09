@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "date": "2026-11-09",
+  "phase": "constant-cell padding (document: traffic analysis / Var-CNN, DeepCorr)",
+  "what": "every QUIC datagram on every hop is framed [len:u16][payload][zero pad] to one cell size, so inner packet sizes do not leak on any link (DAITA alone shapes only client<->first-hop)",
+  "opt_in": "avpn init --padding cells (signed into the chain; both ends of each layer share the flag)",
+  "lab": {
+    "tool": "tools/managed_test.py --cells",
+    "datagram_sizes_per_layer": {
+      "client_inner": 1152,
+      "exit_inner": 1152,
+      "relay_outer": 1208,
+      "bridge_outer": 1208
+    },
+    "note": "each layer sends exactly one datagram size (audited via AVPN_CELL_AUDIT); wire packets still vary by QUIC header jitter and receive offload, which is why the proof is at the datagram layer",
+    "still_passing": [
+      "egress via exit",
+      "DNS over TLS",
+      "kill switch",
+      "first-hop silence",
+      "upstream fail-closed",
+      "whole-device guard"
+    ]
+  },
+  "unit": "src/run.rs frame/unframe round-trip; a receiver that does not strip gets the padded blob (mutation); an over-long length prefix is rejected",
+  "cost": "constant cells roughly double the overhead of small packets; fixed per chain; off by default"
+}

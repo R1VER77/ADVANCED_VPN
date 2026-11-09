@@ -1,27 +1,51 @@
 # avpn cloud
 
-Create, inspect and remove the cloud servers a chain runs on. Run it as yourself, not
-with sudo: it uses your own signed-in `aws` and `oci` command-line tools.
+Find, create, record and remove the servers a chain runs on, then join them into one
+multi-hop chain. Run it as yourself, not with sudo: it uses your own signed-in `aws`
+and `oci` command-line tools, and plain SSH for everything else.
 
 ## Usage
 
+    avpn cloud suggest [--profile P]
     avpn cloud status [--live]
-    avpn cloud aws relay --apply --allow-from IP [--name avpn-NAME] [--role relay|middle|exit] [--profile P] ...
+    avpn cloud aws relay --apply [--name avpn-NAME] [--role relay|middle|exit] [--allow-from IP|any] [--profile P] ...
     avpn cloud aws relay --teardown [--name avpn-NAME] [--profile P]
-    avpn cloud aws allow --apply [--name avpn-NAME] [--allow-from IP ...] [--admin-ip IP] [--profile P]
+    avpn cloud aws allow --apply [--name avpn-NAME] [--allow-from IP|any ...] [--admin-ip IP] [--profile P]
+    avpn cloud oci server --apply [--name avpn-NAME] [--role relay|middle|exit] [--shape micro|arm] ...
+    avpn cloud oci server --teardown [--name avpn-NAME]
     avpn cloud oci allow --apply --name avpn-NAME --security-list OCID --allow-from IP [--port N] [--protocol udp|tcp]
     avpn cloud oci allow --teardown --name avpn-NAME --security-list OCID
+    avpn cloud host add --name avpn-NAME --ssh USER@HOST --key FILE [--provider P] [--shared]
+    avpn cloud host setup --name avpn-NAME --out FILE [--role ROLE] [--replace]
+    avpn cloud host forget --name avpn-NAME
+    avpn cloud chain --apply --client-request FILE --vault DIR [--order A,B,C]
 
 Every `--apply` and `--teardown` first shows its plan and asks before changing
 anything. `--dry-run` stops after the plan. `--yes` skips the question; scripts
 using `--json` must pass it.
 
+## Getting started
+
+1. `avpn cloud suggest` ranks the free places to run servers (`avpn help endpoints`) and says which you are already signed in to.
+2. Create servers (`aws relay`, `oci server`) or record ones you have (`host add`). Two servers on two providers give a 2-hop chain where no single provider sees both your address and your destinations.
+3. `avpn cloud chain --apply` installs every server, signs the chain once with your Nitrokey, enrolls the servers and starts them.
+4. On the client: `sudo avpn enroll ... --replace` and `sudo avpn connect`, as the chain's last lines say.
+
 ## Safety rules
 
-- Everything it creates is tagged `avpn:managed=true` and `avpn:name=NAME`, and names start with `avpn-`. A teardown deletes only resources with both tags, and it refuses an instance not named `avpn-*`. Nothing else in the account is touched.
-- The project has one Region, the profile's configured Region. Asking for any other Region is refused.
-- A firewall is opened only to the previous hop's single public IPv4 address (and SSH only to the admin address). Private, documentation, IPv6 and range addresses are refused.
-- A local inventory, `~/.config/advanced-vpn/cloud.json` (mode 0600, no secrets), records what was created.
+- Everything it creates is tagged (`avpn:managed=true` and `avpn:name=NAME` on AWS, freeform `avpn-managed`/`avpn-name` on OCI), and names start with `avpn-`. A teardown deletes only resources carrying both tags, and checks each one before deleting it. Nothing else in the account is touched.
+- One region per account: the AWS profile's Region, and OCI's home region (Always Free exists only there). Anything else is refused.
+- The first hop's tunnel port is open to any address: it is WireGuard, which never answers a peer it was not enrolled with (proven by the lab test and a live probe), so the provider's firewall configuration never names you. Every later hop admits only the previous server's single address. Private, documentation, IPv6 and range addresses are refused.
+- Plans show a `caller` row: the address the provider will record as the API caller (AWS CloudTrail keeps it 90 days, OCI Audit 365 days, whatever you configure). Run provider commands while connected through a chain, and it records the exit's address instead of yours.
+- A local inventory, `~/.config/advanced-vpn/cloud.json` (mode 0600, no secrets), records what was created or added.
+
+## avpn cloud suggest
+
+The endpoint catalog, ranked by usable monthly outbound transfer, with each
+provider's free terms, caveats, whether it is ready to use from this machine, and the
+exact next command. It ends with a recommendation based on what is recorded.
+
+- `--profile P`: the AWS CLI profile whose sign-in to check (default `$AWS_PROFILE`).
 
 ## avpn cloud status
 
@@ -42,7 +66,7 @@ One chain server on EC2.
 - `--instance-type T`: an EC2 type with NitroTPM support (default `t3.micro`).
 - `--disk-gib N`: root disk size (default 8).
 - `--port N`: the tunnel port (default 41194 for a relay, 4445 for a middle, 4444 for an exit).
-- `--allow-from IP`: the previous hop's public IPv4, or `auto` for this machine. It is required with `--apply` and can be repeated.
+- `--allow-from IP`: who may reach the tunnel port: `any` (a relay's default, and only allowed for a relay), a public IPv4, or `auto` for this machine. A middle or exit needs the previous server's address. It can be repeated.
 - `--admin-ip IP`: the address allowed to SSH in (default `auto`, this machine).
 - `--dry-run`: show the plan and stop.
 - `--yes`: do not ask for confirmation.
@@ -61,22 +85,15 @@ The plan shows a rough monthly list price. On the free plan, credits pay for it;
 Billing shows the real cost. If your sign-in has expired, the error says to run
 `aws login --profile P`.
 
-After creation, install the package on the server, run
-`sudo avpn request --role ROLE --protect systemd-creds` there, and include its request
-in `avpn init`.
-
 ## avpn cloud aws allow
 
-Replace the addresses that may reach a server this tool created, for example after
-your internet provider or VPN provider gave you a new public address. A relay admits
-only the previous hop's address, so a client whose address changes cannot connect
-(and cannot SSH in) until its firewall is updated.
+Replace who may reach a server this tool created.
 
-    avpn cloud aws allow --apply --name avpn-relay --allow-from auto --admin-ip auto
+    avpn cloud aws allow --apply --name avpn-relay --allow-from any --admin-ip auto
 
 - `--apply`: change the security group (required; the plan is shown first).
 - `--name avpn-NAME`: the server (default `avpn-relay`). Its security group must carry both tags.
-- `--allow-from IP`: the new previous-hop public IPv4, or `auto` for this machine. Repeat it to admit several. The tunnel rule then admits exactly these addresses.
+- `--allow-from IP`: the new tunnel sources: `any` (first hop only), a public IPv4, or `auto`. Repeat it to admit several. The tunnel rule then admits exactly these.
 - `--admin-ip IP`: the new address allowed to SSH in, or `auto`.
 - `--profile P`, `--region R`: as for `aws relay`.
 - `--dry-run`, `--yes`: as above.
@@ -88,17 +105,41 @@ more than one) and the admin rule is TCP 22. Every other rule is kept.
 The new addresses are opened before the old ones are closed, so a working chain never
 loses its path. Old addresses, and any IPv6 range, prefix list or group reference on
 those two rules, are removed. If the group already admits exactly the addresses
-given, nothing is changed. The inventory records the new addresses.
+given, nothing is changed.
 
-Addresses that change often: `auto` asks `checkip.amazonaws.com`, which sees the
-address your traffic leaves from. Behind a commercial VPN that is the VPN's exit and
-it can change at any reconnect; rerun this command when it does. On the client,
-`avpn doctor --check-egress` shows which address the first hop sees.
+A first hop open to `any` never needs updating when your address changes. Single
+addresses do: `auto` asks `checkip.amazonaws.com`, which sees the address your
+traffic leaves from, and behind a commercial VPN that can change at any reconnect.
+
+## avpn cloud oci server
+
+One Oracle Cloud Always Free server with its own network. It needs the `oci` CLI,
+configured once with `oci setup config`.
+
+- `--apply`: create it. It refuses if the name is already recorded.
+- `--teardown`: delete everything recorded for `--name`: instance, subnet, security list, internet gateway, VCN. Each must carry this tool's tags.
+- `--name avpn-NAME`: the resource name and tag (default `avpn-exit`).
+- `--role relay|middle|exit`: what the server is in the chain (default `exit`).
+- `--shape micro|arm`: `micro` is VM.Standard.E2.1.Micro (AMD, 1 GB, up to 2 per tenancy); `arm` is VM.Standard.A1.Flex.
+- `--ocpus N`, `--memory-gib N`: A1 only (Always Free: 2 OCPU and 12 GB in total; defaults 1 and 6).
+- `--compartment OCID`: where to create it (default: the tenancy's root compartment).
+- `--oci-profile NAME`: the profile in `~/.oci/config` (default `DEFAULT`). Its region must be the tenancy's home region.
+- `--port N`, `--allow-from IP`, `--admin-ip IP`: as for `aws relay`.
+- `--dry-run`, `--yes`: as above.
+
+What `--apply` creates, all tagged with the name:
+1. A VCN (`10.77.100.0/24`), an internet gateway and a default route to it.
+2. A security list of its own: UDP on the tunnel port from `--allow-from`, TCP 22 from `--admin-ip`, and all egress. The subnet uses only this list, not the VCN's default one (which allows SSH from anywhere).
+3. A throwaway ed25519 SSH key in `~/.config/advanced-vpn/ssh/NAME`.
+4. The instance: the newest full Canonical Ubuntu 24.04 image for the shape, a public address, and legacy (unauthenticated) metadata endpoints disabled.
+
+OCI reclaims Always Free instances that stay idle (CPU, network and memory all under
+20% for 7 days); a hop carrying your traffic is normally busy enough.
 
 ## avpn cloud oci allow
 
-One ingress rule on an OCI security list, from the previous hop only. Use it for
-existing OCI servers, for example the exit.
+One ingress rule on an existing OCI security list, from the previous hop only. Use it
+for OCI servers this tool did not create.
 
 - `--apply`: add the rule. Re-applying replaces it rather than duplicating it.
 - `--teardown`: remove it. Rules not created by this command are never touched.
@@ -111,21 +152,74 @@ existing OCI servers, for example the exit.
 
 Every other ingress rule, and every egress rule, is kept exactly as it was.
 
+## avpn cloud host add
+
+Record a server you already have, on any provider (Azure, Google, a VPS) or your own
+machine, so `host setup` and `chain` can use it. It checks that SSH works with
+passwordless sudo.
+
+- `--name avpn-NAME`: a name for it.
+- `--ssh USER@HOST`: how to reach it, as a sudo user. With `--ssh-config`, HOST can be an alias from that file.
+- `--key FILE`: its SSH private key (mode 600; SSH never asks for a password).
+- `--ssh-config FILE`: an SSH config file, for bastions, jump hosts or other ports.
+- `--address IP`: its public IPv4, if HOST is not it (for example behind a bastion).
+- `--provider oci|aws|azure|gcp|own`: where it runs (default `own`). It sets the allowance used to order a chain.
+- `--shared`: the host also runs other things: setup leaves its system journal alone.
+
+This tool does not manage the firewall of an added server. The chain plan says which
+port to open, and from where.
+
 ## avpn cloud host setup
 
-Install the package on a server this tool created, over SSH with its throwaway key,
-and fetch the server's public request.
+Install or upgrade the package on a recorded server over SSH and fetch its public
+request. `chain` does this for every hop; use it on its own to prepare one server.
 
 - `--name avpn-NAME`: the recorded server.
-- `--source DIR`: a built checkout to install from (default: this checkout). It must contain `target/release/` with every binary.
+- `--source DIR`: a built checkout or unpacked release to install from (default: this one). It must contain `target/release/` with every binary.
 - `--out FILE`: where to save the public request. Give it to `avpn init`.
+- `--role relay|middle|exit`: the role to make keys for (default: its recorded role).
+- `--replace`: replace keys made for another role. Without it, a role change is refused.
 
 What it does on the server:
 1. Installs `nftables`, `python3-venv` and the TSS2 runtime libraries. Without TSS2, systemd-creds would silently fall back to the host key.
-2. Keeps the server's system journal in RAM only (`Storage=volatile`), and removes what the boot wrote to disk. Otherwise `sshd` would keep a persistent record of the admin's address, which is your address.
-3. Installs the package with the installer (the service is not enabled).
-4. Runs `avpnctl request --role ROLE --protect systemd-creds`. The keys are sealed to host + TPM2 when the TPM is usable.
+2. Unless the host is shared: keeps the system journal in RAM only (`Storage=volatile`) and removes what the boot wrote to disk. Otherwise `sshd` would keep a persistent record of the admin's address, which is your address.
+3. On images that reject by default (OCI's Ubuntu), accepts the tunnel port in the host firewall, and saves it unless the host is shared (saving would also persist its other runtime rules).
+4. Installs or upgrades the package (the service is not enabled).
+5. Keeps the keys when they were made for the same role; otherwise runs `avpnctl request --role ROLE --protect systemd-creds`, sealing them to host + TPM2 when the TPM is usable.
 
-It refuses to regenerate keys on a server that is already enrolled. Binaries are
-copied as built, so the server needs a C library at least as new as the build
-machine's (Debian 13 to Debian 13 works).
+Binaries are copied as built, so the server needs a C library at least as new as the
+build machine's (release builds need glibc 2.34: Debian 12+, Ubuntu 22.04+).
+
+## avpn cloud host forget
+
+Drop a server from the inventory. Nothing on the server or in the provider changes.
+
+- `--name avpn-NAME`: the recorded server.
+
+## avpn cloud chain
+
+Join the recorded servers into one chain and start it.
+
+- `--apply`: build the chain, or rebuild it after adding or removing a server.
+- `--client-request FILE`: the client device's public request (from its installer, or `sudo avpn request --role client`).
+- `--vault DIR`: the operator's Nitrokey vault; the chain is signed once (PIN + touch).
+- `--order A,B,C`: the hop order from the client side, overriding the automatic one.
+- `--source DIR`: the package to install on the servers, as for `host setup`.
+- `--dry-run`, `--yes`: as above.
+
+How hops are chosen: one server is a 1-hop chain, two make 2 hops, three or more make
+3 hops (the most a chain has; extra servers are listed as unused). The exit is the
+server with the largest monthly outbound allowance, because it carries everything.
+The entry relay prefers a different provider from the exit, so no single provider
+sees both your address and your destinations. A chain can carry about as much per
+month as its smallest hop allowance; the plan shows it.
+
+What `--apply` does:
+1. Firewalls of managed servers (`aws relay`, `oci server`): the first hop's WireGuard port (41194) open to any address; each later hop's port (4445 middle, 4444 exit) only from the previous server; SSH from here for setup.
+2. Installs or upgrades every server and fetches its request for its role. A server whose role changes gets new keys.
+3. Signs the whole chain once: `avpnctl init` with your client request and every server's.
+4. Enrolls and restarts each server, exit first, and checks it is running.
+5. Removes SSH from your address. From then on you administer the servers while connected: the other hops admit SSH from the exit's address (which is where your traffic now comes from), and the exit answers at `10.77.0.1`, its own address inside the tunnel, which needs no firewall rule. The exit's public address does not work from inside the tunnel, because cloud servers do not hold it locally. So no rule names you. Rerun `chain` (or `aws allow --admin-ip auto`) to get back in when you are not connected.
+
+The bundles go to `~/.config/advanced-vpn/chains/TIMESTAMP/bundles`. The last lines
+give the client's enroll and connect commands.

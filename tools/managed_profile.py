@@ -58,6 +58,8 @@ def profile_validate(p):
     core_role = "relay" if p["role"] in ("relay", "middle") else p["role"]
     if p["core"]["role"] != core_role or p["core"]["mtu"] != MANAGED_MTU or p["core"].get("layers") != h:
         raise ValueError("wrong inner profile")
+    if type(p["core"].get("cells")) is not bool:
+        raise ValueError("inner padding flag must be boolean")
     lanes = {l for l in ALL_LANES if p["core"].get(l)}
     if lanes != (set(CHAIN_LANES[h]) if p["role"] == "client" else {SERVER_LANE[p["role"]]}):
         raise ValueError("identity role separation failed")
@@ -450,6 +452,7 @@ def create(
     rates=None,
     hops=2,
     middle=None,
+    cells=False,
 ):
     """Operator: build signed bundles for a 1-, 2- or 3-hop chain from public device
     requests. Bundles carry no private key; the WireGuard PSK is hybrid-KEM encrypted
@@ -512,6 +515,7 @@ def create(
             bytes_per_second=RATE_BYTES,
             mtu=MANAGED_MTU,
             layers=hops,
+            cells=bool(cells),
         )
         if rates:
             core.update(rates)
@@ -809,6 +813,7 @@ def lab_setup(
     defense="balanced",
     hops=2,
     middle=None,
+    cells=False,
 ):
     """TEST/LAB: run the real request -> init -> enroll flow for every role in the
     chain. `protect` maps role -> protection (default 'none'); the operator is
@@ -833,6 +838,7 @@ def lab_setup(
         defense=defense,
         hops=hops,
         middle=middle,
+        cells=cells,
     )
     for role in roles:
         enroll(ops / (role + ".avpn"), ops / "operator.pub", root / role)

@@ -22,6 +22,16 @@ See `avpn help chains`:
 - the WireGuard + DAITA carrier innermost on the client's link;
 - the inner IP MTU is 1100 for every chain length.
 
+## Threat model
+
+See `avpn help threat-model`:
+- the design is a multi-party relay (like iCloud Private Relay) using the MASQUE
+  QUIC-datagram mechanism, with post-quantum mutual authentication and DAITA traffic
+  shaping that OHTTP, MASQUE and Private Relay do not have;
+- the honest limits are global-passive flow correlation (DeepCorr/Var-CNN) and the
+  non-collusion assumption; constant-cell padding and `masque` transport reduce, but do
+  not erase, what an observer can learn.
+
 ## Keys
 
 See `avpn help keys`:
