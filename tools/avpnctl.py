@@ -30,6 +30,7 @@ from managed_profile import (
     create,
     enroll,
     profile_validate,
+    require_padding,
     runtime,
     canonical,
     refresh_leaves,
@@ -675,7 +676,13 @@ def launch_client(binary, config, ns, log=None, key_fds=None, uid=0, gid=0):
 def supervise(state, bin_dir, lab=False, whole=False):
     """The supervisor: build the network, start and restart the data plane, enforce the budget, write status."""
     root_guard(lab)
+    # Refuse an unpadded chain before anything on the host changes. reset, guard and
+    # info still accept it, so the kill switch can always be cleared to re-sign.
     profile = load_profile(state)
+    try:
+        require_padding(profile)
+    except ValueError as e:
+        raise RuntimeError(str(e)) from None
     uid, gid = service_identity(lab)
     rt = runtime_dir(state)
     lock = os.open(rt / "controller.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
@@ -1131,6 +1138,7 @@ def device_info(state):
         info.update(
             role=profile["role"],
             hops=profile["hops"],
+            padded=profile["core"].get("cells") is True,
             chain=[dict(hop=name, endpoint=endpoint) for name, endpoint in chain_of(profile)],
             defense=preferences.get("defense", (profile["carrier"] or {}).get("defense")),
             mode=preferences.get("mode", "applications"),
@@ -1194,6 +1202,14 @@ def doctor(state, check_egress=False):
         info["enrolled"],
         "%s hop(s)" % info.get("hops") if info["enrolled"] else "run `avpn enroll`",
     )
+    if info["enrolled"]:
+        check(
+            "constant-cell padding",
+            info.get("padded"),
+            "every hop pads to one size"
+            if info.get("padded")
+            else "re-sign: avpn cloud chain --apply, then enroll --replace",
+        )
     if info.get("protection") == "systemd-creds":
         from keyguard import tpm2_usable
 
@@ -1298,12 +1314,6 @@ def build_parser():
         "--defense", choices=["balanced", "strong"], default="balanced", help="DAITA traffic-analysis defense"
     )
     init.add_argument(
-        "--padding",
-        choices=["off", "cells"],
-        default="off",
-        help="constant-cell padding on every hop (hides packet sizes; higher overhead)",
-    )
-    init.add_argument(
         "--daily-limit-mib", type=int, default=None, help="optional fail-closed daily carrier cap; default none"
     )
     imp = s.add_parser("enroll", help="verify and install this device's signed bundle")
@@ -1392,7 +1402,6 @@ def main():
             daily_mib=a.daily_limit_mib,
             hops=a.hops,
             middle=a.middle,
-            cells=a.padding == "cells",
         )
         emit(
             a,

@@ -56,6 +56,14 @@ class CliGuards(unittest.TestCase):
         c["inner"]["key"] = str(alias)
         self.check(c, False)
 
+    def test_padding_is_required_by_the_data_plane(self):
+        c = self.configs["client"]
+        self.check(c, True)
+        c["cells"] = False
+        self.check(c, False)
+        del c["cells"]
+        self.check(c, False)
+
     def test_pinned_profile_and_rates_are_required(self):
         c = self.configs["client"]
         c["mtu"] = 1400

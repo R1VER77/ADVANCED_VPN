@@ -77,9 +77,11 @@ pub struct Config {
     /// Nested QUIC layers in this chain (1-3 hops; legacy profiles are 2).
     #[serde(default = "two_layers")]
     pub layers: usize,
-    /// Constant-cell padding: pad every datagram on every hop to one size so inner
-    /// packet sizes do not leak (`avpn help threat-model`). Off by default.
-    #[serde(default)]
+    /// Constant-cell padding, which is always on: every datagram on every hop is padded
+    /// to one size so inner packet sizes do not leak (`avpn help threat-model`). There
+    /// is no way to turn it off. The field is required and must be `true`, so a profile
+    /// signed before padding existed is refused instead of running unpadded, and an
+    /// older build that does not pad refuses a new profile instead of mismatching.
     pub cells: bool,
 }
 fn two_layers() -> usize {
@@ -131,6 +133,10 @@ impl Config {
         ensure!(
             (4096..=100_000_000).contains(&self.bytes_per_second),
             "byte rate out of bounds"
+        );
+        ensure!(
+            self.cells,
+            "constant-cell padding is required; re-sign this chain with a current avpn init"
         );
         let layers = self.layers;
         ensure!(

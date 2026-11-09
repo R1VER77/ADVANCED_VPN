@@ -53,10 +53,8 @@ jobs:
         run: |
           cargo build --release --locked
           unshare -Urnm python tools/namespace_test.py --state /tmp/advanced-vpn-ci
-      - name: Managed WireGuard DAITA and unprivileged service proof
+      - name: Managed WireGuard DAITA, constant cells and unprivileged service proof
         run: unshare --user --map-root-user --map-auto --net --mount python tools/managed_test.py --state /tmp/advanced-vpn-managed-ci
-      - name: Constant-cell padding, every hop one datagram size
-        run: unshare --user --map-root-user --map-auto --net --mount python tools/managed_test.py --state /tmp/advanced-vpn-cells-ci --cells
       - name: Privacy budget lifecycle (opt-in cap, refunds, blocked-not-exited)
         run: unshare --user --map-root-user --map-auto --net --mount python tools/budget_test.py --state /tmp/advanced-vpn-budget-ci
       - name: Tunnel throughput floor (default per-session limits)

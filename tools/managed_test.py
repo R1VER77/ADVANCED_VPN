@@ -165,16 +165,14 @@ def main():
     p.add_argument(
         "--hardware-vault", type=Path, help="client keys and operator signature on this FIDO2 vault (PIN+touch 4 times)"
     )
-    p.add_argument("--cells", action="store_true", help="constant-cell padding on every hop")
     a = p.parse_args()
     os.umask(0o077)
-    audit_dir = None
-    if a.cells:
-        # The data plane runs as an unprivileged service UID, so the audit must land
-        # somewhere it can write (the state dir is root-owned 0700).
-        audit_dir = Path(tempfile.mkdtemp(prefix="avpn-cellaudit-"))
-        audit_dir.chmod(0o777)
-        os.environ["AVPN_CELL_AUDIT"] = str(audit_dir / "cellaudit")
+    # Constant-cell padding is always on. The data plane runs as an unprivileged
+    # service UID, so its datagram-size audit must land somewhere that UID can write
+    # (the state dir is root-owned 0700).
+    audit_dir = Path(tempfile.mkdtemp(prefix="avpn-cellaudit-"))
+    audit_dir.chmod(0o777)
+    os.environ["AVPN_CELL_AUDIT"] = str(audit_dir / "cellaudit")
     from avpnctl import lab_guard, identity_of, runtime_dir
 
     lab_guard()
@@ -213,7 +211,6 @@ def main():
         protect={"client": "nitrokey"} if a.hardware_vault else None,
         vault=a.hardware_vault.resolve() if a.hardware_vault else None,
         operator=HardwareOperator(a.hardware_vault) if a.hardware_vault else None,
-        cells=a.cells,
     )
     bundles = [f.name for f in ops.glob("*.avpn")]
     import zipfile
@@ -404,8 +401,7 @@ def main():
         spawn(
             "av-relay", [sys.executable, ROOT / "tools/managed_lab_peer.py", "observer", "--state", state], "observer"
         )
-        # Watch the relay -> exit link (raw QUIC, no WireGuard carrier). With cells on,
-        # the data-bearing packets there must collapse to a single size.
+        # Watch the relay -> exit link (raw QUIC, no WireGuard carrier), for the record.
         spawn(
             "av-exit",
             [
@@ -694,16 +690,18 @@ def main():
         inter_sizes = json.loads((state / "interhop.json").read_text()) if (state / "interhop.json").exists() else []
         inter_hop = sorted(set(inter_sizes))
         # Every hop that sent data must have padded every datagram to one size.
+        # cellaudit.<layer>.<pid>: every process, every layer, exactly one datagram size,
+        # and one size per layer across all the processes the lab started.
+        per_process = {f.name.split(".", 1)[1]: json.loads(f.read_text()) for f in audit_dir.glob("cellaudit.*")}
+        for name, sizes in per_process.items():
+            assert len(sizes) == 1, ("%s sent more than one datagram size" % name, sizes)
         cell_audit = {}
-        if a.cells:
-            for f in audit_dir.glob("cellaudit.*"):
-                cell_audit[f.suffix[1:]] = json.loads(f.read_text())
-            assert {"client", "relay", "exit", "bridge"} <= set(cell_audit), (
-                "missing audited layers",
-                sorted(cell_audit),
-            )
-            for role, sizes in cell_audit.items():
-                assert len(sizes) == 1, ("%s sent more than one datagram size under padding" % role, sizes)
+        for name, sizes in per_process.items():
+            cell_audit.setdefault(name.split(".")[0], set()).update(sizes)
+        cell_audit = {k: sorted(v) for k, v in cell_audit.items()}
+        assert {"client", "relay", "exit", "bridge"} <= set(cell_audit), ("missing audited layers", sorted(cell_audit))
+        for role, sizes in cell_audit.items():
+            assert len(sizes) == 1, ("%s used more than one cell size across processes" % role, sizes)
         result = dict(
             schema=2,
             wireguard_implementation="GotaTun 0.10.2",

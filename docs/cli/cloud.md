@@ -221,5 +221,8 @@ What `--apply` does:
 4. Enrolls and restarts each server, exit first, and checks it is running.
 5. Removes SSH from your address. From then on you administer the servers while connected: the other hops admit SSH from the exit's address (which is where your traffic now comes from), and the exit answers at `10.77.0.1`, its own address inside the tunnel, which needs no firewall rule. The exit's public address does not work from inside the tunnel, because cloud servers do not hold it locally. So no rule names you. Rerun `chain` (or `aws allow --admin-ip auto`) to get back in when you are not connected.
 
+Every chain is padded to constant cells on every hop; there is no option to turn it
+off (`avpn help threat-model`).
+
 The bundles go to `~/.config/advanced-vpn/chains/TIMESTAMP/bundles`. The last lines
 give the client's enroll and connect commands.

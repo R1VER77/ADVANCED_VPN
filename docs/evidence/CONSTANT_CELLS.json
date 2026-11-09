@@ -3,9 +3,8 @@
   "date": "2026-11-09",
   "phase": "constant-cell padding (document: traffic analysis / Var-CNN, DeepCorr)",
   "what": "every QUIC datagram on every hop is framed [len:u16][payload][zero pad] to one cell size, so inner packet sizes do not leak on any link (DAITA alone shapes only client<->first-hop)",
-  "opt_in": "avpn init --padding cells (signed into the chain; both ends of each layer share the flag)",
   "lab": {
-    "tool": "tools/managed_test.py --cells",
+    "tool": "tools/managed_test.py (padding is always on; no flag)",
     "datagram_sizes_per_layer": {
       "client_inner": 1152,
       "exit_inner": 1152,
@@ -23,5 +22,13 @@
     ]
   },
   "unit": "src/run.rs frame/unframe round-trip; a receiver that does not strip gets the padded blob (mutation); an over-long length prefix is rejected",
-  "cost": "constant cells roughly double the overhead of small packets; fixed per chain; off by default"
+  "cost": "constant cells roughly double the overhead of small packets; fixed per chain; off by default",
+  "always_on": "no command, flag or preference turns padding off; avpn init always signs cells=true into every hop's profile",
+  "refusals": {
+    "data_plane": "advanced-vpn refuses a config without cells=true (tools/test_cli.py)",
+    "connect": "avpnctl refuses to connect a chain signed before padding existed, before any host change (tools/test_controller_json.py)",
+    "enroll": "enrolling an unpadded bundle is refused",
+    "still_allowed": "reset, guard and info still load such a chain, so the kill switch can always be cleared to re-sign it",
+    "version_mismatch": "the v0.3.3 release binary refuses a current padded profile (exit 1), and the current binary refuses an unpadded one, so an old and a new hop never run mismatched"
+  }
 }

@@ -157,6 +157,7 @@ def provision(root, relay, exit_address, hours=12, adversarial=False, algorithm=
             packets_per_second=RATE_PACKETS,
             bytes_per_second=RATE_BYTES,
             mtu=1280,
+            cells=True,
         )
         if role == "relay":
             config["outer"] = identity(directory, "relay", "client-outer", "outer")

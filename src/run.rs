@@ -66,35 +66,24 @@ impl Budget {
         true
     }
 }
-/// Constant-cell padding (`avpn help threat-model`). When the signed profile sets
-/// `cells`, every datagram on every hop is framed `[len: u16 big-endian][payload][zero
-/// padding]` up to `cell` bytes, so the real packet size never shows on the wire — not
-/// just on the first hop, the way DAITA alone would leave it. The receiver reads `len`
-/// and ignores the padding. Both ends of a layer share one `cells` setting (it is part
-/// of the chain the operator signs), so there is never a padded/unpadded mismatch.
-///
-/// Framing is driven by `cells` (a chain-wide signed constant, identical on both ends),
-/// so the sender and receiver never disagree. `cell` only sets how far to pad: when it
-/// is `None` (the connection has not reported a datagram size yet) the frame is just the
-/// length prefix and the payload, still parseable by the same receiver.
-fn frame(payload: &[u8], cells: bool, cell: Option<usize>) -> Bytes {
-    if !cells {
-        return Bytes::copy_from_slice(payload);
-    }
-    let target = cell.unwrap_or(0).max(payload.len() + 2);
+/// Constant-cell padding (`avpn help threat-model`), always on. Every datagram on every
+/// hop is framed `[len: u16 big-endian][payload][zero padding]` up to the layer's `cell`
+/// size, so the real packet size never shows on the wire — not just on the first hop,
+/// the way DAITA alone would leave it. The receiver reads `len` and ignores the padding.
+/// There is no unpadded mode: the signed profile must say `cells: true`
+/// (`Config::validate`), so both ends of every layer always frame the same way.
+fn frame(payload: &[u8], cell: usize) -> Bytes {
+    // Callers bound `payload` below `cell - 2`; never truncate if that ever fails.
+    let target = cell.max(payload.len() + 2);
     let mut b = vec![0u8; target];
     b[..2].copy_from_slice(&(payload.len() as u16).to_be_bytes());
     b[2..2 + payload.len()].copy_from_slice(payload);
     Bytes::from(b)
 }
 
-/// Recover the real payload from a received datagram. With `cells` off the datagram is
-/// the payload. With it on, read the length prefix and return that many bytes, rejecting
-/// a frame that claims more than it carries.
-fn unframe(d: &[u8], cells: bool) -> Option<&[u8]> {
-    if !cells {
-        return Some(d);
-    }
+/// Recover the real payload from a received cell: read the length prefix and return
+/// that many bytes, rejecting a frame that claims more than it carries.
+fn unframe(d: &[u8]) -> Option<&[u8]> {
     let len = u16::from_be_bytes([*d.first()?, *d.get(1)?]) as usize;
     d.get(2..2 + len)
 }
@@ -104,16 +93,16 @@ fn unframe(d: &[u8], cells: bool) -> Option<&[u8]> {
 /// real overhead is ~20 bytes) so the cell never has to shrink at runtime.
 const CELL_RESERVE: usize = 48;
 
-/// The cell size to pad to on a layer whose configured QUIC payload is `layer_payload`,
-/// or `None` when padding is off. It is a fixed function of the signed profile, not of
-/// runtime timing, so every datagram on the layer is one size from the very first
-/// packet and both peers agree without negotiation.
-fn cell_size(cells: bool, layer_payload: usize) -> Option<usize> {
-    cells.then(|| layer_payload - CELL_RESERVE)
+/// The cell size on a layer whose configured QUIC payload is `layer_payload`. It is a
+/// fixed function of the signed profile, not of runtime timing, so every datagram on
+/// the layer is one size from the very first packet and both peers agree without
+/// negotiation.
+fn cell_size(layer_payload: usize) -> usize {
+    layer_payload - CELL_RESERVE
 }
 
 /// Test-only: when `AVPN_CELL_AUDIT` names a path, every process records the distinct
-/// datagram payload sizes it sends to `<path>.<role>`. The namespace lab asserts that
+/// datagram payload sizes it sends to `<path>.<role>.<pid>`. The namespace lab asserts that
 /// under constant-cell padding each hop's set collapses to one size — which catches any
 /// send path that forgot to pad, not just the padding helper in isolation. No file, no
 /// cost in production.
@@ -128,7 +117,9 @@ fn audit(role: &str, len: usize) {
         let seen = guard.get_or_insert_with(Default::default);
         if seen.entry(role.to_string()).or_default().insert(len) {
             let sizes: Vec<_> = seen[role].iter().copied().collect();
-            let p = std::path::Path::new(&path).with_extension(role);
+            // One file per process and layer, so every process the lab starts is checked.
+            let mut p = path.clone();
+            p.push(format!(".{role}.{}", std::process::id()));
             let _ = std::fs::write(p, format!("{sizes:?}"));
         }
     }
@@ -185,7 +176,7 @@ async fn relay_session(
     let mut down = Budget::new(c.packets_per_second, c.bytes_per_second);
     // Datagrams carry the next layer's packets, bounded by that layer's payload size.
     let next = tls::layer_payload(c.mtu, c.layers, layer + 1) as usize;
-    let cell = cell_size(c.cells, tls::layer_payload(c.mtu, c.layers, layer) as usize);
+    let cell = cell_size(tls::layer_payload(c.mtu, c.layers, layer) as usize);
     let deadline = sleep(life.min(Duration::from_secs(c.session_seconds)));
     tokio::pin!(deadline);
     loop {
@@ -194,15 +185,15 @@ async fn relay_session(
             r=conn.read_datagram()=>{
                 let d=r?;
                 if !up.admit(d.len()) {counts.rate_dropped+=1;continue;}
-                let Some(p)=unframe(&d,c.cells) else {counts.dropped+=1;continue;};
+                let Some(p)=unframe(&d) else {counts.dropped+=1;continue;};
                 if p.len()>next || p.is_empty() {counts.dropped+=1;continue;}
                 udp.send(p).await?;counts.sent+=1;
             }
             r=udp.recv(&mut b)=>{
                 let n=r?;
                 if n==0 || n>next {counts.dropped+=1;continue;}
-                if !down.admit(cell.unwrap_or(n)) {counts.rate_dropped+=1;continue;}
-                let f=frame(&b[..n],c.cells,cell);audit(&c.role,f.len());if conn.send_datagram(f).is_err() {counts.dropped+=1;}else{counts.received+=1;}
+                if !down.admit(cell) {counts.rate_dropped+=1;continue;}
+                let f=frame(&b[..n],cell);audit(&c.role,f.len());if conn.send_datagram(f).is_err() {counts.dropped+=1;}else{counts.received+=1;}
             }
         }
     }
@@ -239,10 +230,7 @@ async fn tunnel(
     let mut counts = Counts::default();
     let mut up = Budget::new(c.packets_per_second, c.bytes_per_second);
     let mut down = Budget::new(c.packets_per_second, c.bytes_per_second);
-    let cell = cell_size(
-        c.cells,
-        tls::layer_payload(c.mtu, c.layers, c.layers - 1) as usize,
-    );
+    let cell = cell_size(tls::layer_payload(c.mtu, c.layers, c.layers - 1) as usize);
     let deadline = sleep(life.min(Duration::from_secs(c.session_seconds)));
     tokio::pin!(deadline);
     println!("{{\"event\":\"tunnel_ready\",\"kx\":\"X25519MLKEM768\",\"cipher\":\"AES_256_GCM\"}}");
@@ -252,13 +240,13 @@ async fn tunnel(
             r=tun.read(&mut buf)=>{
                 let n=r?;
                 if !allowed_packet(&buf[..n],fixed,&routes,out_source,c.mtu) {counts.dropped+=1;continue;}
-                if !up.admit(cell.unwrap_or(n)) {counts.rate_dropped+=1;continue;}
-                let f=frame(&buf[..n],c.cells,cell);audit(&c.role,f.len());if conn.send_datagram(f).is_err(){counts.dropped+=1;}else{counts.sent+=1;}
+                if !up.admit(cell) {counts.rate_dropped+=1;continue;}
+                let f=frame(&buf[..n],cell);audit(&c.role,f.len());if conn.send_datagram(f).is_err(){counts.dropped+=1;}else{counts.sent+=1;}
             }
             r=conn.read_datagram()=>{
                 let d=r?;
                 if !down.admit(d.len()){counts.rate_dropped+=1;continue;}
-                let Some(p)=unframe(&d,c.cells) else {counts.dropped+=1;continue;};
+                let Some(p)=unframe(&d) else {counts.dropped+=1;continue;};
                 if !allowed_packet(p,fixed,&routes,!out_source,c.mtu){counts.dropped+=1;continue;}
                 tun.write(p).await?;counts.received+=1;
             }
@@ -325,17 +313,16 @@ fn bridge(
     max_datagram: usize,
     max_packets: u64,
     max_bytes: u64,
-    cells: bool,
 ) -> tokio::task::JoinHandle<Result<()>> {
     tokio::spawn(async move {
         let mut buf = vec![0; 65536];
         let mut up = Budget::new(max_packets, max_bytes);
         let mut down = Budget::new(max_packets, max_bytes);
-        let cell = cell_size(cells, max_datagram + tls::LAYER_STEP as usize);
+        let cell = cell_size(max_datagram + tls::LAYER_STEP as usize);
         loop {
             tokio::select! {
-                r=socket.recv(&mut buf)=>{let n=r?;if n>0 && n<=max_datagram && up.admit(cell.unwrap_or(n)) {let f=frame(&buf[..n],cells,cell);audit("bridge",f.len());let _=parent.send_datagram(f);}}
-                r=parent.read_datagram()=>{let d=r?;if down.admit(d.len()) && let Some(p)=unframe(&d,cells) && !p.is_empty() && p.len()<=max_datagram {socket.send(p).await?;}}
+                r=socket.recv(&mut buf)=>{let n=r?;if n>0 && n<=max_datagram && up.admit(cell) {let f=frame(&buf[..n],cell);audit("bridge",f.len());let _=parent.send_datagram(f);}}
+                r=parent.read_datagram()=>{let d=r?;if down.admit(d.len()) && let Some(p)=unframe(&d) && !p.is_empty() && p.len()<=max_datagram {socket.send(p).await?;}}
             }
         }
     })
@@ -376,7 +363,6 @@ pub async fn client_once(
                 payload as usize,
                 c.packets_per_second,
                 c.bytes_per_second,
-                c.cells,
             ));
             // The parent must be able to carry this layer's packets as single datagrams.
             ensure!(
@@ -457,36 +443,57 @@ mod tests {
     use super::*;
     #[test]
     fn constant_cells_round_trip_and_hide_size() {
-        // Padding off: the datagram is the payload, unchanged.
-        let p = b"an inner IP packet";
-        assert_eq!(&frame(p, false, None)[..], p);
-        assert_eq!(unframe(p, false), Some(&p[..]));
-        // Padding on: two different payloads become the same wire size, and each
-        // recovers exactly.
+        // Two different payloads become the same wire size, and each recovers exactly.
         let cell = 1200;
-        let small = frame(b"short", true, Some(cell));
-        let big = frame(&vec![7u8; 900], true, Some(cell));
+        let small = frame(b"short", cell);
+        let big = frame(&vec![7u8; 900], cell);
         assert_eq!(small.len(), cell);
         assert_eq!(
             big.len(),
             cell,
             "every cell is one size regardless of payload"
         );
-        assert_eq!(unframe(&small, true), Some(&b"short"[..]));
-        assert_eq!(unframe(&big, true), Some(&vec![7u8; 900][..]));
+        assert_eq!(unframe(&small), Some(&b"short"[..]));
+        assert_eq!(unframe(&big), Some(&vec![7u8; 900][..]));
         // The padding really is beyond the real bytes.
         assert_eq!(&small[2..7], b"short");
         assert!(small[7..].iter().all(|&x| x == 0));
-        // A receiver that forgets to strip gets the padded blob, not the packet — which
-        // is why a mismatched (unpadded) peer cannot silently accept padded traffic.
-        assert_ne!(unframe(&small, false), Some(&b"short"[..]));
-        // Cells on but the size is not known yet: framed with just the prefix, and the
-        // same receiver still recovers it (this is the bug that broke the first lab run).
-        let nopad = frame(b"hello", true, None);
-        assert_eq!(nopad.len(), 7);
-        assert_eq!(unframe(&nopad, true), Some(&b"hello"[..]));
+        // A receiver that did not strip would see the padded blob, not the packet, so
+        // an unpadded peer can never silently accept padded traffic.
+        assert_ne!(&small[..], b"short");
         // A frame claiming more than it carries is rejected, not read out of bounds.
-        assert_eq!(unframe(&[0x00, 0x40, 1, 2], true), None);
+        assert_eq!(unframe(&[0x00, 0x40, 1, 2]), None);
+        assert_eq!(unframe(&[0x00]), None);
+    }
+    #[test]
+    fn every_layer_cell_fits_what_it_carries() {
+        // The cell must hold the largest payload a layer carries plus the 2-byte prefix,
+        // and stay below the QUIC payload so it always fits a datagram.
+        for (mtu, hops) in [
+            (tls::MANAGED_IP_MTU, 1),
+            (tls::MANAGED_IP_MTU, 2),
+            (tls::MANAGED_IP_MTU, 3),
+            (1280, 2),
+        ] {
+            let p = |k: usize| tls::layer_payload(mtu, hops, k) as usize;
+            // Innermost: inner IP packets up to `mtu`.
+            assert!(mtu + 2 <= cell_size(p(hops - 1)), "inner cell too small");
+            for k in 0..hops - 1 {
+                // A relay layer k carries layer k+1's packets.
+                assert!(p(k + 1) + 2 <= cell_size(p(k)), "relay cell too small");
+            }
+            if hops > 1 {
+                // A client bridge for layer k rides layer k-1's cell.
+                let child = p(hops - 1);
+                assert!(child + 2 <= cell_size(child + tls::LAYER_STEP as usize));
+            }
+            for k in 0..hops {
+                assert!(
+                    cell_size(p(k)) < p(k),
+                    "cell must leave room for QUIC framing"
+                );
+            }
+        }
     }
     #[test]
     fn layer_budget_respects_quic_minimum_and_carrier_mtu() {

@@ -88,25 +88,34 @@ class EnrollmentTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             enroll(self.ops / "client.avpn", self.ops / "operator.pub", self.dev("client"))  # no silent re-enroll
 
-    def test_constant_cell_padding_is_chain_wide_and_validated(self):
-        from managed_profile import profile_validate
+    def test_constant_cell_padding_is_always_on_and_required(self):
+        from managed_profile import PADDING_REQUIRED, profile_validate, require_padding
 
         reqs = {r: (self.dev(r) / "request.json").read_bytes() for r in ["client", "relay", "exit"]}
-        for cells in (False, True):
-            out = self.root / ("cells%s" % cells)
-            create(out, reqs, "192.0.2.1:41194", "198.51.100.2:4444", self.signer, cells=cells)
-            profiles = {r: json.loads(zipfile.ZipFile(out / (r + ".avpn")).read("profile.json")) for r in reqs}
-            # Every hop carries the same padding flag, so no peer is left mismatched.
-            self.assertEqual({pr["core"]["cells"] for pr in profiles.values()}, {cells})
-            for pr in profiles.values():
-                profile_validate(pr)
+        out = self.root / "cells"
+        create(out, reqs, "192.0.2.1:41194", "198.51.100.2:4444", self.signer)
+        profiles = {r: json.loads(zipfile.ZipFile(out / (r + ".avpn")).read("profile.json")) for r in reqs}
+        # Every hop pads; there is no option that produces an unpadded chain.
+        self.assertEqual({pr["core"]["cells"] for pr in profiles.values()}, {True})
+        for pr in profiles.values():
+            require_padding(profile_validate(pr))
+        # A malformed flag is refused outright.
+        for value in (False, "yes", None):
             bad = json.loads(json.dumps(profiles["client"]))
-            bad["core"]["cells"] = "yes"
-            with self.assertRaisesRegex(ValueError, "padding flag must be boolean"):
+            bad["core"]["cells"] = value
+            with self.assertRaisesRegex(ValueError, "malformed padding flag"):
                 profile_validate(bad)
-            del bad["core"]["cells"]
-            with self.assertRaises(ValueError):
-                profile_validate(bad)
+        # A chain signed before padding existed is well-formed (so reset and the kill
+        # switch still work on it) but can never be connected or enrolled.
+        old = json.loads(json.dumps(profiles["client"]))
+        del old["core"]["cells"]
+        profile_validate(old)
+        with self.assertRaises(ValueError) as e:
+            require_padding(old)
+        self.assertEqual(str(e.exception), PADDING_REQUIRED)
+        import inspect
+
+        self.assertNotIn("cells", inspect.signature(create).parameters, "padding must not be optional")
 
     def test_profiles_for_one_two_and_three_hops(self):
         from managed_profile import request

@@ -17,6 +17,7 @@ Each check prints `✓` or `✗` with a detail.
 - trusted `ip`, `nft`, `mount`, `systemctl`: each found only in system directories, root-owned and not writable by others
 - post-quantum crypto library: ML-DSA and ML-KEM are available
 - device keys generated, enrolled in a chain
+- constant-cell padding: the enrolled chain pads every hop; a chain signed before padding existed fails here, with the command to re-sign it
 - keys bound to TPM2 (systemd-creds protection), or the key protection mode
 - whole-device kill switch table (whole-device clients)
 - `advanced-vpn.service` and `advanced-vpn-guard.service` installed

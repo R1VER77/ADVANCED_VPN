@@ -62,6 +62,13 @@ class ControllerJsonTests(unittest.TestCase):
         for secret_marker in ["PRIVATE KEY", "psk", "-key.der"]:
             self.assertNotIn(secret_marker, text)
 
+    def test_a_current_chain_is_padded(self):
+        rc, out, _ = ctl(self.root / "client", "info")
+        self.assertIs(out["info"]["padded"], True)
+        rc, out, _ = ctl(self.root / "client", "doctor")
+        row = next(c for c in out["checks"] if c["check"] == "constant-cell padding")
+        self.assertTrue(row["ok"])
+
     def test_read_only_queries_create_no_runtime_state(self):
         state = self.root / "client"
         rt = runtime_dir(state, create=False)
@@ -132,6 +139,69 @@ class ControllerJsonTests(unittest.TestCase):
         self.assertIn("post-quantum crypto library", names)
         self.assertIn("enrolled in a chain", names)
         self.assertTrue(all(set(c) == {"check", "ok", "detail"} for c in out["checks"]))
+
+
+class PrePaddingChainTests(unittest.TestCase):
+    """A device enrolled before constant-cell padding existed, then upgraded."""
+
+    @classmethod
+    def setUpClass(cls):
+        import managed_profile
+
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.root = Path(cls.tmp.name)
+        # Sign the chain the old way (no `cells`) and enroll it as the old code did.
+        with (
+            mock.patch.object(managed_profile, "CELLS", False),
+            mock.patch.object(managed_profile, "require_padding", lambda p: p),
+        ):
+            lab_setup(cls.root, "192.0.2.1:41194", "198.51.100.2:4444")
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def test_the_old_profile_really_lacks_padding(self):
+        profile = json.loads((self.root / "client" / "profile.json").read_text())
+        self.assertNotIn("cells", profile["core"])
+
+    def test_kill_switch_reset_and_info_still_load_it(self):
+        import avpnctl
+
+        # reset and guard go through load_profile: they must never lock the user out.
+        self.assertEqual(avpnctl.load_profile(self.root / "client")["role"], "client")
+        rc, out, _ = ctl(self.root / "client", "info")
+        self.assertEqual(rc, 0)
+        self.assertIs(out["info"]["padded"], False)
+
+    def test_doctor_says_to_re_sign(self):
+        rc, out, _ = ctl(self.root / "client", "doctor")
+        row = next(c for c in out["checks"] if c["check"] == "constant-cell padding")
+        self.assertFalse(row["ok"])
+        self.assertIn("avpn cloud chain --apply", row["detail"])
+
+    def test_connect_refuses_before_changing_the_host(self):
+        import avpnctl
+        from managed_profile import PADDING_REQUIRED
+
+        touched = mock.Mock(side_effect=AssertionError("host touched before the padding check"))
+        with (
+            mock.patch.object(avpnctl, "root_guard", lambda lab: None),
+            mock.patch.object(avpnctl, "service_identity", touched),
+            mock.patch.object(avpnctl, "ensure_network", touched),
+        ):
+            with self.assertRaises(RuntimeError) as e:
+                avpnctl.supervise(self.root / "client", self.root / "bin", lab=True)
+        self.assertEqual(str(e.exception), PADDING_REQUIRED)
+        touched.assert_not_called()
+
+    def test_enrolling_an_unpadded_bundle_is_refused(self):
+        from managed_profile import PADDING_REQUIRED, enroll
+
+        ops = self.root / "operator"
+        with self.assertRaises(ValueError) as e:
+            enroll(ops / "client.avpn", ops / "operator.pub", self.root / "client", replace=True)
+        self.assertEqual(str(e.exception), PADDING_REQUIRED)
 
 
 if __name__ == "__main__":

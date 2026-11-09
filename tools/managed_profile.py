@@ -37,6 +37,18 @@ ALL_LANES = ["outer", "middle", "inner"]
 
 # Inner IP MTU is 1100 for every chain; the layer count is explicit (QUIC needs >=1200-byte payloads).
 MANAGED_MTU = 1100
+# Constant-cell padding on every hop. Always on: no command, flag or preference turns it
+# off. (A constant only so tests can build a chain the way it was signed before padding
+# existed, to prove such a chain is refused.)
+CELLS = True
+PADDING_REQUIRED = "this chain was signed without constant-cell padding, which is now required; re-sign it (avpn cloud chain --apply, or avpn init) and enroll the new bundle with --replace"
+
+
+def require_padding(p):
+    """Refuse a profile that does not pad every hop (connect and enroll call this)."""
+    if p["core"].get("cells") is not True:
+        raise ValueError(PADDING_REQUIRED)
+    return p
 
 
 def profile_validate(p):
@@ -58,8 +70,11 @@ def profile_validate(p):
     core_role = "relay" if p["role"] in ("relay", "middle") else p["role"]
     if p["core"]["role"] != core_role or p["core"]["mtu"] != MANAGED_MTU or p["core"].get("layers") != h:
         raise ValueError("wrong inner profile")
-    if type(p["core"].get("cells")) is not bool:
-        raise ValueError("inner padding flag must be boolean")
+    # Absent means signed before padding existed: still a well-formed profile, so the
+    # kill switch, reset and info keep working; connecting and enrolling refuse it
+    # (require_padding). Anything other than true or absent is malformed.
+    if "cells" in p["core"] and p["core"]["cells"] is not True:
+        raise ValueError("malformed padding flag")
     lanes = {l for l in ALL_LANES if p["core"].get(l)}
     if lanes != (set(CHAIN_LANES[h]) if p["role"] == "client" else {SERVER_LANE[p["role"]]}):
         raise ValueError("identity role separation failed")
@@ -452,7 +467,6 @@ def create(
     rates=None,
     hops=2,
     middle=None,
-    cells=False,
 ):
     """Operator: build signed bundles for a 1-, 2- or 3-hop chain from public device
     requests. Bundles carry no private key; the WireGuard PSK is hybrid-KEM encrypted
@@ -515,8 +529,10 @@ def create(
             bytes_per_second=RATE_BYTES,
             mtu=MANAGED_MTU,
             layers=hops,
-            cells=bool(cells),
         )
+        if CELLS:
+            # Constant-cell padding is always on; there is no unpadded chain.
+            core["cells"] = True
         if rates:
             core.update(rates)
         for lane in lanes:
@@ -676,7 +692,7 @@ def enroll(bundle, operator_public, state, replace=False):
         for name, b in contents.items():
             if hashlib.sha256(b).hexdigest() != manifest["files"][name]:
                 raise ValueError("bundle integrity failure")
-    profile = profile_validate(json.loads(contents["profile.json"]))
+    profile = require_padding(profile_validate(json.loads(contents["profile.json"])))
     if profile["role"] != role or role != request_doc["role"]:
         raise ValueError("role substitution")
     allowed = {"profile.json"}
@@ -813,7 +829,6 @@ def lab_setup(
     defense="balanced",
     hops=2,
     middle=None,
-    cells=False,
 ):
     """TEST/LAB: run the real request -> init -> enroll flow for every role in the
     chain. `protect` maps role -> protection (default 'none'); the operator is
@@ -838,7 +853,6 @@ def lab_setup(
         defense=defense,
         hops=hops,
         middle=middle,
-        cells=cells,
     )
     for role in roles:
         enroll(ops / (role + ".avpn"), ops / "operator.pub", root / role)

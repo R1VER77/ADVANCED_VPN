@@ -11,6 +11,7 @@ status. It is safe to paste into a bug report.
 
 - `role`: `client`, `relay`, `middle` or `exit`.
 - `hops`: 1, 2 or 3.
+- `padded`: `true` when the chain pads every hop to constant cells. `false` only for a chain signed before padding existed; it cannot connect until it is re-signed (`avpn help threat-model`).
 - `chain`: the public endpoints, in the order the client reaches them.
 - `protection`: `nitrokey`, `systemd-creds` or `none`. `creds_key` is `host+tpm2` when the sealing key is bound to the TPM.
 - `mode`: `applications` (only `avpn run` programs) or `whole-device`.

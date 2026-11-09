@@ -42,10 +42,15 @@ allows. That leaves packet sizes, counts and timing correlated across the proxy,
 is what flow-correlation and website-fingerprinting attacks feed on.
 
 This design's carrier runs **DAITA** (Maybenot): FRONT padding and decoy packets
-always, and Tamaraw constant-rate shaping in the `strong` defense. The optional
-constant-cell mode (`avpn init --padding cells`) pads **every** hop's datagrams to one
-size, so inner packet sizes do not leak on the outer path at all — not just on the
-first link. See the cost note there before turning it on.
+always, and Tamaraw constant-rate shaping in the `strong` defense. On top of that,
+every chain pads **every** hop's datagrams to one size per layer (constant cells), so
+inner packet sizes do not leak on the outer path at all — not just on the first link.
+Padding is always on and cannot be turned off; a chain signed without it is refused.
+The cost is bandwidth on the links between hops: every datagram travels as a full cell
+(1152 bytes on the innermost layer). A full-size 1100-byte packet costs about 5% more;
+a 60-byte acknowledgement costs about 19 times as much, so the overall cost depends on
+how much of your traffic is small packets. Count it against each provider's monthly
+outbound allowance.
 
 ## Roaming between networks
 
