@@ -33,6 +33,7 @@ import urllib.request
 
 from install import pack  # the installer's own package format
 import providers
+import retention
 
 MANAGED = "avpn:managed"
 NAME = "avpn:name"
@@ -245,6 +246,15 @@ def aws_relay_plan(a, aws):
     return dict(account=who["Account"], rows=rows, owned=owned, port=port)
 
 
+def first_boot_file():
+    """The first-boot hardening as a cloud-init user-data file (tools/retention.py)."""
+    INVENTORY.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    fd, path = tempfile.mkstemp(dir=INVENTORY.parent, prefix=".first-boot.", suffix=".yaml")
+    with os.fdopen(fd, "w") as f:
+        f.write(retention.cloud_init())
+    return Path(path)
+
+
 def ssh_key_dir(name):
     """Where the throwaway admin SSH key for `name` lives (your config dir, 0700)."""
     d = INVENTORY.parent / "ssh"
@@ -397,34 +407,40 @@ def aws_relay_apply(a, aws, plan):
         dict(IpProtocol="tcp", FromPort=22, ToPort=22, IpRanges=[dict(CidrIp=a.admin_ip, Description="admin SSH")]),
     ]
     aws.ec2("authorize-security-group-ingress", "--group-id", sg, "--ip-permissions", json.dumps(perms))
-    run = aws.ec2(
-        "run-instances",
-        "--image-id",
-        tpm,
-        "--instance-type",
-        a.instance_type,
-        "--key-name",
-        a.name,
-        "--security-group-ids",
-        sg,
-        "--credit-specification",
-        "CpuCredits=standard",
-        "--metadata-options",
-        "HttpTokens=required,HttpPutResponseHopLimit=1,HttpEndpoint=enabled",
-        "--block-device-mappings",
-        json.dumps(
-            [
-                dict(
-                    DeviceName=root,
-                    Ebs=dict(VolumeSize=a.disk_gib, VolumeType="gp3", Encrypted=True, DeleteOnTermination=True),
-                )
-            ]
-        ),
-        "--tag-specifications",
-        json.dumps(
-            json.loads(aws.tags("instance", a.name, {"avpn:role": a.role})) + json.loads(aws.tags("volume", a.name))
-        ),
+    # First-boot hardening: every log in RAM before sshd accepts its first login.
+    user_data = first_boot_file()
+    disks = [
+        dict(
+            DeviceName=root, Ebs=dict(VolumeSize=a.disk_gib, VolumeType="gp3", Encrypted=True, DeleteOnTermination=True)
+        )
+    ]
+    instance_tags = json.loads(aws.tags("instance", a.name, {"avpn:role": a.role})) + json.loads(
+        aws.tags("volume", a.name)
     )
+    try:
+        run = aws.ec2(
+            "run-instances",
+            "--user-data",
+            "file://" + str(user_data),
+            "--image-id",
+            tpm,
+            "--instance-type",
+            a.instance_type,
+            "--key-name",
+            a.name,
+            "--security-group-ids",
+            sg,
+            "--credit-specification",
+            "CpuCredits=standard",
+            "--metadata-options",
+            "HttpTokens=required,HttpPutResponseHopLimit=1,HttpEndpoint=enabled",
+            "--block-device-mappings",
+            json.dumps(disks),
+            "--tag-specifications",
+            json.dumps(instance_tags),
+        )
+    finally:
+        user_data.unlink(missing_ok=True)
     iid = run["Instances"][0]["InstanceId"]
     created["instance"] = iid
     record()
@@ -825,14 +841,20 @@ def oci_server_apply(a, oc, plan):
             ],
             check=True,
         )
+    # First-boot hardening: every log in RAM before sshd accepts its first login.
+    user_data = first_boot_file()
     launch = ["compute", "instance", "launch", *c, "--availability-domain", plan["ad"], "--shape", plan["shape"],
               "--image-id", plan["image"], "--subnet-id", subnet["id"], "--assign-public-ip", "true",
               "--ssh-authorized-keys-file", str(key) + ".pub", "--display-name", a.name, "--freeform-tags", tags,
               "--instance-options", json.dumps(dict(areLegacyImdsEndpointsDisabled=True)),
+              "--user-data-file", str(user_data),
               "--wait-for-state", "RUNNING"]  # fmt: skip
     if a.shape == "arm":
         launch += ["--shape-config", json.dumps(dict(ocpus=a.ocpus, memoryInGBs=a.memory_gib))]
-    inst = oc(*launch)["data"]
+    try:
+        inst = oc(*launch)["data"]
+    finally:
+        user_data.unlink(missing_ok=True)
     record(instance=inst["id"], ssh_key=str(key))
     vnics = oc("compute", "instance", "list-vnics", "--instance-id", inst["id"])["data"]
     ip = vnics[0].get("public-ip")
@@ -903,18 +925,22 @@ def oci_teardown_apply(a, oc, plan):
 HOST_SETUP = r"""set -e
 ROLE=$1 PORT=$2 REPLACE=$3 SHARED=$4
 E=/etc/advanced-vpn/enrolled
+# No retained data, first: a dedicated server keeps every log in RAM before anything
+# else runs (tools/retention.py). A shared host's logging belongs to its other
+# workloads, so it is only marked, and doctor reports it.
+if [ "$SHARED" != yes ]; then
+  sudo -n sh -s <<'AVPN_HARDEN'
+@@HARDEN@@
+AVPN_HARDEN
+  sudo -n rm -f /etc/advanced-vpn/shared-host
+else
+  sudo -n mkdir -p /etc/advanced-vpn
+  sudo -n touch /etc/advanced-vpn/shared-host
+fi
 export DEBIAN_FRONTEND=noninteractive
 sudo -n apt-get update -qq
 TSS=$(apt-cache search --names-only '^libtss2-(esys|mu|rc|tcti-device)' | awk '{print $1}' | grep -v -- -dev | tr '\n' ' ')
 sudo -n apt-get install -y -qq nftables python3-venv $TSS >/dev/null
-if [ "$SHARED" != yes ]; then
-  # No retained data: a dedicated chain server keeps its system journal (sshd included,
-  # which records the admin's address) in RAM only, and drops what the boot wrote to disk.
-  sudo -n mkdir -p /etc/systemd/journald.conf.d
-  printf '[Journal]\nStorage=volatile\n' | sudo -n tee /etc/systemd/journald.conf.d/50-advanced-vpn.conf >/dev/null
-  sudo -n systemctl restart systemd-journald
-  sudo -n rm -rf /var/log/journal
-fi
 # Images that reject by default (OCI's Ubuntu) need the tunnel port accepted on the host.
 if sudo -n iptables -S INPUT 2>/dev/null | grep -q -- '-j REJECT'; then
   sudo -n iptables -C INPUT -p udp --dport "$PORT" -j ACCEPT 2>/dev/null || sudo -n iptables -I INPUT 1 -p udp --dport "$PORT" -j ACCEPT
@@ -937,7 +963,7 @@ fi
 sudo -n cat $E/request.json > /tmp/avpn-request.json
 echo "tpm2=$(systemd-analyze has-tpm2 >/dev/null 2>&1 && echo yes || echo no) creds_key=$(sudo -n python3 -c 'import json;print(json.load(open("/etc/advanced-vpn/enrolled/protection.json")).get("creds_key"))')"
 sudo -n rm -rf /tmp/avpn-src /tmp/avpn-src.tgz
-"""
+""".replace("@@HARDEN@@", retention.HARDEN.rstrip("\n"))
 
 # Install a signed bundle on a server and (re)start it: bash -s -- (bundle on stdin is not used).
 HOST_ENROLL = r"""set -e
@@ -1371,6 +1397,175 @@ def suggest(a):
     return rows
 
 
+def _server_addresses():
+    """The public addresses of every recorded server (the only sources a rule may name)."""
+    return {r["public_ip"] for r in load_inventory()["resources"].values() if r.get("public_ip")}
+
+
+def _foreign(cidrs, servers):
+    """Sources in `cidrs` that are neither "any" nor one of your servers."""
+    return sorted(c for c in cidrs if c != ANY and c.split("/")[0] not in servers)
+
+
+def audit_aws(profile, servers):
+    """Rows and finding count for one AWS profile, in its Region (logs also in us-east-1)."""
+    aws = Aws(profile)
+    rows, findings = [], 0
+
+    def row(label, found, detail):
+        nonlocal findings
+        findings += bool(found)
+        rows.append(dict(label=label, value=("FOUND: " if found else "") + detail))
+
+    def ask(*args):
+        """Run a read; None when the account may not read it (a managed-account policy)."""
+        try:
+            return aws(*args)
+        except CloudError as e:
+            if "AccessDenied" in str(e) or "not authorized" in str(e):
+                return None
+            raise
+
+    trails = ask("cloudtrail", "describe-trails", "--include-shadow-trails")
+    names = [t["Name"] for t in (trails or {}).get("trailList", [])]
+    row("aws trails", bool(names), ", ".join(names) or "none (API calls kept only in the 90-day history)")
+    stores = ask("cloudtrail", "list-event-data-stores")
+    names = [d.get("Name") for d in (stores or {}).get("EventDataStores", [])]
+    row("aws cloudtrail lake", bool(names), ", ".join(names) or "none")
+    flows = ask("ec2", "describe-flow-logs")
+    names = ["%s on %s" % (f["FlowLogId"], f["ResourceId"]) for f in (flows or {}).get("FlowLogs", [])]
+    row("aws vpc flow logs", bool(names), ", ".join(names) or "none")
+    mirrors = ask("ec2", "describe-traffic-mirror-sessions")
+    names = [m["TrafficMirrorSessionId"] for m in (mirrors or {}).get("TrafficMirrorSessions", [])]
+    row("aws traffic mirroring", bool(names), ", ".join(names) or "none")
+    config = ask("configservice", "describe-configuration-recorder-status")
+    names = [c["name"] for c in (config or {}).get("ConfigurationRecordersStatus", []) if c.get("recording")]
+    row("aws config recording", bool(names), ", ".join(names) or "none (firewall history not recorded)")
+    dns = ask("route53resolver", "list-resolver-query-log-configs")
+    names = [c.get("Name") for c in (dns or {}).get("ResolverQueryLogConfigs", [])]
+    row("aws dns query logs", bool(names), ", ".join(names) or "none")
+    groups = []
+    for region in sorted({aws.region, "us-east-1"}):
+        out = call(
+            [aws.exe, "logs", "describe-log-groups", "--profile", profile, "--region", region, "--output", "json"]
+        )
+        groups += ["%s (%s)" % (g["logGroupName"], region) for g in out.get("logGroups", [])]
+    row("aws log groups", bool(groups), ", ".join(groups) or "none in %s or us-east-1" % aws.region)
+    for name, r in sorted(load_inventory()["resources"].items()):
+        if r.get("provider") != "aws" or r.get("profile") != profile:
+            continue
+        for g in aws.owned(name)["security_groups"]:
+            cidrs = [x["CidrIp"] for q in g.get("IpPermissions", []) for x in q.get("IpRanges", [])]
+            bad = _foreign(cidrs, servers)
+            row("aws firewall " + name, bool(bad), ("names %s, which is not one of your servers" % ", ".join(bad))
+                if bad else "only any-address and your servers")  # fmt: skip
+    detectors = ask("guardduty", "list-detectors")
+    if detectors is None:
+        rows.append(dict(label="aws guardduty", value="cannot check: the account may not read it (a managing policy)"))
+    else:
+        ids = detectors.get("DetectorIds", [])
+        row("aws guardduty", bool(ids), ("detectors %s analyse flow and DNS data" % ", ".join(ids)) if ids else "off")
+    history = ask("cloudtrail", "lookup-events", "--max-items", "1000") or {}
+    callers = set()
+    for e in history.get("Events", []):
+        ip = json.loads(e.get("CloudTrailEvent", "{}")).get("sourceIPAddress", "")
+        if ip and not ip.endswith("amazonaws.com") and ip != "AWS Internal":
+            callers.add(ip)
+    rows.append(
+        dict(
+            label="aws always on",
+            value="CloudTrail keeps every API caller's address for 90 days and cannot be turned off; "
+            "%d caller addresses are in it now" % len(callers),
+        )
+    )
+    return rows, findings
+
+
+def audit_oci(profile, servers):
+    """Rows and finding count for one OCI CLI profile, across the whole tenancy."""
+    oc = Oci(profile)
+    rows, findings = [], 0
+
+    def row(label, found, detail):
+        nonlocal findings
+        findings += bool(found)
+        rows.append(dict(label=label, value=("FOUND: " if found else "") + detail))
+
+    subs = oc(
+        "iam", "compartment", "list", "--compartment-id", oc.tenancy, "--compartment-id-in-subtree", "true", "--all"
+    )
+    compartments = [oc.tenancy] + [c["id"] for c in subs.get("data", [])]
+    logs, flows, vtaps, allow = [], [], [], []
+    for c in compartments:
+        for g in oc("logging", "log-group", "list", "--compartment-id", c, "--all").get("data", []):
+            members = oc("logging", "log", "list", "--log-group-id", g["id"], "--all").get("data", [])
+            for log in members:
+                source = (((log.get("configuration") or {}).get("source")) or {}).get("service", "")
+                (flows if source == "flowlogs" else logs).append(log.get("display-name", "?"))
+            if not members:
+                logs.append(g.get("display-name", "?") + " (empty group)")
+        vtaps += [
+            v.get("display-name", "?")
+            for v in oc("network", "vtap", "list", "--compartment-id", c, "--all").get("data", [])
+        ]
+        for b in oc("bastion", "bastion", "list", "--compartment-id", c, "--all").get("data", []):
+            got = oc("bastion", "bastion", "get", "--bastion-id", b["id"]).get("data", {})
+            bad = _foreign(got.get("client-cidr-block-allow-list", []), servers)
+            if bad:
+                allow.append("%s admits %s" % (got.get("name", "?"), ", ".join(bad)))
+    row("oci flow logs", bool(flows), ", ".join(flows) or "none")
+    row("oci other logs", bool(logs), ", ".join(logs) or "none")
+    row("oci traffic mirroring", bool(vtaps), ", ".join(vtaps) or "none")
+    row("oci bastions", bool(allow), "; ".join(allow) or "admit only your servers (or none exist)")
+    for name, r in sorted(load_inventory()["resources"].items()):
+        if r.get("provider") != "oci" or not r.get("security_list"):
+            continue
+        rules = oc("network", "security-list", "get", "--security-list-id", r["security_list"]).get("data", {})
+        ingress = rules.get("ingress-security-rules", [])
+        if not r.get("managed_list"):
+            # A list this tool does not own (oci allow): only its own tagged rule is ours to judge.
+            ingress = [x for x in ingress if x.get("description") == r.get("rule", "advanced-vpn:" + name)]
+        bad = _foreign([x.get("source", "") for x in ingress], servers)
+        row("oci firewall " + name, bool(bad), ("names %s, which is not one of your servers" % ", ".join(bad))
+            if bad else "only any-address and your servers")  # fmt: skip
+    rows.append(
+        dict(
+            label="oci always on",
+            value="OCI Audit keeps every API caller's address for 365 days and cannot be turned off",
+        )
+    )
+    return rows, findings
+
+
+def audit(a):
+    """`cloud audit`: what the providers log about you, and what this tool cannot turn off."""
+    servers = _server_addresses()
+    inv = load_inventory()["resources"].values()
+    rows, findings = [], 0
+    profiles = sorted(
+        {r["profile"] for r in inv if r.get("provider") == "aws" and r.get("profile")}
+        | ({a.profile} if a.profile else set())
+    )
+    for profile in profiles:
+        r, f = audit_aws(profile, servers)
+        rows += r
+        findings += f
+    oci_used = any(r.get("provider") == "oci" or r.get("catalog") == "oci" for r in inv) or a.oci_profile
+    if oci_used:
+        r, f = audit_oci(a.oci_profile or "DEFAULT", servers)
+        rows += r
+        findings += f
+    if not rows:
+        rows.append(dict(label="nothing", value="no AWS or OCI resources recorded; give --profile or --oci-profile"))
+    rows.append(
+        dict(
+            label="on the servers",
+            value="avpn doctor on each server checks that no log reaches its disk (avpn help retention)",
+        )
+    )
+    return rows, findings
+
+
 def status(a):
     """The inventory, and for AWS entries whether the instance still exists."""
     inv = load_inventory()
@@ -1400,6 +1595,9 @@ def build_parser():
     sg.add_argument(
         "--profile", default=os.environ.get("AWS_PROFILE"), help="AWS CLI profile to check (default: $AWS_PROFILE)"
     )
+    au = s.add_parser("audit", help="what the cloud providers log about you, and what cannot be turned off")
+    au.add_argument("--profile", default=os.environ.get("AWS_PROFILE"), help="AWS CLI profile to audit too")
+    au.add_argument("--oci-profile", help="OCI CLI profile to audit too (default: DEFAULT, if OCI is used)")
     st = s.add_parser("status", help="recorded resources and whether they still exist")
     st.add_argument("--live", action="store_true", help="ask the provider whether each instance still exists")
     aws = s.add_parser("aws", help="Amazon Web Services")
@@ -1523,6 +1721,10 @@ def run(a):
     """Execute one parsed command; return the result object."""
     if a.provider == "suggest":
         return dict(title="Where to run your servers", summary="checked %s" % providers.CHECKED, rows=suggest(a))
+    if a.provider == "audit":
+        rows, findings = audit(a)
+        summary = "%d finding(s)" % findings if findings else "no opt-in logging found"
+        return dict(title="Provider logging audit", summary=summary, rows=rows, findings=findings)
     if a.provider == "status":
         return dict(title="Cloud", summary="inventory " + str(INVENTORY), rows=status(a))
     if a.provider == "host":

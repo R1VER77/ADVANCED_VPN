@@ -148,8 +148,13 @@ def seed(work, name):
     d = work / (name + "-seed")
     d.mkdir(exist_ok=True)
     (d / "meta-data").write_text("instance-id: avpn-%s-%s\nlocal-hostname: avpn-%s\n" % (name, work.name, name))
-    user = [
-        "#cloud-config",
+    user = ["#cloud-config"]
+    if name != "client":
+        # Servers boot exactly as avpn cloud creates them: every log in RAM from the start.
+        import retention
+
+        user += retention.cloud_init().splitlines()[1:]
+    user += [
         "hostname: avpn-" + name,
         "users:",
         "  - name: tester",

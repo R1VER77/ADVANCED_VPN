@@ -204,5 +204,79 @@ class PrePaddingChainTests(unittest.TestCase):
         self.assertEqual(str(e.exception), PADDING_REQUIRED)
 
 
+class ServerRetentionGateTests(unittest.TestCase):
+    """A server whose host would keep logs on disk must not carry traffic."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.root = Path(cls.tmp.name)
+        lab_setup(cls.root, "192.0.2.1:41194", "198.51.100.2:4444")
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    class Reached(Exception):
+        """Raised by the first step after the gate: the server would have started."""
+
+    def start(self, role, failing, shared=False, lab=False):
+        import avpnctl
+        import retention
+
+        marker = self.root / ("shared-%s" % shared)
+        if shared:
+            marker.write_text("")
+        reached = mock.Mock(side_effect=self.Reached)
+        with (
+            mock.patch.object(avpnctl, "root_guard", lambda lab: None),
+            mock.patch.object(avpnctl, "service_identity", reached),
+            mock.patch.object(retention, "failures", lambda: failing),
+            mock.patch.object(retention, "SHARED_MARKER", marker),
+        ):
+            try:
+                avpnctl.supervise(self.root / role, self.root / "bin", lab=lab)
+            except self.Reached:
+                return "started"
+            except RuntimeError as e:
+                return str(e)
+        return "returned"
+
+    def test_a_server_that_would_keep_logs_refuses_before_touching_the_host(self):
+        out = self.start("relay", [("/var/log in RAM", False, "root disk"), ("no swap", False, "/swapfile")])
+        self.assertIn("would keep logs on disk (/var/log in RAM; no swap)", out)
+
+    def test_a_clean_server_starts(self):
+        self.assertEqual(self.start("exit", []), "started")
+
+    def test_a_shared_host_is_let_through_and_lab_and_clients_are_exempt(self):
+        failing = [("no disk logger running", False, "rsyslog.service")]
+        self.assertEqual(self.start("exit", failing, shared=True), "started")
+        self.assertEqual(self.start("relay", failing, lab=True), "started")
+        self.assertEqual(self.start("client", failing), "started")
+
+    def test_doctor_shows_the_checks_on_servers_only(self):
+        import avpnctl
+        import retention
+
+        rows = [("no swap", False, "/swapfile"), ("/var/log in RAM", True, "tmpfs")]
+        missing = self.root / "no-such-marker"
+        with (
+            mock.patch.object(retention, "checks", lambda: rows),
+            mock.patch.object(retention, "SHARED_MARKER", missing),
+        ):
+            server = {c["check"]: c for c in avpnctl.doctor(self.root / "relay")}
+            client = {c["check"] for c in avpnctl.doctor(self.root / "client")}
+        self.assertFalse(server["no swap"]["ok"])
+        self.assertTrue(server["/var/log in RAM"]["ok"])
+        self.assertNotIn("no swap", client)
+        marker = self.root / "shared-doctor"
+        marker.write_text("")
+        with mock.patch.object(retention, "SHARED_MARKER", marker):
+            server = {c["check"]: c for c in avpnctl.doctor(self.root / "relay")}
+        self.assertFalse(server["no retained data"]["ok"])
+        self.assertIn("shared host", server["no retained data"]["detail"])
+
+
 if __name__ == "__main__":
     unittest.main()

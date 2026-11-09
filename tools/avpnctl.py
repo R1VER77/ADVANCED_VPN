@@ -26,6 +26,7 @@ import sys
 import time
 
 from keyguard import atomic, read_private, trusted_exe
+import retention
 from managed_profile import (
     create,
     enroll,
@@ -683,6 +684,15 @@ def supervise(state, bin_dir, lab=False, whole=False):
         require_padding(profile)
     except ValueError as e:
         raise RuntimeError(str(e)) from None
+    # A server never writes a log to disk: refuse to carry traffic on one that would.
+    # (Lab servers share the developer's host, whose logging is not theirs to judge.)
+    if profile["role"] != "client" and not lab:
+        failing = retention.failures()
+        if failing and not retention.SHARED_MARKER.exists():
+            raise RuntimeError(
+                "this server would keep logs on disk (%s); run avpn cloud host setup on it, or rebuild it "
+                "with avpn cloud (avpn help retention)" % "; ".join(name for name, _, _ in failing)
+            )
     uid, gid = service_identity(lab)
     rt = runtime_dir(state)
     lock = os.open(rt / "controller.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
@@ -1202,6 +1212,12 @@ def doctor(state, check_egress=False):
         info["enrolled"],
         "%s hop(s)" % info.get("hops") if info["enrolled"] else "run `avpn enroll`",
     )
+    if info["enrolled"] and info.get("role") != "client":
+        if retention.SHARED_MARKER.exists():
+            check("no retained data", False, "shared host: its logging belongs to its other workloads")
+        else:
+            for name, ok, detail in retention.checks():
+                check(name, ok, detail)
     if info["enrolled"]:
         check(
             "constant-cell padding",

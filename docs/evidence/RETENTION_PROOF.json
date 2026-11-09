@@ -1,0 +1,72 @@
+{
+  "schema": 1,
+  "date": "2026-11-09",
+  "tool": "tools/retention_proof.py",
+  "method": "fresh cloud VM; a failed SSH login with a unique username and a successful login with a unique key; clean power-off; every byte the VM wrote (qcow2 overlay, deleted blocks included) scanned for both markers",
+  "runs": {
+    "debian-control": {
+      "image": "debian-13-genericcloud-amd64.qcow2",
+      "login_worked": true,
+      "checks": {
+        "journal in RAM only": false,
+        "/var/log in RAM": false,
+        "no disk logger running": true,
+        "no login database on disk": true,
+        "no swap": true
+      },
+      "markers_on_disk": {
+        "failed-login username": 6,
+        "accepted key fingerprint": 1
+      },
+      "bytes_scanned": 24379392
+    },
+    "debian-hardened": {
+      "image": "debian-13-genericcloud-amd64.qcow2",
+      "login_worked": true,
+      "checks": {
+        "journal in RAM only": true,
+        "/var/log in RAM": true,
+        "no disk logger running": true,
+        "no login database on disk": true,
+        "no swap": true
+      },
+      "markers_on_disk": {
+        "failed-login username": 0,
+        "accepted key fingerprint": 0
+      },
+      "bytes_scanned": 22609920
+    },
+    "ubuntu-control": {
+      "image": "noble-server-cloudimg-amd64.img",
+      "login_worked": true,
+      "checks": {
+        "journal in RAM only": false,
+        "/var/log in RAM": false,
+        "no disk logger running": false,
+        "no login database on disk": true,
+        "no swap": true
+      },
+      "markers_on_disk": {
+        "failed-login username": 15,
+        "accepted key fingerprint": 2
+      },
+      "bytes_scanned": 57409536
+    },
+    "ubuntu-hardened": {
+      "image": "noble-server-cloudimg-amd64.img",
+      "login_worked": true,
+      "checks": {
+        "journal in RAM only": true,
+        "/var/log in RAM": true,
+        "no disk logger running": true,
+        "no login database on disk": true,
+        "no swap": true
+      },
+      "markers_on_disk": {
+        "failed-login username": 0,
+        "accepted key fingerprint": 0
+      },
+      "bytes_scanned": 54263808
+    }
+  }
+}

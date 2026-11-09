@@ -48,6 +48,8 @@ class DeviceSetupTests(unittest.TestCase):
                 avpnctl.device_vault(vault)
 
     def test_default_vault_only_for_root(self):
+        if os.geteuid() == 0:
+            self.skipTest("as root the default vault is used by design; this checks a non-root caller")
         with self.assertRaisesRegex(ValueError, "--vault is required"):
             avpnctl.device_vault(None)
 

@@ -56,6 +56,22 @@ if name == "oci":
             ("network", "security-list", "create"): {"id": "ocid1.sl.1"},
             ("network", "subnet", "create"): {"id": "ocid1.subnet.1"},
             ("compute", "instance", "launch"): {"id": "ocid1.instance.1"}}
+    if argv[:3] == ["compute", "instance", "launch"] and "--user-data-file" in argv:
+        state["oci_user_data"] = open(oflag("--user-data-file")).read()
+        json.dump(state, open(os.environ["STUB_STATE"], "w"))
+    if argv[:3] == ["iam", "compartment", "list"]:
+        out({"data": state.get("oci_compartments", [])})
+    if argv[:3] == ["logging", "log-group", "list"]:
+        out({"data": state.get("oci_log_groups", {}).get(oflag("--compartment-id"), [])})
+    if argv[:3] == ["logging", "log", "list"]:
+        out({"data": state.get("oci_logs", {}).get(oflag("--log-group-id"), [])})
+    if argv[:3] == ["network", "vtap", "list"]:
+        out({"data": state.get("oci_vtaps", {}).get(oflag("--compartment-id"), [])})
+    if argv[:3] == ["bastion", "bastion", "list"]:
+        out({"data": [{"id": b["id"]} for b in state.get("oci_bastions", {}).get(oflag("--compartment-id"), [])]})
+    if argv[:3] == ["bastion", "bastion", "get"]:
+        every = [b for group in state.get("oci_bastions", {}).values() for b in group]
+        out({"data": next(b for b in every if b["id"] == oflag("--bastion-id"))})
     if tuple(argv[:3]) in made:
         out({"data": made[tuple(argv[:3])]})
     if argv[:3] == ["compute", "instance", "list-vnics"]:
@@ -70,6 +86,25 @@ if argv[:2] == ["sts", "get-caller-identity"]:
     out({"Account": "123456789012", "Arn": "arn:aws:iam::123456789012:root"})
 if argv[:1] == ["freetier"]:
     out({"accountPlanType": "FREE"})
+AUDIT_DEFAULTS = {
+    "cloudtrail describe-trails": {"trailList": []},
+    "cloudtrail list-event-data-stores": {"EventDataStores": []},
+    "cloudtrail lookup-events": {"Events": []},
+    "configservice describe-configuration-recorder-status": {"ConfigurationRecordersStatus": []},
+    "route53resolver list-resolver-query-log-configs": {"ResolverQueryLogConfigs": []},
+    "logs describe-log-groups": {"logGroups": []},
+    "guardduty list-detectors": {"DetectorIds": []},
+    "ec2 describe-flow-logs": {"FlowLogs": []},
+    "ec2 describe-traffic-mirror-sessions": {"TrafficMirrorSessions": []},
+}
+key = " ".join(argv[:2])
+if key in AUDIT_DEFAULTS:
+    v = state.get("audit", {}).get(key)
+    if key == "logs describe-log-groups":
+        v = state.get("audit", {}).get(key + " " + argv[argv.index("--region") + 1], v)
+    if v == "DENIED":
+        fail("An error occurred (AccessDeniedException) when calling the operation: User is not authorized")
+    out(AUDIT_DEFAULTS[key] if v is None else v)
 op = argv[1]
 def flag(f):
     return argv[argv.index(f) + 1] if f in argv else None
@@ -103,6 +138,9 @@ if op == "register-image":
 if op == "create-security-group":
     out({"GroupId": "sg-1"})
 if op == "run-instances":
+    if flag("--user-data"):
+        state["user_data"] = open(flag("--user-data")[len("file://"):]).read()
+        json.dump(state, open(os.environ["STUB_STATE"], "w"))
     out({"Instances": [{"InstanceId": "i-1"}]})
 if op == "terminate-instances":
     state["terminated"] = True
@@ -207,6 +245,16 @@ class CloudTests(Stubbed):
         self.assertTrue(r["dry_run"])
         creating = {"copy-image", "register-image", "run-instances", "create-security-group", "import-key-pair"}
         self.assertFalse(creating & set(self.ops()))
+
+    def test_new_aws_server_is_hardened_at_first_boot(self):
+        import retention
+
+        self.run_cli("aws", "relay", "--apply", "--yes", "--profile", "p", "--admin-ip", "18.0.0.4")
+        ud = json.loads(self.state.read_text())["user_data"]
+        self.assertEqual(ud, retention.cloud_init())
+        for must in ("Storage=volatile", "tmpfs /var/log", "systemctl mask", "swapoff -a"):
+            self.assertIn(must, ud)
+        self.assertFalse(list(cloud.INVENTORY.parent.glob(".first-boot.*")), "user-data file left behind")
 
     def test_apply_creates_hardened_instance_open_only_to_previous_hop(self):
         r = self.run_cli(
@@ -592,6 +640,14 @@ class OciServerTests(Stubbed):
         with self.assertRaisesRegex(cloud.CloudError, "only in the home region eu-stockholm-1"):
             self.run_cli("oci", "server", "--apply", "--dry-run", "--allow-from", "16.0.0.9")
 
+    def test_new_oci_server_is_hardened_at_first_boot(self):
+        import retention
+
+        self.run_cli("oci", "server", "--apply", "--yes", "--allow-from", "16.0.0.9", "--admin-ip", "18.0.0.4")
+        ud = json.loads(self.state.read_text())["oci_user_data"]
+        self.assertEqual(ud, retention.cloud_init())
+        self.assertFalse(list(cloud.INVENTORY.parent.glob(".first-boot.*")), "user-data file left behind")
+
     def test_apply_creates_a_tagged_network_and_server_open_only_as_asked(self):
         r = self.run_cli("oci", "server", "--apply", "--yes", "--role", "relay", "--name", "avpn-relay2",
                          "--admin-ip", "18.0.0.4")  # fmt: skip
@@ -642,6 +698,95 @@ class OciServerTests(Stubbed):
         with self.assertRaisesRegex(cloud.CloudError, "not tagged avpn-name=avpn-exit"):
             self.run_cli("oci", "server", "--teardown", "--yes")
         self.assertFalse([c for c in self.oci_calls() if c[2] in ("delete", "terminate")])
+
+
+class AuditTests(Stubbed):
+    def setUp(self):
+        super().setUp()
+        cfg = Path(self.tmp.name) / "oci-config"
+        cfg.write_text("[DEFAULT]\ntenancy=ocid1.tenancy.oc1..t\nregion=eu-stockholm-1\nuser=u\n")
+        self.cfg = mock.patch.dict(os.environ, OCI_CLI_CONFIG_FILE=str(cfg))
+        self.cfg.start()
+        cloud.save_inventory(
+            dict(schema=1, resources={
+                "avpn-relay": dict(provider="aws", profile="p", region="eu-north-1", public_ip="13.0.0.1", ssh_key="k"),
+                "avpn-exit": dict(provider="ssh", catalog="oci", public_ip="16.40.0.2", ssh="u@16.40.0.2", ssh_key="k"),
+            })
+        )  # fmt: skip
+        sg = dict(GroupId="sg-r", GroupName="avpn-relay", IpPermissions=[
+            dict(IpProtocol="udp", FromPort=41194, ToPort=41194, IpRanges=[dict(CidrIp="0.0.0.0/0")]),
+            dict(IpProtocol="tcp", FromPort=22, ToPort=22, IpRanges=[dict(CidrIp="16.40.0.2/32")])])  # fmt: skip
+        self.base = dict(groups=[sg], oci_bastions={"ocid1.tenancy.oc1..t": [
+            dict(id="b1", name="bastion", **{"client-cidr-block-allow-list": ["13.0.0.1/32", "16.40.0.2/32"]})]})  # fmt: skip
+
+    def tearDown(self):
+        self.cfg.stop()
+        super().tearDown()
+
+    def audit(self, **state):
+        self.set_state(dict(self.base, **state))
+        r = self.run_cli("audit")
+        return r, {row["label"]: row["value"] for row in r["rows"]}
+
+    def test_a_clean_account_has_no_findings_but_states_the_always_on_logs(self):
+        events = [
+            dict(CloudTrailEvent=json.dumps(dict(sourceIPAddress=ip)))
+            for ip in ("31.13.0.5", "31.13.0.5", "ec2.amazonaws.com")
+        ]
+        r, rows = self.audit(audit={"cloudtrail lookup-events": {"Events": events}})
+        self.assertEqual((r["findings"], r["summary"]), (0, "no opt-in logging found"))
+        self.assertIn("90 days", rows["aws always on"])
+        self.assertIn("1 caller addresses", rows["aws always on"])
+        self.assertIn("365 days", rows["oci always on"])
+        self.assertEqual(rows["aws firewall avpn-relay"], "only any-address and your servers")
+        self.assertFalse([v for v in rows.values() if v.startswith("FOUND")])
+
+    def test_opt_in_logging_and_foreign_addresses_are_found(self):
+        sg = json.loads(json.dumps(self.base["groups"][0]))
+        sg["IpPermissions"][1]["IpRanges"].append(dict(CidrIp="31.13.0.5/32"))
+        bastion = dict(id="b1", name="bastion", **{"client-cidr-block-allow-list": ["31.13.0.5/32"]})
+        r, rows = self.audit(
+            groups=[sg],
+            audit={
+                "ec2 describe-flow-logs": {"FlowLogs": [dict(FlowLogId="fl-1", ResourceId="vpc-1")]},
+                "cloudtrail describe-trails": {"trailList": [dict(Name="org-trail")]},
+                "logs describe-log-groups us-east-1": {"logGroups": [dict(logGroupName="/aws/x")]},
+                "configservice describe-configuration-recorder-status": {"ConfigurationRecordersStatus": [dict(name="default", recording=True)]},
+            },
+            oci_bastions={"ocid1.tenancy.oc1..t": [bastion]},
+            oci_log_groups={"ocid1.tenancy.oc1..t": [dict(id="g1", **{"display-name": "net"})]},
+            oci_logs={"g1": [{"display-name": "vcn-flows", "configuration": {"source": {"service": "flowlogs"}}}]},
+        )  # fmt: skip
+        for label in ("aws vpc flow logs", "aws trails", "aws log groups", "aws config recording",
+                      "aws firewall avpn-relay", "oci bastions", "oci flow logs"):  # fmt: skip
+            self.assertTrue(rows[label].startswith("FOUND"), (label, rows[label]))
+        self.assertIn("31.13.0.5/32", rows["aws firewall avpn-relay"])
+        self.assertEqual(r["findings"], 7)
+        self.assertEqual(r["summary"], "7 finding(s)")
+
+    def test_a_shared_security_list_is_judged_only_by_its_own_rule(self):
+        inv = cloud.load_inventory()
+        inv["resources"]["avpn-oci-rule"] = dict(
+            provider="oci", security_list="ocid1.sl", rule="advanced-vpn:avpn-oci-rule"
+        )
+        cloud.save_inventory(inv)
+        others = [
+            dict(source="10.0.0.0/16", description="ssh from vcn"),
+            dict(source="31.13.0.9/32", description="someone's"),
+        ]
+        ours = dict(source="13.0.0.1/32", description="advanced-vpn:avpn-oci-rule")
+        r, rows = self.audit(security_list={"ingress-security-rules": others + [ours]})
+        self.assertEqual(rows["oci firewall avpn-oci-rule"], "only any-address and your servers")
+        r, rows = self.audit(security_list={"ingress-security-rules": others + [dict(ours, source="31.13.0.5/32")]})
+        self.assertIn("31.13.0.5/32", rows["oci firewall avpn-oci-rule"])
+        self.assertNotIn("10.0.0.0/16", rows["oci firewall avpn-oci-rule"])
+
+    def test_what_cannot_be_read_is_reported_not_counted_clean(self):
+        r, rows = self.audit(audit={"guardduty list-detectors": "DENIED"})
+        self.assertIn("cannot check", rows["aws guardduty"])
+        self.assertEqual(r["findings"], 0)
+        r, rows = self.audit(audit={"guardduty list-detectors": {"DetectorIds": ["d1"]}})
+        self.assertTrue(rows["aws guardduty"].startswith("FOUND"))
 
 
 class ChainTests(Stubbed):
@@ -1009,7 +1154,12 @@ class HostScriptTests(unittest.TestCase):
         self.tgz.parent.mkdir()
         with tarfile.open(self.root / "keep.tgz", "w:gz") as tf:
             tf.add(self.root / "pkg/tools", arcname="tools")
-        self.script = cloud.HOST_SETUP
+        # Never run the real hardening here: it masks services, mounts over /var/log and
+        # edits /etc/fstab on whatever machine runs the tests. The VM proof covers it.
+        import retention
+
+        self.script = cloud.HOST_SETUP.replace(retention.HARDEN.rstrip("\n"), 'echo harden >> "$ROOT/log"')
+        assert "systemctl mask" not in self.script and "swapoff" not in self.script, "real hardening left in"
         for path in [
             "/etc/advanced-vpn",
             "/etc/systemd",
@@ -1051,9 +1201,10 @@ class HostScriptTests(unittest.TestCase):
         self.assertIn("keys=new", r.stdout)
         self.assertEqual(json.loads((self.root / "tmp/avpn-request.json").read_text())["role"], "relay")
         self.assertIn("install", self.log())
-        conf = self.root / "etc/systemd/journald.conf.d/50-advanced-vpn.conf"
-        self.assertIn("Storage=volatile", conf.read_text())
-        self.assertFalse((self.root / "var/log/journal").exists())
+        # The hardening runs first, before packages are installed.
+        log = self.log()
+        self.assertLess(log.index("harden"), log.index("apt-get"))
+        self.assertFalse((self.root / "etc/advanced-vpn/shared-host").exists())
         self.assertFalse((self.root / "tmp/avpn-src.tgz").exists())
 
     def test_same_role_keeps_keys_and_another_role_needs_replace(self):
@@ -1070,10 +1221,14 @@ class HostScriptTests(unittest.TestCase):
         self.assertIn("systemctl stop advanced-vpn.service", self.log())
         self.assertEqual(json.loads((self.root / "tmp/avpn-request.json").read_text())["role"], "exit")
 
-    def test_shared_host_keeps_its_journal(self):
+    def test_shared_host_is_marked_not_hardened(self):
         self.setup("exit", shared="yes")
-        self.assertFalse((self.root / "etc/systemd/journald.conf.d").exists())
-        self.assertTrue((self.root / "var/log/journal").exists())
+        self.assertNotIn("harden", self.log())
+        self.assertTrue((self.root / "etc/advanced-vpn/shared-host").exists())
+        # Setting it up again as a dedicated host hardens it and clears the mark.
+        self.setup("exit")
+        self.assertIn("harden", self.log())
+        self.assertFalse((self.root / "etc/advanced-vpn/shared-host").exists())
 
     def test_reject_by_default_hosts_get_the_tunnel_port_accepted(self):
         self.setup("exit", port="4444")

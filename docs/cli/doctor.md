@@ -18,6 +18,7 @@ Each check prints `✓` or `✗` with a detail.
 - post-quantum crypto library: ML-DSA and ML-KEM are available
 - device keys generated, enrolled in a chain
 - constant-cell padding: the enrolled chain pads every hop; a chain signed before padding existed fails here, with the command to re-sign it
+- on servers, no retained data: journal in RAM only, `/var/log` in RAM, no disk logger running, no login database on disk, no swap. A server's VPN will not start while any of these fail (`avpn help retention`); a shared host reports that its logging is outside this tool's control
 - keys bound to TPM2 (systemd-creds protection), or the key protection mode
 - whole-device kill switch table (whole-device clients)
 - `advanced-vpn.service` and `advanced-vpn-guard.service` installed

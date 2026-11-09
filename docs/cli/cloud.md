@@ -8,6 +8,7 @@ and `oci` command-line tools, and plain SSH for everything else.
 
     avpn cloud suggest [--profile P]
     avpn cloud status [--live]
+    avpn cloud audit [--profile P] [--oci-profile NAME]
     avpn cloud aws relay --apply [--name avpn-NAME] [--role relay|middle|exit] [--allow-from IP|any] [--profile P] ...
     avpn cloud aws relay --teardown [--name avpn-NAME] [--profile P]
     avpn cloud aws allow --apply [--name avpn-NAME] [--allow-from IP|any ...] [--admin-ip IP] [--profile P]
@@ -47,6 +48,35 @@ exact next command. It ends with a recommendation based on what is recorded.
 
 - `--profile P`: the AWS CLI profile whose sign-in to check (default `$AWS_PROFILE`).
 
+## avpn cloud audit
+
+What the cloud providers log about you, checked against your own accounts. It only
+reads; nothing is changed.
+
+- `--profile P`: also audit this AWS CLI profile. Profiles of servers in the inventory are always audited.
+- `--oci-profile NAME`: the OCI CLI profile to audit (default `DEFAULT`, used whenever an OCI server is recorded).
+
+Opt-in logging it looks for, each reported as `FOUND` when present:
+- **AWS:**
+  - CloudTrail trails and CloudTrail Lake;
+  - VPC flow logs and traffic mirroring;
+  - AWS Config recording, which keeps the history of every firewall rule;
+  - Route 53 DNS query logs;
+  - CloudWatch log groups, in the Region and in us-east-1;
+  - GuardDuty.
+- **OCI:**
+  - flow logs and other logs, in every compartment;
+  - traffic mirroring (VTAPs).
+- **Firewalls:** any rule, AWS security group, OCI security list or bastion allow-list that names an address that is not one of your recorded servers.
+
+A service the account may not read is reported as "cannot check", never as clean.
+It also states the logs that are always on and cannot be turned off: AWS CloudTrail's
+90-day history, with how many caller addresses it holds now, and OCI Audit's 365 days.
+Running the audit is itself recorded there, under the address you run it from.
+
+What happens on the servers themselves is checked by `avpn doctor` on each server
+(`avpn help retention`).
+
 ## avpn cloud status
 
 The recorded resources, by name.
@@ -79,7 +109,8 @@ What `--apply` creates:
    - IMDSv2 required, hop limit 1;
    - `standard` CPU credits, so no surplus charges;
    - an encrypted gp3 root disk, deleted with the instance;
-   - no instance profile.
+   - no instance profile;
+   - first-boot user data that keeps every log in RAM before `sshd` accepts the first login (`avpn help retention`).
 
 The plan shows a rough monthly list price. On the free plan, credits pay for it; AWS
 Billing shows the real cost. If your sign-in has expired, the error says to run
@@ -131,7 +162,7 @@ What `--apply` creates, all tagged with the name:
 1. A VCN (`10.77.100.0/24`), an internet gateway and a default route to it.
 2. A security list of its own: UDP on the tunnel port from `--allow-from`, TCP 22 from `--admin-ip`, and all egress. The subnet uses only this list, not the VCN's default one (which allows SSH from anywhere).
 3. A throwaway ed25519 SSH key in `~/.config/advanced-vpn/ssh/NAME`.
-4. The instance: the newest full Canonical Ubuntu 24.04 image for the shape, a public address, and legacy (unauthenticated) metadata endpoints disabled.
+4. The instance: the newest full Canonical Ubuntu 24.04 image for the shape, a public address, and legacy (unauthenticated) metadata endpoints disabled. Its first-boot user data keeps every log in RAM before `sshd` accepts the first login (`avpn help retention`).
 
 OCI reclaims Always Free instances that stay idle (CPU, network and memory all under
 20% for 7 days); a hop carrying your traffic is normally busy enough.
@@ -182,7 +213,7 @@ request. `chain` does this for every hop; use it on its own to prepare one serve
 
 What it does on the server:
 1. Installs `nftables`, `python3-venv` and the TSS2 runtime libraries. Without TSS2, systemd-creds would silently fall back to the host key.
-2. Unless the host is shared: keeps the system journal in RAM only (`Storage=volatile`) and removes what the boot wrote to disk. Otherwise `sshd` would keep a persistent record of the admin's address, which is your address.
+2. Unless the host is shared, first of all: keeps every log in RAM (`avpn help retention`). That covers the journal, syslog daemons, `/var/log`, login databases and swap. Otherwise `sshd` would keep a persistent record of the admin's address, which is your address. A shared host is only marked as shared, and `doctor` reports it.
 3. On images that reject by default (OCI's Ubuntu), accepts the tunnel port in the host firewall, and saves it unless the host is shared (saving would also persist its other runtime rules).
 4. Installs or upgrades the package (the service is not enabled).
 5. Keeps the keys when they were made for the same role; otherwise runs `avpnctl request --role ROLE --protect systemd-creds`, sealing them to host + TPM2 when the TPM is usable.
