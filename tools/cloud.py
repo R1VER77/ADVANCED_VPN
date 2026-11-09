@@ -8,6 +8,8 @@ Runs as you, never as root, because it uses your own signed-in provider CLIs (`a
 Commands:
 - `status`: the local inventory, plus the tagged resources that still exist.
 - `aws relay --apply|--teardown`: one NitroTPM-capable relay (or middle/exit) instance.
+- `aws allow --apply`: replace the addresses that may reach that instance (for example
+  after your public address changed).
 - `oci allow --apply|--teardown`: one ingress rule on an OCI security list, from the
   previous hop only.
 
@@ -442,6 +444,85 @@ def aws_teardown_apply(a, aws, plan):
     return [dict(label="deleted", value=r["value"]) for r in plan["rows"] if r["label"] != "nothing"]
 
 
+def ranges_of(perm):
+    """The IPv4 sources of one security-group permission, as CIDR strings."""
+    return {r["CidrIp"] for r in perm.get("IpRanges", [])}
+
+
+def aws_allow_plan(a, aws):
+    """Which sources `aws allow` adds to and removes from the tagged security group.
+
+    The group's tunnel rule is its one single-port UDP permission and its admin rule is
+    TCP 22; any other permission is left alone. A source list is replaced, never merged:
+    afterwards the rule admits exactly the addresses given. IPv6 ranges, prefix lists
+    and group references on a managed rule are removed, because this tool never opens
+    them.
+    """
+    groups = aws.owned(a.name)["security_groups"]
+    if len(groups) != 1:
+        raise CloudError("expected one security group tagged %s=%s, found %d" % (NAME, a.name, len(groups)))
+    g = groups[0]
+    perms = g.get("IpPermissions", [])
+    tunnel = [p for p in perms if p.get("IpProtocol") == "udp" and p.get("FromPort") == p.get("ToPort")]
+    ssh = [p for p in perms if p.get("IpProtocol") == "tcp" and p.get("FromPort") == 22 and p.get("ToPort") == 22]
+    if len(tunnel) != 1:
+        raise CloudError(
+            "%s has %d single-port UDP rules; cannot tell which is the tunnel" % (g["GroupId"], len(tunnel))
+        )
+    wanted = []
+    if a.allow_from:
+        wanted.append(("tunnel", tunnel[0], "udp", tunnel[0]["FromPort"], a.allow_from, "ADVANCED_VPN previous hop"))
+    if a.admin_ip:
+        wanted.append(("ssh", ssh[0] if ssh else {}, "tcp", 22, [a.admin_ip], "admin SSH"))
+    add, remove, rows = [], [], [dict(label="firewall", value="%s %s" % (g["GroupId"], g.get("GroupName", "")))]
+    for label, perm, proto, port, sources, why in wanted:
+        now, new = ranges_of(perm), set(sources)
+        extra = {k: perm[k] for k in ("Ipv6Ranges", "PrefixListIds", "UserIdGroupPairs") if perm.get(k)}
+        if new - now:
+            add.append(
+                dict(
+                    IpProtocol=proto,
+                    FromPort=port,
+                    ToPort=port,
+                    IpRanges=[dict(CidrIp=c, Description=why) for c in sorted(new - now)],
+                )
+            )
+        if now - new or extra:
+            gone = dict(IpProtocol=proto, FromPort=port, ToPort=port, **extra)
+            if now - new:
+                gone["IpRanges"] = [dict(CidrIp=c) for c in sorted(now - new)]
+            remove.append(gone)
+        was = sorted(now) + (["%d non-IPv4 source(s)" % sum(map(len, extra.values()))] if extra else [])
+        state = "unchanged" if now == new and not extra else "was " + (", ".join(was) or "closed")
+        rows.append(dict(label=label, value="%s %d from %s (%s)" % (proto, port, ", ".join(sorted(new)), state)))
+    kept = [p for p in perms if not any(p is w[1] for w in wanted)]
+    rows.append(dict(label="unchanged", value="%d other ingress rule(s)" % len(kept)))
+    if not add and not remove:
+        rows = [dict(label="nothing", value="%s already admits exactly these addresses" % g["GroupId"])]
+    return dict(group=g["GroupId"], add=add, remove=remove, rows=rows)
+
+
+def aws_allow_apply(a, aws, plan):
+    """Open the new sources, then close the old ones, and record them."""
+    if plan["add"]:
+        aws.ec2(
+            "authorize-security-group-ingress", "--group-id", plan["group"], "--ip-permissions", json.dumps(plan["add"])
+        )
+    if plan["remove"]:
+        aws.ec2(
+            "revoke-security-group-ingress", "--group-id", plan["group"], "--ip-permissions", json.dumps(plan["remove"])
+        )
+    inv = load_inventory()
+    record = inv["resources"].get(a.name)
+    if record is not None:
+        if a.allow_from:
+            record["allow_from"] = a.allow_from
+        if a.admin_ip:
+            record["admin_ip"] = a.admin_ip
+        save_inventory(inv)
+    return plan["rows"]
+
+
 def oci(*args):
     """`oci ...` with JSON output."""
     return call([tool("oci"), *args])
@@ -639,6 +720,17 @@ def build_parser():
     relay.add_argument("--admin-ip", default="auto", help="address allowed to SSH in (default: this machine)")
     relay.add_argument("--dry-run", action="store_true", help="show the plan and stop")
     relay.add_argument("--yes", action="store_true", help="do not ask for confirmation")
+    allow = aws_s.add_parser("allow", help="replace who may reach a server this tool created")
+    allow.add_argument("--apply", action="store_true", required=True, help="change the security group")
+    allow.add_argument("--name", default="avpn-relay", help="the server's name and tag (avpn-*)")
+    allow.add_argument("--profile", default=os.environ.get("AWS_PROFILE", "default"), help="AWS CLI profile")
+    allow.add_argument("--region", help="must equal the profile's Region (the project has one Region)")
+    allow.add_argument(
+        "--allow-from", action="append", default=[], help="new previous-hop public IPv4, or auto (repeatable)"
+    )
+    allow.add_argument("--admin-ip", help="new address allowed to SSH in, or auto")
+    allow.add_argument("--dry-run", action="store_true", help="show the plan and stop")
+    allow.add_argument("--yes", action="store_true", help="do not ask for confirmation")
     h = s.add_parser("host", help="servers this tool created")
     h_s = h.add_subparsers(dest="kind", required=True)
     setup = h_s.add_parser("setup", help="install the package over SSH and fetch the public request")
@@ -682,6 +774,18 @@ def run(a):
     if a.provider == "aws":
         valid_name(a.name)
         aws = Aws(a.profile, a.region)
+        if a.kind == "allow":
+            if not a.allow_from and not a.admin_ip:
+                raise CloudError("nothing to change: give --allow-from and/or --admin-ip (auto = this machine)")
+            a.allow_from = [single_ip(x) for x in a.allow_from]
+            a.admin_ip = a.admin_ip and single_ip(a.admin_ip)
+            plan = aws_allow_plan(a, aws)
+            title = "Update AWS firewall %s" % a.name
+            if a.dry_run or plan["rows"][0]["label"] == "nothing":
+                return dict(title=title, summary="plan", rows=plan["rows"], dry_run=True)
+            if not confirm(a, title):
+                return dict(title=title, summary="cancelled", rows=plan["rows"])
+            return dict(title=title, summary="applied", rows=aws_allow_apply(a, aws, plan))
         if a.apply:
             if not a.allow_from:
                 raise CloudError("--allow-from is required: the previous hop's address (auto = this machine)")

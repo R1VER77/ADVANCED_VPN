@@ -8,6 +8,7 @@ with sudo: it uses your own signed-in `aws` and `oci` command-line tools.
     avpn cloud status [--live]
     avpn cloud aws relay --apply --allow-from IP [--name avpn-NAME] [--role relay|middle|exit] [--profile P] ...
     avpn cloud aws relay --teardown [--name avpn-NAME] [--profile P]
+    avpn cloud aws allow --apply [--name avpn-NAME] [--allow-from IP ...] [--admin-ip IP] [--profile P]
     avpn cloud oci allow --apply --name avpn-NAME --security-list OCID --allow-from IP [--port N] [--protocol udp|tcp]
     avpn cloud oci allow --teardown --name avpn-NAME --security-list OCID
 
@@ -63,6 +64,36 @@ Billing shows the real cost. If your sign-in has expired, the error says to run
 After creation, install the package on the server, run
 `sudo avpn request --role ROLE --protect systemd-creds` there, and include its request
 in `avpn init`.
+
+## avpn cloud aws allow
+
+Replace the addresses that may reach a server this tool created, for example after
+your internet provider or VPN provider gave you a new public address. A relay admits
+only the previous hop's address, so a client whose address changes cannot connect
+(and cannot SSH in) until its firewall is updated.
+
+    avpn cloud aws allow --apply --name avpn-relay --allow-from auto --admin-ip auto
+
+- `--apply`: change the security group (required; the plan is shown first).
+- `--name avpn-NAME`: the server (default `avpn-relay`). Its security group must carry both tags.
+- `--allow-from IP`: the new previous-hop public IPv4, or `auto` for this machine. Repeat it to admit several. The tunnel rule then admits exactly these addresses.
+- `--admin-ip IP`: the new address allowed to SSH in, or `auto`.
+- `--profile P`, `--region R`: as for `aws relay`.
+- `--dry-run`, `--yes`: as above.
+
+Give at least one of `--allow-from` and `--admin-ip`; the other rule is left as it
+is. The tunnel rule is the group's one single-port UDP rule (it refuses if there is
+more than one) and the admin rule is TCP 22. Every other rule is kept.
+
+The new addresses are opened before the old ones are closed, so a working chain never
+loses its path. Old addresses, and any IPv6 range, prefix list or group reference on
+those two rules, are removed. If the group already admits exactly the addresses
+given, nothing is changed. The inventory records the new addresses.
+
+Addresses that change often: `auto` asks `checkip.amazonaws.com`, which sees the
+address your traffic leaves from. Behind a commercial VPN that is the VPN's exit and
+it can change at any reconnect; rerun this command when it does. On the client,
+`avpn doctor --check-egress` shows which address the first hop sees.
 
 ## avpn cloud oci allow
 

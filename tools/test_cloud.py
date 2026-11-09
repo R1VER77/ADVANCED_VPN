@@ -79,7 +79,33 @@ if op == "terminate-instances":
     state["terminated"] = True
     json.dump(state, open(os.environ["STUB_STATE"], "w"))
     out({})
-if op in ("create-tags", "deregister-image", "import-key-pair", "authorize-security-group-ingress",
+if op in ("authorize-security-group-ingress", "revoke-security-group-ingress"):
+    for g in state.get("groups", []):
+        if g["GroupId"] != flag("--group-id"):
+            continue
+        for p in json.loads(flag("--ip-permissions")):
+            key = (p["IpProtocol"], p["FromPort"], p["ToPort"])
+            mine = [q for q in g.setdefault("IpPermissions", []) if (q["IpProtocol"], q["FromPort"], q["ToPort"]) == key]
+            if op.startswith("authorize"):
+                if not mine:
+                    mine = [dict(IpProtocol=key[0], FromPort=key[1], ToPort=key[2], IpRanges=[])]
+                    g["IpPermissions"].append(mine[0])
+                have = {r["CidrIp"] for r in mine[0]["IpRanges"]}
+                if have & {r["CidrIp"] for r in p["IpRanges"]}:
+                    fail("An error occurred (InvalidPermission.Duplicate)")
+                mine[0]["IpRanges"] += p["IpRanges"]
+            else:
+                if not mine:
+                    fail("An error occurred (InvalidPermission.NotFound)")
+                for k in ("IpRanges", "Ipv6Ranges", "PrefixListIds", "UserIdGroupPairs"):
+                    drop = [json.dumps({x: r[x] for x in r if x != "Description"}, sort_keys=True) for r in p.get(k, [])]
+                    mine[0][k] = [r for r in mine[0].get(k, [])
+                                  if json.dumps({x: r[x] for x in r if x != "Description"}, sort_keys=True) not in drop]
+                if not any(mine[0].get(k) for k in ("IpRanges", "Ipv6Ranges", "PrefixListIds", "UserIdGroupPairs")):
+                    g["IpPermissions"].remove(mine[0])
+    json.dump(state, open(os.environ["STUB_STATE"], "w"))
+    out({"Return": True})
+if op in ("create-tags", "deregister-image", "import-key-pair",
           "delete-security-group", "delete-key-pair", "delete-snapshot"):
     out({})
 fail("unexpected aws call: " + " ".join(argv))
@@ -307,6 +333,86 @@ class CloudTests(unittest.TestCase):
             "ingress-security-rules": [other],
             "egress-security-rules": [{"protocol": "all"}],
         }
+
+    def relay_group(self, tunnel=("16.170.0.7/32",), ssh=("18.0.0.4/32",), extra=None):
+        perms = [
+            dict(IpProtocol="udp", FromPort=41194, ToPort=41194, IpRanges=[dict(CidrIp=c) for c in tunnel]),
+            dict(IpProtocol="tcp", FromPort=22, ToPort=22, IpRanges=[dict(CidrIp=c) for c in ssh]),
+            dict(IpProtocol="tcp", FromPort=443, ToPort=443, IpRanges=[dict(CidrIp="16.1.1.1/32")]),
+        ]
+        if extra:
+            perms[0].update(extra)
+        return dict(GroupId="sg-r", GroupName="avpn-relay", IpPermissions=perms)
+
+    def opened(self):
+        g = json.loads(self.state.read_text())["groups"][0]
+        return {
+            (p["IpProtocol"], p["FromPort"]): sorted(r["CidrIp"] for r in p.get("IpRanges", []))
+            for p in g["IpPermissions"]
+        }
+
+    def test_aws_allow_replaces_sources_exactly_and_keeps_other_rules(self):
+        self.set_state(dict(groups=[self.relay_group(tunnel=("16.170.0.7/32", "16.170.0.8/32"))]))
+        cloud.save_inventory(dict(schema=1, resources={"avpn-relay": dict(provider="aws", instance="i-1")}))
+        r = self.run_cli(
+            "aws", "allow", "--apply", "--yes", "--profile", "p", "--allow-from", "31.13.0.5", "--admin-ip", "31.13.0.5"
+        )
+        self.assertEqual(r["summary"], "applied")
+        self.assertEqual(
+            self.opened(),
+            {("udp", 41194): ["31.13.0.5/32"], ("tcp", 22): ["31.13.0.5/32"], ("tcp", 443): ["16.1.1.1/32"]},
+        )
+        # New sources are opened before old ones are closed, so a live chain never has a gap.
+        self.assertEqual(
+            [o for o in self.ops() if "security-group-ingress" in o],
+            ["authorize-security-group-ingress", "revoke-security-group-ingress"],
+        )
+        text = json.dumps(r["rows"])
+        self.assertIn("udp 41194 from 31.13.0.5/32 (was 16.170.0.7/32, 16.170.0.8/32)", text)
+        inv = json.loads(cloud.INVENTORY.read_text())["resources"]["avpn-relay"]
+        self.assertEqual((inv["allow_from"], inv["admin_ip"]), (["31.13.0.5/32"], "31.13.0.5/32"))
+        # Applying the same addresses again changes nothing.
+        before = len(self.ops())
+        again = self.run_cli("aws", "allow", "--apply", "--yes", "--profile", "p", "--allow-from", "31.13.0.5")
+        self.assertEqual(again["rows"][0]["label"], "nothing")
+        self.assertEqual([o for o in self.ops()[before:] if "security-group-ingress" in o], [])
+
+    def test_aws_allow_changes_only_what_is_asked(self):
+        self.set_state(dict(groups=[self.relay_group()]))
+        self.run_cli("aws", "allow", "--apply", "--yes", "--profile", "p", "--admin-ip", "31.13.0.6")
+        self.assertEqual(self.opened()[("udp", 41194)], ["16.170.0.7/32"])
+        self.assertEqual(self.opened()[("tcp", 22)], ["31.13.0.6/32"])
+
+    def test_aws_allow_removes_ipv6_and_other_sources_on_the_tunnel(self):
+        extra = dict(Ipv6Ranges=[dict(CidrIpv6="::/0")], PrefixListIds=[dict(PrefixListId="pl-1")])
+        self.set_state(dict(groups=[self.relay_group(extra=extra)]))
+        r = self.run_cli("aws", "allow", "--apply", "--yes", "--profile", "p", "--allow-from", "16.170.0.7")
+        tunnel = next(
+            p for p in json.loads(self.state.read_text())["groups"][0]["IpPermissions"] if p["FromPort"] == 41194
+        )
+        self.assertEqual((tunnel.get("Ipv6Ranges"), tunnel.get("PrefixListIds")), ([], []))
+        self.assertIn("2 non-IPv4 source(s)", json.dumps(r["rows"]))
+
+    def test_aws_allow_dry_run_and_refusals(self):
+        self.set_state(dict(groups=[self.relay_group()]))
+        r = self.run_cli("aws", "allow", "--apply", "--dry-run", "--profile", "p", "--allow-from", "31.13.0.5")
+        self.assertTrue(r["dry_run"])
+        self.assertEqual([o for o in self.ops() if "security-group-ingress" in o], [])
+        with self.assertRaisesRegex(cloud.CloudError, "nothing to change"):
+            self.run_cli("aws", "allow", "--apply", "--yes", "--profile", "p")
+        with self.assertRaisesRegex(cloud.CloudError, "not a public IPv4"):
+            self.run_cli("aws", "allow", "--apply", "--yes", "--profile", "p", "--allow-from", "10.0.0.1")
+        with self.assertRaises(ValueError):
+            self.run_cli("aws", "allow", "--apply", "--yes", "--profile", "p", "--admin-ip", "0.0.0.0/0")
+        self.set_state({})
+        with self.assertRaisesRegex(cloud.CloudError, "expected one security group"):
+            self.run_cli("aws", "allow", "--apply", "--yes", "--profile", "p", "--allow-from", "31.13.0.5")
+        two = self.relay_group()
+        two["IpPermissions"].append(dict(IpProtocol="udp", FromPort=53, ToPort=53, IpRanges=[]))
+        self.set_state(dict(groups=[two]))
+        with self.assertRaisesRegex(cloud.CloudError, "cannot tell which is the tunnel"):
+            self.run_cli("aws", "allow", "--apply", "--yes", "--profile", "p", "--allow-from", "31.13.0.5")
+        self.assertEqual([o for o in self.ops() if "security-group-ingress" in o], [])
 
     def test_oci_allow_adds_one_tagged_rule_and_keeps_the_rest(self):
         self.set_state(dict(security_list=self.oci_list()))
