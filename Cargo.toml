@@ -22,6 +22,8 @@ x509-parser = "=0.18.1"
 zeroize = "=1.9.1"
 gotatun = { version = "=0.10.2", default-features = false, features = ["aws-lc-rs", "device", "tun", "daita"] }
 maybenot-machines = "=1.0.1"
+maybenot = "=2.2.2"
+enum-map = "=2.7.3"
 rand = "=0.9.5"
 hex = "=0.4.3"
 tokio-rustls = { version = "=0.26.6", default-features = false, features = ["aws_lc_rs"] }

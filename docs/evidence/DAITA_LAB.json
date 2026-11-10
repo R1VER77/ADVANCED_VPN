@@ -1,0 +1,46 @@
+{
+ "what": "Website-fingerprinting resistance of the WireGuard + DAITA carrier, measured with tools/daita_lab.py and tools/wf_attack.py, and protocol identification with nDPI 4.2 (ndpiReader) and TShark 4.4.19",
+ "date": "2026-11-09",
+ "setup": {
+  "chain": "2 hops in network namespaces (client, relay, exit, destination), constant cells on every hop",
+  "latency": "netem 10 ms (+-1 ms) at each end of every link: about 60 ms round trip end to end",
+  "workload": "8 synthetic sites (main document plus 3-28 objects, 77-594 KB), 15 loads each in shuffled order, 2 parallel connections, sizes +-15% and ~10% of objects skipped per load, 5 s between loads",
+  "attack": "k-FP-style features plus CUMUL, 500-tree random forest, stratified 5-fold cross-validation; closed world, chance 0.125",
+  "views": {
+   "carrier": "client <-> first hop: WireGuard + DAITA, what the client's ISP sees",
+   "inner link": "first hop <-> exit: QUIC with constant cells, no DAITA (the same loads, as a baseline)"
+  },
+  "windows": {
+   "true end + 3 s": "each load cut at its true end: the attacker is told where every page finished",
+   "fixed 6 s": "every load gets the same 6 s from its true start: the fairer view of a constant-rate stream"
+  }
+ },
+ "accuracy": {
+  "v0.5.0 balanced": {"true end + 3 s": {"carrier": 0.583, "inner link": 0.625}, "fixed 6 s": {"carrier": 0.567, "inner link": 0.608}},
+  "v0.5.0 strong": {"true end + 3 s": {"carrier": 0.575, "inner link": 0.792}, "fixed 6 s": {"carrier": 0.325, "inner link": 0.475}},
+  "balanced (FRONT re-armed)": {"true end + 3 s": {"carrier": 0.6, "inner link": 0.708}, "fixed 6 s": {"carrier": 0.6, "inner link": 0.7}},
+  "strong (FRONT re-armed, Tamaraw rounding on its clock)": {"true end + 3 s": {"carrier": 0.542, "inner link": 0.75}, "fixed 6 s": {"carrier": 0.258, "inner link": 0.492}},
+  "strong, fixed 6 s, per site": {"S0": 0.73, "S1": 0.2, "S2": 0.27, "S3": 0.27, "S4": 0.4, "S5": 0.07, "S6": 0.07, "S7": 0.07},
+  "reading": "Balanced does not stop this attacker. Strong reduces it to the shortest site (S0, whose trace ends inside the window); the other seven are at or near chance, which is Tamaraw's guarantee: only the rounded length of a trace leaks."
+ },
+ "cost": {
+  "balanced": {"idle": "6-7 GB/month per side (unchanged)", "decoys per page load": {"client": 62, "relay": 22}, "decoy share of sent bytes during browsing": {"client": 0.12, "relay": 0.04}, "mean load seconds": 2.26},
+  "strong": {"idle": "168 GB/month per side (v0.5.0: 187-223)", "decoys per page load": {"client": 347, "relay": 307}, "decoy share of sent bytes during browsing": {"client": 0.46, "relay": 0.41}, "mean load seconds": 10.84, "rate": "one 1380-byte packet every ~21 ms per direction, continuously while keepalives flow"},
+  "no defense reference": {"mean load seconds": 2.31}
+ },
+ "defects found in v0.5.0": [
+  "FRONT got its padding window as 1-4 microseconds (maybenot-machines takes microseconds; Tamaraw scales seconds itself): every decoy left at once, 1.1 ms apart, at the tunnel's first packet",
+  "FRONT ran once per tunnel: no decoys around any later page load, including after WireGuard rekeys",
+  "Upstream Tamaraw stopped counting packets once data flowed, so traces were never rounded (5 of 120 a multiple of 100); each ended with ~98 decoys sent 1 us apart, marking when the page finished, and one more decoy after the trace",
+  "The QUIC ClientHello between hops named the tool: SNI <role>.advanced-vpn.internal and ALPN advanced-vpn/1, readable by anyone on the path (QUIC Initial packets are decryptable)"
+ ],
+ "protocol identification": {
+  "carrier": "nDPI: WireGuard, category VPN, by DPI. DAITA hides what is sent, not that WireGuard is used.",
+  "between hops, v0.5.0": "nDPI: QUIC, Hostname/SNI exit.advanced-vpn.internal, ALPN advanced-vpn/1",
+  "between hops, now": "nDPI: QUIC, category Web, ALPN h3, no hostname"
+ },
+ "padding": {
+  "carrier data packets": "every WireGuard data packet 1380 bytes on the wire (14,706 balanced, 29,565 strong); only handshakes (156/100) and empty keepalives (40) differ",
+  "Tamaraw spacing": "20-21 ms between packets per direction"
+ }
+}

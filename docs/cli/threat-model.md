@@ -41,8 +41,10 @@ Oblivious HTTP gateways, MASQUE proxies and Private Relay nodes do **no** paddin
 allows. That leaves packet sizes, counts and timing correlated across the proxy, which
 is what flow-correlation and website-fingerprinting attacks feed on.
 
-This design's carrier runs **DAITA** (Maybenot): FRONT padding and decoy packets
-always, and Tamaraw constant-rate shaping in the `strong` defense. On top of that,
+This design's carrier runs **DAITA** (Maybenot): every data packet padded to one size,
+FRONT decoys around every burst of traffic (a page load, say), and in the `strong`
+defense Tamaraw constant-rate shaping that rounds every trace up to a multiple of 100
+packets on its own clock. On top of that,
 every chain pads **every** hop's datagrams to one size per layer (constant cells), so
 inner packet sizes do not leak on the outer path at all — not just on the first link.
 Padding is always on and cannot be turned off; a chain signed without it is refused.
@@ -59,6 +61,31 @@ to the first hop keeps a persistent keepalive, so when your address changes the 
 hop re-learns it from the next authenticated packet. The inner QUIC layers ride on the
 carrier's stable overlay addresses and never see the change. Nothing falls back to an
 unprotected path while this happens — the kill switch holds throughout.
+
+## Measured: which website you are on
+
+An observer next to you (your ISP, the Wi-Fi) cannot read the traffic, but can try to
+recognise a website from the shape of its traffic. The lab (`tools/daita_lab.py`,
+`tools/wf_attack.py`) loads 8 synthetic sites 15 times each over a ~60 ms chain, and a
+random-forest classifier of the kind used in website-fingerprinting research guesses
+the site from the carrier. A random guess is right 12.5% of the time.
+
+| Defense | Right, told where each page ended | Right, given 6 s from each page's start |
+|---|---|---|
+| no DAITA (the same loads between hops) | 71-75% | 49-70% |
+| `balanced` | 60% | 60% |
+| `strong` | 54% | 26% |
+
+- `balanced` costs almost nothing (6-7 GB a month idle, about 12% decoys while browsing) and does **not** stop this attacker.
+- `strong` sends one 1380-byte packet every ~21 ms each way for as long as the tunnel is busy, and pads every trace to a whole 2 s step. The attacker then recognised only the shortest site; the other seven were at or near chance. The cost is real: pages load about 4.7 times slower, and an idle tunnel sends about 168 GB a month each way.
+- Real browsing is harder for the attacker than 8 known sites, and easier if it trains on your exact sites with more samples. Treat these as orders of magnitude.
+
+Details are in `docs/evidence/DAITA_LAB.json`.
+
+## What it does show
+
+- **That you use WireGuard.** Deep packet inspection (nDPI) labels the carrier WireGuard, a VPN, from its content. DAITA hides what you send, not that a VPN is in use.
+- **Between hops: QUIC that looks like HTTP/3.** The handshake offers HTTP/3's protocol name (`h3`) and names no server, so it does not identify this tool. The certificates are still checked against their pinned names; the names just never go on the wire.
 
 ## What it does not stop
 

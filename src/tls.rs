@@ -23,8 +23,10 @@ use x509_parser::prelude::*;
 pub const OUTER_MTU: u16 = 1440;
 /// Inner layer UDP payload of the legacy two-layer profile.
 pub const INNER_MTU: u16 = 1350;
-/// ALPN every layer must negotiate.
-pub const ALPN: &[u8] = b"advanced-vpn/1";
+/// ALPN every layer must negotiate. QUIC's first (Initial) packets can be decrypted by
+/// anyone on the path, so the ClientHello must not name this tool: it offers HTTP/3's
+/// ALPN, as any QUIC client does, and no server name at all (see [`client`]).
+pub const ALPN: &[u8] = b"h3";
 /// Managed profiles nest one QUIC layer per server hop, built from the inside out:
 /// the innermost layer uses QUIC's 1200-byte minimum UDP payload (RFC 9000) and
 /// each outer layer adds 56 bytes (a short-header DATAGRAM packet costs ~32).
@@ -173,7 +175,8 @@ pub fn server(i: &Identity, fd: Option<i32>, mtu: u16) -> Result<ServerConfig> {
         .incoming_buffer_size_total(262144);
     Ok(s)
 }
-/// Client configuration for one layer: X25519MLKEM768 only, ML-DSA-65 on both sides, peer pinned.
+/// Client configuration for one layer: X25519MLKEM768 only, ML-DSA-65 on both sides, peer
+/// pinned, and no server name (SNI) in the ClientHello.
 pub fn client(i: &Identity, fd: Option<i32>, mtu: u16) -> Result<ClientConfig> {
     let (cert, key) = material(i, fd)?;
     let mut t = rustls::ClientConfig::builder_with_provider(provider())
@@ -181,6 +184,9 @@ pub fn client(i: &Identity, fd: Option<i32>, mtu: u16) -> Result<ClientConfig> {
         .with_root_certificates(roots(i)?)
         .with_client_auth_cert(cert, key)?;
     t.alpn_protocols = vec![ALPN.to_vec()];
+    // The server certificate is still checked against the pinned name; the name just
+    // never goes on the wire.
+    t.enable_sni = false;
     t.enable_early_data = false;
     t.resumption = rustls::client::Resumption::disabled();
     let crypto = QuicClientConfig::with_initial(Arc::new(t), initial_suite())?;

@@ -180,3 +180,88 @@ fn only_ml_dsa_65_is_verifiable() {
     assert_eq!(algorithms.mapping.len(), 1);
     assert_eq!(algorithms.mapping[0].0, tls::SIGNATURE_SCHEME);
 }
+
+/// The server name and ALPN offers of one ClientHello.
+type Hello = (Option<String>, Vec<Vec<u8>>);
+
+/// Records every ClientHello it sees, then refuses.
+#[derive(Debug, Default)]
+struct HelloRecorder(std::sync::Mutex<Vec<Hello>>);
+
+impl rustls::server::ResolvesServerCert for HelloRecorder {
+    fn resolve(
+        &self,
+        hello: rustls::server::ClientHello<'_>,
+    ) -> Option<Arc<rustls::sign::CertifiedKey>> {
+        let alpn = hello
+            .alpn()
+            .map(|a| a.map(<[u8]>::to_vec).collect())
+            .unwrap_or_default();
+        self.0
+            .lock()
+            .unwrap()
+            .push((hello.server_name().map(str::to_owned), alpn));
+        None
+    }
+}
+
+#[tokio::test]
+async fn client_hello_names_neither_the_server_nor_this_tool() {
+    let tmp = std::env::temp_dir().join(format!("avpn-hello-{}", std::process::id()));
+    let status = std::process::Command::new("python3")
+        .args([
+            "tools/provision.py",
+            "--out",
+            tmp.to_str().unwrap(),
+            "--relay",
+            "127.0.0.1:4433",
+            "--exit",
+            "127.0.0.1:4444",
+        ])
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let raw: serde_json::Value =
+        serde_json::from_slice(&private_read(&tmp.join("client/config.json"), 65536).unwrap())
+            .unwrap();
+    let ci: crate::config::Identity = serde_json::from_value(raw["outer"].clone()).unwrap();
+    let recorder = Arc::new(HelloRecorder::default());
+    let mut server = rustls::ServerConfig::builder_with_provider(Arc::new(
+        rustls::crypto::aws_lc_rs::default_provider(),
+    ))
+    .with_protocol_versions(&[&rustls::version::TLS13])
+    .unwrap()
+    .with_no_client_auth()
+    .with_cert_resolver(recorder.clone());
+    server.alpn_protocols = vec![tls::ALPN.to_vec()];
+    let server = Endpoint::server(
+        quinn::ServerConfig::with_crypto(Arc::new(
+            quinn::crypto::rustls::QuicServerConfig::try_from(server).unwrap(),
+        )),
+        "127.0.0.1:0".parse().unwrap(),
+    )
+    .unwrap();
+    let addr = server.local_addr().unwrap();
+    let task = tokio::spawn(async move {
+        let incoming = server.accept().await.unwrap();
+        let _ = tokio::time::timeout(Duration::from_secs(3), incoming).await;
+        server.close(0u32.into(), b"test done");
+    });
+    let mut endpoint = Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
+    endpoint.set_default_client_config(tls::client(&ci, None, tls::OUTER_MTU).unwrap());
+    // The handshake fails (the recorder offers no certificate); only the ClientHello matters.
+    let _ = tokio::time::timeout(
+        Duration::from_secs(3),
+        endpoint.connect(addr, &ci.server_name).unwrap(),
+    )
+    .await;
+    task.await.unwrap();
+    endpoint.close(0u32.into(), b"test done");
+    let seen = recorder.0.lock().unwrap().clone();
+    assert!(
+        ci.server_name.contains("advanced-vpn"),
+        "the test must use a revealing name"
+    );
+    assert_eq!(seen, vec![(None, vec![b"h3".to_vec()])]);
+    std::fs::remove_dir_all(tmp).unwrap();
+}

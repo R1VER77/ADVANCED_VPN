@@ -122,11 +122,7 @@ async fn work() -> Result<()> {
     }
     peer.keepalive = Some(25);
     let mut rng = rand::rngs::StdRng::from_os_rng();
-    let mut machines = vec![maybenot_machines::netflow::simple_netflow()];
-    machines.extend(maybenot_machines::front::front(256, 1.0, 4.0, 8, &mut rng));
-    if c.defense == "strong" {
-        machines.extend(maybenot_machines::tamaraw::tamaraw(0.02, 500_000.0));
-    }
+    let machines = advanced_vpn::daita::machines(&c.defense, &mut rng);
     let daita = DaitaSettings {
         maybenot_machines: machines,
         max_decoy_frac: 0.5,

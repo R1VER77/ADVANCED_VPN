@@ -15,5 +15,10 @@
     "version": "1.0.1",
     "license": "MIT OR Apache-2.0",
     "source": "https://crates.io/crates/maybenot-machines/1.0.1"
+  },
+  "enum_map": {
+    "version": "2.7.3",
+    "license": "MIT OR Apache-2.0",
+    "source": "https://crates.io/crates/enum-map/2.7.3"
   }
 }
