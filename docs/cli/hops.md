@@ -8,7 +8,7 @@ Show the enrolled chain, hop by hop, as the client reaches it.
 
 ## Example
 
-    client → relay 198.51.100.80:41194 → exit 203.0.113.80:4444
+    client → relay 198.51.100.80:443 → exit 203.0.113.80:4444
 
 ## Meaning of each hop
 

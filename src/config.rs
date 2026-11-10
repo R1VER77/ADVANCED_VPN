@@ -283,3 +283,26 @@ pub fn key_fds(items: &[String]) -> Result<BTreeMap<String, i32>> {
     }
     Ok(out)
 }
+
+/// The contents of an inherited key descriptor, which must be an immutable sealed memfd
+/// of at most `max` bytes. The caller's descriptor is duplicated, never taken over.
+pub fn sealed_fd(fd: i32, max: u64) -> Result<Vec<u8>> {
+    use std::os::{fd::FromRawFd, unix::fs::FileExt};
+    // SAFETY: fcntl F_DUPFD_CLOEXEC duplicates an integer descriptor without pointers.
+    let n = unsafe { libc::fcntl(fd, libc::F_DUPFD_CLOEXEC, 3) };
+    ensure!(n >= 0, "invalid inherited key descriptor");
+    // SAFETY: n is a newly allocated owned descriptor from successful fcntl.
+    let f = unsafe { std::fs::File::from_raw_fd(n) };
+    // SAFETY: F_GET_SEALS reads flags on a valid descriptor without pointers.
+    let seals = unsafe { libc::fcntl(n, libc::F_GET_SEALS) };
+    let required = libc::F_SEAL_WRITE | libc::F_SEAL_SHRINK | libc::F_SEAL_GROW | libc::F_SEAL_SEAL;
+    ensure!(
+        seals >= 0 && seals & required == required,
+        "key descriptor must be an immutable sealed memfd"
+    );
+    let len = f.metadata()?.len();
+    ensure!(len <= max, "inherited key too large");
+    let mut b = vec![0; len as usize];
+    f.read_exact_at(&mut b, 0)?;
+    Ok(b)
+}

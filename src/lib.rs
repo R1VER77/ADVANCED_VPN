@@ -1,6 +1,8 @@
 //! ADVANCED_VPN data plane: nested hybrid post-quantum QUIC layers (X25519MLKEM768,
 //! ML-DSA-65 authentication), one per hop, carried inside WireGuard + DAITA.
 #![deny(missing_docs)]
+/// HTTP/3 camouflage for the WireGuard carrier to the first hop.
+pub mod cloak;
 /// Data-plane configuration files and inherited key descriptors.
 pub mod config;
 /// The DAITA (Maybenot) machines of the WireGuard carrier.

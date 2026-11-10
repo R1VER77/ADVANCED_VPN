@@ -8,8 +8,9 @@ A chain is the ordered list of servers your traffic crosses.
 
 Each hop is a separate QUIC layer (X25519MLKEM768 key exchange, ML-DSA-65
 certificates). Layers are nested inside-out, so each server can unwrap only its own
-layer. The WireGuard + DAITA carrier runs innermost. Inner packets are 1100 bytes,
-and each outer layer adds 56 bytes of budget.
+layer. The WireGuard + DAITA carrier runs innermost, and travels to the first hop as
+QUIC datagrams on UDP 443, so that link looks like HTTP/3. Inner packets are 1100
+bytes, and each outer layer adds 56 bytes of budget.
 
 Switch chains with `avpn init` (new bundles), then `avpn enroll BUNDLE --replace` on
 each device.

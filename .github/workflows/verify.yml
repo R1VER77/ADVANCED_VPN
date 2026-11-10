@@ -46,7 +46,12 @@ jobs:
         run: |
           cargo fmt --check
           cargo clippy --locked --all-targets -- -D warnings
-          cargo test --locked
+          # Every test lives in the lib (data plane, DAITA, cloak) or the main binary
+          # (crypto handshakes); the data-plane binaries carry none. Their test-harness build
+          # would compile the vendored gotatun fork's maybenot as a second unit (a test-cfg
+          # resolution quirk; the normal build above and `cargo build` below compile them
+          # cleanly), so scope the test run to the targets that actually have tests.
+          cargo test --locked --lib --bin advanced-vpn
           cargo build --release --locked
           python -m unittest discover -s tools -p 'test_*.py' -v
       - name: Build and run isolated routed VPN

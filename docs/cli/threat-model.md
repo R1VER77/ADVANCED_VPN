@@ -61,6 +61,22 @@ to the first hop keeps a persistent keepalive, so when your address changes the 
 hop re-learns it from the next authenticated packet. The inner QUIC layers ride on the
 carrier's stable overlay addresses and never see the change. Nothing falls back to an
 unprotected path while this happens — the kill switch holds throughout.
+Now that the carrier rides inside the HTTP/3 cloak's QUIC, a changed address is also a
+changed QUIC path: the cloak reconnects and the carrier's keepalive re-learns the address,
+so a transfer survives the move (measured for both defenses with `tools/daita_lab.py`,
+`ROBUST=roam`). `strong` recovers more slowly, because its constant-rate shaping only
+resumes once a session is re-established.
+
+## Fails closed, not open
+
+The cloak needs the path to the first hop to carry a full-size packet (an IPv4 MTU of at
+least 1448 bytes). On a smaller path the client refuses to bring the tunnel up rather than
+send anything in the clear, and the kill switch stays in place: in whole-device mode every
+packet is dropped; in applications mode a protected program simply has no route. There is
+no automatic fallback to a direct or smaller-MTU path. If the first hop is briefly
+unreachable, `strong` mode used to be able to wedge its traffic shaper; it now flushes and
+recovers on its own (a fix carried in the vendored `gotatun`), and the supervisor restarts
+the carrier as a backstop if it ever stays stuck.
 
 ## Measured: which website you are on
 
@@ -68,13 +84,15 @@ An observer next to you (your ISP, the Wi-Fi) cannot read the traffic, but can t
 recognise a website from the shape of its traffic. The lab (`tools/daita_lab.py`,
 `tools/wf_attack.py`) loads 8 synthetic sites 15 times each over a ~60 ms chain, and a
 random-forest classifier of the kind used in website-fingerprinting research guesses
-the site from the carrier. A random guess is right 12.5% of the time.
+the site from the carrier. A random guess is right 12.5% of the time. (These are measured
+on the camouflaged carrier, now that it is QUIC on UDP 443; the cloak wraps the same shaped
+traffic, so the numbers match what DAITA gave before it.)
 
 | Defense | Right, told where each page ended | Right, given 6 s from each page's start |
 |---|---|---|
-| no DAITA (the same loads between hops) | 71-75% | 49-70% |
-| `balanced` | 60% | 60% |
-| `strong` | 54% | 26% |
+| no DAITA (the same loads between hops) | 74-82% | 46-70% |
+| `balanced` | 62% | 62% |
+| `strong` | 55% | 22% |
 
 - `balanced` costs almost nothing (6-7 GB a month idle, about 12% decoys while browsing) and does **not** stop this attacker.
 - `strong` sends one 1380-byte packet every ~21 ms each way for as long as the tunnel is busy, and pads every trace to a whole 2 s step. The attacker then recognised only the shortest site; the other seven were at or near chance. The cost is real: pages load about 4.7 times slower, and an idle tunnel sends about 168 GB a month each way.
@@ -84,8 +102,23 @@ Details are in `docs/evidence/DAITA_LAB.json`.
 
 ## What it does show
 
-- **That you use WireGuard.** Deep packet inspection (nDPI) labels the carrier WireGuard, a VPN, from its content. DAITA hides what you send, not that a VPN is in use.
-- **Between hops: QUIC that looks like HTTP/3.** The handshake offers HTTP/3's protocol name (`h3`) and names no server, so it does not identify this tool. The certificates are still checked against their pinned names; the names just never go on the wire.
+The link to the first hop no longer looks like WireGuard. The carrier (WireGuard + DAITA)
+rides inside QUIC on UDP 443 (`advanced-vpn-cloak`), so deep packet inspection (nDPI in the
+lab) labels it QUIC, category Web, as it would an HTTP/3 website — not a VPN. The first hop
+answers an unauthenticated connection like a web server (an HTTP/3 `404`), so a probe learns
+nothing; only a peer that proves the chain's key is carried. The hops behind the first one
+were already QUIC that offers HTTP/3's `h3` and names no server.
+
+What a capable observer can still tell:
+
+- **That it is QUIC, not which site.** The outer stream is real QUIC with HTTP/3's ALPN, but its
+  handshake fingerprint (the QUIC library's transport parameters, the TLS ClientHello) is not a
+  mainstream browser's; an adversary that fingerprints QUIC stacks (JA4) can see it is not Chrome.
+  The certificate is self-signed, so an adversary that completes the handshake sees that too.
+- **The volume and timing of the outer stream**, which is what the fingerprinting measurement
+  above is about. The camouflage changes what the stream *looks like*, not DAITA's shaping of it.
+- **Nothing, on a network that blocks UDP.** There is no TCP fallback; the tunnel simply fails
+  to form (and fails closed — see below), rather than falling back to anything weaker.
 
 ## What it does not stop
 

@@ -36,7 +36,7 @@ result object for scripts.
 ```
 $ avpn hops
 • Chain  2-hop
-  └ client → relay 198.51.100.80:41194 → exit 203.0.113.80:4444
+  └ client → relay 198.51.100.80:443 → exit 203.0.113.80:4444
 
 $ avpn doctor
 • Doctor  11 passed · 0 failed
@@ -164,7 +164,7 @@ sudo /opt/advanced-vpn/bin/avpn request --role exit  --protect systemd-creds --o
 
 ```sh
 /opt/advanced-vpn/bin/avpn init --out ./enrollment --vault ~/.config/advanced-vpn/vault \
-  --relay 192.0.2.10:41194 --exit 198.51.100.20:4444 \
+  --relay 192.0.2.10:443 --exit 198.51.100.20:4444 \
   --request client=client.req --request relay=relay.req --request exit=exit.req
 ```
 
@@ -229,7 +229,7 @@ How the layers work:
 sudo /opt/advanced-vpn/bin/avpn request --role middle --protect systemd-creds --out middle.req
 # laptop: sign a chain (one PIN + touch)
 /opt/advanced-vpn/bin/avpn init --hops 3 --out ./chain3 --vault ~/.config/advanced-vpn/vault \
-  --relay 192.0.2.10:41194 --middle 198.18.0.20:4445 --exit 198.51.100.20:4444 \
+  --relay 192.0.2.10:443 --middle 198.18.0.20:4445 --exit 198.51.100.20:4444 \
   --request client=client.req --request relay=relay.req --request middle=middle.req --request exit=exit.req
 ```
 
@@ -237,7 +237,7 @@ sudo /opt/advanced-vpn/bin/avpn request --role middle --protect systemd-creds --
 1. Run `init` again with another `--hops` value and the same requests.
 2. On each device in the new chain, run `sudo avpn disconnect`, then `sudo avpn enroll <bundle> --operator-key operator.pub --replace`, then `connect`.
 
-Traffic stays blocked while you switch. In single-hop mode, give `--exit` the exit's WireGuard endpoint.
+Traffic stays blocked while you switch. In single-hop mode, give `--exit` the exit's port-443 endpoint: it is then the first hop.
 
 Measured in the namespace benchmark (32 MiB, SHA-checked):
 

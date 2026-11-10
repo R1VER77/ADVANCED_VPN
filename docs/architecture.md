@@ -6,7 +6,9 @@
 flowchart LR
     CLI["avpn (Rust): renders results"] -->|"--json"| CTL["avpnctl (Python, root): validates, builds network, supervises"]
     CLI -->|"as you"| CLOUD["avpn-cloud: aws / oci CLIs, tagged resources only"]
+    CTL --> CLOAK["advanced-vpn-cloak: HTTP/3 camouflage"]
     CTL --> WG["advanced-vpn-wireguard: GotaTun + DAITA carrier"]
+    WG <-->|"loopback"| CLOAK
     CTL --> CORE["advanced-vpn: nested QUIC layers"]
     CTL --> DNS["advanced-vpn-dns: DNS over TLS"]
 ```
@@ -19,7 +21,8 @@ flowchart LR
 
 See `avpn help chains`:
 - one QUIC layer per server hop (X25519MLKEM768, ML-DSA-65), nested inside-out;
-- the WireGuard + DAITA carrier innermost on the client's link;
+- the WireGuard + DAITA carrier innermost on the client's link, itself carried as QUIC
+  datagrams on UDP 443 (`advanced-vpn-cloak`), so that link looks like HTTP/3;
 - the inner IP MTU is 1100 for every chain length;
 - the WireGuard carrier keeps a persistent keepalive, so the chain survives roaming between networks (`avpn help threat-model`).
 

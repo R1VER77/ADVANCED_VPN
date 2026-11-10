@@ -8,6 +8,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest import mock
 import zipfile
 import subprocess
 
@@ -117,6 +118,114 @@ class EnrollmentTests(unittest.TestCase):
 
         self.assertNotIn("cells", inspect.signature(create).parameters, "padding must not be optional")
 
+    def test_http3_cloak_is_always_on_and_strictly_bound(self):
+        from managed_profile import CLOAK_REQUIRED, cloak_certificate, profile_validate, require_current, spki_sha256
+
+        reqs = {r: (self.dev(r) / "request.json").read_bytes() for r in ["client", "relay", "exit"]}
+        out = self.root / "cloak"
+        create(out, reqs, "192.0.2.1:443", "198.51.100.2:4444", self.signer, cover_name="ec2-192-0-2-1.example.com")
+        profiles = {r: json.loads(zipfile.ZipFile(out / (r + ".avpn")).read("profile.json")) for r in reqs}
+        for pr in profiles.values():
+            require_current(profile_validate(pr))
+        client, relay = profiles["client"], profiles["relay"]
+        self.assertEqual(
+            (client["cloak"]["cover_name"], relay["cloak"]["cover_name"]), ("ec2-192-0-2-1.example.com",) * 2
+        )
+        self.assertIsNone(profiles["exit"]["cloak"])
+        # Tampering with anything that reaches the cloak's sockets or trust is refused.
+        for section, field, value in [
+            ("cloak", "remote", "203.0.113.9:443"),
+            ("cloak", "listen", "0.0.0.0:41196"),
+            ("cloak", "wireguard", "127.0.0.1:41194"),
+            ("cloak", "server_spki_sha256", "00"),
+            ("cloak", "cover_name", "other.example"),
+            ("cloak", "cert", "cloak-cert.der"),
+            ("cloak", "extra", 1),
+            ("carrier", "endpoint", "192.0.2.1:443"),
+            ("carrier", "schema", 1),
+        ]:
+            bad = json.loads(json.dumps(client))
+            bad[section][field] = value
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                profile_validate(bad)
+        bad = json.loads(json.dumps(relay))
+        bad["cloak"]["listen"] = "0.0.0.0:443"
+        with self.assertRaises(ValueError):
+            profile_validate(bad)
+        # A profile without the cloak is well-formed, but never connects or enrolls.
+        old = json.loads(json.dumps(client))
+        del old["cloak"], old["network"]["cover_name"]
+        old["carrier"].update(schema=1, endpoint="192.0.2.1:443")
+        profile_validate(old)
+        with self.assertRaises(ValueError) as e:
+            require_current(old)
+        self.assertEqual(str(e.exception), CLOAK_REQUIRED)
+        # The certificate made at each start carries exactly the key the client pins.
+        from managed_profile import load_keys
+
+        key = load_keys(self.dev("relay"), ["cloak"])["cloak"]
+        cert = cloak_certificate(key, "ec2-192-0-2-1.example.com")
+        self.assertEqual(spki_sha256(cert), client["cloak"]["server_spki_sha256"])
+        import inspect
+
+        self.assertNotIn("cloak", inspect.signature(create).parameters, "the cloak must not be optional")
+
+    def test_cloak_proof_key_comes_from_the_psk_only(self):
+        import avpnctl
+
+        a = avpnctl.cloak_token(b"\x01" * 32 + b"\x02" * 32)
+        self.assertEqual(len(a), 32)
+        self.assertEqual(a, avpnctl.cloak_token(b"\x09" * 32 + b"\x02" * 32))  # the private half plays no part
+        self.assertNotEqual(a, avpnctl.cloak_token(b"\x01" * 32 + b"\x03" * 32))
+        with self.assertRaises(ValueError):
+            avpnctl.cloak_token(b"\x01" * 32)
+
+    def test_a_carrier_that_receives_nothing_is_restarted(self):
+        import avpnctl
+
+        w = avpnctl.CarrierWatch(limit=20)
+        self.assertFalse(w.stalled(10, 500, 0))
+        self.assertFalse(w.stalled(10, 500, 19.9))
+        self.assertTrue(w.stalled(10, 500, 20))
+        # Any received byte, or a new carrier process, starts the clock again.
+        self.assertFalse(w.stalled(10, 501, 25))
+        self.assertFalse(w.stalled(10, 501, 44))
+        self.assertFalse(w.stalled(11, 501, 46))
+        self.assertTrue(w.stalled(11, 501, 66))
+        # Received decoys are not data: a carrier receiving only decoys is stuck.
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(avpnctl, "runtime_dir", lambda state: Path(d)):
+            (Path(d) / "carrier-status.json").write_text(json.dumps(dict(rx_bytes=5000, rx_decoy_bytes=4000)))
+            self.assertEqual(avpnctl.carrier_rx(Path(d)), 1000)
+            (Path(d) / "carrier-status.json").write_text("{")
+            self.assertIsNone(avpnctl.carrier_rx(Path(d)))
+        # An unreadable status is never a reason to restart.
+        self.assertFalse(w.stalled(11, None, 100))
+        self.assertFalse(w.stalled(11, None, 200))
+
+    def test_underlay_mtu_floor_matches_the_cloak_packet_size(self):
+        import re
+
+        import avpnctl
+
+        # A full WireGuard datagram becomes a cloak::OUTER_MTU-byte QUIC UDP payload, so the
+        # underlay link must carry OUTER_MTU + 8 (UDP) + 20 (IPv4) bytes. Keep the Python floor
+        # in step with the Rust constant so a too-small path is refused, not silently black-holed.
+        outer = int(
+            re.search(
+                r"pub const OUTER_MTU: u16 = (\d+);",
+                (Path(avpnctl.__file__).resolve().parents[1] / "src/cloak.rs").read_text(),
+            ).group(1)
+        )
+        self.assertEqual(avpnctl.UNDERLAY_MIN_MTU, outer + 28)
+
+    def test_first_hop_firewall_keeps_wireguard_on_loopback(self):
+        import avpnctl
+
+        text = avpnctl.first_hop_rules({"network": {"relay_endpoint": "192.0.2.1:443"}})
+        self.assertIn('udp dport 41194 iifname != "lo" drop', text)
+        self.assertIn("fib daddr type local udp dport 443 redirect to :8443", text)
+        self.assertIn('udp dport 4433 iifname != "avwg0" drop', text)
+
     def test_profiles_for_one_two_and_three_hops(self):
         from managed_profile import request
 
@@ -140,7 +249,18 @@ class EnrollmentTests(unittest.TestCase):
                 self.assertEqual({pr["core"]["layers"] for pr in profiles.values()}, {hops})
                 first = roles[1]
                 self.assertEqual({r for r, pr in profiles.items() if pr["carrier"]}, {"client", first})
-                self.assertEqual(profiles["client"]["carrier"]["endpoint"], relay or "198.51.100.2:4444")
+                # WireGuard goes only to the local cloak; the cloak reaches the first hop.
+                self.assertEqual(profiles["client"]["carrier"]["endpoint"], "127.0.0.1:41196")
+                self.assertEqual(profiles["client"]["cloak"]["remote"], relay or "198.51.100.2:4444")
+                self.assertEqual(profiles[first]["carrier"]["listen_port"], 41194)
+                self.assertEqual(
+                    (profiles[first]["cloak"]["role"], profiles[first]["cloak"]["listen"]), ("server", "0.0.0.0:8443")
+                )
+                self.assertEqual(
+                    profiles["client"]["cloak"]["server_spki_sha256"],
+                    json.loads(reqs[first])["cloak_spki_sha256"],
+                )
+                self.assertEqual({r for r, pr in profiles.items() if pr["cloak"]}, {"client", first})
                 if hops == 3:
                     m = profiles["middle"]["core"]
                     self.assertEqual(

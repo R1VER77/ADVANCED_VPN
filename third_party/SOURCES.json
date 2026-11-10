@@ -4,7 +4,8 @@
     "license": "MPL-2.0",
     "source": "https://crates.io/crates/gotatun/0.10.2",
     "revision": "1d46b779f5e0743f30a13cc2c325b8114b901fb9",
-    "modified": false
+    "modified": true,
+    "patch": "vendor/gotatun: bound DAITA delay so strong-mode shaping cannot stall the carrier when the first hop is briefly unreachable (see the [patch.crates-io] note in Cargo.toml)"
   },
   "maybenot": {
     "version": "2.2.2",

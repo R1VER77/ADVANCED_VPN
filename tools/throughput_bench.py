@@ -104,9 +104,9 @@ def topology(hops):
 def endpoints(chain_hops, topology_hops):
     exit_ip = "192.0.2.1" if topology_hops == 1 else "198.51.100.2"
     return dict(
-        relay="192.0.2.1:41194" if chain_hops > 1 else None,
+        relay="192.0.2.1:443" if chain_hops > 1 else None,
         middle="198.18.0.2:4445" if chain_hops == 3 else None,
-        exit=exit_ip + (":4444" if chain_hops > 1 else ":51820"),
+        exit=exit_ip + (":4444" if chain_hops > 1 else ":443"),
     )
 
 

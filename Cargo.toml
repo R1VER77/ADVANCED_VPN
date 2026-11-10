@@ -20,7 +20,7 @@ sha2 = "=0.10.9"
 tokio = { version = "=1.54.1", features = ["rt", "macros", "net", "time", "signal", "sync", "io-util"] }
 x509-parser = "=0.18.1"
 zeroize = "=1.9.1"
-gotatun = { version = "=0.10.2", default-features = false, features = ["aws-lc-rs", "device", "tun", "daita"] }
+gotatun = { path = "vendor/gotatun", default-features = false, features = ["aws-lc-rs", "device", "tun", "daita"] }
 maybenot-machines = "=1.0.1"
 maybenot = "=2.2.2"
 enum-map = "=2.7.3"
@@ -41,3 +41,7 @@ unsafe_op_in_unsafe_fn = "deny"
 
 [lints.clippy]
 undocumented_unsafe_blocks = "deny"
+
+# Own workspace root; the vendored gotatun fork is a plain path dependency, not a member,
+# so its tests and benches are never built here (see vendor/gotatun).
+[workspace]

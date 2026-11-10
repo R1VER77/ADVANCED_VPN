@@ -94,9 +94,11 @@ jobs:
           boot; run \`avpn cloud host setup\` on others, or rebuild them fresh.
 
           The QUIC handshake between hops no longer names this tool (it offers HTTP/3's \`h3\`
-          and no server name), so every hop and the client must run the same release: rebuild
-          the chain from this package. DAITA's FRONT decoys now pad every burst of traffic,
-          and \`strong\` rounds every trace on its constant clock (\`avpn help threat-model\`).
+          and no server name), and the client's link to the first hop now looks like HTTP/3 on
+          UDP 443 instead of WireGuard. Every hop and the client must run the same release, and
+          the first hop needs new keys: rebuild the chain from this package with
+          \`avpn cloud chain --apply\` (it opens UDP 443 and closes the old WireGuard port).
+          DAITA's FRONT decoys now pad every burst of traffic, and \`strong\` rounds every trace on its constant clock (\`avpn help threat-model\`).
 
           Check the download: \`sha256sum -c SHA256SUMS\`. Then unpack it, and either
           install the command line for yourself (an operator machine) with

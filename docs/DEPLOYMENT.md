@@ -63,7 +63,7 @@ Don't place hops on hosts that already run other services, unless you mean to; a
 ## Hosts with their own firewall
 
 `avpn` installs its rules in its own nftables table. It can't override another table's drop. OCI's Ubuntu images ship iptables `INPUT` and `FORWARD` chains that reject everything except SSH, and the same applies to any default-drop host firewall. On such a host, add accepts ahead of the reject:
-- **Every server:** the carrier/QUIC listening port (the WireGuard port on the first hop, the QUIC port on later hops).
+- **Every server:** its public listening port: UDP 443 on the first hop (and 8443, where the first hop's own firewall redirects 443 for the unprivileged camouflage process), the QUIC port on later hops. WireGuard itself (41194) is reachable only over loopback.
 - **First hop:** `-i avwg0 -p udp --dport 4433`.
 - **Exit:** `-i avpn0 -p udp --dport 1053` and `-i avpn0 -p tcp --dport 1053` for DNS, and `FORWARD -i avpn0` and `FORWARD -o avpn0 RELATED,ESTABLISHED` for traffic.
 

@@ -95,7 +95,7 @@ One chain server on EC2.
 - `--region R`: must equal the profile's Region; omit it to use that Region.
 - `--instance-type T`: an EC2 type with NitroTPM support (default `t3.micro`).
 - `--disk-gib N`: root disk size (default 8).
-- `--port N`: the tunnel port (default 41194 for a relay, 4445 for a middle, 4444 for an exit).
+- `--port N`: the tunnel port (default 443 for a relay, where the HTTP/3 camouflage listens; 4445 for a middle; 4444 for an exit).
 - `--allow-from IP`: who may reach the tunnel port: `any` (a relay's default, and only allowed for a relay), a public IPv4, or `auto` for this machine. A middle or exit needs the previous server's address. It can be repeated.
 - `--admin-ip IP`: the address allowed to SSH in (default `auto`, this machine).
 - `--dry-run`: show the plan and stop.
@@ -246,14 +246,16 @@ sees both your address and your destinations. A chain can carry about as much pe
 month as its smallest hop allowance; the plan shows it.
 
 What `--apply` does:
-1. Firewalls of managed servers (`aws relay`, `oci server`): the first hop's WireGuard port (41194) open to any address; each later hop's port (4445 middle, 4444 exit) only from the previous server; SSH from here for setup.
+1. Firewalls of managed servers (`aws relay`, `oci server`): the first hop's UDP 443 (the HTTP/3 camouflage in front of WireGuard) open to any address, and any older WireGuard port rule removed; each later hop's port (4445 middle, 4444 exit) only from the previous server; SSH from here for setup.
 2. Installs or upgrades every server and fetches its request for its role. A server whose role changes gets new keys.
 3. Signs the whole chain once: `avpnctl init` with your client request and every server's.
 4. Enrolls and restarts each server, exit first, and checks it is running.
 5. Removes SSH from your address. From then on you administer the servers while connected: the other hops admit SSH from the exit's address (which is where your traffic now comes from), and the exit answers at `10.77.0.1`, its own address inside the tunnel, which needs no firewall rule. The exit's public address does not work from inside the tunnel, because cloud servers do not hold it locally. So no rule names you. Rerun `chain` (or `aws allow --admin-ip auto`) to get back in when you are not connected.
 
-Every chain is padded to constant cells on every hop; there is no option to turn it
-off (`avpn help threat-model`).
+Every chain is padded to constant cells on every hop, and the client's link to the
+first hop looks like HTTP/3 on UDP 443; there is no option to turn either off
+(`avpn help threat-model`). On AWS the first hop presents its provider DNS name as
+its server name, so name and address agree.
 
 The bundles go to `~/.config/advanced-vpn/chains/TIMESTAMP/bundles`. The last lines
 give the client's enroll and connect commands.

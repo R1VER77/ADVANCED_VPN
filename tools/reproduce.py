@@ -43,7 +43,7 @@ def main():
         hashes.append(
             {
                 binary: hashlib.sha256((dest / "target/release" / binary).read_bytes()).hexdigest()
-                for binary in ["advanced-vpn", "advanced-vpn-wireguard", "advanced-vpn-dns"]
+                for binary in ["advanced-vpn", "advanced-vpn-wireguard", "advanced-vpn-dns", "advanced-vpn-cloak"]
             }
         )
     result = dict(

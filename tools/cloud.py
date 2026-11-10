@@ -42,7 +42,8 @@ INVENTORY = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "
 # On-demand list prices in eu-north-1 (USD, checked 2026-11). These are estimates only:
 # the free plan's credits pay for them, and AWS Billing shows the real cost.
 MONTHLY_USD = {"t3.micro": 7.88, "t3.small": 15.77, "gp3_gib": 0.0836, "public_ipv4": 3.65}
-ROLES = {"relay": 41194, "middle": 4445, "exit": 4444}
+# The first hop serves the HTTP/3 camouflage on UDP 443, as a web server would.
+ROLES = {"relay": 443, "middle": 4445, "exit": 4444}
 PROTO = {"relay": "udp", "middle": "udp", "exit": "udp"}
 
 
@@ -451,6 +452,10 @@ def aws_relay_apply(a, aws, plan):
 
     inst = wait("the instance to run", running, timeout=600, every=10)
     created["public_ip"] = inst["PublicIpAddress"]
+    # The provider's own name for this address: the cloak sends it as its server name,
+    # so name and address agree, as for any site hosted there.
+    if inst.get("PublicDnsName"):
+        created["public_dns"] = inst["PublicDnsName"]
     record()
     return [
         dict(label="instance", value=iid),
@@ -944,6 +949,10 @@ sudo -n apt-get install -y -qq nftables python3-venv $TSS >/dev/null
 # Images that reject by default (OCI's Ubuntu) need the tunnel port accepted on the host.
 if sudo -n iptables -S INPUT 2>/dev/null | grep -q -- '-j REJECT'; then
   sudo -n iptables -C INPUT -p udp --dport "$PORT" -j ACCEPT 2>/dev/null || sudo -n iptables -I INPUT 1 -p udp --dport "$PORT" -j ACCEPT
+  # A first hop redirects its public port to the cloak's unprivileged listener first.
+  if [ "$ROLE" != middle ] && [ "$PORT" = 443 ]; then
+    sudo -n iptables -C INPUT -p udp --dport 8443 -j ACCEPT 2>/dev/null || sudo -n iptables -I INPUT 1 -p udp --dport 8443 -j ACCEPT
+  fi
   # Persisting would also save a shared host's other runtime rules, so only a dedicated one does.
   if [ "$SHARED" != yes ] && command -v netfilter-persistent >/dev/null; then sudo -n netfilter-persistent save >/dev/null 2>&1 || true; fi
 fi
@@ -1156,7 +1165,7 @@ def servers():
     return out
 
 
-FIRST_HOP_PORT = ROLES["relay"]  # the WireGuard carrier, whatever the first hop's role
+FIRST_HOP_PORT = ROLES["relay"]  # the HTTP/3 cloak in front of WireGuard, whatever the first hop's role
 # The exit's own address inside the tunnel. Its public address does not work from
 # inside: cloud servers do not hold it locally (the provider translates it at its edge).
 EXIT_TUNNEL_IP = "10.77.0.1"
@@ -1329,6 +1338,8 @@ def chain_apply(a, plan):
     endpoint = {h["role"]: "%s:%d" % (h["record"]["public_ip"], h["port"]) for h in hops}
     argv = [*controller(), "--json", "init", "--out", str(work / "bundles"), "--hops", str(len(hops))]
     argv += ["--exit", endpoint["exit"], "--vault", str(a.vault)]
+    if hops[0]["record"].get("public_dns"):
+        argv += ["--cover-name", hops[0]["record"]["public_dns"]]
     for role in ("relay", "middle"):
         if role in endpoint:
             argv += ["--" + role, endpoint[role]]

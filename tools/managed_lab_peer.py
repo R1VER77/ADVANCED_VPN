@@ -96,7 +96,7 @@ def main():
         s.bind(("r0", 0))
         s.settimeout(0.2)
         sizes = []
-        n = 0
+        n = wireguard = quic = 0
         with (a.state / "physical-capture.bin").open("xb") as f:
             while True:
                 try:
@@ -111,15 +111,28 @@ def main():
                 ihl = (b[14] & 15) * 4
                 udp = 14 + ihl
                 payload = b[udp + 8 :]
-                # Empty transport keepalives are control traffic, not IP data.
-                if len(payload) > 32 and payload[:4] == b"\4\0\0\0":
-                    sizes.append(len(payload))
+                # The carrier runs behind the HTTP/3 cloak: no WireGuard message may be on
+                # the wire. Its type bytes (0x01-0x04, then three zeros) can never start a
+                # QUIC packet, whose first byte always has the fixed bit (0x40) set.
+                if len(payload) >= 32 and payload[0] in (1, 2, 3, 4) and payload[1:4] == b"\0\0\0":
+                    wireguard += 1
+                elif payload and payload[0] & 0x40:
+                    quic += 1
+                    if len(payload) > 1300:
+                        sizes.append(len(payload))
                 n += 1
                 if f.tell() < 16 * 1024 * 1024:
                     f.write(b)
                     f.flush()
                 (a.state / "physical.json").write_text(
-                    json.dumps(dict(packets=n, wireguard_data_packets=len(sizes), data_sizes=sorted(set(sizes))))
+                    json.dumps(
+                        dict(
+                            packets=n,
+                            wireguard_messages=wireguard,
+                            quic_packets=quic,
+                            outer_sizes={str(k): sizes.count(k) for k in sorted(set(sizes))},
+                        )
+                    )
                 )
 
 

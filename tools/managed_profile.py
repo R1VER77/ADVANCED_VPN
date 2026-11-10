@@ -12,8 +12,8 @@ import stat
 import zipfile
 from cryptography import x509
 
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import ed25519, x25519, mldsa
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ec, ed25519, x25519, mldsa
 
 # operator.pub (JSON): a classical half (the Nitrokey FIDO2 credential, or a lab-only
 # Ed25519 key) and an ML-DSA-65 public key. Enrollment requires BOTH signatures.
@@ -42,6 +42,28 @@ MANAGED_MTU = 1100
 # existed, to prove such a chain is refused.)
 CELLS = True
 PADDING_REQUIRED = "this chain was signed without constant-cell padding, which is now required; re-sign it (avpn cloud chain --apply, or avpn init) and enroll the new bundle with --replace"
+# HTTP/3 camouflage (advanced-vpn-cloak) in front of the WireGuard carrier. Always on:
+# WireGuard is reached only through it. (A constant only so tests can build a chain the
+# way it was signed before the cloak existed, to prove such a chain is refused.)
+CLOAK = True
+CLOAK_REQUIRED = "this chain was signed before the HTTP/3 camouflage, which is now required; re-sign it (avpn cloud chain --apply, or avpn init) and enroll the new bundles with --replace"
+# Fixed cloak and carrier addresses: the client's carrier sends to its local cloak; the
+# first hop's cloak listens on 8443 (its firewall redirects the public port there) and
+# hands datagrams to WireGuard on loopback.
+CLOAK_CLIENT = dict(listen="127.0.0.1:41196", wireguard="127.0.0.1:41195")
+CLOAK_SERVER = dict(listen="0.0.0.0:8443", wireguard="127.0.0.1:41194")
+CLOAK_FIELDS = {
+    "schema",
+    "role",
+    "listen",
+    "wireguard",
+    "remote",
+    "cover_name",
+    "server_spki_sha256",
+    "cert",
+    "statistics",
+}
+FIRST_HOP_ROLES = ("relay", "exit")  # either may be a chain's first hop and run the cloak server
 
 
 def require_padding(p):
@@ -51,10 +73,30 @@ def require_padding(p):
     return p
 
 
+def require_current(p):
+    """Refuse a profile signed before padding or before the HTTP/3 camouflage (connect and
+    enroll call this; reset, guard and info still load such a profile)."""
+    require_padding(p)
+    if p["carrier"] and not p.get("cloak"):
+        raise ValueError(CLOAK_REQUIRED)
+    return p
+
+
+def valid_cover_name(name):
+    """A cover name is a plain DNS name, or None (then no server name is sent)."""
+    if name is not None and (
+        not isinstance(name, str) or not re.fullmatch(r"(?=.{1,253}$)[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?", name)
+    ):
+        raise ValueError("bad cover name")
+    return name
+
+
 def profile_validate(p):
     """Validate a profile's exact schema and every value that reaches rules or commands."""
+    base = {"schema", "role", "hops", "core", "carrier", "dns", "network", "daily_budget_bytes"}
+    # Without "cloak": signed before the camouflage; well-formed, but require_current refuses it.
     if (
-        set(p) != {"schema", "role", "hops", "core", "carrier", "dns", "network", "daily_budget_bytes"}
+        set(p) not in (base, base | {"cloak"})
         or p["schema"] != 3
         or p["role"] not in ["client", "relay", "middle", "exit"]
     ):
@@ -87,7 +129,7 @@ def profile_validate(p):
         if i.get("pin_kind") != "spki":
             raise ValueError("managed profiles require public-key identity pins")
     n = p["network"]
-    if set(n) != {
+    network = {
         "relay_endpoint",
         "middle_endpoint",
         "exit_endpoint",
@@ -96,8 +138,10 @@ def profile_validate(p):
         "protected_destinations",
         "peer_overlay",
         "local_overlay",
-    }:
+    }
+    if set(n) not in (network, network | {"cover_name"}) or ("cover_name" in n) != ("cloak" in p):
         raise ValueError("network schema mismatch")
+    valid_cover_name(n.get("cover_name"))
     for endpoint in [n["relay_endpoint"], n["exit_endpoint"]] + ([n["middle_endpoint"]] if h == 3 else []):
         host, port = endpoint.rsplit(":", 1)
         ip = ipaddress.IPv4Address(host)
@@ -132,6 +176,40 @@ def profile_validate(p):
             raise ValueError("carrier path rejected")
         if not re.fullmatch("[0-9a-f]{64}", w["peer_public_hex"]) or w["allowed_ip"] != n["peer_overlay"] + "/32":
             raise ValueError("carrier peer rejected")
+        if "cloak" in p:
+            # Schema 2: WireGuard only behind the cloak, on fixed loopback addresses.
+            client = p["role"] == "client"
+            if w["schema"] != 2 or (w["listen_port"], w["endpoint"]) != (
+                (41195, CLOAK_CLIENT["listen"]) if client else (41194, None)
+            ):
+                raise ValueError("the carrier must run behind the cloak")
+        elif w["schema"] != 1:
+            raise ValueError("carrier schema mismatch")
+    if "cloak" in p:
+        c = p["cloak"]
+        if (c is not None) != (p["carrier"] is not None):
+            raise ValueError("cloak role separation failed")
+        if c is not None:
+            client = p["role"] == "client"
+            fixed = CLOAK_CLIENT if client else CLOAK_SERVER
+            if (
+                set(c) != CLOAK_FIELDS
+                or c["schema"] != 1
+                or c["role"] != ("client" if client else "server")
+                or (c["listen"], c["wireguard"]) != (fixed["listen"], fixed["wireguard"])
+                or c["cover_name"] != n["cover_name"]
+                or c["statistics"] != "cloak-status.json"
+            ):
+                raise ValueError("cloak binding rejected")
+            if client:
+                if (
+                    c["remote"] != n["relay_endpoint"]
+                    or c["cert"] is not None
+                    or not re.fullmatch("[0-9a-f]{64}", c["server_spki_sha256"] or "")
+                ):
+                    raise ValueError("cloak peer rejected")
+            elif c["remote"] is not None or c["server_spki_sha256"] is not None or c["cert"] != "cloak-cert.der":
+                raise ValueError("cloak server rejected")
     if p["dns"]:
         d = p["dns"]
         if d["listen"] != "10.77.0.1:1053" or d["client_ip"] != "10.77.0.2" or d["test_ca"] not in [None, "dns-ca.der"]:
@@ -169,6 +247,7 @@ PLAINTEXT = {
     "inner": "inner-key.der",
     "wireguard": "wireguard-key.bin",
     "kem": "kem-key.bin",
+    "cloak": "cloak-key.der",
 }
 MLDSA65_OID = "2.16.840.1.101.3.4.3.18"
 
@@ -316,6 +395,16 @@ def request(role, state, protect, vault=None):
         )
         keys["kem"], kem_public = kem_keypair()
         req["kem_public"] = b64(kem_public)
+    if role in FIRST_HOP_ROLES:
+        # The HTTP/3 cloak's server key (ECDSA P-256, as a web server's would be). Clients
+        # pin its public key; the certificate is self-signed at each start.
+        c = ec.generate_private_key(ec.SECP256R1())
+        keys["cloak"] = c.private_bytes(
+            serialization.Encoding.DER, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()
+        )
+        req["cloak_spki_sha256"] = hashlib.sha256(
+            c.public_key().public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)
+        ).hexdigest()
     put(state / "request.json", canonical(req))
     protection = dict(schema=1, mode=protect, vault=str(vault.resolve()) if vault else None)
     if protect == "systemd-creds":
@@ -349,6 +438,10 @@ def load_request(raw, role):
 
         if len(base64.b64decode(r["kem_public"], validate=True)) != KEM_PUBLIC:
             raise ValueError("bad hybrid KEM key")
+    if "cloak_spki_sha256" in r and (
+        role not in FIRST_HOP_ROLES or not re.fullmatch("[0-9a-f]{64}", r["cloak_spki_sha256"])
+    ):
+        raise ValueError("bad cloak key")
     return r, certs
 
 
@@ -467,6 +560,7 @@ def create(
     rates=None,
     hops=2,
     middle=None,
+    cover_name=None,
 ):
     """Operator: build signed bundles for a 1-, 2- or 3-hop chain from public device
     requests. Bundles carry no private key; the WireGuard PSK is hybrid-KEM encrypted
@@ -491,6 +585,12 @@ def create(
     if set(requests) != set(roles):
         raise ValueError("requests needed exactly for: " + ", ".join(roles))
     reqs = {role: load_request(requests[role], role) for role in roles}
+    valid_cover_name(cover_name)
+    if CLOAK and "cloak_spki_sha256" not in reqs[first][0]:
+        raise ValueError(
+            "the %s's keys predate the HTTP/3 camouflage; create them again with this release (avpn reset, then avpn request)"
+            % first
+        )
     allowed = destinations if destinations is not None else ["0.0.0.0/0"]
 
     # Cloud hosts are 1:1 NATed: the public address is not on the interface. Public
@@ -562,11 +662,13 @@ def create(
                 kem_seal(base64.b64decode(req["kem_public"]), psk, b"advanced-vpn/wireguard-psk/" + role.encode())
             )
             carrier = dict(
-                schema=1,
+                schema=2 if CLOAK else 1,
                 role="wireguard",
                 tun="avwg0",
-                listen_port=41195 if role == "client" else int(carrier_endpoint.rsplit(":", 1)[1]),
-                endpoint=carrier_endpoint if role == "client" else None,
+                listen_port=(41195 if role == "client" else 41194)
+                if CLOAK
+                else (41195 if role == "client" else int(carrier_endpoint.rsplit(":", 1)[1])),
+                endpoint=(CLOAK_CLIENT["listen"] if CLOAK else carrier_endpoint) if role == "client" else None,
                 peer_public_hex=peer_public,
                 allowed_ip=peer + "/32",
                 identity=dict(key="wireguard-key.bin", cert="wireguard-binding.json"),
@@ -574,6 +676,19 @@ def create(
                 statistics="carrier-status.json",
                 byte_budget=67_108_864,
             )
+            client = role == "client"
+            cloak = dict(
+                schema=1,
+                role="client" if client else "server",
+                remote=carrier_endpoint if client else None,
+                cover_name=cover_name,
+                server_spki_sha256=reqs[first][0]["cloak_spki_sha256"] if client else None,
+                cert=None if client else "cloak-cert.der",
+                statistics="cloak-status.json",
+                **(CLOAK_CLIENT if client else CLOAK_SERVER),
+            )
+        else:
+            cloak = None
         if role == "exit":
             d = dict(upstream="9.9.9.9:853", server_name="dns.quad9.net", test_ca=None)
             if dns:
@@ -601,6 +716,9 @@ def create(
                 local_overlay=local,
             ),
         )
+        if CLOAK:
+            profile["cloak"] = cloak
+            profile["network"]["cover_name"] = cover_name
         profile_validate(profile)
         files["profile.json"] = canonical(profile)
         payloads[role] = files
@@ -692,7 +810,7 @@ def enroll(bundle, operator_public, state, replace=False):
         for name, b in contents.items():
             if hashlib.sha256(b).hexdigest() != manifest["files"][name]:
                 raise ValueError("bundle integrity failure")
-    profile = require_padding(profile_validate(json.loads(contents["profile.json"])))
+    profile = require_current(profile_validate(json.loads(contents["profile.json"])))
     if profile["role"] != role or role != request_doc["role"]:
         raise ValueError("role substitution")
     allowed = {"profile.json"}
@@ -763,6 +881,13 @@ def runtime(profile, root):
             for field in ["ca", "cert", "key"]:
                 i[field] = str(root / i[field])
     out = {"core": c}
+    # The cloak starts before the carrier, so WireGuard's first handshake finds it ready.
+    if profile.get("cloak"):
+        k = dict(profile["cloak"])
+        k["statistics"] = str(root / "cloak-status.json")
+        if k["cert"]:
+            k["cert"] = str(root / k["cert"])
+        out["cloak"] = k
     if profile["carrier"]:
         w = json.loads(json.dumps(profile["carrier"]))
         for field in ["cert", "key"]:
@@ -774,6 +899,28 @@ def runtime(profile, root):
         if out["dns"].get("test_ca"):
             out["dns"]["test_ca"] = str(root / Path(out["dns"]["test_ca"]).name)
     return out
+
+
+def cloak_certificate(key_der, cover_name):
+    """A fresh self-signed certificate (DER) for the cloak's ECDSA key, naming the cover
+    name (or localhost). Clients pin the key, not the certificate, so it can change."""
+    key = serialization.load_der_private_key(key_der, password=None)
+    if not isinstance(key, ec.EllipticCurvePrivateKey):
+        raise ValueError("the cloak key must be ECDSA")
+    name = x509.Name([x509.NameAttribute(x509.oid.NameOID.COMMON_NAME, cover_name or "localhost")])
+    now = dt.datetime.now(dt.timezone.utc)
+    return (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - dt.timedelta(days=1))
+        .not_valid_after(now + dt.timedelta(days=90))
+        .add_extension(x509.SubjectAlternativeName([x509.DNSName(cover_name or "localhost")]), critical=False)
+        .sign(key, hashes.SHA256())
+        .public_bytes(serialization.Encoding.DER)
+    )
 
 
 def refresh_leaves(config, root, keys=None, out_dir=None):
@@ -829,6 +976,7 @@ def lab_setup(
     defense="balanced",
     hops=2,
     middle=None,
+    cover_name=None,
 ):
     """TEST/LAB: run the real request -> init -> enroll flow for every role in the
     chain. `protect` maps role -> protection (default 'none'); the operator is
@@ -853,6 +1001,7 @@ def lab_setup(
         defense=defense,
         hops=hops,
         middle=middle,
+        cover_name=cover_name,
     )
     for role in roles:
         enroll(ops / (role + ".avpn"), ops / "operator.pub", root / role)

@@ -10,6 +10,8 @@ import argparse
 import datetime as dt
 import fcntl
 import functools
+import hashlib
+import hmac
 import ipaddress
 import json
 import os
@@ -31,8 +33,9 @@ from managed_profile import (
     create,
     enroll,
     profile_validate,
-    require_padding,
+    require_current,
     runtime,
+    cloak_certificate,
     canonical,
     refresh_leaves,
     request,
@@ -42,6 +45,8 @@ from managed_profile import (
 )
 
 APP = "avpn-app"
+# Smallest underlay link MTU the HTTP/3 cloak can use: a 1420-byte QUIC UDP payload in an IPv4+UDP packet.
+UNDERLAY_MIN_MTU = 1448
 TUN = "avpn0"
 WG = "avwg0"
 
@@ -188,6 +193,27 @@ def whole_firewall(profile, service_uid=None):
     )
 
 
+def first_hop_rules(profile):
+    """nftables chains for the chain's first hop: outer QUIC only over the carrier, the
+    carrier (WireGuard, 41194) only from the local cloak over loopback, and the public
+    port redirected to the cloak's unprivileged listener (8443), for packets addressed to
+    this host only (traffic passing through is never captured)."""
+    public = int(profile["network"]["relay_endpoint"].rsplit(":", 1)[1])
+    if not 1 <= public <= 65535:
+        raise ValueError("bad public port")
+    return (
+        """
+ chain input { type filter hook input priority -100; policy accept;
+  udp dport 4433 iifname != "avwg0" drop
+  udp dport 41194 iifname != "lo" drop
+ }
+ chain cloak { type nat hook prerouting priority dstnat;
+  fib daddr type local udp dport %d redirect to :8443
+ }"""
+        % public
+    )
+
+
 def resolved_managed(target):
     """True when /etc/resolv.conf is systemd-resolved's generated file and resolved is running."""
     try:
@@ -288,8 +314,14 @@ def ensure_network(profile, state, whole=False, service_uid=0, upstream=None, up
             upstream_firewall(n["relay_endpoint"], None)
             r = route_to(relay_ip)
         mtu_rows = json.loads(cmd("ip", "-j", "link", "show", "dev", r["dev"]).stdout)
-        if mtu_rows[0]["mtu"] < 1420:
-            raise RuntimeError("underlay MTU below managed profile minimum")
+        # The carrier rides inside the HTTP/3 cloak's QUIC: a full WireGuard datagram becomes a
+        # 1420-byte QUIC UDP payload (cloak::OUTER_MTU), i.e. a 1448-byte IPv4 packet (+8 UDP +20 IP).
+        # Below that the cloak cannot send full packets, so refuse rather than black-hole them; the
+        # kill switch stays up (fail closed), as the caller's cleanup leaves it in place.
+        if mtu_rows[0]["mtu"] < UNDERLAY_MIN_MTU:
+            raise RuntimeError(
+                "underlay MTU below the camouflage minimum (%d); the first hop is unreachable here" % UNDERLAY_MIN_MTU
+            )
         args = ["ip", "route", "replace", relay_ip + "/32"]
         if "gateway" in r:
             args += ["via", r["gateway"]]
@@ -327,12 +359,9 @@ def ensure_network(profile, state, whole=False, service_uid=0, upstream=None, up
     elif role == "relay":
         tun(WG, "10.78.0.1/32", 1340, owner=service_uid)
         cmd("ip", "route", "replace", "10.78.0.2/32", "dev", WG)
-        # Outer QUIC is accepted only on the authenticated WireGuard carrier.
-        replace_table("""table inet advanced_vpn {
- chain input { type filter hook input priority -100; policy accept;
-  udp dport 4433 iifname != "avwg0" drop
- }
-}\n""")
+        # Outer QUIC is accepted only on the authenticated WireGuard carrier, and the
+        # carrier only from the local cloak, which owns the public port.
+        replace_table("table inet advanced_vpn {" + first_hop_rules(profile) + "\n}\n")
     else:
         carrier_first_hop = profile["carrier"] is not None  # single-hop chain: exit terminates WireGuard
         if carrier_first_hop:
@@ -345,14 +374,7 @@ def ensure_network(profile, state, whole=False, service_uid=0, upstream=None, up
         cmd("/usr/sbin/sysctl", "-qw", "net.ipv4.ip_forward=1")
         # Never forward inner packets into an unrequested management/metadata/LAN destination.
         private = "ip daddr {0.0.0.0/8,10.0.0.0/8,100.64.0.0/10,127.0.0.0/8,169.254.0.0/16,172.16.0.0/12,192.168.0.0/16,224.0.0.0/4} drop"
-        carrier_input = (
-            """
- chain input { type filter hook input priority -100; policy accept;
-  udp dport 4433 iifname != "avwg0" drop
- }"""
-            if carrier_first_hop
-            else ""
-        )
+        carrier_input = first_hop_rules(profile) if carrier_first_hop else ""
         replace_table(
             """table inet advanced_vpn {"""
             + carrier_input
@@ -519,6 +541,60 @@ def owned_public(path, data, uid, gid):
             os.unlink(tmp)
 
 
+# The data-plane executable for each section of the runtime configuration, and the key
+# descriptors it receives. The cloak gets only its proof key (and, on the first hop, its
+# ECDSA server key): never a WireGuard or layer key.
+BINARIES = {
+    "core": "advanced-vpn",
+    "carrier": "advanced-vpn-wireguard",
+    "dns": "advanced-vpn-dns",
+    "cloak": "advanced-vpn-cloak",
+}
+CHILD_KEYS = {"core": ["outer", "middle", "inner"], "carrier": ["wireguard"], "cloak": ["token", "cloak"]}
+CLOAK_TOKEN_LABEL = b"advanced-vpn cloak"
+
+
+# A working carrier always receives real data: the chain's inner QUIC keep-alives every
+# 2 s. One that has received none for this long is stuck and is restarted. (Seen in strong
+# mode: GotaTun's DAITA can stop releasing the packets Tamaraw holds back, for example
+# after the first hop was unreachable at start; a fresh carrier recovers.)
+CARRIER_STALL_SECONDS = 12
+
+
+class CarrierWatch:
+    """Notices a client carrier whose received-byte counter has stopped moving."""
+
+    def __init__(self, limit=CARRIER_STALL_SECONDS):
+        self.limit = limit
+        self.pid = self.rx = self.since = None
+
+    def stalled(self, pid, rx, now):
+        """True when carrier `pid` has received no new bytes for `limit` seconds.
+        A new process, or any received byte, starts the clock again."""
+        if pid != self.pid or rx is None or rx != self.rx:
+            self.pid, self.rx, self.since = pid, rx, now
+            return False
+        return now - self.since >= self.limit
+
+
+def carrier_rx(state):
+    """The client carrier's received data bytes, decoys excluded (the far end's DAITA keeps
+    sending decoys even when this carrier is stuck), or None when unreadable."""
+    try:
+        c = json.loads((runtime_dir(state) / "carrier-status.json").read_text())
+        return int(c["rx_bytes"]) - int(c["rx_decoy_bytes"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def cloak_token(wireguard_key):
+    """The cloak's proof key: HMAC-SHA256 of the chain's WireGuard PSK (the last 32 bytes
+    of the carrier key), so both ends share it without another secret."""
+    if len(wireguard_key) != 64:
+        raise ValueError("unexpected carrier key")
+    return hmac.new(wireguard_key[32:], CLOAK_TOKEN_LABEL, hashlib.sha256).digest()
+
+
 def publish_runtime(cfg, directory, uid, gid):
     """Only public files/config enter the service-owned directory. Keys are FD-only."""
     published = json.loads(json.dumps(cfg))
@@ -540,6 +616,14 @@ def publish_runtime(cfg, directory, uid, gid):
         i["cert"] = str(target)
         i["key"] = str(directory / "wireguard-private-key.fd-only")
         published["carrier"]["statistics"] = str(directory / "carrier-status.json")
+    if "cloak" in published:
+        c = published["cloak"]
+        if c["cert"]:
+            source = Path(c["cert"])
+            target = directory / source.name
+            owned_public(target, read_private(source), uid, gid)
+            c["cert"] = str(target)
+        c["statistics"] = str(directory / "cloak-status.json")
     if published.get("dns", {}).get("test_ca"):
         source = Path(published["dns"]["test_ca"])
         target = directory / source.name
@@ -562,14 +646,15 @@ def prepare_runtime(cfg, bin_dir, state, uid, gid, lab=False):
     if lab:
         executables.mkdir(mode=0o755, exist_ok=True)
         executables.chmod(0o755)
-        for name in ["advanced-vpn", "advanced-vpn-wireguard", "advanced-vpn-dns"]:
+        # Only what this device runs: a middle relay never stages the cloak or WireGuard.
+        for name in [BINARIES[section] for section in cfg]:
             src = bin_dir / name
             tmp = executables / (name + ".tmp")
             shutil.copyfile(src, tmp)
             tmp.chmod(0o755)
             os.replace(tmp, executables / name)
     else:
-        for name in ["advanced-vpn", "advanced-vpn-wireguard", "advanced-vpn-dns"]:
+        for name in [BINARIES[section] for section in cfg]:
             path = executables / name
             if path.is_symlink() or path.stat().st_uid != 0 or path.stat().st_mode & 0o022:
                 raise RuntimeError("installed binaries must be root-owned and not group/world writable")
@@ -577,11 +662,12 @@ def prepare_runtime(cfg, bin_dir, state, uid, gid, lab=False):
     directory.chmod(0o700)
     os.chown(directory, uid, gid)
     publish_runtime(cfg, directory, uid, gid)
-    if "carrier" in cfg:
-        link = runtime_dir(state) / "carrier-status.json"
-        if link.exists() or link.is_symlink():
-            link.unlink()
-        link.symlink_to(directory / "carrier-status.json")
+    for section in ["carrier", "cloak"]:
+        if section in cfg:
+            link = runtime_dir(state) / (section + "-status.json")
+            if link.exists() or link.is_symlink():
+                link.unlink()
+            link.symlink_to(directory / (section + "-status.json"))
     return executables, directory
 
 
@@ -681,7 +767,7 @@ def supervise(state, bin_dir, lab=False, whole=False):
     # info still accept it, so the kill switch can always be cleared to re-sign.
     profile = load_profile(state)
     try:
-        require_padding(profile)
+        require_current(profile)
     except ValueError as e:
         raise RuntimeError(str(e)) from None
     # A server never writes a log to disk: refuse to carry traffic on one that would.
@@ -723,6 +809,13 @@ def supervise(state, bin_dir, lab=False, whole=False):
     # moves each key into a sealed memfd. No Python copy is kept: rotation reads the
     # key back from its descriptor only for the moment it signs a fresh leaf.
     key_handles = {name: memory_fd(value) for name, value in load_keys(state, list(managed_identities(cfg))).items()}
+    if "cloak" in cfg:
+        key_handles["token"] = memory_fd(cloak_token(fd_bytes(key_handles["wireguard"])))
+        if cfg["cloak"]["role"] == "server":
+            # A fresh self-signed certificate for the pinned key, in root-only RAM.
+            cert = rt / "cloak-cert.der"
+            atomic(cert, cloak_certificate(fd_bytes(key_handles["cloak"]), cfg["cloak"]["cover_name"]))
+            cfg["cloak"]["cert"] = str(cert)
     refresh_leaves(
         cfg["core"],
         state,
@@ -731,14 +824,8 @@ def supervise(state, bin_dir, lab=False, whole=False):
     )
     bin_dir, device_dir = prepare_runtime(cfg, bin_dir, state, uid, gid, lab)
     for name in cfg:
-        binary = bin_dir / (
-            "advanced-vpn" if name == "core" else "advanced-vpn-wireguard" if name == "carrier" else "advanced-vpn-dns"
-        )
-        fds = {
-            r: v
-            for r, v in key_handles.items()
-            if r in (["outer", "middle", "inner"] if name == "core" else ["wireguard"] if name == "carrier" else [])
-        }
+        binary = bin_dir / BINARIES[name]
+        fds = {r: v for r, v in key_handles.items() if r in CHILD_KEYS.get(name, [])}
         args = [str(binary), "--config", str(device_dir / (name + ".runtime.json")), "--check"]
         for r, value in fds.items():
             args += ["--key-fd", r + "=" + str(value)]
@@ -793,8 +880,16 @@ def supervise(state, bin_dir, lab=False, whole=False):
 
     if "carrier" in cfg and allowance.limit is None:
         remove_meter()
+    watch = CarrierWatch()
     try:
         while not quit_requested:
+            if (
+                profile["role"] == "client"
+                and "carrier" in children
+                and children["carrier"].poll() is None
+                and watch.stalled(children["carrier"].pid, carrier_rx(state), time.monotonic())
+            ):
+                stop(children["carrier"])
             if (
                 "carrier" in children
                 and children["carrier"].poll() is None
@@ -872,24 +967,10 @@ def supervise(state, bin_dir, lab=False, whole=False):
                         cfg[name]["byte_budget"] = amount
                         carrier_meter(profile, amount)
                     publish_runtime(cfg, device_dir, uid, gid)
-                binary = str(
-                    bin_dir
-                    / (
-                        "advanced-vpn"
-                        if name == "core"
-                        else "advanced-vpn-wireguard"
-                        if name == "carrier"
-                        else "advanced-vpn-dns"
-                    )
-                )
+                binary = str(bin_dir / BINARIES[name])
                 path = device_dir / (name + ".runtime.json")
                 log = (rt / (name + ".lab.log")).open("a") if lab else None  # lab only; RAM like everything else
-                fds = {
-                    r: v
-                    for r, v in key_handles.items()
-                    if r
-                    in (["outer", "middle", "inner"] if name == "core" else ["wireguard"] if name == "carrier" else [])
-                }
+                fds = {r: v for r, v in key_handles.items() if r in CHILD_KEYS.get(name, [])}
                 if name == "core" and profile["role"] == "client" and not whole:
                     children[name] = launch_client(binary, path, APP, log, fds, uid, gid)
                 else:
@@ -955,6 +1036,8 @@ def managed_identities(cfg):
     out = {r: cfg["core"][r] for r in ["outer", "middle", "inner"] if cfg["core"].get(r)}
     if "carrier" in cfg:
         out["wireguard"] = cfg["carrier"]["identity"]
+    if cfg.get("cloak", {}).get("role") == "server":
+        out["cloak"] = cfg["cloak"]
     return out
 
 
@@ -1149,6 +1232,8 @@ def device_info(state):
             role=profile["role"],
             hops=profile["hops"],
             padded=profile["core"].get("cells") is True,
+            # None: this device runs no carrier (a middle relay, or the exit of a longer chain).
+            camouflaged=bool(profile.get("cloak")) if profile["carrier"] else None,
             chain=[dict(hop=name, endpoint=endpoint) for name, endpoint in chain_of(profile)],
             defense=preferences.get("defense", (profile["carrier"] or {}).get("defense")),
             mode=preferences.get("mode", "applications"),
@@ -1224,6 +1309,14 @@ def doctor(state, check_egress=False):
             info.get("padded"),
             "every hop pads to one size"
             if info.get("padded")
+            else "re-sign: avpn cloud chain --apply, then enroll --replace",
+        )
+    if info["enrolled"] and info.get("camouflaged") is not None:
+        check(
+            "HTTP/3 camouflage",
+            info["camouflaged"],
+            "the link to the first hop looks like HTTP/3 on UDP 443, not WireGuard"
+            if info["camouflaged"]
             else "re-sign: avpn cloud chain --apply, then enroll --replace",
         )
     if info.get("protection") == "systemd-creds":
@@ -1315,10 +1408,13 @@ def build_parser():
     init.add_argument(
         "--hops", type=int, choices=[1, 2, 3], default=2, help="1: client-exit; 2: +entry relay; 3: +middle relay"
     )
-    init.add_argument("--relay", help="entry relay public WireGuard endpoint IP:PORT (2-3 hops)")
+    init.add_argument("--relay", help="entry relay public endpoint IP:PORT, normally port 443 (2-3 hops)")
     init.add_argument("--middle", help="middle relay public QUIC endpoint IP:PORT (3 hops)")
     init.add_argument(
-        "--exit", required=True, help="exit public QUIC endpoint (2-3 hops) or WireGuard endpoint (1 hop)"
+        "--exit", required=True, help="exit public QUIC endpoint (2-3 hops), or its port-443 endpoint (1 hop)"
+    )
+    init.add_argument(
+        "--cover-name", help="server name the first hop's HTTP/3 camouflage presents (default: none sent)"
     )
     init.add_argument(
         "--request", action="append", required=True, help="ROLE=PATH for the client and every server in the chain"
@@ -1418,6 +1514,7 @@ def main():
             daily_mib=a.daily_limit_mib,
             hops=a.hops,
             middle=a.middle,
+            cover_name=a.cover_name,
         )
         emit(
             a,

@@ -238,7 +238,7 @@ class CloudTests(Stubbed):
             "NitroTPM 2.0",
             "IMDSv2 only",
             "standard CPU credits",
-            "udp 41194 from 16.170.0.7/32",
+            "udp 443 from 16.170.0.7/32",
             "FREE",
         ]:
             self.assertIn(expected, text)
@@ -280,7 +280,7 @@ class CloudTests(Stubbed):
         )
         perms = json.loads(self.value(self.call_with("authorize-security-group-ingress"), "--ip-permissions"))
         opened = sorted((p["IpProtocol"], p["FromPort"], [r["CidrIp"] for r in p["IpRanges"]]) for p in perms)
-        self.assertEqual(opened, [("tcp", 22, ["18.0.0.4/32"]), ("udp", 41194, ["16.170.0.7/32"])])
+        self.assertEqual(opened, [("tcp", 22, ["18.0.0.4/32"]), ("udp", 443, ["16.170.0.7/32"])])
         run = self.call_with("run-instances")
         self.assertIn("HttpTokens=required", self.value(run, "--metadata-options"))
         self.assertEqual(self.value(run, "--credit-specification"), "CpuCredits=standard")
@@ -889,12 +889,14 @@ class ChainTests(Stubbed):
         self.assertIn("client -> relay(avpn-relay) -> exit(avpn-exit)", text)
         init = json.loads(Path(os.environ["STUB_LOG"] + ".ctl").read_text())
         self.assertEqual(init[init.index("--hops") + 1], "2")
-        self.assertEqual(init[init.index("--relay") + 1], "13.0.0.1:41194")
+        self.assertEqual(init[init.index("--relay") + 1], "13.0.0.1:443")
+        self.assertNotIn("--cover-name", init)  # no provider DNS name recorded: no server name sent
         self.assertEqual(init[init.index("--exit") + 1], "16.40.0.2:4444")
         reqs = [init[i + 1] for i, x in enumerate(init) if x == "--request"]
         self.assertEqual(sorted(x.split("=")[0] for x in reqs), ["client", "exit", "relay"])
         # Final firewall: the first hop open to any address, SSH only from the exit.
-        self.assertEqual(self.final_sg(), {("udp", 41194): ["0.0.0.0/0"], ("tcp", 22): ["16.40.0.2/32"]})
+        # The old WireGuard port is closed; only the camouflage's 443 stays open.
+        self.assertEqual(self.final_sg(), {("udp", 443): ["0.0.0.0/0"], ("tcp", 22): ["16.40.0.2/32"]})
         self.assertNotIn("16.9.9.9/32", sum(self.final_sg().values(), []))
         # Servers are enrolled exit first.
         log = (Path(self.tmp.name) / "log.ssh").read_text().splitlines()
@@ -933,13 +935,22 @@ class ChainTests(Stubbed):
         self.assertFalse([c for c in self.calls()[before:] if "security-group-ingress" in (c[1:2] or [""])[0]])
         self.assertFalse(Path(os.environ["STUB_LOG"] + ".ctl").exists())
 
-    def test_one_server_is_a_one_hop_exit_on_the_wireguard_port(self):
+    def test_one_server_is_a_one_hop_exit_on_the_camouflage_port(self):
         r = self.chain()
         init = json.loads(Path(os.environ["STUB_LOG"] + ".ctl").read_text())
-        self.assertEqual((init[init.index("--hops") + 1], init[init.index("--exit") + 1]), ("1", "13.0.0.1:41194"))
+        self.assertEqual((init[init.index("--hops") + 1], init[init.index("--exit") + 1]), ("1", "13.0.0.1:443"))
         self.assertNotIn("--relay", init)
         self.assertIn("client -> exit(avpn-relay)", json.dumps(r["rows"]))
-        self.assertEqual(self.final_sg()[("udp", 41194)], ["0.0.0.0/0"])
+        self.assertEqual(self.final_sg()[("udp", 443)], ["0.0.0.0/0"])
+
+    def test_the_first_hop_presents_its_provider_dns_name(self):
+        inv = cloud.load_inventory()
+        inv["resources"]["avpn-relay"]["public_dns"] = "ec2-13-0-0-1.eu-north-1.compute.amazonaws.com"
+        cloud.save_inventory(inv)
+        self.add_exit()
+        self.chain()
+        init = json.loads(Path(os.environ["STUB_LOG"] + ".ctl").read_text())
+        self.assertEqual(init[init.index("--cover-name") + 1], "ec2-13-0-0-1.eu-north-1.compute.amazonaws.com")
 
     def test_three_servers_put_a_different_provider_at_the_entry(self):
         self.add_exit("avpn-exit", "oci", "16.40.0.2")
@@ -1075,7 +1086,7 @@ class HostSetupTests(unittest.TestCase):
         log = (self.d / "log.ssh").read_text()
         self.assertIn("StrictHostKeyChecking=accept-new", log)
         self.assertIn("IdentityAgent=none", log)
-        self.assertIn("bash -s -- relay 41194 no no", log)
+        self.assertIn("bash -s -- relay 443 no no", log)
         self.assertIn("tpm2=yes creds_key=host+tpm2", json.dumps(r["rows"]))
         self.assertEqual(
             json.loads(cloud.INVENTORY.read_text())["resources"]["avpn-relay"]["request"], str(self.d / "relay.req")
@@ -1242,6 +1253,12 @@ class HostScriptTests(unittest.TestCase):
         self.setup("exit", port="4444", shared="yes")
         self.assertIn("iptables -I INPUT 1 -p udp --dport 4444 -j ACCEPT", self.log())
         self.assertNotIn("netfilter-persistent", self.log())
+        self.assertNotIn("--dport 8443", self.log())
+        # A first hop's public 443 is redirected to the cloak's 8443 before INPUT sees it.
+        (self.root / "log").write_text("")
+        self.setup("relay", port="443")
+        self.assertIn("iptables -I INPUT 1 -p udp --dport 443 -j ACCEPT", self.log())
+        self.assertIn("iptables -I INPUT 1 -p udp --dport 8443 -j ACCEPT", self.log())
 
 
 if __name__ == "__main__":

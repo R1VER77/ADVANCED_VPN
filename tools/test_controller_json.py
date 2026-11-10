@@ -204,6 +204,68 @@ class PrePaddingChainTests(unittest.TestCase):
         self.assertEqual(str(e.exception), PADDING_REQUIRED)
 
 
+class PreCloakChainTests(unittest.TestCase):
+    """A device enrolled before the HTTP/3 camouflage existed, then upgraded."""
+
+    @classmethod
+    def setUpClass(cls):
+        import managed_profile
+
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.root = Path(cls.tmp.name)
+        # Sign the chain the old way (WireGuard straight to the first hop) and enroll it.
+        with (
+            mock.patch.object(managed_profile, "CLOAK", False),
+            mock.patch.object(managed_profile, "require_current", lambda p: p),
+        ):
+            lab_setup(cls.root, "192.0.2.1:41194", "198.51.100.2:4444")
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def test_the_old_profile_really_lacks_the_cloak(self):
+        profile = json.loads((self.root / "client" / "profile.json").read_text())
+        self.assertNotIn("cloak", profile)
+        self.assertEqual(profile["carrier"]["endpoint"], "192.0.2.1:41194")
+
+    def test_kill_switch_reset_and_info_still_load_it(self):
+        import avpnctl
+
+        self.assertEqual(avpnctl.load_profile(self.root / "client")["role"], "client")
+        rc, _, _ = ctl(self.root / "client", "info")
+        self.assertEqual(rc, 0)
+
+    def test_doctor_says_to_re_sign_for_the_camouflage(self):
+        rc, out, _ = ctl(self.root / "client", "doctor")
+        row = next(c for c in out["checks"] if c["check"] == "HTTP/3 camouflage")
+        self.assertFalse(row["ok"])
+        self.assertIn("avpn cloud chain --apply", row["detail"])
+
+    def test_connect_refuses_before_changing_the_host(self):
+        import avpnctl
+        from managed_profile import CLOAK_REQUIRED
+
+        touched = mock.Mock(side_effect=AssertionError("host touched before the cloak check"))
+        with (
+            mock.patch.object(avpnctl, "root_guard", lambda lab: None),
+            mock.patch.object(avpnctl, "service_identity", touched),
+            mock.patch.object(avpnctl, "ensure_network", touched),
+        ):
+            with self.assertRaises(RuntimeError) as e:
+                avpnctl.supervise(self.root / "client", self.root / "bin", lab=True)
+        self.assertEqual(str(e.exception), CLOAK_REQUIRED)
+        touched.assert_not_called()
+
+    def test_enrolling_a_bundle_without_the_cloak_is_refused(self):
+        from managed_profile import CLOAK_REQUIRED, enroll
+
+        ops = self.root / "operator"
+        with self.assertRaises(ValueError) as e:
+            enroll(ops / "client.avpn", ops / "operator.pub", self.root / "client", replace=True)
+        self.assertEqual(str(e.exception), CLOAK_REQUIRED)
+
+
 class ServerRetentionGateTests(unittest.TestCase):
     """A server whose host would keep logs on disk must not carry traffic."""
 

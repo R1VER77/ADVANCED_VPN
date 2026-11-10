@@ -8,7 +8,6 @@ import json
 import os
 from pathlib import Path
 import signal
-import socket
 import subprocess
 import tempfile
 import sys
@@ -81,8 +80,8 @@ def stop(p):
 # Runs in av-upstream as 192.0.2.4, a peer the relay has never been told about.
 PROBE = r"""
 import hashlib, json, os, socket, sys
-relay = ("192.0.2.1", int(sys.argv[3]))
-public, replay = bytes.fromhex(sys.argv[1]), bytes.fromhex(sys.argv[2])
+relay = ("192.0.2.1", int(sys.argv[2]))
+public = bytes.fromhex(sys.argv[1])
 def mac1(msg):
     # WireGuard: MAC1 = BLAKE2s-128 keyed with BLAKE2s-256("mac1----" || responder public key).
     key = hashlib.blake2s(b"mac1----" + public).digest()
@@ -94,7 +93,6 @@ probes = [os.urandom(n) for n in (1, 16, 32, 64, 92, 148, 1200)] + [
     b"\x02\0\0\0" + os.urandom(88),          # unsolicited handshake response
     b"\x03\0\0\0" + os.urandom(60),          # cookie reply
     b"\x04\0\0\0" + os.urandom(48),          # transport data for an unknown session
-    replay,                                      # the client's real, already-used initiation
 ]
 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 s.bind(("192.0.2.4", 0))
@@ -111,32 +109,13 @@ print(json.dumps(dict(sent=len(probes) * 5, received=got)))
 """
 
 
-def last_initiation(capture, source="192.0.2.2", port=41194):
-    """The newest WireGuard handshake initiation from `source` in the observer's raw
-    frame stream (Ethernet frames written back to back)."""
-    data, i, found = capture.read_bytes(), 0, None
-    while i + 34 <= len(data) and data[i + 12 : i + 14] == b"\x08\x00" and data[i + 14] >> 4 == 4:
-        total = int.from_bytes(data[i + 16 : i + 18], "big")
-        frame = data[i : i + 14 + total]
-        ihl = (frame[14] & 15) * 4
-        udp = 14 + ihl
-        if frame[23] == 17 and socket.inet_ntoa(frame[26:30]) == source:
-            if int.from_bytes(frame[udp + 2 : udp + 4], "big") == port:
-                payload = frame[udp + 8 :]
-                if len(payload) == 148 and payload[:4] == b"\x01\0\0\0":
-                    found = payload
-        i += 14 + total
-    if found is None:
-        raise RuntimeError("no client handshake initiation in the capture")
-    return found
-
-
 def probe_first_hop(state, run):
-    """Prove the first hop never answers a peer it has not been enrolled with: garbage,
-    forged and replayed handshakes all get nothing back. A closed port on the same host
-    must answer (ICMP), which proves the counter would have seen a reply."""
+    """Prove WireGuard on the first hop is unreachable from outside: garbage and forged
+    handshakes (even with a valid MAC1) sent to its port get nothing back, because only
+    the local cloak may reach it. A closed port on the same host must answer (ICMP),
+    which proves the counter would have seen a reply. (The cloak's public port answers
+    like an HTTP/3 server instead; src/cloak.rs tests that.)"""
     public = json.loads((state / "relay" / "request.json").read_text())["wireguard_public_hex"]
-    replay = last_initiation(state / "physical-capture.bin")
     nft = ("ip", "netns", "exec", "av-relay", "/usr/sbin/nft")
 
     def answered():
@@ -145,14 +124,12 @@ def probe_first_hop(state, run):
         return next(r["packets"] for r in rows if r["table"] == "seen" and r["name"] == "answered")
 
     run(*nft, "reset", "counters", "table", "inet", "seen")
-    out = run(
-        "ip", "netns", "exec", "av-upstream", sys.executable, "-c", PROBE, public, replay.hex(), "41194", timeout=60
-    )
+    out = run("ip", "netns", "exec", "av-upstream", sys.executable, "-c", PROBE, public, "41194", timeout=60)
     probe = json.loads(out.stdout)
     silent = answered()
     assert probe["received"] == 0 and silent == 0, ("the first hop answered a stranger", probe, silent)
     # Control: the same stranger, a closed port. The kernel must reply (port unreachable).
-    run("ip", "netns", "exec", "av-upstream", sys.executable, "-c", PROBE, public, replay.hex(), "41195", timeout=60)
+    run("ip", "netns", "exec", "av-upstream", sys.executable, "-c", PROBE, public, "41195", timeout=60)
     assert answered() > 0, "control failed: a closed port produced no reply, so the counter proves nothing"
     return dict(probes=probe["sent"], replies=silent, control_replies=answered())
 
@@ -203,7 +180,7 @@ def main():
     # Real request -> init -> enroll: every device generates its own keys; bundles hold none.
     ops = lab_setup(
         state,
-        "192.0.2.1:41194",
+        "192.0.2.1:443",
         "198.51.100.2:4444",
         dns=dns,
         daily_mib=1024,
@@ -380,9 +357,9 @@ def main():
             "-f",
             "-",
             input="table inet seen {\n counter direct {\n }\n counter upstream {\n }\n counter answered {\n }\n"
-            " chain in { type filter hook input priority -300; policy accept;\n"
-            "  ip saddr 192.0.2.2 udp dport 41194 counter name direct\n"
-            "  ip saddr 192.0.2.3 udp dport 41194 counter name upstream\n }\n"
+            " chain in { type filter hook prerouting priority -300; policy accept;\n"
+            "  ip saddr 192.0.2.2 udp dport 443 counter name direct\n"
+            "  ip saddr 192.0.2.3 udp dport 443 counter name upstream\n }\n"
             " chain out { type filter hook output priority -300; policy accept;\n"
             "  ip daddr 192.0.2.4 counter name answered\n }\n}\n",
         )
@@ -518,7 +495,17 @@ def main():
         stats = json.loads((runtime_dir(state / "client") / "carrier-status.json").read_text())
         assert stats["handshake"] and stats["tx_padding_bytes"] > 0 and stats["tx_decoy_bytes"] > 0
         physical = json.loads((state / "physical.json").read_text())
-        assert physical["wireguard_data_packets"] > 0 and len(physical["data_sizes"]) == 1, physical
+        # Nothing on the wire is WireGuard; it is QUIC, and full packets share one size
+        # (a few differ by the ACK frames QUIC adds to some of them).
+        assert physical["wireguard_messages"] == 0 and physical["quic_packets"] > 0, physical
+        outer = {int(k): v for k, v in physical["outer_sizes"].items()}
+        size = max(outer, key=outer.get)
+        # The capture sees GSO super-frames before segmentation: k packets of one size.
+        # QUIC loss probes alone stay unpadded (so a shrunken path MTU can be detected);
+        # they are rare, and anything else of another size fails.
+        packets = sum(k // size * v for k, v in outer.items())
+        odd = sum(v for k, v in outer.items() if k % size)
+        assert odd <= max(2, packets // 100), ("outer sizes vary", outer)
         assert marker.encode() not in (state / "physical-capture.bin").read_bytes()
         # Fresh leaves are self-issued by the same pinned device identity. No CA
         # private key is present on a peer, and the remote peer accepts rotation.
@@ -573,9 +560,12 @@ def main():
 
         def child_dead(child):
             path = Path("/proc/" + str(child["pid"]) + "/stat")
-            return identity_of(child["pid"]) != child["identity"] or (
-                path.exists() and path.read_text().rsplit(")", 1)[1].split()[0] == "Z"
-            )
+            try:
+                return identity_of(child["pid"]) != child["identity"] or (
+                    path.read_text().rsplit(")", 1)[1].split()[0] == "Z"
+                )
+            except (FileNotFoundError, ProcessLookupError):
+                return True  # reaped between the two reads: gone
 
         while time.monotonic() < end and not all(child_dead(v) for v in children.values()):
             time.sleep(0.05)
@@ -714,7 +704,8 @@ def main():
             dns_bypass_rejected=True,
             ipv6_leak_rejected=True,
             carrier_padding_and_decoys_verified=True,
-            wireguard_data_sizes=physical["data_sizes"],
+            wireguard_messages_on_the_wire=physical["wireguard_messages"],
+            outer_quic_sizes=physical["outer_sizes"],
             private_marker_absent_from_physical_capture=True,
             carrier_stats=stats,
             child_crash_recovered=True,

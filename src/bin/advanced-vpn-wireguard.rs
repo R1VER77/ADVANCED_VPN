@@ -73,9 +73,19 @@ fn secret(path: &Path, fd: Option<i32>) -> Result<Vec<u8>> {
 async fn work() -> Result<()> {
     let a = Args::parse();
     let c: Carrier = serde_json::from_slice(&private_read(&a.config, 16384)?)?;
+    // Schema 2: the carrier is only reached through the cloak (advanced-vpn-cloak), so
+    // WireGuard never appears on the wire. The client sends to its local cloak; the
+    // first hop listens on 41194, which its firewall opens to loopback only.
     ensure!(
-        c.schema == 1 && c.role == "wireguard",
+        c.schema == 2 && c.role == "wireguard",
         "wrong carrier schema"
+    );
+    ensure!(
+        match c.endpoint {
+            Some(e) => e == SocketAddr::from(([127, 0, 0, 1], 41196)) && c.listen_port == 41195,
+            None => c.listen_port == 41194,
+        },
+        "the carrier must run behind the cloak"
     );
     ensure!(
         c.tun == "avwg0" && c.listen_port != 0,

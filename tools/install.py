@@ -31,7 +31,7 @@ from sysexec import trusted_exe  # noqa: E402  (standard library only)
 
 # What a built checkout must provide; the VM harness and `avpn cloud host setup` pack
 # exactly these, so the three never disagree.
-BINARIES = ["advanced-vpn", "advanced-vpn-wireguard", "advanced-vpn-dns", "avpn"]
+BINARIES = ["advanced-vpn", "advanced-vpn-wireguard", "advanced-vpn-dns", "advanced-vpn-cloak", "avpn"]
 SOURCES = ["tools", "deploy", "third_party", "docs/cli", "README.md", "LICENSE", "NOTICE", "SECURITY.md"]
 
 
