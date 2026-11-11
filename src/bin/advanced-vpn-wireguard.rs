@@ -91,9 +91,12 @@ async fn work() -> Result<()> {
         c.tun == "avwg0" && c.listen_port != 0,
         "fixed managed carrier required"
     );
+    // There is one defense posture: strong, on every hop. A bundle signed with the
+    // removed `balanced` profile is refused, so no chain ever runs half-defended;
+    // re-enroll with a current bundle (`avpn init` signs strong only).
     ensure!(
-        matches!(c.defense.as_str(), "balanced" | "strong"),
-        "DAITA is mandatory"
+        c.defense == "strong",
+        "the balanced defense profile was removed: re-enroll with a current strong-only bundle"
     );
     ensure!(
         c.byte_budget
@@ -131,8 +134,10 @@ async fn work() -> Result<()> {
         peer = peer.with_endpoint(endpoint);
     }
     peer.keepalive = Some(25);
+    // Every hop builds the full strong machine set from its own OS-seeded RNG, so
+    // each hop's defense schedule is independent (see advanced_vpn::daita).
     let mut rng = rand::rngs::StdRng::from_os_rng();
-    let machines = advanced_vpn::daita::machines(&c.defense, &mut rng);
+    let machines = advanced_vpn::daita::machines(&mut rng);
     let daita = DaitaSettings {
         maybenot_machines: machines,
         max_decoy_frac: 0.5,

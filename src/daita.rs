@@ -1,8 +1,23 @@
 //! The DAITA (Maybenot) machines the WireGuard carrier runs, built here so they can be tested.
 //!
-//! `balanced`: NetFlow padding plus FRONT, re-armed for every burst of traffic.
-//! `strong`: the same plus Tamaraw constant-rate shaping, with a stop machine that
-//! rounds every trace to a multiple of [`TAMARAW_L`] packets on the constant clock.
+//! There is exactly one defense posture: **strong**. The `balanced` profile was
+//! removed (AVPN/Mesh, carrier schema 3): a dial that trades security for speed is
+//! one users cannot calibrate. Every carrier, on every hop, runs the full stack:
+//!
+//! - NetFlow padding (idle links do not form flow records),
+//! - FRONT decoys, re-armed for every burst of traffic,
+//! - Tamaraw constant-rate shaping with a stop machine that rounds every trace to
+//!   a multiple of [`TAMARAW_L`] packets on the constant clock,
+//! - [`cover`]: bidirectional constant-rate cover. After the first tunnel activity
+//!   each endpoint emits one decoy per [`COVER_INTERVAL_SECONDS`] until the run
+//!   ends, so idle links keep a constant stream and real sessions hide among the
+//!   scheduled cover. Node-level daily cover budgets are enforced by the
+//!   controller (`tools/mesh.py`), never by weakening the machines.
+//!
+//! Every hop builds its machines from its own OS-seeded RNG, so the schedules are
+//! independent per hop: identical shaping at every hop would preserve cross-link
+//! correlation, and client-side-only shaping is eroded by downstream queueing
+//! (see docs/MESH_DESIGN.md and the measurements in tools/mesh_wf_sim.py).
 //!
 //! Maybenot times are in microseconds. The public FRONT generator takes its padding
 //! window in those units, unlike Tamaraw, which takes seconds and scales them itself.
@@ -43,6 +58,9 @@ pub const TAMARAW_STOP_MICROS: f64 = 500_000.0;
 /// at one packet per [`TAMARAW_INTERVAL_SECONDS`] its length in time rounds up to a
 /// multiple of 2 s: every page whose load ends in the same 2 s step looks the same.
 pub const TAMARAW_L: f64 = 100.0;
+/// Cover sends one packet every this many seconds. Kept equal to the Tamaraw clock so
+/// cover and shaped traffic are indistinguishable on the wire.
+pub const COVER_INTERVAL_SECONDS: f64 = TAMARAW_INTERVAL_SECONDS;
 const MICROS: f64 = 1_000_000.0;
 
 fn constant(value: f64) -> Dist {
@@ -268,13 +286,43 @@ pub fn tamaraw() -> Vec<Machine> {
     machines
 }
 
-/// Every machine the carrier runs for `defense` ("balanced" or "strong").
-pub fn machines<R: RngCore>(defense: &str, rng: &mut R) -> Vec<Machine> {
+/// Bidirectional constant-rate cover. Once any tunnel activity is seen, the machine
+/// emits one decoy every [`COVER_INTERVAL_SECONDS`] and re-arms itself on every decoy
+/// it sends, so the stream is self-sustaining while the run is up. Every endpoint of
+/// every hop runs it, which makes the cover bidirectional: each direction of each
+/// link carries a constant-rate stream, real packets replacing same-direction decoys.
+///
+/// The machine is deliberately unbudgeted (`u64::MAX`): resource limits belong to the
+/// node's operator and are enforced by the controller's daily cover budget
+/// (`tools/mesh.py`), fail-closed at the carrier level by the existing byte budget —
+/// never by weakening the defense mid-run.
+pub fn cover() -> Machine {
+    let start = State::new(enum_map! {
+        Event::NormalSent | Event::NormalRecv | Event::TunnelSent | Event::TunnelRecv =>
+            vec![Trans(1, 1.0)],
+        _ => vec![],
+    });
+    let mut tick = State::new(enum_map! {
+        Event::PaddingSent => vec![Trans(1, 1.0)],
+        _ => vec![],
+    });
+    tick.action = Some(Action::SendPadding {
+        bypass: true,
+        replace: true,
+        timeout: constant(COVER_INTERVAL_SECONDS * MICROS),
+        limit: None,
+    });
+    Machine::new(u64::MAX, 0.0, 0, 0.0, vec![start, tick]).expect("a valid cover machine")
+}
+
+/// Every machine the carrier runs. There is one posture — strong — and every hop of
+/// every chain runs the full set, built from this endpoint's own OS-seeded RNG so
+/// each hop's schedule is independent (see the module docs).
+pub fn machines<R: RngCore>(rng: &mut R) -> Vec<Machine> {
     let mut machines = vec![maybenot_machines::netflow::simple_netflow()];
     machines.extend(front(rng));
-    if defense == "strong" {
-        machines.extend(tamaraw());
-    }
+    machines.extend(tamaraw());
+    machines.push(cover());
     machines
 }
 
@@ -478,7 +526,7 @@ mod tests {
             let data: Vec<f64> = (0..(length / 0.03) as usize)
                 .map(|i| start + i as f64 * 0.03)
                 .collect();
-            let strong = machines("strong", &mut rand::rngs::StdRng::seed_from_u64(0));
+            let strong = machines(&mut rand::rngs::StdRng::seed_from_u64(0));
             let sent = padding_times(&strong[2..], &data, start + 15.0);
             // Constant clock to the end: no burst anywhere.
             assert!(
@@ -530,9 +578,28 @@ mod tests {
     }
 
     #[test]
-    fn balanced_and_strong_machine_sets() {
+    fn cover_ticks_on_its_constant_clock_once_started() {
+        // One data packet starts the cover; it then sustains itself on its own decoys.
+        let sent = padding_times(&[cover()], &[0.0], 10.0);
+        assert!(sent.len() > 400, "{} cover packets in 10 s", sent.len());
+        for g in gaps(&sent) {
+            assert!(
+                (g - COVER_INTERVAL_SECONDS).abs() < 0.002,
+                "cover gap {g} s off the {COVER_INTERVAL_SECONDS} s clock"
+            );
+        }
+    }
+
+    #[test]
+    fn cover_stays_silent_before_any_activity() {
+        let sent = padding_times(&[cover()], &[], 10.0);
+        assert!(sent.is_empty(), "cover must not run before the tunnel is used");
+    }
+
+    #[test]
+    fn the_machine_set_is_strong_only_and_complete() {
         let mut rng = rand::rngs::StdRng::seed_from_u64(0);
-        assert_eq!(machines("balanced", &mut rng).len(), 2);
-        assert_eq!(machines("strong", &mut rng).len(), 4);
+        // netflow + FRONT + Tamaraw (padding and stop) + cover.
+        assert_eq!(machines(&mut rng).len(), 5);
     }
 }
