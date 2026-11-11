@@ -1,6 +1,6 @@
 # ADVANCED_VPN — managed Linux client
 
-A Rust VPN data plane with signed enrollment, automatic networking, a persistent kill switch, DNS isolation, real GotaTun/Maybenot DAITA, and the original two hybrid post-quantum QUIC layers. The cloud relay never holds the inner tunnel keys. No existing VPN is automatically replaced during build or installation.
+A Rust VPN data plane with signed enrollment, automatic networking, a persistent kill switch, DNS isolation, real GotaTun/Maybenot DAITA on every hop, and the original two hybrid post-quantum QUIC layers. The cloud relay never holds the inner tunnel keys. No existing VPN is automatically replaced during build or installation.
 
 ```mermaid
 flowchart LR
@@ -21,9 +21,9 @@ WireGuard is the outer carrier, implemented by **GotaTun 0.10.2**, with its actu
 - Twelve-hour TLS leaves rotate every six hours using the enrolled device key and its pinned SPKI. TLS/WebPKI/name validation is retained; no CA private key is deployed to a peer. Pin revocation requires an operator-authorized enrollment change.
 - There is **no data cap by default**. An optional daily cap (`preferences --daily-limit-mib N`) is metered in the kernel and fail-closed: durable reservations survive crashes and clock rollback, unused bytes are refunded when the carrier stops, and an exhausted cap blocks traffic (never disabling DAITA) while the supervisor stays up and resumes at the next UTC day or when the cap is raised. `--no-daily-limit` removes it.
 
-The `balanced` profile uses NetFlow padding and FRONT decoys re-armed for every burst of traffic; `strong` adds Tamaraw constant-rate shaping that rounds each trace to a multiple of 100 packets on its own clock (`src/daita.rs`). These are not Mullvad's private/current production profiles. Nonempty WireGuard data packets are padded to constant size; handshake/empty keepalive control packets remain distinguishable. Measured against a website-fingerprinting classifier (8 sites, chance 12.5%): `balanced` 60%, `strong` 26% (`docs/evidence/DAITA_LAB.json`, `avpn help threat-model`).
+There is one defense posture: **strong** (`src/daita.rs`). Every hop of every chain runs NetFlow padding, FRONT decoys re-armed for every burst of traffic, Tamaraw constant-rate shaping that rounds each trace to a multiple of 100 packets on its own clock, and a bidirectional constant-rate cover stream — each hop building its machines from its own OS-seeded randomness, so per-hop schedules are independent (identical schedules would preserve cross-link correlation). The `balanced` profile was removed; bundles that name it are refused with a re-enroll hint. Nonempty WireGuard data packets are padded to constant size; handshake/empty keepalive control packets remain distinguishable. Earlier measurements against a website-fingerprinting classifier (8 sites, chance 12.5%): 60% and 26% for the old balanced and strong profiles (`docs/evidence/DAITA_LAB.json`, `avpn help threat-model`). The mesh redesign's own exit-vantage simulation is `tools/mesh_wf_sim.py`, with the mechanism analysis in [docs/MESH_DESIGN.md](docs/MESH_DESIGN.md).
 
-Measured in the namespace benchmark (`tools/throughput_bench.py`, 32 MiB, SHA-checked): `balanced` carries about **290 Mbit/s** through the full tunnel. `strong` is a low-bandwidth mode: Tamaraw paces packets at a constant rate, which gave about **0.34 Mbit/s**. Use it only when traffic-shape hiding matters more than speed. The WireGuard + DAITA carrier on its own measured about 960 Mbit/s.
+Measured in the namespace benchmark (`tools/throughput_bench.py`, 32 MiB, SHA-checked): the strong profile paces packets at a constant rate, which gave about **0.34 Mbit/s** — traffic-shape hiding over speed, always. The WireGuard + DAITA carrier on its own measured about 960 Mbit/s. The daily cover budget a node spends is set by its operator and enforced by the controller, fail-closed at the carrier byte budget; the defense itself is never weakened.
 
 ## Command line
 
@@ -51,6 +51,7 @@ explains how the pieces fit together.
 
 - **Layering:** `avpn` renders results. The privileged controller (`avpnctl`) does all the work and validates every option.
 - **Cloud:** `avpn cloud` finds free places to run servers, creates them with your own `aws`/`oci` sign-in (or records servers you already have, over SSH), and joins them into one multi-hop chain.
+- **Mesh:** `avpn mesh` browses the community directory, contributes nodes and builds chains across members' servers ([`docs/cli/mesh.md`](docs/cli/mesh.md)).
 - **Style:** the layout and colour rules follow the OpenAI Codex CLI's terminal style (Apache-2.0). Only the design rules were followed; no code was copied.
 
 ## Getting started: free servers, one chain
@@ -89,7 +90,7 @@ mkdir advanced-vpn && tar -C advanced-vpn -xzf advanced-vpn-v0.6.0-x86_64-linux-
 ```
 
 There are two ways to install from there:
-- **Command line only, for you (an operator machine):** `python3 tools/install.py --user`. It needs no root and starts no services. `avpn` goes in `~/.local/bin`, with its own hash-locked Python environment. It covers `avpn help`, `init` (with the Nitrokey), `cloud` and the read-only commands. Run it again to upgrade; `--user --uninstall` removes it.
+- **Command line only, for you (an operator machine):** `python3 tools/install.py --user`. It needs no root and starts no services. `avpn` goes in `~/.local/bin`, with its own hash-locked Python environment. It covers `avpn help`, `init` (with the Nitrokey), `cloud`, `mesh` and the read-only commands. Run it again to upgrade; `--user --uninstall` removes it.
 - **The VPN itself (a client or a server), in one step:**
 
   ```bash
@@ -136,7 +137,7 @@ unshare --user --map-root-user --map-auto --net --mount python3 tools/budget_tes
 python3 tools/vm_validation.py --base debian-13-genericcloud-amd64.qcow2 --work /tmp/avpn-vm-01
 ```
 
-The managed test exercises actual WireGuard/DAITA, both PQ layers, system DNS over an isolated TLS upstream, NAT, leak blocking, certificate rotation, both defense profiles, crashes, recovery, and explicit unlock. It first demonstrates a working unencrypted fallback route, then verifies that the whole-device guard blocks it. All network/DNS changes are confined to disposable namespaces. See [current validation](docs/MANAGED_VALIDATION.md).
+The managed test exercises actual WireGuard/DAITA, both PQ layers, system DNS over an isolated TLS upstream, NAT, leak blocking, certificate rotation, the defense profile, crashes, recovery, and explicit unlock. It first demonstrates a working unencrypted fallback route, then verifies that the whole-device guard blocks it. All network/DNS changes are confined to disposable namespaces. See [current validation](docs/MANAGED_VALIDATION.md).
 
 ## One-time enrollment, then connect
 
@@ -148,7 +149,7 @@ python3 tools/install.py --out /tmp/new-avpn-package
 
 An operator can install with `sudo python3 tools/install.py --out /path/to/new-stage --apply`. Installation creates `/opt/advanced-vpn`, a hash-locked Python environment and service files, but **does not enable them**. Review [deployment](docs/DEPLOYMENT.md) before activation.
 
-Designed for one person running their own client, relay and exit from the command line. **Every device generates its own private keys, and no private key ever leaves the device it was made on.** Your laptop, with the Nitrokey, is both the client and the operator.
+Designed for one person running their own client, relay and exit from the command line — and, through AVPN/Mesh, for a community of such people contributing one server each (see below). **Every device generates its own private keys, and no private key ever leaves the device it was made on.** Your laptop, with the Nitrokey, is both the client and the operator.
 
 1. On each device, generate its keys and write a public request. The laptop seals its keys with the Nitrokey, so they're never written in plaintext. Servers without a token use `systemd-creds`, which is bound to the TPM2 when one is present.
 
@@ -249,6 +250,18 @@ Measured in the namespace benchmark (32 MiB, SHA-checked):
 
 Every run also proves two things on the wire. Raw packet observers on each server's ingress never see the payload, and only the first hop ever sees the client's address. The same runs check that no server writes anything persistent while carrying traffic. CI enforces all three.
 
+## The community mesh (AVPN/Mesh)
+
+ADVANCED_VPN is becoming a community mesh: every member contributes at least one server — an always-free cloud VM is enough, and `avpn mesh offer --guided` ranks the options (Oracle Cloud Always Free first, ~10 TiB/month egress) and provisions through the existing cloud machinery — and in return can build chains across nodes contributed by other members, browsable and selectable from the CLI:
+
+```
+avpn mesh nodes --fetch          # the directory: roles, providers, latency, uptime
+avpn mesh chain --hops 3         # every hop a distinct operator, provider and country
+avpn mesh quota                  # credits earned relaying vs spent on chains
+```
+
+There is **no account anywhere**: a member is their hardware device — a Nitrokey (open source) by preference, but any token that can generate the required keys. The member ID is the hash of the device public key; the private key never leaves the token. Nodes can also be kept private (`avpn mesh offer --private`), usable only by you. Defense is strong-only and per-hop: every link runs the full Maybenot set plus a bidirectional constant-rate cover stream, seeded independently at each hop. The full design, the contribution economy (unlinkable VOPRF credits, fail-closed until the verifier is vendored), the trust model for stranger-run nodes, and the website-fingerprinting measurements are in [docs/MESH_DESIGN.md](docs/MESH_DESIGN.md); the command reference is [docs/cli/mesh.md](docs/cli/mesh.md).
+
 ## No retained data
 
 Like Mullvad, servers are built to hold nothing that could be handed over:
@@ -261,7 +274,7 @@ Like Mullvad, servers are built to hold nothing that could be handed over:
 
 In installed Debian 13 VMs, after real traffic, the relay and exit had **written no files** under `/etc/advanced-vpn` and had **no journal entries** for the VPN units. The client keeps only its own preferences and a pre-VPN network snapshot, which it needs to restore its routes after a reboot.
 
-**Zero-knowledge proofs aren't used, and nothing here needs them.** Mullvad and Nym use ZK credentials to separate a paying account from what that account does on someone else's servers. Here one person owns every device and every hop, so there's no account or payment to unlink. A cloud provider can still see packet metadata on its own hop, and ZK doesn't hide that. Splitting the hops across providers does. ZK credentials would only matter if other people used these relays, or if you rented relays you don't control.
+**Zero-knowledge proofs aren't used in the single-operator design, and nothing there needs them.** Mullvad and Nym use ZK credentials to separate a paying account from what that account does on someone else's servers. With one person owning every device and every hop, there's no account or payment to unlink. AVPN/Mesh is the point where that changes: once strangers use each other's servers, usage must be decoupled from identity, so mesh contribution credits are blind-signed VOPRF tokens (see [docs/MESH_DESIGN.md](docs/MESH_DESIGN.md)) — not accounts, and still no ledger.
 
 ## Key exposure
 
@@ -283,7 +296,7 @@ If nobody answers, the prompt times out after 5 minutes. The service restarts an
 
 ## Limits and provenance
 
-The relay/provider can still observe addresses, sizes, timing and outages. The owned exit sees traffic after VPN decryption; HTTPS retains its independent TLS. No provider-no-logging, anonymity, TEE attestation, WAN-performance or independent-audit guarantee is made.
+The relay/provider can still observe addresses, sizes, timing and outages. The owned exit sees traffic after VPN decryption; HTTPS retains its independent TLS. No provider-no-logging, anonymity, TEE attestation, WAN-performance or independent-audit guarantee is made. A global passive adversary remains out of scope for any low-latency system; per-hop defense raises its cost, it does not produce mixnet-grade unlinkability (see `docs/MESH_DESIGN.md`, threat model).
 
 The data plane is Linux/IPv4 only. **IPv6 is deliberately blocked** in every mode, so it can't escape around the tunnel. The managed profile uses inner MTU 1100 and WireGuard MTU 1340, requiring an IPv4 underlay MTU of at least 1420. A native desktop GUI, multi-user fleet control and a statistically evaluated defense dataset are not included. The standalone v0.1 QUIC interface remains available; see [historical interface](docs/LEGACY_QUIC.md).
 
