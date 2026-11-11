@@ -33,6 +33,14 @@ struct Carrier {
     statistics: PathBuf,
     /// None: no carrier byte cap (the default). Some: fail-closed grant from the supervisor.
     byte_budget: Option<u64>,
+    /// None: the shipped strong constants. Some: the ephemeral defense database
+    /// (tools/defense_db.py); the profile in force at startup parameterizes the
+    /// same five machines, and "no profile in force" refuses the run.
+    defense_db: Option<PathBuf>,
+    /// None: keepalive 25 s. Some("always-on"): keepalive 5 s — the self-sustaining
+    /// cover machine starts within seconds of tunnel setup, so idle server links
+    /// (relay<->relay) carry the same constant-rate stream as busy ones.
+    cover: Option<String>,
 }
 #[derive(Parser)]
 struct Args {
@@ -104,6 +112,10 @@ async fn work() -> Result<()> {
         "invalid per-run traffic budget"
     );
     ensure!(
+        c.cover.as_deref().is_none_or(|v| v == "always-on"),
+        "unknown cover mode"
+    );
+    ensure!(
         c.endpoint
             .is_none_or(|a| a.is_ipv4() && a.port() != 0 && !a.ip().is_unspecified()),
         "bad endpoint"
@@ -133,11 +145,32 @@ async fn work() -> Result<()> {
     if let Some(endpoint) = c.endpoint {
         peer = peer.with_endpoint(endpoint);
     }
-    peer.keepalive = Some(25);
+    // Always-on cover (server roles): a 5 s keepalive guarantees the cover machine
+    // starts within seconds of tunnel setup even with no user traffic; once started
+    // it is self-sustaining, so idle links keep the constant-rate stream.
+    peer.keepalive = Some(if c.cover.as_deref() == Some("always-on") {
+        5
+    } else {
+        25
+    });
     // Every hop builds the full strong machine set from its own OS-seeded RNG, so
-    // each hop's defense schedule is independent (see advanced_vpn::daita).
+    // each hop's defense schedule is independent (see advanced_vpn::daita). With a
+    // defense database the profile in force parameterizes the same machines; the
+    // schedule rotates, the posture never weakens.
     let mut rng = rand::rngs::StdRng::from_os_rng();
-    let machines = advanced_vpn::daita::machines(&mut rng);
+    let machines = match &c.defense_db {
+        Some(path) => {
+            let db = advanced_vpn::daita::DefenseDb::load(path)?;
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_secs();
+            let profile = db
+                .select(now)
+                .context("no defense profile in force; rotate the defense database")?;
+            advanced_vpn::daita::machines_from_profile(profile, &mut rng)
+        }
+        None => advanced_vpn::daita::machines(&mut rng),
+    };
     let daita = DaitaSettings {
         maybenot_machines: machines,
         max_decoy_frac: 0.5,
@@ -148,7 +181,9 @@ async fn work() -> Result<()> {
     peer = peer.with_daita(daita);
     if a.check {
         println!(
-            "{{\"configuration_valid\":true,\"wireguard\":\"GotaTun\",\"daita\":true,\"psk\":true}}"
+            "{{\"configuration_valid\":true,\"wireguard\":\"GotaTun\",\"daita\":true,\"psk\":true,\"defense_db\":{},\"cover_always_on\":{}}}",
+            c.defense_db.is_some(),
+            c.cover.as_deref() == Some("always-on"),
         );
         return Ok(());
     }
