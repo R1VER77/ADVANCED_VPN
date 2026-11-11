@@ -1,0 +1,35 @@
+{
+ "what": "Website-fingerprinting mechanism comparison for the AVPN/Mesh defense design, simulated by tools/mesh_wf_sim.py at the acceptance scale (100 sites). The vantage is the exit-side link - the one first-link-only defenses such as Mullvad's DAITA placement do not protect - where the observer sees timing and direction of constant-size packets after two hops of queueing jitter.",
+ "date": "2026-11-12",
+ "tool": "tools/mesh_wf_sim.py --sites 100 --traces 80 --json (seed 42)",
+ "setup": {
+  "world": "closed world, 100 synthetic site profiles, 80 traces per site, chance = 1%",
+  "vantage": "exit-side link, after 2 hops of queueing jitter (sigma 12 ms per traversed hop)",
+  "features": "timing + direction: inter-arrival stats, burst-run stats, 40 time-bin histogram",
+  "classifier": "RandomForestClassifier, 200 trees, stratified 65/35 split (scikit-learn 1.7)",
+  "defenses": {
+   "none": "no shaping",
+   "client_only": "constant-rate shaping at the client only (DAITA-style placement); downstream jitter erodes the clock",
+   "per_hop_grace": "per-hop re-shaping, cover only after a 400 ms idle grace",
+   "per_hop_full": "per-hop full constant-rate cover, duration rounded to a 4 s quantum",
+   "bidir_const_4s/8s/16s": "bidirectional constant-rate streams on every link (the shipped posture), duration rounded to a 4/8/16 s quantum"
+  }
+ },
+ "results_100_sites": {
+  "chance": 0.01,
+  "none": {"accuracy": 0.3025, "overhead_x": 1.0},
+  "client_only": {"accuracy": 0.2204, "overhead_x": 2.5},
+  "per_hop_grace": {"accuracy": 0.1686, "overhead_x": 3.1},
+  "per_hop_full": {"accuracy": 0.0289, "overhead_x": 6.9},
+  "bidir_const_4s": {"accuracy": 0.0221, "overhead_x": 13.9},
+  "bidir_const_8s": {"accuracy": 0.0157, "overhead_x": 20.2},
+  "bidir_const_16s": {"accuracy": 0.0143, "overhead_x": 36.2}
+ },
+ "reading": {
+  "placement_dominates": "the same constant-rate shaping scores 22.0% client-side-only vs 2.9% when re-shaped per hop; downstream queueing erodes a clock set only at the client",
+  "direction_must_die": "only the bidirectional streams remove direction as a feature; per-hop full cover with a direction-carrying stream still leaks (2.9% -> 2.2% at the same 4 s quantum, and the gap widens with the quantum)",
+  "duration_is_the_last_leak": "accuracy converges toward chance as the duration quantum coarsens: 2.2% at 4 s, 1.6% at 8 s, 1.4% at 16 s against a 1.0% chance level",
+  "shipped_posture": "bidirectional constant-rate cover on every hop (src/daita.rs cover machine + per-hop OS-seeded schedules) measures 1.4-2.2% against a 1.0% floor at 100 sites"
+ },
+ "limits": "Synthetic traces and a classical classifier: this demonstrates mechanism and ordering at acceptance scale, not a real-world bound. The remaining acceptance gates (real traces, DF/Tik-Tok/RF attackers, cross-link flow confirmation, watermark injection) are Phase 1 lab work per docs/MESH_DESIGN.md section 8."
+}

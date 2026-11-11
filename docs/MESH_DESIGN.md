@@ -121,9 +121,12 @@ hardens (`retention.py`), and publishes the descriptor — or keeps it private:
 
 **Quota without a ledger.** Relaying for the mesh earns blind-signed credits;
 building a chain through others' nodes spends them. Public-pool credits are
-VOPRF (Privacy-Pass family): issuance unlinkable to redemption, daily epochs.
-The data plane rejects public spends **fail-closed** until a reviewed VOPRF
-verifier is vendored (`src/mesh/tokens.rs`); private groups use HMAC credits
+blind signatures: issuance unlinkable to redemption, daily epochs. The
+control-plane verifier landed as Chaum blind RSA-FDH (`tools/mesh_tokens.py`:
+blinded issuance, unlinked redemption, a digest-only double-spend ledger);
+the target primitive remains VOPRF (Privacy-Pass family), and the Rust data
+plane (`src/mesh/tokens.rs`) keeps rejecting public spends **fail-closed**
+until a reviewed VOPRF verifier is vendored. Private groups use HMAC credits
 (members already trust each other). A member who only ever uses their own
 private nodes needs no credits at all.
 
@@ -164,13 +167,28 @@ direction features, RandomForest, closed world (chance = 10%):
 | Bidirectional constant-rate, 8 s quantum | 16.4% | ~14× |
 | **Bidirectional constant-rate, 16 s quantum** | **8.9% ≈ chance** | ~25×; ~0.96 Mbit/s per link |
 
+The same comparison at the acceptance scale — 100 sites, 80 traces/site,
+closed world (chance = 1%), raw numbers in
+[docs/evidence/MESH_WF_SIM.json](evidence/MESH_WF_SIM.json):
+
+| Defense | WF accuracy | Cost |
+|---|---|---|
+| None | 30.3% | — |
+| Client-only constant-rate shaping (DAITA-style placement) | 22.0% | ~2.5× packets |
+| Per-hop re-shape with idle-grace cover | 16.9% | ~3× |
+| Per-hop full constant cover, 4 s quantum | 2.9% | ~7× |
+| Bidirectional constant-rate, 4 s quantum | 2.2% | ~14× |
+| Bidirectional constant-rate, 8 s quantum | 1.6% | ~20× |
+| **Bidirectional constant-rate, 16 s quantum** | **1.4% ≈ chance** | ~36× |
+
 Mechanisms the numbers demonstrate: **placement dominates** (the same shaping
-scores 71.8% client-side-only vs 23% per-hop); **direction must die** (only
-bidirectional streams remove it); **duration is the last leak** (accuracy
-converges to chance as the duration quantum coarsens). Synthetic traces and a
-classical classifier — this shows mechanism and ordering, not a real-world
-bound; it matches published Tamaraw/constant-rate results. The acceptance
-test is real traces against DF/Tik-Tok/RF at every vantage (§8).
+scores 22.0% client-side-only vs 2.9% per-hop at 100 sites); **direction must
+die** (only bidirectional streams remove it); **duration is the last leak**
+(accuracy converges to chance as the duration quantum coarsens). Synthetic
+traces and a classical classifier — this shows mechanism and ordering, not a
+real-world bound; it matches published Tamaraw/constant-rate results. The
+remaining acceptance test is real traces against DF/Tik-Tok/RF at every
+vantage (§8).
 
 ### Affording cover on free tiers
 
@@ -225,14 +243,15 @@ its own VM; exit operators' legal exposure; gossip metadata. Stated in
 | Member/node identity (hardware-anchored) | `src/mesh/identity.rs` | landed |
 | Descriptor schema + validation | `src/mesh/descriptor.rs`, `tools/mesh.py` | landed |
 | Directory + diversity chain selection | `src/mesh/directory.rs`, `tools/mesh.py` | landed |
-| Contribution credits | `src/mesh/tokens.rs`, `tools/mesh.py` | scaffolding, fail-closed; VOPRF verifier pending |
-| `avpn mesh` CLI | `src/bin/avpn/mesh.rs`, `tools/mesh.py` | landed (nodes/chain/offer/quota/identity) |
+| Contribution credits | `src/mesh/tokens.rs`, `tools/mesh_tokens.py`, `tools/mesh.py` | interim verifier landed: Chaum blind RSA-FDH credits in the Python control plane (unlinkable issue/spend, double-spend ledger, fail-closed); `tokens.rs` stays fail-closed until the VOPRF verifier is vendored |
+| `avpn mesh` CLI | `src/bin/avpn/mesh.rs`, `tools/mesh.py` | landed (nodes/chain/offer/quota/identity/publish) |
+| `avpn-mesh` launcher | `tools/install.py` | landed (user wrapper + system launcher, hash-locked venv) |
 | WF simulation | `tools/mesh_wf_sim.py` | landed |
-| Gossip transport + beacons | `tools/mesh.py` (fetch) | partial; inter-node gossip transport pending |
-| Descriptor signing via hardware unseal | `tools/mesh.py` | refuses until keyguard exposes a sealed signing path |
-| Ephemeral defense database (DAITA-v2-style) | — | pending |
-| Inter-relay chaff links | — | pending |
-| Real-trace 100-site acceptance run | — | pending (Phase 1 gate) |
+| Gossip transport + beacons | `tools/mesh.py`, `tools/mesh_beacon.py` | landed: store-and-forward gossip with TTL hop counter, dedup, per-member rate limits, auto-ban, anti-amplification (fixed-shape small responses; POSTs never trigger data-plane traffic) |
+| Descriptor signing via hardware unseal | `tools/keyguard.py`, `tools/mesh.py` | landed: `avpn mesh publish` signs through the sealed envelope (one PIN + touch per publish), self-checks the signed descriptor, and gossips it; unsigned publishing stays refused |
+| Ephemeral defense database (DAITA-v2-style) | `tools/defense_db.py`, `src/daita.rs` (`DefenseDb`), carrier `defense_db` | landed: rotating randomized strong-posture parameterizations, fail-closed validation mirrored in Rust and Python; no profile in force refuses the run |
+| Inter-relay chaff links | carrier `cover: "always-on"` | landed: 5 s keepalive on server roles starts the self-sustaining cover machine within seconds of tunnel setup, so idle relay↔relay links carry the same constant-rate stream as busy ones |
+| 100-site WF simulation run | `docs/evidence/MESH_WF_SIM.json` | landed (1.4–2.2% vs 1% chance for the shipped posture); real-trace DF/Tik-Tok/RF gates remain Phase 1 lab work (§8) |
 
 Non-goals: no token sale/cryptocurrency, no company, no GUI in v1, no mobile
 clients in v1, no exit-node requirement for membership, no weakening of the
