@@ -17,6 +17,7 @@ import resource
 import secrets
 import stat
 import subprocess
+import sys
 from urllib.parse import unquote_to_bytes
 
 from cryptography.hazmat.primitives import hashes
@@ -438,6 +439,61 @@ def memory_fd(key):
     return fd
 
 
+MESH_ROLE = "mesh-operator"
+
+
+def mesh_seal(vault, key_path, cert_path, envelope_path, remove_plaintext=False):
+    """Seal the mesh operator signing key under the hardware credential.
+
+    The envelope is bound to role 'mesh-operator' and to the operator public
+    key as its certificate, exactly like the role envelopes of `seal`: the key
+    can only come back out of the same vault, for the same role, against the
+    same public key. Refuses to overwrite an existing envelope."""
+    if envelope_path.exists():
+        raise ValueError("envelope exists")
+    secret, meta = hardware_secret(vault)
+    cert = read_private(cert_path)
+    key = read_private(key_path, 16384)
+    envelope = seal_bytes(secret, meta, MESH_ROLE, cert, key)
+    if open_bytes(secret, meta, MESH_ROLE, cert, envelope) != key:
+        raise RuntimeError("envelope verification failed")
+    atomic(envelope_path, json.dumps(envelope).encode())
+    if remove_plaintext:
+        key_path.unlink()
+
+
+def mesh_sign(vault, envelope_path, cert_path, descriptor_path):
+    """One PIN + touch: unseal the mesh operator key in memory, sign the
+    canonical descriptor, and print the signed descriptor as the last stdout
+    line (the avpn helper JSON contract).
+
+    Also emits the FIDO2 assertion over SHA-256(canonical descriptor): the
+    hardware-bound membership proof (a member IS their device - Nitrokey
+    preferred, any hmac-secret token works), verifiable offline with
+    verify_assertion(). The key is scrubbed best-effort before returning."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from cryptography.hazmat.primitives.asymmetric.ml_dsa import MLDSAPrivateKey
+    from mesh import canonical
+
+    envelope = json.loads(read_private(envelope_path))
+    cert = read_private(cert_path)
+    descriptor = json.loads(read_private(descriptor_path))
+    message = canonical(descriptor)
+    secret, meta, assertion = hardware_assertion(vault, message)
+    key = open_bytes(secret, meta, MESH_ROLE, cert, envelope)
+    try:
+        priv = MLDSAPrivateKey.from_private_bytes(key)
+        descriptor["signature"] = b64(priv.sign(message))
+    finally:
+        key = b"\x00" * len(key)  # best-effort scrub; CPython gives no guarantee
+    print(json.dumps({
+        "descriptor": descriptor,
+        "credential": meta["credential"],
+        "assertion": assertion,
+        "challenge_sha256": hashlib.sha256(message).hexdigest(),
+    }))
+
+
 def main():
     """Command-line entry point for vault and key-envelope operations."""
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
@@ -446,7 +502,7 @@ def main():
 
     ctypes.CDLL(None).prctl(4, 0, 0, 0, 0)  # PR_SET_DUMPABLE=0
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("action", choices=["enroll", "seal", "run"])
+    p.add_argument("action", choices=["enroll", "seal", "run", "mesh-seal", "mesh-sign"])
     p.add_argument("--vault", type=Path, required=True)
     p.add_argument("--config", type=Path)
     p.add_argument("--binary", type=Path)
@@ -455,10 +511,25 @@ def main():
     p.add_argument("--recovery-recipient", type=Path)
     p.add_argument("--verify-recovery-with", type=Path)
     p.add_argument("--age", type=Path)
+    p.add_argument("--key", type=Path, help="with mesh-seal: the operator signing key to seal")
+    p.add_argument("--cert", type=Path, help="with mesh-seal/mesh-sign: the operator public key")
+    p.add_argument("--envelope", type=Path, help="with mesh-seal/mesh-sign: the sealed-key envelope")
+    p.add_argument("--descriptor", type=Path, help="with mesh-sign: the descriptor JSON to sign")
     a = p.parse_args()
     if a.action == "enroll":
         enroll(a.vault)
         print("New hardware credential enrolled; existing credentials and PIN unchanged.")
+        return
+    if a.action == "mesh-seal":
+        if not (a.key and a.cert and a.envelope):
+            raise ValueError("mesh-seal needs --key, --cert and --envelope")
+        mesh_seal(a.vault, a.key, a.cert, a.envelope, a.remove_plaintext)
+        print("Mesh operator key sealed under the hardware credential.")
+        return
+    if a.action == "mesh-sign":
+        if not (a.envelope and a.cert and a.descriptor):
+            raise ValueError("mesh-sign needs --envelope, --cert and --descriptor")
+        mesh_sign(a.vault, a.envelope, a.cert, a.descriptor)
         return
     if not a.config:
         raise ValueError("configuration required")
