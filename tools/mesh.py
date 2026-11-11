@@ -31,6 +31,10 @@ GOSSIP_HOP_LIMIT = 3
 MESH_DIR = Path(os.environ.get("AVPN_MESH_DIR", Path.home() / ".config" / "advanced-vpn" / "mesh"))
 CLOUD = os.environ.get("AVPN_CLOUD", "/opt/advanced-vpn/bin/avpn-cloud")
 OPERATOR_KEY = Path(os.environ.get("AVPN_OPERATOR_KEY", Path.home() / ".config" / "advanced-vpn" / "operator.pub"))
+KEYGUARD = os.environ.get("AVPN_KEYGUARD", "/opt/advanced-vpn/tools/keyguard.py")
+VAULT = Path(os.environ.get("AVPN_VAULT", Path.home() / ".config" / "advanced-vpn" / "vault"))
+OPERATOR_ENVELOPE = Path(os.environ.get(
+    "AVPN_MESH_ENVELOPE", Path.home() / ".config" / "advanced-vpn" / "mesh" / "operator-key.sealed.json"))
 
 # Always-free capacity a member can contribute. Ranked by free egress: egress is
 # what a relay burns. egress_gib_month=0 means "unsuitable as a relay".
@@ -367,15 +371,65 @@ def cmd_publish(args) -> dict:
     if args.dry_run:
         return {"ok": True, "rows": [{"label": "plan", "value":
                 f"sign + gossip {d['node_id']} to group `{d['group']}` (ttl {GOSSIP_HOP_LIMIT})"}]}
-    _, MLDSAPrivateKey = _mldsa()
-    del MLDSAPrivateKey  # signing key stays in the sealed vault; see below
-    # The operator ML-DSA key is sealed under the hardware credential and is only
-    # unsealed in memory for one signing operation, exactly as in `avpn init`.
-    # That unseal path lives in tools/keyguard.py; until it exposes a mesh
-    # signing entry point, publish refuses rather than weakening key custody.
-    return {"ok": False, "error": "SealedKeyPathNotExposed",
-            "hint": "descriptor signing must go through the hardware-unseal path; "
-                    "see docs/MESH_DESIGN.md (no plaintext keys, ever)"}
+    # The operator ML-DSA key is sealed under the hardware credential and is
+    # only unsealed in memory for one signing operation, exactly as in
+    # `avpn init`: keyguard mesh-sign does one PIN + touch, signs the
+    # canonical descriptor, and returns it as the last JSON stdout line,
+    # together with the FIDO2 membership assertion over the same bytes.
+    if not OPERATOR_ENVELOPE.exists():
+        return {"ok": False, "error": "NoSealedOperatorKey",
+                "hint": f"seal the operator key once: keyguard.py mesh-seal --vault {VAULT} "
+                        f"--key <operator.key> --cert {OPERATOR_KEY} --envelope {OPERATOR_ENVELOPE} "
+                        "--remove-plaintext"}
+    MESH_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = MESH_DIR / ".publish.tmp"
+    tmp.write_text(json.dumps(d))
+    os.chmod(tmp, 0o600)
+    proc = subprocess.run(
+        [sys.executable, KEYGUARD, "mesh-sign", "--vault", str(VAULT),
+         "--envelope", str(OPERATOR_ENVELOPE), "--cert", str(OPERATOR_KEY),
+         "--descriptor", str(tmp)],
+        capture_output=True, text=True)
+    tmp.unlink(missing_ok=True)
+    if proc.returncode != 0:
+        return {"ok": False, "error": "HardwareSignRefused",
+                "hint": "the hardware token refused or was absent; nothing was published"}
+    try:
+        out = parse_last_json(proc.stdout)
+        signed = out["descriptor"]
+    except Exception:
+        return {"ok": False, "error": "SignerOutputInvalid"}
+    # Fail-closed self-check: a descriptor we cannot verify never leaves us.
+    if validate(signed, now) or not verify_descriptor(signed):
+        return {"ok": False, "error": "SelfCheckFailed",
+                "hint": "the signed descriptor did not verify; refusing to gossip it"}
+    if out.get("assertion"):
+        proof = MESH_DIR / "membership-proof.json"
+        proof.write_text(json.dumps({
+            "schema": SCHEMA,
+            "member": d["node_id"],
+            "credential": out.get("credential"),
+            "assertion": out["assertion"],
+            "challenge_sha256": out.get("challenge_sha256"),
+        }))
+        os.chmod(proof, 0o600)
+    node_desc.write_text(json.dumps(signed))
+    os.chmod(node_desc, 0o600)
+    g = gossip_descriptor(signed)
+    return {"ok": True, "rows": [
+        {"label": "node", "value": f"{d['node_id']} signed (hardware, one PIN + touch)"},
+        {"label": "gossip", "value": f"{g['sent']}/{g['beacons']} beacons accepted"},
+    ], "gossip": g}
+
+
+def parse_last_json(stdout: str) -> dict:
+    """The avpn helper contract: the LAST stdout line that starts with '{' is
+    the JSON result; earlier lines are human-facing logs."""
+    for line in reversed(stdout.strip().splitlines()):
+        line = line.strip()
+        if line.startswith("{"):
+            return json.loads(line)
+    raise ValueError("no JSON result line")
 
 
 def gossip_descriptor(descriptor: dict, hop: int = 0) -> dict:

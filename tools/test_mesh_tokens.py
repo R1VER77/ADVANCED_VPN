@@ -44,7 +44,7 @@ class BlindSignatureTests(unittest.TestCase):
         token = mt.new_token()
         blinded, r = mt.blind(token, key.public_key())
         sig = mt.unblind(mt.sign_blinded(key, blinded), r, key.public_key())
-        self.assertFalse(mt.verify(token, sig, key.public_key()))
+        self.assertFalse(mt.verify(token, sig, other.public_key()))
 
     def test_unblinded_signature_is_unlinkable_to_blinded_value(self):
         # The issuer's view is (blinded, blind_signature); the spender's view is
