@@ -44,7 +44,7 @@ class UserInstallTests(unittest.TestCase):
 
     def test_installs_a_working_command_line(self):
         app = self.install()
-        for b in install.BINARIES + ["avpnctl", "avpn-cloud"]:
+        for b in install.BINARIES + ["avpnctl", "avpn-cloud", "avpn-mesh"]:
             self.assertTrue(os.access(app / "bin" / b, os.X_OK), b)
         self.assertTrue((app / "docs/cli/overview.md").exists())
         self.assertFalse(list(app.rglob("__pycache__")))
@@ -77,6 +77,14 @@ class UserInstallTests(unittest.TestCase):
         self.assertEqual(sorted(p.name for p in self.data.iterdir()), ["app"])
         self.assertEqual((self.data / "app" / "bin" / "avpnctl").read_text(), before)
         self.assertEqual(self.avpn("--version").returncode, 0)
+
+    def test_user_wrapper_exports_the_mesh_tool(self):
+        app = self.install()
+        wrapper = (self.bin / "avpn").read_text()
+        self.assertIn("AVPN_MESH=", wrapper)
+        self.assertIn(str(app / "bin/avpn-mesh"), wrapper)
+        mesh_launcher = (app / "bin" / "avpn-mesh").read_text()
+        self.assertIn("tools/mesh.py", mesh_launcher)
 
     def test_root_is_refused(self):
         with mock.patch.object(install.os, "geteuid", lambda: 0):

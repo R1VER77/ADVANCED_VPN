@@ -116,6 +116,9 @@ def _install_user(data, bin_dir, python, stage):
         'exec %s -E -s %s --bin-dir %s "$@"' % (q(str(python)), q(str(app / "tools/avpnctl.py")), q(str(app / "bin"))),
     )
     launcher(stage / "bin/avpn-cloud", 'exec %s -E -s %s "$@"' % (q(sys.executable), q(str(app / "tools/cloud.py"))))
+    # avpn-mesh signs and verifies ML-DSA descriptors, so it runs in the
+    # hash-locked venv (like avpnctl), not the bare interpreter avpn-cloud uses.
+    launcher(stage / "bin/avpn-mesh", 'exec %s -E -s %s "$@"' % (q(str(python)), q(str(app / "tools/mesh.py"))))
     old = data / ("app.old-%d" % os.getpid())
     if app.exists():
         app.rename(old)
@@ -126,8 +129,9 @@ def _install_user(data, bin_dir, python, stage):
         bin_dir / "avpn",
         "# ADVANCED_VPN command line, user installation (tools/install.py --user).\n"
         "# As root, avpn ignores these variables by design and uses /opt/advanced-vpn.\n"
-        'export AVPN_CONTROLLER=%s AVPN_CLOUD=%s\nexec %s "$@"'
-        % (q(str(app / "bin/avpnctl")), q(str(app / "bin/avpn-cloud")), q(str(app / "bin/avpn"))),
+        'export AVPN_CONTROLLER=%s AVPN_CLOUD=%s AVPN_MESH=%s\nexec %s "$@"'
+        % (q(str(app / "bin/avpnctl")), q(str(app / "bin/avpn-cloud")), q(str(app / "bin/avpn-mesh")),
+           q(str(app / "bin/avpn"))),
     )
     return app
 
@@ -276,12 +280,14 @@ def main():
     # -E -s, not -I: ignore PYTHON* variables and the user site directory, but keep the
     # (root-owned) script directory on sys.path, which -I drops on Python 3.11+.
     # `avpn` is the Rust front end. It runs `avpnctl` (the privileged controller,
-    # in the hash-locked venv) and `avpn-cloud` (stdlib only; runs as the user, whose
-    # own provider sign-in it uses).
+    # in the hash-locked venv), `avpn-cloud` (stdlib only; runs as the user, whose
+    # own provider sign-in it uses) and `avpn-mesh` (the mesh tool; the venv again,
+    # for ML-DSA descriptor signing and verification).
     launchers = {
         "avpnctl": "exec /opt/advanced-vpn/venv/bin/python -E -s /opt/advanced-vpn/tools/avpnctl.py"
         ' --bin-dir /opt/advanced-vpn/bin "$@"',
         "avpn-cloud": 'exec /usr/bin/python3 -E -s /opt/advanced-vpn/tools/cloud.py "$@"',
+        "avpn-mesh": 'exec /opt/advanced-vpn/venv/bin/python -E -s /opt/advanced-vpn/tools/mesh.py "$@"',
     }
     for name, body in launchers.items():
         (package / "bin" / name).write_text("#!/bin/sh\n" + body + "\n")
