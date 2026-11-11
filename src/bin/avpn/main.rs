@@ -11,6 +11,7 @@ mod app;
 mod cells;
 mod cloud;
 mod controller;
+mod mesh;
 mod theme;
 mod topics;
 
@@ -109,6 +110,9 @@ enum Cmd {
     /// Create, inspect and remove the chain's cloud servers.
     #[command(disable_help_flag = true)]
     Cloud(Rest),
+    /// Browse the community mesh, offer nodes, build chains.
+    #[command(disable_help_flag = true)]
+    Mesh(Rest),
     /// Reference pages: avpn help [TOPIC].
     Help {
         /// A command or concept; omit for the list.
@@ -135,6 +139,7 @@ impl Cmd {
             Cmd::Unlock(r) => ("unlock", r.args),
             Cmd::Reset(r) => ("reset", r.args),
             Cmd::Cloud(r) => ("cloud", r.args),
+            Cmd::Mesh(r) => ("mesh", r.args),
             Cmd::Help { topic } => ("help", topic.into_iter().collect()),
         }
     }
@@ -219,6 +224,9 @@ fn run(cli: Cli, theme: Theme) -> i32 {
     }
     if action == "cloud" {
         return cloud::main(&args, cli.json, theme);
+    }
+    if action == "mesh" {
+        return mesh::main(&args, cli.json, theme);
     }
     let ctrl = match Controller::locate(cli.state) {
         Ok(c) => c,
