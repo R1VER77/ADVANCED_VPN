@@ -5,8 +5,11 @@
 pub mod cloak;
 /// Data-plane configuration files and inherited key descriptors.
 pub mod config;
-/// The DAITA (Maybenot) machines of the WireGuard carrier.
+/// The DAITA (Maybenot) machines of the WireGuard carrier: strong, on every hop.
 pub mod daita;
+/// AVPN/Mesh: community node identity, signed descriptors, the node directory
+/// and unlinkable contribution credits. See docs/MESH_DESIGN.md.
+pub mod mesh;
 /// Relay, exit and client session loops.
 pub mod run;
 /// QUIC/TLS settings: hybrid-PQ key exchange, ML-DSA-65 only, pinning, layer sizes.
