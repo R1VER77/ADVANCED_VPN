@@ -5,7 +5,7 @@ Decodes both captures with tshark (Wireshark), cuts out every page load, turns e
 a k-FP-style feature vector (counts, directions, bursts, ordering, timing, packets per
 0.25 s) plus CUMUL (cumulative signed size at 50 points), and scores a 500-tree random
 forest with stratified 5-fold cross-validation. It attacks two views of the same loads:
-  inner link  relay <-> exit QUIC: constant cells, no DAITA (GSO super-frames split)
+  inner link  relay <-> exit: paced, encrypted constant-rate cells (GSO super-frames split)
   carrier     client <-> relay WireGuard + DAITA: what the client's ISP sees
 
 Windows: by default each load runs from its true start to its true end plus --tail
@@ -86,7 +86,7 @@ def attack(run, tail, fixed):
     loads = [p for p in meta["phases"] if p.get("site")]
     res = dict(rate=meta.get("rate", meta.get("defense")), loads=len(loads), sites=len({p["site"] for p in loads}),
                window="fixed %g s" % fixed if fixed else "true end + %g s" % tail)  # fmt: skip
-    for name, pcap in (("inner link (no DAITA)", "inner_link.pcap"), ("carrier (DAITA)", "client_link.pcap")):
+    for name, pcap in (("inner link (paced)", "inner_link.pcap"), ("carrier (DAITA)", "client_link.pcap")):
         pk = packets(run, pcap)
         X, y = [], []
         for p in loads:

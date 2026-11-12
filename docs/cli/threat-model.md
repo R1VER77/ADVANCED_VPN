@@ -116,9 +116,11 @@ random guess is right **3.3%** of the time (`1/30`).
 | View / Rate class | Right, given 6 s from each page's start | Right, told the exact timestamp each page ended |
 |---|---|---|
 | Inner link before per-hop shaping (v0.7.0, same loads) | 27.0–74.7% | 42.7–81.3% |
+| Inner link with per-hop shaping (v0.8.0) — `metered` / `fast` | **2.3% / 2.7%** (chance 3.3%) | — |
 | Carrier — `metered` (50 pps / direction) | **3.3%** (= 1/30 random chance) | 21.3% |
 | Carrier — `fast` (4,000 pps / direction) | **1.7%** (≤ 1/30 random chance) | 20.0% |
 
+- With per-hop shaping (v0.8.0) the link into the exit is at chance too; the carrier read 3.7% / 4.3% in that run, within sampling noise of the 3.3% floor.
 - In a continuous constant-rate stream, there is no on-wire start or end marker: under the fixed 6 s observation window, the classifier on both `metered` (**3.3%**) and `fast` (**1.7%**) is at or below the **3.3%** random-chance floor.
 - Even when an external oracle tells the attacker the exact instant each page finished loading (`true end + 3 s`), accuracy drops from `42.7–81.3%` on the unshaped inner link to `20.0–21.3%` on the carrier.
 - All four rate classes keep the outer wire rate constant between idle and full-load transfers (`tools/throughput_bench.py --shape-idle 5`):

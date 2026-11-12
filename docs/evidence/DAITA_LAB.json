@@ -59,5 +59,32 @@
   "fails_closed": "the cloak requires an underlay IPv4 MTU >= 1448; below that the client refuses to connect and keeps the kill switch",
   "roaming": "changing the client's address mid-transfer is survived: the cloak reconnects and the carrier keepalive re-learns the address",
   "liveness_guard": "vendor/gotatun flushes the strict-blocking delay queue if real packets sit behind active blocking with no decoy drain for 3 s, preventing start-outage stalls"
+ },
+ "v0_8_0_per_hop_shaping": {
+  "date": "2026-11-12",
+  "setup": "Same 30-site, 300-load lab and attack as above, fixed 6 s window, with every server-to-server link paced and encrypted (src/link.rs). Chance = 1/30 = 3.3%.",
+  "results": {
+   "metered": {
+    "inner link (no DAITA)": {
+     "accuracy": 0.023,
+     "chance": 0.033
+    },
+    "carrier (DAITA)": {
+     "accuracy": 0.037,
+     "chance": 0.033
+    }
+   },
+   "fast": {
+    "inner link (no DAITA)": {
+     "accuracy": 0.027,
+     "chance": 0.033
+    },
+    "carrier (DAITA)": {
+     "accuracy": 0.043,
+     "chance": 0.033
+    }
+   }
+  },
+  "reading": "The inner link (relay -> exit), unshaped in v0.7.0 at 27.0-74.7%, now scores 2.3% (metered) and 2.7% (fast), at chance. The carrier reads 3.7% and 4.3% in this run (1.7-3.3% in the v0.7.0 run): within the sampling noise of 5-fold cross-validation over 300 loads around the 3.3% chance level."
  }
 }
