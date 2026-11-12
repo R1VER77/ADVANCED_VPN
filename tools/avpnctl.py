@@ -29,6 +29,7 @@ import time
 
 from keyguard import atomic, read_private, trusted_exe
 import retention
+from i2p import FRONT_RATES
 from managed_profile import (
     RATE_CLASSES,
     choose_rate,
@@ -162,30 +163,26 @@ def app_firewall(ns):
     )
 
 
-def whole_firewall(profile, service_uid=None):
-    """Whole-device kill switch: drop everything except the tunnel, the carrier to the first hop and loopback."""
+def whole_firewall(profile, service_uid=None, front_uid=None):
+    """Whole-device kill switch: drop everything except the tunnel, the carrier to the first hop and loopback.
+    Behind an I2P front the carrier never leaves the host: only the I2P router's own user
+    may (and the front table keeps even it away from the entry's address)."""
     host, port = profile["network"]["relay_endpoint"].rsplit(":", 1)
-    carrier_allow = (
-        ""
-        if service_uid is None
-        else (
-            "  meta skuid "
-            + str(service_uid)
-            + " ip daddr "
-            + host
-            + " udp dport "
-            + str(int(port))
-            + " accept\n  meta skuid "
-            + str(service_uid)
-            + " ip daddr "
-            + host
-            + " tcp dport "
-            + str(int(port))
-            + " accept\n  meta skuid "
-            + str(service_uid)
-            + ' ip daddr 10.78.0.1 udp dport 4433 oifname "avwg0" accept\n'
-        )
-    )
+    carrier_allow = ""
+    if profile.get("front"):
+        if front_uid in (None, 0, service_uid):
+            raise RuntimeError("the I2P router needs its own unprivileged user")
+        carrier_allow += "  meta skuid %d meta l4proto {tcp, udp} accept\n" % int(front_uid)
+    elif service_uid is not None:
+        for proto in ["udp", "tcp"]:
+            carrier_allow += "  meta skuid %d ip daddr %s %s dport %d accept\n" % (
+                int(service_uid),
+                ipaddress.IPv4Address(host),
+                proto,
+                int(port),
+            )
+    if service_uid is not None:
+        carrier_allow += '  meta skuid %d ip daddr 10.78.0.1 udp dport 4433 oifname "avwg0" accept\n' % int(service_uid)
     replace_table(
         """table inet advanced_vpn {
  chain output { type filter hook output priority -100; policy drop;
@@ -290,7 +287,51 @@ def upstream_route(iface, gateway=None):
     raise RuntimeError("upstream interface %s has no gateway; set avpn preferences --upstream-gateway" % iface)
 
 
-def ensure_network(profile, state, whole=False, service_uid=0, upstream=None, upstream_gateway=None):
+FRONT_TABLE = "advanced_vpn_front"
+# Whole-device mode moves the default route into the tunnel; the I2P router's own packets
+# (which carry that tunnel) keep the underlay through this routing table and rule.
+FRONT_ROUTES = 7797
+
+
+def front_routes(snapshot_default, uid):
+    """Policy-route the I2P router's user over the underlay's default route."""
+    cmd("ip", "rule", "del", "priority", str(FRONT_ROUTES), check=False)
+    cmd("ip", "route", "flush", "table", str(FRONT_ROUTES), check=False)
+    if not snapshot_default:
+        raise RuntimeError("no underlay default route for the I2P router")
+    route = snapshot_default[0]
+    args = ["ip", "route", "replace", "default"]
+    if route.get("gateway"):
+        args += ["via", str(ipaddress.IPv4Address(route["gateway"]))]
+    args += ["dev", valid_interface(route["dev"]), "table", str(FRONT_ROUTES)]
+    cmd(*args)
+    cmd(
+        "ip",
+        "rule",
+        "add",
+        "uidrange",
+        "%d-%d" % (uid, uid),
+        "lookup",
+        str(FRONT_ROUTES),
+        "priority",
+        str(FRONT_ROUTES),
+    )
+
+
+def front_guard(profile):
+    """A client behind an I2P front: install (or, without a front, remove) the table that
+    keeps every packet of this host away from the entry's own address."""
+    exists = cmd("/usr/sbin/nft", "list", "table", "inet", FRONT_TABLE, check=False).returncode == 0
+    text = "delete table inet %s\n" % FRONT_TABLE if exists else ""
+    if profile.get("front"):
+        from i2p import front_firewall
+
+        text += front_firewall(profile["network"]["relay_endpoint"].rsplit(":", 1)[0])
+    if text:
+        nft(text)
+
+
+def ensure_network(profile, state, whole=False, service_uid=0, upstream=None, upstream_gateway=None, front_uid=None):
     """Build this role's network (TUN, namespace, routes, firewall), snapshotting the prior state once."""
     role = profile["role"]
     n = profile["network"]
@@ -299,11 +340,16 @@ def ensure_network(profile, state, whole=False, service_uid=0, upstream=None, up
     if not snapshot.exists():
         save(snapshot, dict(default=json.loads(cmd("ip", "-j", "route", "show", "default").stdout), whole_device=whole))
     if role == "client":
+        front = profile.get("front")
+        if front and upstream:
+            raise RuntimeError("an I2P front and an upstream entry are exclusive: the front already hides the entry")
+        # Before anything else: behind a front, nothing here may reach the entry directly.
+        front_guard(profile)
         if whole:
             if os.environ.get("SSH_CONNECTION"):
                 raise RuntimeError("whole-device activation requires a local console")
             # Firewall is installed before any route change; errors leave traffic blocked.
-            whole_firewall(profile, service_uid)
+            whole_firewall(profile, service_uid, front_uid)
         else:
             if cmd("ip", "netns", "list").stdout.split().count(APP) == 0:
                 cmd("ip", "netns", "add", APP)
@@ -314,7 +360,11 @@ def ensure_network(profile, state, whole=False, service_uid=0, upstream=None, up
             app_firewall(APP)
         ns = None if whole else APP
         relay_ip = n["relay_endpoint"].rsplit(":", 1)[0]
-        if upstream:
+        if front:
+            # The cloak reaches the entry only through the local I2P router: no route to it.
+            upstream_firewall(n["relay_endpoint"], None)
+            r = None
+        elif upstream:
             # Upstream entry: the guard goes in before the route, and a missing upstream
             # refuses the connection instead of falling back to the direct path.
             r = upstream_route(upstream, upstream_gateway)
@@ -322,23 +372,26 @@ def ensure_network(profile, state, whole=False, service_uid=0, upstream=None, up
         else:
             upstream_firewall(n["relay_endpoint"], None)
             r = route_to(relay_ip)
-        mtu_rows = json.loads(cmd("ip", "-j", "link", "show", "dev", r["dev"]).stdout)
+        mtu_rows = json.loads(cmd("ip", "-j", "link", "show", "dev", r["dev"]).stdout) if r else None
         # The carrier rides inside the HTTP/3 cloak's QUIC: a full WireGuard datagram becomes a
         # 1420-byte QUIC UDP payload (cloak::OUTER_MTU), i.e. a 1448-byte IPv4 packet (+8 UDP +20 IP).
         # Below that the cloak cannot send full packets, so refuse rather than black-hole them; the
         # kill switch stays up (fail closed), as the caller's cleanup leaves it in place.
-        if mtu_rows[0]["mtu"] < UNDERLAY_MIN_MTU:
+        if mtu_rows and mtu_rows[0]["mtu"] < UNDERLAY_MIN_MTU:
             raise RuntimeError(
                 "underlay MTU below the camouflage minimum (%d); the first hop is unreachable here" % UNDERLAY_MIN_MTU
             )
-        args = ["ip", "route", "replace", relay_ip + "/32"]
-        if "gateway" in r:
-            args += ["via", r["gateway"]]
-        args += ["dev", r["dev"]]
-        cmd(*args)
+        if r:
+            args = ["ip", "route", "replace", relay_ip + "/32"]
+            if "gateway" in r:
+                args += ["via", r["gateway"]]
+            args += ["dev", r["dev"]]
+            cmd(*args)
         tun(WG, "10.78.0.2/32", 1340, owner=service_uid)
         cmd("ip", "route", "replace", "10.78.0.1/32", "dev", WG)
         tun(TUN, "10.77.0.2/32", profile["core"]["mtu"], ns, owner=service_uid)
+        if front and whole:
+            front_routes(json.loads(read_private(snapshot))["default"], front_uid)
         prefix = ["ip", "-n", ns] if ns else ["ip"]
         cmd(*prefix, "route", "replace", "default", "dev", TUN)
         # The resolver file is public data, mounted only into isolated app processes.
@@ -560,6 +613,89 @@ BINARIES = {
     "cloak": "advanced-vpn-cloak",
 }
 CHILD_KEYS = {"core": ["outer", "middle", "inner", "link"], "carrier": ["wireguard"], "cloak": ["token", "cloak"]}
+# The I2P front's router (i2pd) is not ours: an unmodified, separately installed program
+# under its own user, configured in a RAM directory only that user can read.
+FRONT_USER = "advanced-vpn-i2p"
+I2PD_PATHS = ["/usr/sbin/i2pd", "/usr/bin/i2pd"]
+
+
+def front_identity(lab):
+    """The I2P router's own UID/GID: `advanced-vpn-i2p`, or the mapped lab user 2."""
+    if lab:
+        lab_guard()
+        mapped = any(
+            int(p[0]) <= 2 < int(p[0]) + int(p[2])
+            for p in (row.split() for row in Path("/proc/self/uid_map").read_text().splitlines())
+        )
+        if not mapped:
+            raise RuntimeError("the I2P front lab needs a mapped user 2 (unshare --map-auto)")
+        return 2, 2
+    user = pwd.getpwnam(FRONT_USER)
+    if user.pw_uid == 0 or user.pw_gid == 0:
+        raise RuntimeError("a dedicated non-root I2P identity is required")
+    return user.pw_uid, user.pw_gid
+
+
+def front_binary(lab):
+    """i2pd: root-owned and not writable by others (in the lab: $AVPN_I2PD)."""
+    if lab and os.environ.get("AVPN_I2PD"):
+        return Path(os.environ["AVPN_I2PD"])
+    for path in map(Path, I2PD_PATHS):
+        if path.exists():
+            st = path.stat()
+            if path.is_symlink() or st.st_uid != 0 or st.st_mode & 0o022:
+                raise RuntimeError("i2pd must be root-owned and not group/world writable")
+            return path
+    raise RuntimeError("the I2P front needs i2pd (apt install i2pd; avpn help front)")
+
+
+def prepare_front(profile, key_handles, uid, gid, lab=False):
+    """The I2P router's RAM directory (owned by its user): router and tunnel files, and on
+    the entry its destination's private keys. Lab only: $AVPN_LAB_I2P names a private test
+    network (JSON: netid, reseed zip, this node's address)."""
+    import tempfile
+
+    import i2p
+
+    base = Path("/run/advanced-vpn-runtime-" + str(os.stat("/proc/self/ns/net").st_ino))
+    d = Path(tempfile.mkdtemp(prefix="i2p-", dir=base))
+    d.chmod(0o700)
+    os.chown(d, uid, gid)
+    testnet = (
+        json.loads(Path(os.environ["AVPN_LAB_I2P"]).read_text()) if lab and os.environ.get("AVPN_LAB_I2P") else None
+    )
+    front = profile["front"]
+    if profile["role"] == "client":
+        conf = i2p.router_conf(d, verbose=lab, testnet=testnet)
+        tunnels = i2p.tunnels_conf(front)
+    else:
+        host = profile["network"]["relay_endpoint"].rsplit(":", 1)[0]
+        conf = i2p.router_conf(d, host=host, port=front["router_port"], verbose=lab, testnet=testnet)
+        keys = fd_bytes(key_handles["i2p"])
+        i2p.private_identity(keys)
+        owned_public(d / "front.dat", keys, uid, gid)
+        tunnels = i2p.tunnels_conf(front, d / "front.dat", d)
+    owned_public(d / "i2pd.conf", conf.encode(), uid, gid)
+    owned_public(d / "tunnels.conf", tunnels.encode(), uid, gid)
+    return d
+
+
+def launch_front(binary, directory, uid, gid, log=None, lab=False):
+    """Start i2pd under its own user, without capabilities, tied to the supervisor."""
+    env = {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin"}
+    if lab and os.environ.get("LD_LIBRARY_PATH"):
+        env["LD_LIBRARY_PATH"] = os.environ["LD_LIBRARY_PATH"]
+    return subprocess.Popen(
+        [str(binary), "--datadir", str(directory), "--conf", str(directory / "i2pd.conf"),
+         "--tunconf", str(directory / "tunnels.conf")],
+        preexec_fn=functools.partial(child_guard, os.getpid(), uid, gid),
+        env=env,
+        cwd=str(directory),
+        stdout=log or subprocess.DEVNULL,
+        stderr=log or subprocess.DEVNULL,
+    )  # fmt: skip
+
+
 CLOAK_TOKEN_LABEL = b"advanced-vpn cloak"
 
 
@@ -661,14 +797,14 @@ def prepare_runtime(cfg, bin_dir, state, uid, gid, lab=False):
         executables.mkdir(mode=0o755, exist_ok=True)
         executables.chmod(0o755)
         # Only what this device runs: a middle relay never stages the cloak or WireGuard.
-        for name in [BINARIES[section] for section in cfg]:
+        for name in [BINARIES[section] for section in cfg if section in BINARIES]:
             src = bin_dir / name
             tmp = executables / (name + ".tmp")
             shutil.copyfile(src, tmp)
             tmp.chmod(0o755)
             os.replace(tmp, executables / name)
     else:
-        for name in [BINARIES[section] for section in cfg]:
+        for name in [BINARIES[section] for section in cfg if section in BINARIES]:
             path = executables / name
             if path.is_symlink() or path.stat().st_uid != 0 or path.stat().st_mode & 0o022:
                 raise RuntimeError("installed binaries must be root-owned and not group/world writable")
@@ -794,6 +930,7 @@ def supervise(state, bin_dir, lab=False, whole=False):
                 "with avpn cloud (avpn help retention)" % "; ".join(name for name, _, _ in failing)
             )
     uid, gid = service_identity(lab)
+    front_uid, front_gid = front_identity(lab) if profile.get("front") else (None, None)
     rt = runtime_dir(state)
     lock = os.open(rt / "controller.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -812,6 +949,7 @@ def supervise(state, bin_dir, lab=False, whole=False):
         uid,
         upstream=early.get("upstream_interface"),
         upstream_gateway=early.get("upstream_gateway"),
+        front_uid=front_uid,
     )
     cfg = runtime(profile, state)
     preferences = json.loads(read_private(state / "preferences.json")) if (state / "preferences.json").exists() else {}
@@ -835,7 +973,11 @@ def supervise(state, bin_dir, lab=False, whole=False):
         out_dir=rt,
     )
     bin_dir, device_dir = prepare_runtime(cfg, bin_dir, state, uid, gid, lab)
-    for name in cfg:
+    front_dir = front_exe = None
+    if "front" in cfg:
+        front_exe = front_binary(lab)
+        front_dir = prepare_front(profile, key_handles, front_uid, front_gid, lab)
+    for name in [n for n in cfg if n in BINARIES]:
         binary = bin_dir / BINARIES[name]
         fds = {r: v for r, v in key_handles.items() if r in CHILD_KEYS.get(name, [])}
         args = [str(binary), "--config", str(device_dir / (name + ".runtime.json")), "--check"]
@@ -970,11 +1112,13 @@ def supervise(state, bin_dir, lab=False, whole=False):
                         cfg[name]["byte_budget"] = amount
                         carrier_meter(profile, amount)
                     publish_runtime(cfg, device_dir, uid, gid)
-                binary = str(bin_dir / BINARIES[name])
+                binary = str(bin_dir / BINARIES.get(name, ""))
                 path = device_dir / (name + ".runtime.json")
                 log = (rt / (name + ".lab.log")).open("a") if lab else None  # lab only; RAM like everything else
                 fds = {r: v for r, v in key_handles.items() if r in CHILD_KEYS.get(name, [])}
-                if name == "core" and profile["role"] == "client" and not whole:
+                if name == "front":
+                    children[name] = launch_front(front_exe, front_dir, front_uid, front_gid, log, lab)
+                elif name == "core" and profile["role"] == "client" and not whole:
                     children[name] = launch_client(binary, path, APP, log, fds, uid, gid)
                 else:
                     args = [binary, "--config", str(path)]
@@ -1019,6 +1163,8 @@ def supervise(state, bin_dir, lab=False, whole=False):
         for fd in key_handles.values():
             os.close(fd)
         shutil.rmtree(device_dir, ignore_errors=True)
+        if front_dir:
+            shutil.rmtree(front_dir, ignore_errors=True)
 
 
 def control_signal(state, signum):
@@ -1044,6 +1190,8 @@ def managed_identities(cfg):
         out["wireguard"] = cfg["carrier"]["identity"]
     if cfg.get("cloak", {}).get("role") == "server":
         out["cloak"] = cfg["cloak"]
+    if "router_port" in cfg.get("front", {}):
+        out["i2p"] = {}  # the entry's I2P destination keys
     return out
 
 
@@ -1145,8 +1293,10 @@ def reset(state, lab=False):
             row = json.loads(cmd("ip", "-j", "link", "show", "dev", name).stdout)[0]
             if row.get("ifalias") == "advanced-vpn-managed":
                 cmd("ip", "link", "del", name)
-    for name in ["advanced_vpn", "advanced_vpn_meter", UPSTREAM_TABLE]:
+    for name in ["advanced_vpn", "advanced_vpn_meter", UPSTREAM_TABLE, FRONT_TABLE]:
         cmd("/usr/sbin/nft", "delete", "table", "inet", name, check=False)
+    cmd("ip", "rule", "del", "priority", str(FRONT_ROUTES), check=False)
+    cmd("ip", "route", "flush", "table", str(FRONT_ROUTES), check=False)
     save(rt / "status.json", dict(schema=1, state="unlocked", kill_switch=False, explicit_cleartext_permission=True))
 
 
@@ -1447,6 +1597,18 @@ def build_parser():
         help="NAME=IP:PORT: a standby exit (2-3 hops); give its request as --request NAME=FILE",
     )
     init.add_argument(
+        "--front",
+        choices=["i2p"],
+        help="reach the entry through I2P: its provider sees I2P routers, never your address (avpn help front)",
+    )
+    init.add_argument(
+        "--front-hops",
+        type=int,
+        choices=[1, 2, 3],
+        default=2,
+        help="I2P hops each way between you and the entry (1: one router sees both ends; default 2: none does)",
+    )
+    init.add_argument(
         "--rotate-seconds",
         default="900,3600",
         help="MIN,MAX: with standby exits, rotate among the live ones at a random time in this window",
@@ -1509,7 +1671,92 @@ def build_parser():
         help="group to run as (default: the sudo caller)",
     )
     r.add_argument("command", nargs=argparse.REMAINDER, help="the command, after --")
+    mx = s.add_parser("mix", help="the mix lane: a Katzenpost mixnet client inside the protected namespace")
+    mx.add_argument("mix_action", choices=["setup", "start", "status", "fetch", "stop"], help="what to do")
+    mx.add_argument("url", nargs="?", help="fetch: an absolute http(s) URL")
+    mx.add_argument("--config", type=Path, help="setup: the directory holding the mixnet's client.toml")
+    mx.add_argument("--method", choices=["GET", "HEAD"], default="GET", help="fetch: the request method")
+    for flag, env in [("--uid", "SUDO_UID"), ("--gid", "SUDO_GID")]:
+        mx.add_argument(
+            flag,
+            type=int,
+            default=int(os.environ.get(env, "0")),
+            help="start/fetch: the %s to run as (default: the sudo caller's)" % flag[2:],
+        )
     return p
+
+
+def mix_command(a):
+    """avpn mix: install a mixnet configuration, run its client inside the protected
+    namespace (so the mixnet sees the chain's exit), fetch through it, stop it."""
+    import mix
+
+    state = a.state.resolve()
+    rt = runtime_dir(state)
+    record = rt / "mix.json"
+    tool = Path(__file__).resolve().parent / "mix.py"
+
+    def running():
+        if not record.exists():
+            return None
+        value = json.loads(read_private(record))
+        return value if identity_of(value["pid"]) == value["identity"] else None
+
+    if a.mix_action == "setup":
+        if not a.config:
+            raise ValueError("setup needs --config DIR (the mixnet's client.toml)")
+        mix.setup(a.config, state / "mix")
+        emit(a, "Mixnet configuration installed; start it with avpn mix start.", configured=True)
+    elif a.mix_action == "start":
+        if running():
+            emit(a, "The mix lane is already running.", running=True)
+            return
+        if not (state / "mix" / "client.toml").exists():
+            raise RuntimeError("no mixnet configuration: avpn mix setup --config DIR")
+        mix.binaries()
+        # The client runs as the user: give it a copy of the (public) configuration.
+        work = Path("/run/advanced-vpn-mix-%d" % a.uid)
+        shutil.rmtree(work, ignore_errors=True)
+        work.mkdir(mode=0o700)
+        for name in mix.CONFIG_FILES:
+            shutil.copy(state / "mix" / name, work / name)
+            if a.uid:
+                os.chown(work / name, a.uid, a.gid)
+        if a.uid:
+            os.chown(work, a.uid, a.gid)
+        pid = os.fork()
+        if pid == 0:
+            os.setsid()
+            devnull = os.open(os.devnull, os.O_RDWR)
+            for fd in (0, 1, 2):
+                os.dup2(devnull, fd)
+            try:
+                run_app(state, [sys.executable, str(tool), "serve", "--config", str(work)], a.uid, a.gid, a.lab)
+            finally:
+                os._exit(1)
+        time.sleep(0.5)
+        save(record, dict(pid=pid, identity=identity_of(pid)))
+        emit(a, "Mix lane started inside the protected namespace (proxy 127.0.0.1:41199 there).", running=True)
+    elif a.mix_action == "status":
+        r = running()
+        ready = (
+            r is not None
+            and cmd("ip", "netns", "exec", APP, sys.executable, str(tool), "ready", check=False).returncode == 0
+        )
+        emit(a, "Mix lane: %s." % ("ready" if ready else "starting" if r else "stopped"), running=bool(r), ready=ready)
+    elif a.mix_action == "stop":
+        r = running()
+        if r:
+            os.killpg(r["pid"], signal.SIGTERM)
+        if record.exists():
+            record.unlink()
+        emit(a, "Mix lane stopped.", running=False)
+    else:
+        if not a.url:
+            raise ValueError("fetch needs a URL")
+        if not running():
+            raise RuntimeError("the mix lane is not running: avpn mix start")
+        run_app(state, [sys.executable, str(tool), "fetch", a.url, "--method", a.method], a.uid, a.gid, a.lab)
 
 
 def main():
@@ -1537,6 +1784,8 @@ def main():
         # A relay sends the stream on two links (client side and next hop).
         links = 2 if a.hops > 1 else 1
         rate, why = choose_rate(a.rate, a.allowance_gib, a.hours_per_day, a.accept_cost, links)
+        if a.front and a.rate == "auto" and rate not in FRONT_RATES:
+            rate, why = FRONT_RATES[-1], "the fastest class an I2P stream carries"
         standby = [tuple(x.split("=", 1)) for x in a.standby_exit]
         if any(len(x) != 2 for x in standby):
             raise ValueError("--standby-exit takes NAME=IP:PORT")
@@ -1561,6 +1810,8 @@ def main():
             rate=rate,
             alternates=standby,
             rotate=rotate,
+            front=a.front,
+            front_hops=a.front_hops,
         )
         emit(
             a,
@@ -1666,6 +1917,8 @@ def main():
     elif a.action == "reset":
         reset(a.state.resolve(), a.lab)
         emit(a, "Guard removed; cleartext networking restored.")
+    elif a.action == "mix":
+        mix_command(a)
     elif a.action == "run":
         run_app(a.state.resolve(), a.command[1:] if a.command[:1] == ["--"] else a.command, a.uid, a.gid, a.lab)
 

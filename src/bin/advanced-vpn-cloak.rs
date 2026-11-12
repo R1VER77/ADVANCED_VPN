@@ -22,6 +22,11 @@ struct Config {
     server_spki_sha256: Option<String>,
     cert: Option<PathBuf>,
     statistics: PathBuf,
+    /// "i2p": the chain's entry is reached through I2P (tools/i2p.py). The client's
+    /// remote is then its local I2P tunnel; the server gives loopback streams longer to
+    /// authenticate.
+    #[serde(default)]
+    front: Option<String>,
 }
 #[derive(Parser)]
 struct Args {
@@ -63,6 +68,10 @@ fn validate(c: &Config) -> Result<()> {
             "bad cover name"
         );
     }
+    ensure!(
+        c.front.as_deref().is_none_or(|f| f == "i2p"),
+        "unknown front"
+    );
     match c.role.as_str() {
         "client" => {
             ensure!(
@@ -70,10 +79,18 @@ fn validate(c: &Config) -> Result<()> {
                 "fixed client cloak addresses required"
             );
             let r = c.remote.context("client needs the server address")?;
-            ensure!(
-                r.is_ipv4() && !r.ip().is_unspecified() && r.port() != 0,
-                "bad server address"
-            );
+            if c.front.is_some() {
+                // Through the local I2P router's client tunnel, never a direct address.
+                ensure!(
+                    local(&r, 41197),
+                    "a front client reaches its local I2P tunnel"
+                );
+            } else {
+                ensure!(
+                    r.is_ipv4() && !r.ip().is_unspecified() && r.port() != 0,
+                    "bad server address"
+                );
+            }
             ensure!(c.cert.is_none(), "a client has no certificate");
             let pin = c
                 .server_spki_sha256
@@ -131,10 +148,11 @@ async fn work() -> Result<()> {
         let acceptor = tokio_rustls::TlsAcceptor::from(tls_config);
         let (wg, tokens_tcp, stats_quic, stats_tcp) =
             (c.wireguard, tokens.clone(), stats.clone(), stats.clone());
+        let front = c.front.is_some();
         tokio::spawn(async move {
             tokio::select! {
                 r = cloak::serve(endpoint, c.wireguard, tokens, stats_quic) => r,
-                r = cloak::serve_tcp(tcp_listener, acceptor, wg, tokens_tcp, stats_tcp) => r,
+                r = cloak::serve_tcp(tcp_listener, acceptor, wg, tokens_tcp, stats_tcp, front) => r,
             }
         })
     } else {
@@ -157,6 +175,7 @@ async fn work() -> Result<()> {
             pin,
             token,
             stats.clone(),
+            c.front.is_some(),
         ))
     };
     let mut ticker = tokio::time::interval(Duration::from_secs(1));

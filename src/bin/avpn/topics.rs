@@ -101,6 +101,16 @@ pub const TOPICS: &[Topic] = &[
         body: include_str!("../../../docs/cli/reset.md"),
     },
     Topic {
+        name: "mix",
+        summary: "the mix lane: requests through a mixnet",
+        body: include_str!("../../../docs/cli/mix.md"),
+    },
+    Topic {
+        name: "front",
+        summary: "reach the entry through I2P",
+        body: include_str!("../../../docs/cli/front.md"),
+    },
+    Topic {
         name: "cloud",
         summary: "find, create and record servers, and join them into a chain",
         body: include_str!("../../../docs/cli/cloud.md"),

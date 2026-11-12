@@ -96,9 +96,9 @@ reference pages in one package, with SHA256 checksums. The repository is private
 download while signed in to GitHub:
 
 ```bash
-gh release download v0.8.0 -R R1VER77/ADVANCED_VPN
+gh release download v0.9.0 -R R1VER77/ADVANCED_VPN
 sha256sum -c SHA256SUMS
-mkdir advanced-vpn && tar -C advanced-vpn -xzf advanced-vpn-v0.8.0-x86_64-linux-gnu.tar.gz && cd advanced-vpn
+mkdir advanced-vpn && tar -C advanced-vpn -xzf advanced-vpn-v0.9.0-x86_64-linux-gnu.tar.gz && cd advanced-vpn
 ```
 
 There are two ways to install from there:
@@ -121,7 +121,7 @@ Both need Python 3.10+ with `venv` (`sudo apt install python3-venv`). The binari
 built on Ubuntu 22.04, so they run on Ubuntu 22.04+ and Debian 12/13 (x86-64).
 
 To cut a release: bump `version` in `Cargo.toml`, commit, and push a matching tag
-(`git tag -s v0.8.0 && git push origin v0.8.0`). The release workflow builds only if the
+(`git tag -s v0.9.0 && git push origin v0.9.0`). The release workflow builds only if the
 tag matches the version and that commit's `verify` run passed.
 
 ## Build and verify
@@ -316,7 +316,7 @@ If nobody answers, the prompt times out after 5 minutes. The service restarts an
 
 ## Limits and provenance
 
-The relay/provider can still observe addresses, sizes, timing and outages. The owned exit sees traffic after VPN decryption; HTTPS retains its independent TLS. No provider-no-logging, anonymity, TEE attestation, WAN-performance or independent-audit guarantee is made. A global passive adversary remains out of scope for any low-latency system; per-hop defense raises its cost, it does not produce mixnet-grade unlinkability (a mixnet lane for async traffic is next) (see `docs/MESH_DESIGN.md`, threat model).
+The relay/provider can still observe addresses, sizes, timing and outages. The owned exit sees traffic after VPN decryption; HTTPS retains its independent TLS. No provider-no-logging, anonymity, TEE attestation, WAN-performance or independent-audit guarantee is made. A global passive adversary remains out of scope for any low-latency system, ours included; per-hop defense raises its cost, it does not produce mixnet-grade unlinkability. For traffic that can wait seconds, the mix lane (`avpn mix`, Katzenpost) does: with live websites such an adversary named 7.7% of senders on the mix lane against 86% on a low-latency path (chance 10%, `docs/evidence/MIX_LANE.json`). An I2P front (`avpn init --front i2p`) keeps your address from the entry and its provider (`docs/evidence/I2P_FRONT.json`).
 
 The data plane is Linux/IPv4 only. **IPv6 is deliberately blocked** in every mode, so it can't escape around the tunnel. The managed profile uses inner MTU 1100 and WireGuard MTU 1340, requiring an IPv4 underlay MTU of at least 1420. A native desktop GUI, multi-user fleet control and a statistically evaluated defense dataset are not included. The standalone v0.1 QUIC interface remains available; see [historical interface](docs/LEGACY_QUIC.md).
 

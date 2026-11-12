@@ -302,6 +302,9 @@ def main():
     units.mkdir(parents=True)
     for name in ["advanced-vpn.service", "advanced-vpn-guard.service"]:
         shutil.copy2(ROOT / "deploy" / name, units / name)
+    apparmor = a.out / "etc/apparmor.d/local"
+    apparmor.mkdir(parents=True)
+    shutil.copy2(ROOT / "deploy/apparmor/usr.bin.i2pd.local", apparmor / "usr.bin.i2pd")
     receipt = dict(
         schema=1,
         architecture=platform.machine(),
@@ -328,18 +331,29 @@ def main():
         raise RuntimeError("existing /opt/advanced-vpn is not a root-owned installation; not replacing it")
     import pwd
 
-    try:
-        pwd.getpwnam("advanced-vpn")
-    except KeyError:
-        subprocess.run(
-            [trusted_exe("useradd"), "--system", "--no-create-home", "--shell", "/usr/sbin/nologin", "advanced-vpn"],
-            check=True,
-        )
+    # The data plane's user, and the I2P front's router's own user (avpn help front).
+    for name in ["advanced-vpn", "advanced-vpn-i2p"]:
+        try:
+            pwd.getpwnam(name)
+        except KeyError:
+            subprocess.run(
+                [trusted_exe("useradd"), "--system", "--no-create-home", "--shell", "/usr/sbin/nologin", name],
+                check=True,
+            )
     upgraded = install_system(package, target)
     Path("/etc/advanced-vpn").mkdir(mode=0o700, exist_ok=True)
     for source in units.glob("*.service"):
         shutil.copy2(source, Path("/etc/systemd/system") / source.name)
     subprocess.run([trusted_exe("systemctl"), "daemon-reload"], check=True)
+    # The I2P front's router runs from the service's RAM directory: let the packaged
+    # i2pd AppArmor profile read it (its `local/` include is meant for exactly this).
+    if Path("/etc/apparmor.d").is_dir():
+        local = Path("/etc/apparmor.d/local")
+        local.mkdir(mode=0o755, exist_ok=True)
+        shutil.copy2(apparmor / "usr.bin.i2pd", local / "usr.bin.i2pd")
+        profile = Path("/etc/apparmor.d/usr.bin.i2pd")
+        if profile.exists():
+            subprocess.run([trusted_exe("apparmor_parser"), "-r", str(profile)], check=False)
     linked = link_commands(target)
     print(
         ("Upgraded" if upgraded else "Installed")

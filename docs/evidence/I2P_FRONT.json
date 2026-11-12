@@ -1,0 +1,236 @@
+{
+ "schema": 1,
+ "lab": "tools/i2p_lab.py: a private I2P network (6 i2pd routers, 3 floodfill) in namespaces; client in whole-device mode; 2-hop chain signed with --front i2p; RFC 5737 addresses",
+ "i2pd": "2.56.0 (Debian package, unmodified)",
+ "runs": {
+  "metered_2_hops": {
+   "rate": "metered",
+   "front_hops": 2,
+   "i2p_routers": 6,
+   "mode": "whole-device",
+   "entry_transit": false,
+   "tunnel_up_seconds": 10.5,
+   "transfer": {
+    "bytes": 2097152,
+    "sha256_verified": true,
+    "seconds": 52.87,
+    "mbit_per_s": 0.32
+   },
+   "ping": {
+    "summary": "20 packets transmitted, 20 received, 0% packet loss, time 19089ms",
+    "rtt_ms": "102.673/684.482/3988.079/1098.755 ms, pipe 4"
+   },
+   "router_restart": {
+    "recovered": true,
+    "outage_seconds": 28.4
+   },
+   "front_table": {
+    "i2p_user_reached_entry": false
+   },
+   "entry_view": {
+    "received_from": [
+     "198.51.100.10",
+     "198.51.100.130",
+     "198.51.100.20",
+     "198.51.100.30",
+     "203.0.113.40",
+     "203.0.113.50",
+     "203.0.113.60"
+    ],
+    "client_address_seen": false,
+    "sent_to_client": false
+   },
+   "client_view": {
+    "sent_to": [
+     "198.51.100.10",
+     "198.51.100.20",
+     "198.51.100.30",
+     "203.0.113.40",
+     "203.0.113.50",
+     "203.0.113.60"
+    ],
+    "bytes_to_i2p_routers": 14262059,
+    "bytes_elsewhere": 0,
+    "sent_to_entry": false
+   },
+   "destination_view": {
+    "received_from": [
+     "198.51.100.130"
+    ],
+    "client_address_seen": false
+   },
+   "gates": {
+    "entry_never_saw_client": true,
+    "entry_never_addressed_client": true,
+    "client_never_sent_to_entry": true,
+    "client_sent_only_to_i2p_routers": true,
+    "destination_never_saw_client": true,
+    "transfer_verified": true,
+    "router_restart_recovered": true,
+    "front_table_blocks_entry": true
+   }
+  },
+  "standard_2_hops": {
+   "rate": "standard",
+   "front_hops": 2,
+   "i2p_routers": 6,
+   "mode": "whole-device",
+   "entry_transit": false,
+   "tunnel_up_seconds": 12.4,
+   "transfer": {
+    "bytes": 8388608,
+    "sha256_verified": true,
+    "seconds": 18.54,
+    "mbit_per_s": 3.62
+   },
+   "ping": {
+    "summary": "20 packets transmitted, 20 received, 0% packet loss, time 19022ms",
+    "rtt_ms": "48.672/82.256/136.303/20.699 ms"
+   },
+   "router_restart": {
+    "recovered": true,
+    "outage_seconds": 8.2
+   },
+   "front_table": {
+    "i2p_user_reached_entry": false
+   },
+   "entry_view": {
+    "received_from": [
+     "198.51.100.10",
+     "198.51.100.130",
+     "198.51.100.20",
+     "198.51.100.30",
+     "203.0.113.40",
+     "203.0.113.50",
+     "203.0.113.60"
+    ],
+    "client_address_seen": false,
+    "sent_to_client": false
+   },
+   "client_view": {
+    "sent_to": [
+     "198.51.100.10",
+     "198.51.100.20",
+     "198.51.100.30",
+     "203.0.113.40",
+     "203.0.113.50",
+     "203.0.113.60"
+    ],
+    "bytes_to_i2p_routers": 43672653,
+    "bytes_elsewhere": 0,
+    "sent_to_entry": false
+   },
+   "destination_view": {
+    "received_from": [
+     "198.51.100.130"
+    ],
+    "client_address_seen": false
+   },
+   "gates": {
+    "entry_never_saw_client": true,
+    "entry_never_addressed_client": true,
+    "client_never_sent_to_entry": true,
+    "client_sent_only_to_i2p_routers": true,
+    "destination_never_saw_client": true,
+    "transfer_verified": true,
+    "router_restart_recovered": true,
+    "front_table_blocks_entry": true
+   }
+  },
+  "metered_1_hop": {
+   "rate": "metered",
+   "front_hops": 1,
+   "i2p_routers": 6,
+   "mode": "whole-device",
+   "entry_transit": false,
+   "tunnel_up_seconds": 24.4,
+   "transfer": {
+    "bytes": 2097152,
+    "sha256_verified": true,
+    "seconds": 53.02,
+    "mbit_per_s": 0.32
+   },
+   "ping": {
+    "summary": "20 packets transmitted, 20 received, 0% packet loss, time 19102ms",
+    "rtt_ms": "61.483/685.256/4455.181/1261.292 ms, pipe 5"
+   },
+   "router_restart": {
+    "recovered": true,
+    "outage_seconds": 16.2
+   },
+   "front_table": {
+    "i2p_user_reached_entry": false
+   },
+   "entry_view": {
+    "received_from": [
+     "198.51.100.10",
+     "198.51.100.130",
+     "198.51.100.20",
+     "198.51.100.30",
+     "203.0.113.40",
+     "203.0.113.50",
+     "203.0.113.60"
+    ],
+    "client_address_seen": false,
+    "sent_to_client": false
+   },
+   "client_view": {
+    "sent_to": [
+     "198.51.100.10",
+     "198.51.100.20",
+     "198.51.100.30",
+     "203.0.113.40",
+     "203.0.113.50",
+     "203.0.113.60"
+    ],
+    "bytes_to_i2p_routers": 15227010,
+    "bytes_elsewhere": 0,
+    "sent_to_entry": false
+   },
+   "destination_view": {
+    "received_from": [
+     "198.51.100.130"
+    ],
+    "client_address_seen": false
+   },
+   "gates": {
+    "entry_never_saw_client": true,
+    "entry_never_addressed_client": true,
+    "client_never_sent_to_entry": true,
+    "client_sent_only_to_i2p_routers": true,
+    "destination_never_saw_client": true,
+    "transfer_verified": true,
+    "router_restart_recovered": true,
+    "front_table_blocks_entry": true
+   }
+  }
+ },
+ "adversarial_entry": {
+  "note": "The entry's I2P router offers itself as a tunnel hop (--entry-transit), 1 hop: every gate held. In this run the client never picked the entry as a hop, with or without the front table, so the table is proven by the direct gate below.",
+  "gates": {
+   "entry_never_saw_client": true,
+   "entry_never_addressed_client": true,
+   "client_never_sent_to_entry": true,
+   "client_sent_only_to_i2p_routers": true,
+   "destination_never_saw_client": true,
+   "transfer_verified": true,
+   "router_restart_recovered": true
+  }
+ },
+ "mutation_without_front_table": {
+  "note": "The same lab with the front table removed from avpnctl (front_guard disabled): the I2P router's user reaches the entry directly and five gates fail.",
+  "failed": [
+   "entry_never_saw_client",
+   "entry_never_addressed_client",
+   "client_never_sent_to_entry",
+   "client_sent_only_to_i2p_routers",
+   "front_table_blocks_entry"
+  ],
+  "front_table": {
+   "i2p_user_reached_entry": true
+  }
+ },
+ "finding_fixed": {
+  "ssu2_peer_test": "With SSU2 enabled on the hidden client router, the entry addressed the client's address in 3 of 3 runs (SSU2 peer test: a third router probes the tester directly). NTCP2-only client: 0 of 7 runs (the mutant run that deliberately connects to the entry excluded)."
+ }
+}

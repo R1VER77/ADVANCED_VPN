@@ -10,7 +10,8 @@ bundle per device.
         [--rate auto|metered|standard|fast|line] [--allowance-gib N] \
         [--hours-per-day H] [--accept-cost] [--daily-limit-mib N] \
         [--dns-blocklist FILE] [--cover-name NAME] \
-        [--standby-exit NAME=IP:PORT ...] [--rotate-seconds MIN,MAX]
+        [--standby-exit NAME=IP:PORT ...] [--rotate-seconds MIN,MAX] \
+        [--front i2p] [--front-hops 1|2|3]
 
 ## Options
 
@@ -30,6 +31,8 @@ bundle per device.
 - `--dns-blocklist FILE`: optional domain blocklist file (one domain per line) signed into the exit bundle so the exit's DoT forwarder immediately answers `NXDOMAIN` for matching domains and subdomains.
 - `--standby-exit NAME=IP:PORT`: a standby exit (2 and 3 hops; repeat for up to 7). Give its request with `--request NAME=FILE`. The server before the exit opens a session through the first live exit, fails over to the next when one stops answering (3 s of silence on the paced link), and the client trusts exactly the signed set of exits. Your entry, the guard, never changes.
 - `--rotate-seconds MIN,MAX`: with standby exits, move to another live exit at a random time in this window (default `900,3600`), always at a session boundary. Between 60 and 86400 seconds.
+- `--front i2p`: the client reaches the entry only through I2P. The entry (and its cloud provider) sees I2P routers, never your address; your network sees I2P, never a VPN server. Carries the `metered` and `standard` classes (`auto` picks `standard` at most). The entry's request must come from this release (it holds the entry's I2P destination). See `avpn help front`.
+- `--front-hops N`: I2P hops each way between you and the entry (default `2`, so no single I2P router sees both your address and the entry's; `1` is faster, but that one router sees both, never the content; `3` is slower still).
 - `--cover-name NAME`: the server name the first hop's HTTP/3 camouflage presents. Use a name that resolves to that hop's address, such as its provider-assigned DNS name; `avpn cloud chain --apply` fills this in for AWS. Without it, no server name is sent.
 
 ## What it changes

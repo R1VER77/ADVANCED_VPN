@@ -165,6 +165,24 @@ What a capable observer can still tell:
   `standard`, `fast`, or `line`) is active from the fixed packet rate, even though that rate
   does not change when you start or stop browsing.
 
+## With an I2P front
+
+With `avpn init --front i2p` (`avpn help front`) the link to the entry is I2P instead:
+your network sees I2P (NTCP2, obfuscated but recognisable), and the entry and its cloud
+provider see I2P routers, never your address. Measured in a private I2P network
+(`docs/evidence/I2P_FRONT.json`), with the client in whole-device mode:
+
+| Gate | Result |
+|---|---|
+| The entry received a packet from the client's address | never (4 runs, incl. an entry offering itself as a hop) |
+| The entry sent a packet to the client's address | never with the client on NTCP2 only; 3 of 3 runs with SSU2 (peer test), so the client router uses NTCP2 only |
+| The client sent anything but I2P to anything but I2P routers | never (only the I2P router's user may leave) |
+| The same lab without the front table | the I2P router's user reaches the entry directly: five gates fail |
+| Throughput / round trip (`standard`, 2 hops each way) | 3.6 Mbit/s, 82 ms average (`metered`: 0.32 Mbit/s) |
+
+What the front does not hide: the I2P routers on your tunnels see your address (never
+the content); with `--front-hops 1` that one router also sees the entry's.
+
 ## What it does not stop
 
 - **A global passive adversary** who can watch both ends of the chain at once can
@@ -172,8 +190,11 @@ What a capable observer can still tell:
   (DeepCorr, Var-CNN) are good at this against low-latency tunnels. Constant cells and
   the constant-rate stream on every link raise the cost, but a stream that keeps packet
   order is still a circuit: only per-packet mixing with random delays and cover traffic
-  (Loopix-style mixnets) defeats it outright, at a latency of seconds. If that is your
-  adversary, carry that traffic over a mixnet.
+  (Loopix-style mixnets) defeats it, at a latency of seconds. If that is your
+  adversary, carry that traffic over the mix lane (`avpn help mix`). Measured with live
+  websites (`docs/evidence/MIX_LANE.json`, 10 clients): such an adversary named the
+  sender of 86% of requests through a low-latency proxy and 7.7% through the mix lane
+  (chance 10%).
 - **Collusion.** The whole guarantee rests on the hops not pooling their logs. Put the
   entry and the exit on different providers and in different legal spheres, so
   collusion needs two companies and two legal orders to agree. Every free tier is a

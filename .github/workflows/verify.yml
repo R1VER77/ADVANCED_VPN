@@ -8,7 +8,7 @@ concurrency:
 jobs:
   local-protocol-proof:
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 45
     env:
       CARGO_BUILD_JOBS: 2
     steps:
@@ -72,6 +72,15 @@ jobs:
         run: |
           unshare --user --map-root-user --map-auto --net --mount python tools/failover_lab.py --state /tmp/avpn-failover --rate standard
           unshare --user --map-root-user --map-auto --net --mount python tools/ohttp_lab.py --state /tmp/avpn-ohttp
+      - name: I2P front (private I2P network; the entry never sees the client, only I2P leaves)
+        run: |
+          # i2pd's libraries only: installing the package itself would start a public I2P router.
+          sudo apt-get install -y --no-install-recommends $(apt-cache depends i2pd | awk '/Depends: lib/ {print $2}')
+          mkdir -p /tmp/i2pd-deb /tmp/i2pd-root && cd /tmp/i2pd-deb
+          apt-get download i2pd
+          dpkg -x i2pd_*.deb /tmp/i2pd-root
+          cd "$GITHUB_WORKSPACE"
+          unshare --user --map-root-user --map-auto --net --mount python tools/i2p_lab.py --state /tmp/avpn-i2p --i2pd-root /tmp/i2pd-root --rate metered
       - name: Known dependency vulnerabilities
         run: |
           cargo install cargo-audit --version 0.22.1 --locked

@@ -113,6 +113,9 @@ enum Cmd {
     /// Browse the community mesh, offer nodes, build chains.
     #[command(disable_help_flag = true)]
     Mesh(Rest),
+    /// The mix lane: a mixnet client inside the protected namespace.
+    #[command(disable_help_flag = true)]
+    Mix(Rest),
     /// Reference pages: avpn help [TOPIC].
     Help {
         /// A command or concept; omit for the list.
@@ -140,6 +143,7 @@ impl Cmd {
             Cmd::Reset(r) => ("reset", r.args),
             Cmd::Cloud(r) => ("cloud", r.args),
             Cmd::Mesh(r) => ("mesh", r.args),
+            Cmd::Mix(r) => ("mix", r.args),
             Cmd::Help { topic } => ("help", topic.into_iter().collect()),
         }
     }
@@ -236,7 +240,7 @@ fn run(cli: Cli, theme: Theme) -> i32 {
         }
     };
     match action {
-        "run" | "unlock" => return exec(&ctrl, action, &args),
+        "run" | "unlock" | "mix" => return exec(&ctrl, action, &args),
         "connect" if args.iter().any(|a| a == "--foreground") => {
             args.retain(|a| a != "--foreground");
             return exec(&ctrl, "connect", &args);

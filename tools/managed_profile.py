@@ -50,6 +50,7 @@ BALANCED_REMOVED = "this chain was signed with the removed balanced defense; eve
 # Rate classes and their cost live in rates.py (standard library only), so the
 # cloud tool, which runs under the system Python, can plan a chain too.
 from rates import RATE_CLASSES, WIRE_PACKET_BYTES, choose_rate, rate_cost_gib  # noqa: E402,F401
+import i2p  # noqa: E402
 
 LINKS_REQUIRED = "this chain was signed before per-hop shaping, which is now required: every link between servers is paced and encrypted. Re-sign it (avpn cloud chain --apply, or avpn init) and enroll the new bundles with --replace"
 LINK_AAD = b"advanced-vpn/link-psk/"
@@ -118,7 +119,7 @@ def profile_validate(p):
     base = {"schema", "role", "hops", "core", "carrier", "dns", "network", "daily_budget_bytes"}
     # Without "cloak": signed before the camouflage; well-formed, but require_current refuses it.
     if (
-        set(p) not in (base, base | {"cloak"})
+        set(p) not in (base, base | {"cloak"}, base | {"cloak", "front"})
         or p["schema"] != 3
         or p["role"] not in ["client", "relay", "middle", "exit"]
     ):
@@ -301,6 +302,17 @@ def profile_validate(p):
                 raise ValueError("the carrier must run behind the cloak")
         elif w["schema"] != 1:
             raise ValueError("carrier schema mismatch")
+    # The I2P front (tools/i2p.py): only on the client and the chain's first hop, which
+    # both run the cloak; the stream it carries fits only the slower rate classes.
+    front = p.get("front")
+    if front is not None:
+        if p["role"] not in ("client", first_hop) or not p.get("cloak") or not p["carrier"]:
+            raise ValueError("the I2P front belongs to the client and the chain's first hop")
+        i2p.valid_front(front, "client" if p["role"] == "client" else "server")
+        if p["carrier"].get("rate", "metered") not in i2p.FRONT_RATES or "members" in p["carrier"]:
+            raise ValueError("an I2P front carries the %s rate classes of a single chain" % "/".join(i2p.FRONT_RATES))
+    elif "front" in p:
+        raise ValueError("malformed front")
     if "cloak" in p:
         c = p["cloak"]
         if (c is not None) != (p["carrier"] is not None):
@@ -308,8 +320,10 @@ def profile_validate(p):
         if c is not None:
             client = p["role"] == "client"
             fixed = CLOAK_CLIENT if client else CLOAK_SERVER
+            if (c.get("front") is not None) != (front is not None) or c.get("front") not in (None, "i2p"):
+                raise ValueError("cloak front mismatch")
             if (
-                set(c) != CLOAK_FIELDS
+                set(c) - {"front"} != CLOAK_FIELDS
                 or c["schema"] != 1
                 or c["role"] != ("client" if client else "server")
                 or (c["listen"], c["wireguard"]) != (fixed["listen"], fixed["wireguard"])
@@ -319,7 +333,7 @@ def profile_validate(p):
                 raise ValueError("cloak binding rejected")
             if client:
                 if (
-                    c["remote"] != n["relay_endpoint"]
+                    c["remote"] != (i2p.CLIENT_TUNNEL if front else n["relay_endpoint"])
                     or c["cert"] is not None
                     or not re.fullmatch("[0-9a-f]{64}", c["server_spki_sha256"] or "")
                 ):
@@ -386,6 +400,7 @@ PLAINTEXT = {
     "kem": "kem-key.bin",
     "link": "link-key.bin",
     "cloak": "cloak-key.der",
+    "i2p": "i2p-destination.dat",
 }
 MLDSA65_OID = "2.16.840.1.101.3.4.3.18"
 
@@ -435,6 +450,10 @@ def binding(state, name):
         return b"kem:" + base64.b64decode(request["kem_public"])
     if name == "link":
         return b"link:" + base64.b64decode(request["kem_public"])
+    if name == "cloak":
+        return b"cloak:" + bytes.fromhex(request["cloak_spki_sha256"])
+    if name == "i2p":
+        return b"i2p:" + base64.b64decode(request["i2p_destination"])
     raise ValueError("unknown key")
 
 
@@ -547,6 +566,10 @@ def request(role, state, protect, vault=None):
         req["cloak_spki_sha256"] = hashlib.sha256(
             c.public_key().public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)
         ).hexdigest()
+        # Its I2P destination, should the operator put the entry behind an I2P front:
+        # clients are signed its b32 address; the private keys stay protected here.
+        keys["i2p"], identity = i2p.destination_keys()
+        req["i2p_destination"] = b64(identity)
     put(state / "request.json", canonical(req))
     protection = dict(schema=1, mode=protect, vault=str(vault.resolve()) if vault else None)
     if protect == "systemd-creds":
@@ -584,6 +607,10 @@ def load_request(raw, role):
         role not in FIRST_HOP_ROLES or not re.fullmatch("[0-9a-f]{64}", r["cloak_spki_sha256"])
     ):
         raise ValueError("bad cloak key")
+    if "i2p_destination" in r:
+        if role not in FIRST_HOP_ROLES:
+            raise ValueError("only a first hop has an I2P destination")
+        i2p.check_identity(base64.b64decode(r["i2p_destination"], validate=True))
     return r, certs
 
 
@@ -706,6 +733,9 @@ def create(
     rate="metered",
     alternates=None,
     rotate=ROTATE_SECONDS,
+    front=None,
+    front_hops=i2p.DEFAULT_HOPS,
+    front_port=None,
 ):
     """Operator: build signed bundles for a 1-, 2- or 3-hop chain from public device
     requests. Bundles carry no private key; the WireGuard PSK is hybrid-KEM encrypted
@@ -716,7 +746,9 @@ def create(
     exit_address = exit's public QUIC endpoint (2-3 hops) or WireGuard endpoint (1 hop)
     alternates = [(name, endpoint)]: standby exits (requests under those names). The
         server before the exit fails over to them and rotates among them every
-        `rotate` = (min, max) seconds; the entry, your guard, never changes."""
+        `rotate` = (min, max) seconds; the entry, your guard, never changes.
+    front = "i2p": the client reaches the entry through I2P (`front_hops` hops each way;
+        the entry's I2P router listens on `front_port`, random when None)."""
     from keyguard import kem_seal
 
     if hops not in CHAINS:
@@ -757,6 +789,24 @@ def create(
             % first
         )
     allowed = destinations if destinations is not None else ["0.0.0.0/0"]
+    if front not in (None, "i2p"):
+        raise ValueError("unknown front: " + str(front))
+    if front:
+        if rate not in i2p.FRONT_RATES:
+            raise ValueError(
+                "an I2P stream carries the %s rate classes, not %s" % (" and ".join(i2p.FRONT_RATES), rate)
+            )
+        if front_hops not in i2p.FRONT_HOPS:
+            raise ValueError("I2P front hops must be 1, 2 or 3")
+        if "i2p_destination" not in reqs[first][0]:
+            raise ValueError(
+                "the %s's keys predate the I2P front; create them again with this release (avpn reset, then avpn request)"
+                % first
+            )
+        import secrets
+
+        front_port = front_port or i2p.PORT_RANGE[0] + secrets.randbelow(i2p.PORT_RANGE[1] - i2p.PORT_RANGE[0] + 1)
+        entry_b32 = i2p.b32(base64.b64decode(reqs[first][0]["i2p_destination"]))
 
     # Cloud hosts are 1:1 NATed: the public address is not on the interface. Public
     # listeners bind every local address on the enrolled port; peers still send to
@@ -881,13 +931,15 @@ def create(
             cloak = dict(
                 schema=1,
                 role="client" if client else "server",
-                remote=carrier_endpoint if client else None,
+                remote=(i2p.CLIENT_TUNNEL if front else carrier_endpoint) if client else None,
                 cover_name=cover_name,
                 server_spki_sha256=reqs[first][0]["cloak_spki_sha256"] if client else None,
                 cert=None if client else "cloak-cert.der",
                 statistics="cloak-status.json",
                 **(CLOAK_CLIENT if client else CLOAK_SERVER),
             )
+            if front:
+                cloak["front"] = front
         else:
             cloak = None
         if role == "exit":
@@ -925,6 +977,12 @@ def create(
         if CLOAK:
             profile["cloak"] = cloak
             profile["network"]["cover_name"] = cover_name
+        if front and role in ("client", first):
+            profile["front"] = (
+                dict(kind="i2p", destination=entry_b32, hops=front_hops)
+                if role == "client"
+                else dict(kind="i2p", router_port=front_port)
+            )
         profile_validate(profile)
         files["profile.json"] = canonical(profile)
         payloads[name] = files
@@ -1661,6 +1719,8 @@ def runtime(profile, root):
             w["identity"][field] = str(root / w["identity"][field])
         w["statistics"] = str(root / "carrier-status.json")
         out["carrier"] = w
+    if profile.get("front"):
+        out["front"] = dict(profile["front"])
     if profile["dns"]:
         out["dns"] = dict(profile["dns"])
         if out["dns"].get("test_ca"):
@@ -1749,6 +1809,8 @@ def lab_setup(
     rate="metered",
     standby=None,
     rotate=ROTATE_SECONDS,
+    front=None,
+    front_hops=i2p.DEFAULT_HOPS,
 ):
     """TEST/LAB: run the real request -> init -> enroll flow for every role in the
     chain (and every standby exit, `standby` = [(name, endpoint)]). `protect` maps
@@ -1781,6 +1843,8 @@ def lab_setup(
         rate=rate,
         alternates=standby,
         rotate=rotate,
+        front=front,
+        front_hops=front_hops,
     )
     for name in roles + [n for n, _ in standby]:
         enroll(ops / (name + ".avpn"), ops / "operator.pub", root / name)

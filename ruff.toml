@@ -23,6 +23,10 @@ ignore = [
 "tools/lab_peer.py" = ["S104", "B023", "D101", "D102", "D103"]
 "tools/managed_lab_peer.py" = ["S104", "D101", "D102", "D103"]
 "tools/reproduce.py" = ["S607", "D101", "D102", "D103"]
+# Simulation and lab randomness (Poisson workloads, synthetic traffic) is not cryptographic.
+"tools/test_gpa.py" = ["S101", "S311", "D101", "D102", "D103"]
+"tools/mix_lab.py" = ["S108", "S311", "S607", "D103"]
+"tools/i2p_lab.py" = ["S108", "S607"]
 "tools/start_client.py" = ["D103"]
 # The binary path of systemd-ask-password is not a credential.
 "tools/keyguard.py" = ["S105"]

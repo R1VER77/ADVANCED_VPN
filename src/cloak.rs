@@ -57,6 +57,10 @@ pub const TCP_CELL_LEN: usize = OUTER_MTU as usize;
 pub const CARRIER_DATAGRAM: usize = 1372;
 /// How long a new connection has to prove the cloak key before it is only a web client.
 pub const AUTH_WINDOW: Duration = Duration::from_secs(3);
+/// Behind an I2P front (`advanced_vpn` tools/i2p.py) a stream crosses I2P tunnels: its
+/// TLS handshake and proof get this long instead of [`AUTH_WINDOW`]. Only connections
+/// from loopback (the local I2P router) get it on the server.
+pub const FRONT_WINDOW: Duration = Duration::from_secs(30);
 /// How long the client waits for QUIC/h3 before falling back to TCP/TLS 1.3.
 pub const QUIC_FALLBACK_TIMEOUT: Duration = Duration::from_secs(2);
 /// How often a client on the TCP/TLS fallback probes QUIC/h3 in the background to upgrade.
@@ -523,13 +527,15 @@ pub async fn serve(
 
 /// Server TCP/TLS 1.3 fallback listener on the same port (8443 behind nftables 443 redirect).
 /// Unauthenticated requests receive [`http1_decoy_response`]; authenticated sessions switch
-/// to fixed [`TCP_CELL_LEN`]-byte cell framing to `wireguard`.
+/// to fixed [`TCP_CELL_LEN`]-byte cell framing to `wireguard`. With `front`, streams from
+/// loopback (the local I2P router's server tunnel) get [`FRONT_WINDOW`] to authenticate.
 pub async fn serve_tcp(
     listener: TcpListener,
     acceptor: TlsAcceptor,
     wireguard: SocketAddr,
     keys: Vec<[u8; TOKEN_LEN]>,
     stats: Arc<Stats>,
+    front: bool,
 ) -> Result<()> {
     ensure!(
         !keys.is_empty() && keys.len() <= 256,
@@ -539,8 +545,13 @@ pub async fn serve_tcp(
     let active_tcp: Arc<Mutex<BTreeMap<usize, (u64, tokio::task::AbortHandle)>>> = Arc::default();
     let seq = Arc::new(AtomicU64::new(1));
     loop {
-        let (tcp, _) = listener.accept().await?;
+        let (tcp, peer) = listener.accept().await?;
         let _ = tcp.set_nodelay(true);
+        let window = if front && peer.ip().is_loopback() {
+            FRONT_WINDOW
+        } else {
+            AUTH_WINDOW
+        };
         let (acceptor, keys, active_tcp, stats, seq) = (
             acceptor.clone(),
             keys.clone(),
@@ -549,12 +560,10 @@ pub async fn serve_tcp(
             seq.clone(),
         );
         tokio::spawn(async move {
-            let Ok(Ok(mut tls)) = tokio::time::timeout(AUTH_WINDOW, acceptor.accept(tcp)).await
-            else {
+            let Ok(Ok(mut tls)) = tokio::time::timeout(window, acceptor.accept(tcp)).await else {
                 return;
             };
-            let Ok(Ok(header)) =
-                tokio::time::timeout(AUTH_WINDOW, read_http_header(&mut tls)).await
+            let Ok(Ok(header)) = tokio::time::timeout(window, read_http_header(&mut tls)).await
             else {
                 add(&stats.web_clients);
                 return;
@@ -661,6 +670,9 @@ impl ClientSink {
 /// Client: take WireGuard's datagrams on `local` (only from `wireguard`), carry them to
 /// the server at `remote` over QUIC/h3 (or TCP/TLS 1.3 when UDP is blocked), and hand the
 /// replies back to `wireguard`. Reconnects forever and upgrades back to QUIC when UDP recovers.
+/// With `front`, `remote` is the local I2P router's client tunnel: TCP/TLS 1.3 only, with
+/// [`FRONT_WINDOW`], and never a QUIC attempt (I2P carries streams, not datagrams).
+#[allow(clippy::too_many_arguments)]
 pub async fn connect(
     local: SocketAddr,
     wireguard: SocketAddr,
@@ -669,6 +681,7 @@ pub async fn connect(
     spki_sha256: [u8; 32],
     key: [u8; TOKEN_LEN],
     stats: Arc<Stats>,
+    front: bool,
 ) -> Result<()> {
     let udp = Arc::new(UdpSocket::bind(local).await?);
     let mut endpoint = Endpoint::client("0.0.0.0:0".parse()?)?;
@@ -710,7 +723,22 @@ pub async fn connect(
         });
     }
     loop {
-        if let Ok(Ok(c)) =
+        if front {
+            let _ = tcp_session(
+                &tls_connector,
+                None,
+                remote,
+                &name,
+                &key,
+                &udp,
+                wireguard,
+                &current,
+                &held,
+                &stats,
+                FRONT_WINDOW,
+            )
+            .await;
+        } else if let Ok(Ok(c)) =
             tokio::time::timeout(QUIC_FALLBACK_TIMEOUT, endpoint.connect(remote, &name)?).await
         {
             if session(&c, &key, &udp, wireguard, &current, &held, &stats)
@@ -722,7 +750,7 @@ pub async fn connect(
         } else {
             let _ = tcp_session(
                 &tls_connector,
-                &endpoint,
+                Some(&endpoint),
                 remote,
                 &name,
                 &key,
@@ -731,6 +759,7 @@ pub async fn connect(
                 &current,
                 &held,
                 &stats,
+                AUTH_WINDOW,
             )
             .await;
         }
@@ -803,7 +832,7 @@ async fn session(
 #[allow(clippy::too_many_arguments)]
 async fn tcp_session(
     connector: &TlsConnector,
-    quic_endpoint: &Endpoint,
+    quic_endpoint: Option<&Endpoint>,
     remote: SocketAddr,
     name: &str,
     key: &[u8; TOKEN_LEN],
@@ -812,13 +841,14 @@ async fn tcp_session(
     current: &Mutex<Option<ClientSink>>,
     held: &Mutex<Held>,
     stats: &Stats,
+    window: Duration,
 ) -> Result<()> {
-    let tcp = tokio::time::timeout(AUTH_WINDOW, TcpStream::connect(remote)).await??;
+    let tcp = tokio::time::timeout(window, TcpStream::connect(remote)).await??;
     let _ = tcp.set_nodelay(true);
     let sni = ServerName::try_from(name.to_owned()).unwrap_or_else(|_| {
         ServerName::try_from("localhost".to_owned()).expect("valid placeholder SNI")
     });
-    let mut tls = tokio::time::timeout(AUTH_WINDOW, connector.connect(sni, tcp)).await??;
+    let mut tls = tokio::time::timeout(window, connector.connect(sni, tcp)).await??;
     let p = tls_proof(tls.get_ref().1, key)?;
     let req = format!(
         "GET / HTTP/1.1\r\nHost: {}\r\nUser-Agent: Mozilla/5.0\r\nIf-None-Match: \"{}\"\r\n\r\n",
@@ -826,7 +856,7 @@ async fn tcp_session(
         hex::encode(p)
     );
     tls.write_all(req.as_bytes()).await?;
-    let resp = tokio::time::timeout(AUTH_WINDOW, read_http_header(&mut tls)).await??;
+    let resp = tokio::time::timeout(window, read_http_header(&mut tls)).await??;
     ensure!(
         resp.starts_with(b"HTTP/1.1 200 OK")
             && std::str::from_utf8(&resp)
@@ -875,8 +905,8 @@ async fn tcp_session(
                     add(&stats.received);
                 }
             }
-            _ = probe_interval.tick() => {
-                if let Ok(connecting) = quic_endpoint.connect(remote, name)
+            _ = probe_interval.tick(), if quic_endpoint.is_some() => {
+                if let Some(Ok(connecting)) = quic_endpoint.map(|e| e.connect(remote, name))
                     && let Ok(Ok(c)) = tokio::time::timeout(Duration::from_secs(1), connecting).await
                 {
                     c.close(VarInt::from_u32(0), b"upgrade");
@@ -1015,6 +1045,7 @@ mod tests {
             wg.local_addr().unwrap(),
             vec![key],
             stats.clone(),
+            false,
         ));
 
         // 1. An unauthenticated HTTPS probe on TCP gets the 200 OK decoy HTML page.
@@ -1051,6 +1082,7 @@ mod tests {
             pin,
             key,
             cs.clone(),
+            false,
         ));
         let mut buf = [0u8; 2048];
         let packet = vec![0x6b; CARRIER_DATAGRAM];
@@ -1095,6 +1127,7 @@ mod tests {
             pin,
             key,
             cs.clone(),
+            false,
         ));
         let mut buf = [0u8; 2048];
         let packet = vec![0x5a; CARRIER_DATAGRAM];
@@ -1152,5 +1185,97 @@ mod tests {
         wrong[0] ^= 1;
         assert!(raw(addr, wrong).await.is_err());
         assert!(raw(addr, pin).await.is_ok());
+    }
+
+    /// A TCP relay standing in for an I2P tunnel: it holds the client's first bytes for
+    /// `delay` (as a stream setup across I2P does) before passing anything through.
+    async fn slow_relay(to: SocketAddr, delay: Duration) -> SocketAddr {
+        let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let at = l.local_addr().unwrap();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut a, _)) = l.accept().await else {
+                    return;
+                };
+                tokio::spawn(async move {
+                    // Connected at once, so both ends' handshake clocks run during the hold.
+                    let Ok(mut b) = TcpStream::connect(to).await else {
+                        return;
+                    };
+                    let mut first = vec![0u8; 4096];
+                    let Ok(n) = a.read(&mut first).await else {
+                        return;
+                    };
+                    tokio::time::sleep(delay).await;
+                    if b.write_all(&first[..n]).await.is_err() {
+                        return;
+                    }
+                    let _ = tokio::io::copy_bidirectional(&mut a, &mut b).await;
+                });
+            }
+        });
+        at
+    }
+
+    #[tokio::test]
+    async fn a_front_client_uses_only_tcp_and_survives_a_slow_tunnel() {
+        let (cert, k, pin) = test_cert();
+        let key = [0x24; 32];
+        let tcp_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = tcp_listener.local_addr().unwrap();
+        let acceptor = TlsAcceptor::from(tls_server_config(cert, k).unwrap());
+        let wg = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let stats = Arc::new(Stats::default());
+        tokio::spawn(serve_tcp(
+            tcp_listener,
+            acceptor,
+            wg.local_addr().unwrap(),
+            vec![key],
+            stats.clone(),
+            true,
+        ));
+        // Longer than AUTH_WINDOW: only the front's window lets this handshake finish.
+        let tunnel = slow_relay(addr, AUTH_WINDOW + Duration::from_secs(2)).await;
+        // Anything sent to the tunnel's port over UDP would be a QUIC attempt.
+        let quic_watch = UdpSocket::bind(tunnel).await.unwrap();
+        let local_wg = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let probe = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let local: SocketAddr = probe.local_addr().unwrap();
+        drop(probe);
+        let cs = Arc::new(Stats::default());
+        tokio::spawn(connect(
+            local,
+            local_wg.local_addr().unwrap(),
+            tunnel,
+            None,
+            pin,
+            key,
+            cs.clone(),
+            true,
+        ));
+        let mut buf = [0u8; 2048];
+        let packet = vec![0x5a; CARRIER_DATAGRAM];
+        let mut got = None;
+        for _ in 0..150 {
+            local_wg.send_to(&packet, local).await.unwrap();
+            if let Ok(Ok((n, _))) =
+                tokio::time::timeout(Duration::from_millis(100), wg.recv_from(&mut buf)).await
+            {
+                got = Some(n);
+                break;
+            }
+        }
+        assert_eq!(
+            got,
+            Some(CARRIER_DATAGRAM),
+            "the front session carries datagrams"
+        );
+        assert_eq!(cs.tcp_sessions.load(Ordering::Relaxed), 1);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(200), quic_watch.recv_from(&mut buf))
+                .await
+                .is_err(),
+            "a front client never tries QUIC"
+        );
     }
 }

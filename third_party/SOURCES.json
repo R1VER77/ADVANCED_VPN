@@ -21,5 +21,31 @@
     "version": "2.7.3",
     "license": "MIT OR Apache-2.0",
     "source": "https://crates.io/crates/enum-map/2.7.3"
+  },
+  "katzenpost": {
+    "version": "v0.0.110",
+    "license": "AGPL-3.0-only",
+    "source": "https://github.com/katzenpost/katzenpost/tree/v0.0.110",
+    "revision": "bd15cab2f568167667478f7ac225576e4a993a94",
+    "modified": false,
+    "linked": false,
+    "note": "The mix lane runs these programs unmodified as separate processes (third_party/katzenpost/build.sh builds them); their source is at the URL above, under the AGPL.",
+    "programs": {
+      "dirauth": "8d46eededca162534f13bfe3080623165c5fbec5838791a7c4d386d8a85ad752",
+      "server": "f4f88a4b326a70db746b362d518f31f496b46a432fdcedbf1aebfd925fc79eb3",
+      "genconfig": "f33be5de63882b6074c5988b92dca8b3db55d5d50196ae60a4583fd091f10f47",
+      "kpclientd": "38ff8cd2b43f062112894fea838c474129979f3c05b993dab7eb33a44533c059",
+      "http-proxy-client": "248fc6fcbbd4de2992ebd5b2db774c56869d592833b46734999df47b00ecf2bf",
+      "http-proxy-server": "fe25a81145f6f3793805c2b95f1a0c5504ad1be71dca7afeda7ad32e9f2b9855"
+    },
+    "toolchain": "golang:1.26-bookworm image, GOTOOLCHAIN=auto (go 1.26.9 as go.mod requires), -trimpath -buildid="
+  },
+  "i2pd": {
+    "version": "2.56.0",
+    "license": "BSD-3-Clause",
+    "source": "https://github.com/PurpleI2P/i2pd/tree/2.56.0",
+    "modified": false,
+    "linked": false,
+    "note": "The I2P front runs the distribution's i2pd package unmodified, as its own user (tools/i2p.py configures it)."
   }
 }

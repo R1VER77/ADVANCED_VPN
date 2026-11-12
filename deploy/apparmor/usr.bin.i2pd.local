@@ -1,0 +1,6 @@
+# ADVANCED_VPN's I2P front (avpn help front): the VPN service runs i2pd with a
+# configuration, keys and data directory in its own RAM directory. Installed by
+# tools/install.py as /etc/apparmor.d/local/usr.bin.i2pd (the packaged profile includes it).
+/{,var/}run/advanced-vpn-runtime-*/ r,
+owner /{,var/}run/advanced-vpn-runtime-*/i2p-*/ rw,
+owner /{,var/}run/advanced-vpn-runtime-*/i2p-*/** rwk,

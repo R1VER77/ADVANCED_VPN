@@ -35,6 +35,7 @@ Setup:
 - `enroll`: install this device's signed bundle
 - `cloud`: find free servers, create or record them, and join them into one chain (`cloud suggest`, `cloud chain`)
 - `mesh`: publish a node descriptor, verify the volunteer mesh directory, or select a multi-operator chain (`mesh descriptor`, `mesh directory`, `mesh select`)
+- `mix`: the mix lane, a Katzenpost mixnet client inside the protected namespace for requests that can wait seconds (`mix setup`, `mix start`, `mix fetch`)
 
 Maintenance:
 
@@ -45,7 +46,7 @@ Maintenance:
 ## Help topics
 
 `avpn help COMMAND` shows a command's page. These concept topics are also available:
-`chains`, `endpoints`, `keys`, `privacy`, `threat-model`, `retention`, `interactive`.
+`chains`, `endpoints`, `front`, `keys`, `privacy`, `threat-model`, `retention`, `interactive`.
 
 ## Privileges
 
