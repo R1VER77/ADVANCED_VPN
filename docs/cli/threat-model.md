@@ -48,10 +48,23 @@ real packet or an indistinguishable decoy packet. Whether your applications are 
 downloading at full speed, the outer packet rate and packet size stay flat (`< 1%` wire
 rate change between idle and busy). Four rate classes (`metered`, `standard`, `fast`,
 `line`) trade cover bandwidth for application throughput without weakening the
-constant-rate invariant (`avpn help preferences`). On top of that,
+constant-rate invariant (`avpn help init`). On top of that,
 every chain pads **every** hop's datagrams to one size per layer (constant cells), so
 inner packet sizes do not leak on the outer path at all — not just on the first link.
 Padding is always on and cannot be turned off; a chain signed without it is refused.
+
+**Per-hop shaping.** The same constant-rate stream runs on every link *between* two
+servers, not only on yours to the first hop. Each relay wraps what it forwards in
+fixed-size cells encrypted under a link key that the operator seals to both servers
+(AES-256-GCM, a fresh key per sender session), and sends a fixed number of cells on
+every tick of the chain's clock — a forwarded packet, or an empty cell that looks
+exactly the same. Measured on the link into the exit: before, 0.5 packets/s of small
+QUIC control packets while idle jumped to 34–3,419 packets/s during a download; now the
+link runs at the class's rate with one 1270-byte packet size, idle or busy (0.0–0.1%
+change; `docs/evidence/RATE_CLASSES.json`, `inner_link`). The receiving server answers
+only with credit earned from authenticated cells, so a server is never a reflector for
+spoofed traffic. Mullvad's DAITA shapes only your link to its entry server; nothing
+shapes the exit side there.
 
 ## Roaming between networks
 
@@ -63,6 +76,22 @@ unprotected path while this happens — the kill switch holds throughout.
 Now that the carrier rides inside the HTTP/3 cloak, a changed address is also a
 changed outer path: the cloak reconnects and the carrier's keepalive re-learns the address,
 so a transfer survives the move (measured with `tools/daita_lab.py`, `ROBUST=roam`).
+
+## Self-healing chains
+
+A chain can carry standby exits (`avpn init --standby-exit`). Because every link between
+servers is paced and never silent, the server before the exit notices within 3 s when
+the exit stops answering, ends the session, and your client's automatic reconnect goes
+through the first standby exit that answers. Your client trusts exactly the signed set
+of exits, and every exit uses the same tunnel addresses, so nothing about your own
+device changes: the kill switch rules stay as they are and nothing can route around the
+tunnel. Measured in the lab, traffic flowed again 4.2 s after the exit went dark, and the
+destination never saw your own address (`docs/evidence/FAILOVER.json`).
+
+With standby exits, sessions also rotate among the live exits at a random time within a
+signed window (default 15–60 minutes), always at a session boundary. That limits how
+long any one exit sees your traffic. The entry relay is your guard: it never rotates,
+because changing it often only raises the odds of eventually picking a hostile one.
 
 ## Fails closed, not open
 
@@ -86,7 +115,7 @@ random guess is right **3.3%** of the time (`1/30`).
 
 | View / Rate class | Right, given 6 s from each page's start | Right, told the exact timestamp each page ended |
 |---|---|---|
-| Inner link (no DAITA baseline, same loads) | 27.0–74.7% | 42.7–81.3% |
+| Inner link before per-hop shaping (v0.7.0, same loads) | 27.0–74.7% | 42.7–81.3% |
 | Carrier — `metered` (50 pps / direction) | **3.3%** (= 1/30 random chance) | 21.3% |
 | Carrier — `fast` (4,000 pps / direction) | **1.7%** (≤ 1/30 random chance) | 20.0% |
 
@@ -100,6 +129,10 @@ random guess is right **3.3%** of the time (`1/30`).
 | `standard` | 2 ms × 1 slot (500 pps) | ~5.5 Mbit/s | ~3.1–4.5 Mbit/s | ~57 GiB/day |
 | `fast` | 2 ms × 8 staggered slots (4,000 pps) | ~44 Mbit/s | ~24.7–32.8 Mbit/s | ~455 GiB/day |
 | `line` | 2 ms × 32 staggered slots (16,000 pps) | ~177 Mbit/s | ~115.3–131.5 Mbit/s | ~1.8 TiB/day |
+
+A relay sends the stream on two links (back to you, and on to its next hop), so in a 2-
+or 3-hop chain its outbound cost is about twice the per-direction figure above;
+`avpn init --rate auto` counts both.
 
 Details are in `docs/evidence/DAITA_LAB.json` and `docs/evidence/RATE_CLASSES.json`.
 
@@ -134,13 +167,18 @@ What a capable observer can still tell:
 
 - **A global passive adversary** who can watch both ends of the chain at once can
   still try to correlate the flows by their timing and volume. Deep-learning attacks
-  (DeepCorr, Var-CNN) are good at this against low-latency tunnels. Constant-cell
-  padding and `strong` shaping raise the cost; only a mixnet with heavy delay and
-  cover traffic (Nym/Loopix, Tor to a lesser degree) defeats it outright, at a latency
-  this design will not pay. If that is your adversary, use a mixnet.
+  (DeepCorr, Var-CNN) are good at this against low-latency tunnels. Constant cells and
+  the constant-rate stream on every link raise the cost, but a stream that keeps packet
+  order is still a circuit: only per-packet mixing with random delays and cover traffic
+  (Loopix-style mixnets) defeats it outright, at a latency of seconds. If that is your
+  adversary, carry that traffic over a mixnet.
 - **Collusion.** The whole guarantee rests on the hops not pooling their logs. Put the
-  entry and the exit on different providers, ideally different jurisdictions, so
-  collusion needs two companies (or two legal orders) to agree. The servers keep
+  entry and the exit on different providers and in different legal spheres, so
+  collusion needs two companies and two legal orders to agree. Every free tier is a
+  US company, and the US CLOUD Act reaches US providers wherever their servers stand,
+  so OCI and AWS ends are one sphere: `avpn cloud chain` warns about that, and mesh
+  chains refuse it unless told otherwise. A non-US middle between two US ends does not
+  help — the legal attack goes to the ends. The servers keep
   nothing to hand over (`avpn help retention`), but a provider can still watch its own
   hop in real time.
 - **Who calls the cloud API.** Creating or changing a server records your address in

@@ -1263,3 +1263,26 @@ class HostScriptTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SystemPythonTests(unittest.TestCase):
+    def test_the_cloud_tool_plans_rates_without_the_locked_dependencies(self):
+        # avpn-cloud runs under the system Python (Debian's cryptography may be too old
+        # for ML-DSA). Importing cloud and choosing a rate must not need cryptography.
+        import subprocess
+
+        code = (
+            "import sys\n"
+            "class Block:\n"
+            "    def find_spec(self, name, path=None, target=None):\n"
+            "        if name == 'cryptography' or name.startswith('cryptography.'):\n"
+            "            raise ImportError('blocked: ' + name)\n"
+            "sys.meta_path.insert(0, Block())\n"
+            "sys.path.insert(0, sys.argv[1])\n"
+            "import cloud\n"
+            "print(cloud.rate_row(10240, 8, False, 2)['value'].split()[0])\n"
+        )
+        tools = str(Path(__file__).resolve().parent)
+        r = subprocess.run([sys.executable, "-I", "-c", code, tools], capture_output=True, text=True, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.strip(), "fast")

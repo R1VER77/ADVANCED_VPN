@@ -101,19 +101,26 @@ while True:
 WIRE_SEGMENT = 1420
 
 
-def shape_window(records, a, b, outgoing):
+def segment_size(records):
+    """The link's cell payload: the most common UDP payload of packets that fit one MTU."""
+    import collections
+
+    small = collections.Counter(n - 28 for _, n, _ in records if 28 < n <= 1500)
+    return small.most_common(1)[0][0] if small else WIRE_SEGMENT
+
+
+def shape_window(records, a, b, outgoing, segment=WIRE_SEGMENT):
     """Wire shape in [a, b): packets/s, the 100 ms bins' spread, and the IPv4 sizes seen."""
     import collections
 
     # GSO hands the observer up to 64 KiB super-frames on veth: count wire segments
-    # (one per WIRE_SEGMENT bytes of UDP payload), and sizes per segment.
+    # (one per `segment` bytes of UDP payload), and sizes per segment.
+    def parts(n):
+        return max(1, round((n - 28) / segment))
+
     window = [(t, n) for t, n, o in records if a <= t < b and o == outgoing]
-    times = [t for t, n in window for _ in range(max(1, round((n - 28) / WIRE_SEGMENT)))]
-    sizes = collections.Counter(
-        28 + (n - 28) // max(1, round((n - 28) / WIRE_SEGMENT))
-        for t, n in window
-        for _ in range(max(1, round((n - 28) / WIRE_SEGMENT)))
-    )
+    times = [t for t, n in window for _ in range(parts(n))]
+    sizes = collections.Counter(28 + (n - 28) // parts(n) for t, n in window for _ in range(parts(n)))
     bins = collections.Counter(int((t - a) * 10) for t in times)
     counts = [bins.get(i, 0) for i in range(int((b - a) * 10))]
     return dict(
@@ -126,15 +133,17 @@ def shape_window(records, a, b, outgoing):
 
 
 def shape_report(path, marks):
-    """Idle vs transfer shape in both directions of the first link."""
+    """Idle vs transfer shape in both directions of the observed link (towards the hop
+    that observes it, and back)."""
     import struct
 
     raw = path.read_bytes()
     records = [struct.unpack_from("<dHB", raw, i) for i in range(0, len(raw) - len(raw) % 11, 11)]
-    out = {}
-    for direction, outgoing in [("client_to_hop", 0), ("hop_to_client", 1)]:
-        idle = shape_window(records, *marks["idle"], outgoing)
-        busy = shape_window(records, *marks["transfer"], outgoing)
+    segment = segment_size(records)
+    out = {"segment_bytes": segment}
+    for direction, outgoing in [("towards_hop", 0), ("from_hop", 1)]:
+        idle = shape_window(records, *marks["idle"], outgoing, segment)
+        busy = shape_window(records, *marks["transfer"], outgoing, segment)
         drift = abs(busy["packets_per_second"] - idle["packets_per_second"]) / max(idle["packets_per_second"], 1e-9)
         out[direction] = dict(idle=idle, transfer=busy, rate_change=round(drift, 4))
     return out
@@ -209,7 +218,13 @@ def main():
         "--shape-idle",
         type=float,
         default=0,
-        help="record the first link's shape: this many idle seconds, then the transfer (0: off)",
+        help="record a link's shape: this many idle seconds, then the transfer (0: off)",
+    )
+    p.add_argument(
+        "--shape-link",
+        choices=["first", "last"],
+        default="first",
+        help="which link to observe: client to first hop, or the link into the exit",
     )
     p.add_argument("--max-rate-change", type=float, help="fail if the transfer changes the wire rate by more than this")
     p.add_argument("--rate-bytes", type=int)
@@ -395,11 +410,12 @@ def main():
                 for s in chain
             ]
             if a.shape_idle:
+                hop = chain[0] if a.shape_link == "first" else chain[-1]
                 shape_file = state / ("shape-%d.bin" % phase)
                 observers.append(
                     (
                         "shape",
-                        spawn("av-" + chain[0], [sys.executable, "-c", SHAPE, ingress[chain[0]], shape_file], "shape"),
+                        spawn("av-" + hop, [sys.executable, "-c", SHAPE, ingress[hop], shape_file], "shape"),
                     )
                 )
             # Mullvad-style: servers must write nothing persistent while carrying traffic.
@@ -511,7 +527,9 @@ def main():
                 or set(disk["client_files_written"]) - {"network-before.json"}
             ):
                 raise SystemExit("persistent data written during a session: " + json.dumps(disk))
-            if a.max_rate_change is not None and any(v["rate_change"] > a.max_rate_change for v in r["shape"].values()):
+            if a.max_rate_change is not None and any(
+                v["rate_change"] > a.max_rate_change for v in r["shape"].values() if isinstance(v, dict)
+            ):
                 raise SystemExit("the transfer changed the wire rate: " + json.dumps(r["shape"]))
             if a.min_mbit is not None and r["mbit_s"] < a.min_mbit:
                 raise SystemExit("throughput %.2f Mbit/s below floor %.1f" % (r["mbit_s"], a.min_mbit))

@@ -8,7 +8,7 @@ concurrency:
 jobs:
   local-protocol-proof:
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 35
     env:
       CARGO_BUILD_JOBS: 2
     steps:
@@ -67,7 +67,11 @@ jobs:
       - name: Multi-hop chains, switching, onion and no-retained-data audits
         run: |
           unshare --user --map-root-user --map-auto --net --mount python tools/throughput_bench.py --state /tmp/avpn-hops-3-1 --hops 3 --switch-to 1 --rate line --mib 16 --min-mbit 20 --shape-idle 5 --max-rate-change 0.15
-          unshare --user --map-root-user --map-auto --net --mount python tools/throughput_bench.py --state /tmp/avpn-hops-2-3 --hops 2 --switch-to 3 --rate line --mib 16 --min-mbit 20 --shape-idle 5 --max-rate-change 0.15
+          unshare --user --map-root-user --map-auto --net --mount python tools/throughput_bench.py --state /tmp/avpn-hops-2-3 --hops 2 --switch-to 3 --rate line --mib 16 --min-mbit 20 --shape-idle 5 --shape-link last --max-rate-change 0.15
+      - name: Self-healing chain (standby exit failover, no leak) and oblivious control plane
+        run: |
+          unshare --user --map-root-user --map-auto --net --mount python tools/failover_lab.py --state /tmp/avpn-failover --rate standard
+          unshare --user --map-root-user --map-auto --net --mount python tools/ohttp_lab.py --state /tmp/avpn-ohttp
       - name: Known dependency vulnerabilities
         run: |
           cargo install cargo-audit --version 0.22.1 --locked

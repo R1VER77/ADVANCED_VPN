@@ -7,6 +7,8 @@ pub mod cloak;
 pub mod config;
 /// The DAITA (Maybenot) machines of the WireGuard carrier: strong, on every hop.
 pub mod daita;
+/// Constant-rate, encrypted links between consecutive servers (per-hop shaping).
+pub mod link;
 /// AVPN/Mesh: community node identity, signed descriptors, the node directory
 /// and unlinkable contribution credits. See docs/MESH_DESIGN.md.
 pub mod mesh;

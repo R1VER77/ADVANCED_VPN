@@ -62,9 +62,13 @@ async fn entry() -> Result<()> {
             tls::layer_payload(c.mtu, c.layers, k),
         )?;
     }
+    // Per-hop shaping: every link's key must be present, 32 bytes and nonzero.
+    let (out, inbound) = run::link_keys(&c, &fds)?;
     if a.check {
         println!(
-            "{{\"configuration_valid\":true,\"required_kx\":\"X25519MLKEM768\",\"required_cipher\":\"AES_256_GCM\"}}"
+            "{{\"configuration_valid\":true,\"required_kx\":\"X25519MLKEM768\",\"required_cipher\":\"AES_256_GCM\",\"paced_links_out\":{},\"paced_links_in\":{}}}",
+            out.len(),
+            inbound.len()
         );
         return Ok(());
     }

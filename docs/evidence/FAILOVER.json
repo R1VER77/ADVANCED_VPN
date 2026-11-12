@@ -1,0 +1,99 @@
+{
+ "what": "Self-healing chains: a 2-hop chain with one standby exit, in network namespaces (tools/failover_lab.py). The primary exit's link is taken down mid-run while a prober inside the tunnel asks the destination every 250 ms which exit it sees; a second phase rotates sessions between live exits. The destination records every source address that ever reaches it.",
+ "date": "2026-11-12",
+ "tool": "unshare --user --map-root-user --map-auto --net --mount python3 tools/failover_lab.py --state DIR --rate standard [--rotate]",
+ "setup": {
+  "rate": "standard",
+  "hops": 2,
+  "standby_exits": 1,
+  "liveness": "a paced link answers every tick; 3 s without an authenticated cell ends the session; a new session waits up to 2 s per candidate",
+  "rotation_window_lab": "60-90 s (production default 900-3600 s)",
+  "session_seconds_lab": 30
+ },
+ "runs": [
+  {
+   "run": "failover only",
+   "rate": "standard",
+   "hops": 2,
+   "standby_exits": 1,
+   "failover": {
+    "before": [
+     "exit"
+    ],
+    "recovered_via": "exit2",
+    "outage_seconds": 4.21,
+    "probes_after": 188,
+    "probes_ok_after_recovery": 184,
+    "probes_failed_after_recovery": 0
+   },
+   "leak": {
+    "destination_sources": [
+     "203.0.113.1",
+     "203.0.113.2",
+     "203.0.113.5"
+    ],
+    "client_address_reached_destination": false
+   }
+  },
+  {
+   "run": "failover then rotation",
+   "rate": "standard",
+   "hops": 2,
+   "standby_exits": 1,
+   "failover": {
+    "before": [
+     "exit"
+    ],
+    "recovered_via": "exit2",
+    "outage_seconds": 4.21,
+    "probes_after": 185,
+    "probes_ok_after_recovery": 180,
+    "probes_failed_after_recovery": 1
+   },
+   "rotation": {
+    "window_seconds": [
+     60,
+     90
+    ],
+    "session_seconds": 30,
+    "exits_used": [
+     "exit",
+     "exit2"
+    ],
+    "changes": [
+     {
+      "t": 16.1,
+      "to": "exit"
+     },
+     {
+      "t": 109.6,
+      "to": "exit2"
+     },
+     {
+      "t": 203.2,
+      "to": "exit"
+     },
+     {
+      "t": 296.7,
+      "to": "exit2"
+     }
+    ],
+    "probes": 1152
+   },
+   "leak": {
+    "destination_sources": [
+     "203.0.113.1",
+     "203.0.113.2",
+     "203.0.113.5"
+    ],
+    "client_address_reached_destination": false
+   }
+  }
+ ],
+ "reading": {
+  "failover": "Traffic flowed again through the standby exit 4.2 s after the primary went dark, in both runs; after recovery 184/184 and 180/181 probes succeeded.",
+  "rotation": "Over 300 s the sessions moved between the two exits four times, about every 93 s (window 60-90 s, aligned to 30 s session boundaries); the entry relay, the client's guard, never changed.",
+  "leak": "The destination only ever saw the two exits' addresses (and its own); the client's real address never reached it during the outage, the switch or rotation."
+ },
+ "limits": "Lab namespaces on one host; real-world reroute time adds the WAN round trips of the chain. Standby exits are single-chain (operator-run); mesh relays route per member and do not yet fail over between members' exits."
+}

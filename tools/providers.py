@@ -90,7 +90,30 @@ PROVIDERS = [
     ),
 ]
 
-ALL_KEYS = {p["key"] for p in PROVIDERS}
+# Hosts whose company is not American, for a chain whose ends answer to different
+# legal spheres. Every free tier above belongs to a US company, and the US CLOUD Act
+# reaches US providers wherever their servers stand, so a chain built only from them
+# sits under one legal umbrella. These are paid; names and homes only (terms and
+# prices change: check them yourself).
+NON_US = [
+    dict(key="hetzner", name="Hetzner", parent="DE", source="https://www.hetzner.com/cloud"),
+    dict(key="netcup", name="netcup", parent="DE", source="https://www.netcup.com"),
+    dict(key="ovh", name="OVHcloud", parent="FR", source="https://www.ovhcloud.com"),
+    dict(key="1984", name="1984 Hosting", parent="IS", source="https://1984.hosting"),
+    dict(key="infomaniak", name="Infomaniak", parent="CH", source="https://www.infomaniak.com"),
+    dict(key="exoscale", name="Exoscale", parent="CH", source="https://www.exoscale.com"),
+]
+# The legal sphere each provider's company answers to (tools/mesh.py and
+# src/mesh/directory.rs use the same table). "own" is your own host: its country's law.
+LEGAL_PARENT = {"oci": "US", "aws": "US", "azure": "US", "gcp": "US", **{p["key"]: p["parent"] for p in NON_US}}
+
+ALL_KEYS = {p["key"] for p in PROVIDERS} | {p["key"] for p in NON_US}
+
+
+def sphere(key):
+    """A provider's legal sphere, or None for your own host (whose country decides)."""
+    return LEGAL_PARENT.get(key)
+
 
 # A hop sending under this much a month is useless for a VPN.
 USABLE_GIB = 20
@@ -115,8 +138,12 @@ def ranked():
 
 
 def by_key(key):
-    """One catalog entry."""
-    return next(p for p in PROVIDERS if p["key"] == key)
+    """One catalog entry (a non-US host has no free allowance on record)."""
+    for p in PROVIDERS:
+        if p["key"] == key:
+            return p
+    q = next(p for p in NON_US if p["key"] == key)
+    return dict(q, egress_gib=None, terms="paid", servers="a VPS you create", automation="ssh")
 
 
 def quick(argv, timeout=20):

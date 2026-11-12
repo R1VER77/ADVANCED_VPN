@@ -92,6 +92,25 @@ pub struct Config {
     #[serde(default)]
     /// Mesh servers only: admitted members. Empty on clients and single-chain servers.
     pub members: Vec<Member>,
+    #[serde(default)]
+    /// Per-hop shaping (`crate::link`): the chain's rate class for the paced, encrypted
+    /// links between consecutive servers. Required on every server of a multi-hop chain;
+    /// absent on clients and one-hop exits, whose only link is the carrier.
+    pub link_rate: Option<String>,
+    #[serde(default)]
+    /// Relays: the next hops this server paces links to, in link-key order.
+    pub link_out: Vec<SocketAddr>,
+    #[serde(default)]
+    /// Servers behind a relay (middle relays and multi-hop exits): how many inbound
+    /// link keys follow the outbound ones in the `link` key descriptor.
+    pub link_in: usize,
+    #[serde(default)]
+    /// The server before the exit: standby exits to fail over to, in order after `exit`.
+    pub alternates: Vec<SocketAddr>,
+    #[serde(default)]
+    /// With standby exits: rotate among the live ones at a random time in this window
+    /// (seconds), at a session boundary. The entry never rotates.
+    pub rotate_seconds: Option<[u64; 2]>,
 }
 fn two_layers() -> usize {
     2
@@ -233,6 +252,7 @@ impl Config {
             }
             _ => bail!("unknown role"),
         }
+        self.validate_links()?;
         for i in [&self.outer, &self.middle, &self.inner]
             .into_iter()
             .flatten()
@@ -254,9 +274,15 @@ impl Config {
                 i.peer_members.is_empty() || i.pin_kind == PinKind::Spki,
                 "member pins cover public keys (spki)"
             );
+            // A client trusts one entry (its guard) and, on the inner layer only, the
+            // set of exits it may fail over to (standby exits).
+            let standby =
+                self.role == "client" && self.inner.as_ref().is_some_and(|x| std::ptr::eq(x, i));
             ensure!(
-                i.peer_members.is_empty() || self.role != "client",
-                "a client pins its one chain; member sets are server-only"
+                i.peer_members.is_empty()
+                    || self.role != "client"
+                    || (standby && (2..=8).contains(&i.peer_members.len())),
+                "a client pins one entry, and at most a small set of exits"
             );
         }
         // Member routing: unique pins, matching the serving layer's accepted set.
@@ -341,9 +367,125 @@ impl Config {
             _ => bail!("server must hold exactly one layer"),
         }
     }
+    /// The link rate class, if this server paces links.
+    pub fn link_class(&self) -> Option<crate::daita::RateClass> {
+        self.link_rate
+            .as_deref()
+            .and_then(crate::daita::RateClass::parse)
+    }
+    /// Whether this server receives its layer over a paced link (it sits behind a relay).
+    pub fn paced_ingress(&self) -> bool {
+        self.link_in > 0
+    }
     /// The admitted mesh member whose pin for this server's layer is `pin`.
     pub fn member(&self, pin: &str) -> Option<&Member> {
         self.members.iter().find(|m| m.pin_sha256 == pin)
+    }
+    /// Per-hop shaping is not optional: every link between two servers is paced and
+    /// encrypted, so a multi-hop chain signed before it existed is refused (re-sign it).
+    fn validate_links(&self) -> Result<()> {
+        const RESIGN: &str = "every link between servers is paced (per-hop shaping); re-sign this chain with a current avpn init";
+        // The legacy standalone QUIC interface (docs/LEGACY_QUIC.md, MTU 1280) has no
+        // carrier and no shaping at all; per-hop pacing is part of every managed chain.
+        if self.mtu != crate::tls::MANAGED_IP_MTU {
+            ensure!(
+                self.link_rate.is_none()
+                    && self.link_out.is_empty()
+                    && self.link_in == 0
+                    && self.alternates.is_empty()
+                    && self.rotate_seconds.is_none(),
+                "paced links and standby exits are managed-chain features"
+            );
+            return Ok(());
+        }
+        ensure!(
+            self.link_rate.is_none() || self.link_class().is_some(),
+            "unknown link rate class"
+        );
+        ensure!(
+            self.link_out.len() <= 256 && self.link_in <= 256,
+            "too many links"
+        );
+        let concrete = |a: &SocketAddr| {
+            a.is_ipv4() && !a.ip().is_unspecified() && !a.ip().is_multicast() && a.port() != 0
+        };
+        match self.role.as_str() {
+            "client" => ensure!(
+                self.link_rate.is_none()
+                    && self.link_out.is_empty()
+                    && self.link_in == 0
+                    && self.alternates.is_empty()
+                    && self.rotate_seconds.is_none(),
+                "a client's only link is the carrier"
+            ),
+            "relay" => {
+                ensure!(
+                    self.link_rate.is_some() && !self.link_out.is_empty(),
+                    "{RESIGN}"
+                );
+                ensure!(
+                    self.link_out.iter().all(concrete)
+                        && self
+                            .link_out
+                            .iter()
+                            .collect::<std::collections::BTreeSet<_>>()
+                            .len()
+                            == self.link_out.len(),
+                    "link next hops must be unique concrete IPv4 endpoints"
+                );
+                // Every next hop this relay forwards to must have its link.
+                let next: Vec<SocketAddr> = if self.members.is_empty() {
+                    self.exit.into_iter().collect()
+                } else {
+                    self.members.iter().filter_map(|m| m.exit).collect()
+                };
+                ensure!(
+                    next.iter().all(|n| self.link_out.contains(n)),
+                    "a next hop without a paced link"
+                );
+                ensure!(
+                    self.members.is_empty() || self.alternates.is_empty(),
+                    "mesh relays route per member; standby exits are single-chain"
+                );
+                ensure!(
+                    self.alternates.iter().all(|a| self.link_out.contains(a))
+                        && !self.exit.is_some_and(|e| self.alternates.contains(&e))
+                        && self.alternates.len() <= 7,
+                    "every standby exit needs its own paced link"
+                );
+                ensure!(
+                    match self.rotate_seconds {
+                        None => self.alternates.is_empty(),
+                        Some([lo, hi]) => {
+                            !self.alternates.is_empty() && 60 <= lo && lo <= hi && hi <= 86_400
+                        }
+                    },
+                    "standby exits need a rotation window of 60..86400 seconds"
+                );
+                // An entry relay receives over the carrier; a middle relay over a link.
+                ensure!(
+                    (self.middle.is_some()) == self.paced_ingress(),
+                    "only a middle relay receives over a paced link"
+                );
+            }
+            "exit" => {
+                ensure!(self.link_out.is_empty(), "an exit has no next hop");
+                ensure!(
+                    self.alternates.is_empty() && self.rotate_seconds.is_none(),
+                    "an exit has no standby exits"
+                );
+                if self.layers >= 2 {
+                    ensure!(self.link_rate.is_some() && self.paced_ingress(), "{RESIGN}");
+                } else {
+                    ensure!(
+                        self.link_rate.is_none() && self.link_in == 0,
+                        "a one-hop exit's only link is the carrier"
+                    );
+                }
+            }
+            _ => {}
+        }
+        Ok(())
     }
     fn validate_tun(&self) -> Result<()> {
         let n = self.tun.as_deref().context("TUN required")?;
@@ -377,9 +519,9 @@ pub fn key_fds(items: &[String]) -> Result<BTreeMap<String, i32>> {
     for s in items {
         let (role, fd) = s
             .split_once('=')
-            .context("key-fd must be outer=N, middle=N or inner=N")?;
+            .context("key-fd must be outer=N, middle=N, inner=N or link=N")?;
         ensure!(
-            matches!(role, "outer" | "middle" | "inner"),
+            matches!(role, "outer" | "middle" | "inner" | "link"),
             "unknown key role"
         );
         let fd: i32 = fd.parse()?;
@@ -453,6 +595,11 @@ mod tests {
             layers: 2,
             cells: true,
             members,
+            link_rate: Some("metered".into()),
+            link_out: vec!["203.0.113.80:4444".parse().unwrap()],
+            link_in: 0,
+            alternates: vec![],
+            rotate_seconds: None,
         }
     }
     fn relay_member(byte: u8) -> Member {
@@ -509,6 +656,9 @@ mod tests {
         c.local_ip = Some("10.77.0.1".into());
         c.peer_ip = Some("10.77.0.2".into());
         c.destinations = vec!["0.0.0.0/0".into()];
+        // A multi-hop exit receives over a paced link and has no next hop.
+        c.link_out = vec![];
+        c.link_in = 1;
         c.validate().unwrap();
         // Two members may not share a tunnel address.
         c.members = vec![exit_member(1, "10.77.0.2"), exit_member(2, "10.77.0.2")];
@@ -535,5 +685,39 @@ mod tests {
         c.local_ip = Some("10.77.0.2".into());
         c.peer_ip = Some("10.77.0.1".into());
         assert!(c.validate().is_err());
+    }
+
+    #[test]
+    fn every_server_link_is_paced() {
+        // A relay signed before per-hop shaping is refused.
+        let mut c = relay(vec![], vec![pin(1)]);
+        c.outer.as_mut().unwrap().peer_members = vec![];
+        c.outer.as_mut().unwrap().peer_sha256 = pin(1);
+        c.validate().unwrap();
+        let mut old = c.clone();
+        old.link_rate = None;
+        assert!(old.validate().is_err());
+        let mut old = c.clone();
+        old.link_out = vec![];
+        assert!(old.validate().is_err());
+        // A next hop without its link, an unknown class, a duplicate link.
+        let mut bad = c.clone();
+        bad.link_out = vec!["203.0.113.81:4444".parse().unwrap()];
+        assert!(bad.validate().is_err());
+        let mut bad = c.clone();
+        bad.link_rate = Some("turbo".into());
+        assert!(bad.validate().is_err());
+        let mut bad = c.clone();
+        bad.link_out.push(c.link_out[0]);
+        assert!(bad.validate().is_err());
+        // An entry relay receives over the carrier, never a link.
+        let mut bad = c.clone();
+        bad.link_in = 1;
+        assert!(bad.validate().is_err());
+        // A mesh relay needs a link to every member's next hop.
+        let mut mesh = relay(vec![relay_member(1)], vec![pin(1)]);
+        mesh.validate().unwrap();
+        mesh.members[0].exit = Some("203.0.113.90:4444".parse().unwrap());
+        assert!(mesh.validate().is_err());
     }
 }

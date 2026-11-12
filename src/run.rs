@@ -28,6 +28,8 @@ pub struct Counts {
     pub dropped: u64,
     /// Datagrams refused by the per-second budget.
     pub rate_dropped: u64,
+    /// Relays: the session ended because the next hop went silent (failover follows).
+    pub next_hop_lost: bool,
 }
 
 // No per-peer maps or unbounded queues. Each direction has its own fixed budget.
@@ -125,9 +127,9 @@ fn audit(role: &str, len: usize) {
     }
 }
 
-fn endpoint_server(c: &Config, i: &Identity, fd: Option<i32>, mtu: u16) -> Result<Endpoint> {
+fn endpoint_server(bind: SocketAddr, i: &Identity, fd: Option<i32>, mtu: u16) -> Result<Endpoint> {
     let s = tls::server(i, fd, mtu)?;
-    let sock = std::net::UdpSocket::bind(c.listen)?;
+    let sock = std::net::UdpSocket::bind(bind)?;
     sock.set_nonblocking(true)?;
     let mut e = quinn::EndpointConfig::default();
     e.max_udp_payload_size(mtu)?;
@@ -162,7 +164,186 @@ fn fd(fds: &BTreeMap<String, i32>, role: &str) -> Option<i32> {
     fds.get(role).copied()
 }
 
+/// A server's link keys: outbound (in `link_out` order), then inbound.
+pub type LinkKeys = (Vec<[u8; 32]>, Vec<[u8; 32]>);
+/// This server's link keys from the sealed `link` descriptor: one 32-byte key per
+/// outbound link (`link_out` order), then one per inbound link.
+pub fn link_keys(c: &Config, fds: &BTreeMap<String, i32>) -> Result<LinkKeys> {
+    let want = c.link_out.len() + c.link_in;
+    if want == 0 {
+        return Ok((vec![], vec![]));
+    }
+    let raw = crate::config::sealed_fd(
+        fd(fds, "link").context("link keys required (per-hop shaping)")?,
+        32 * want as u64,
+    )?;
+    ensure!(raw.len() == 32 * want, "one 32-byte key per link");
+    let keys: Vec<[u8; 32]> = raw
+        .chunks_exact(32)
+        .map(|k| k.try_into().expect("chunk length"))
+        .collect();
+    ensure!(
+        keys.iter().all(|k| k.iter().any(|&b| b != 0)),
+        "nonzero link keys required"
+    );
+    let (out, inbound) = keys.split_at(c.link_out.len());
+    Ok((out.to_vec(), inbound.to_vec()))
+}
+
+/// The bytes a paced link cell holds for a layer whose QUIC payload is `payload`.
+fn link_cell(payload: usize) -> usize {
+    payload + 2
+}
+
+/// A paced link answers every tick; this long without an authenticated cell means the
+/// next hop is gone, and the session ends so the client reconnects through a live one.
+const LINK_DEAD: Duration = Duration::from_secs(3);
+/// How long a new session waits for a next hop's first cell before trying the next.
+const LINK_LIVE_WAIT: Duration = Duration::from_secs(2);
+/// A next hop found dead is skipped for this long.
+const DEAD_FOR: Duration = Duration::from_secs(30);
+
+fn random_u64() -> u64 {
+    use aws_lc_rs::rand::SecureRandom;
+    let mut b = [0u8; 8];
+    // The OS generator; if it ever fails, rotation simply waits the window's minimum.
+    let _ = aws_lc_rs::rand::SystemRandom::new().fill(&mut b);
+    u64::from_be_bytes(b)
+}
+
+/// The next hops of the server before the exit: the exit, then standby exits. New
+/// sessions go to the current one if it is live, else the next live one (failover);
+/// with a rotation window, the current one changes at a random time within it, always
+/// at a session boundary. The entry (the client's guard) is not this server's choice.
+pub struct NextHops {
+    order: Vec<SocketAddr>,
+    current: usize,
+    dead: BTreeMap<SocketAddr, Instant>,
+    window: Option<[u64; 2]>,
+    rotate_at: Option<Instant>,
+}
+
+impl NextHops {
+    /// The next hops of a relay: its exit (or middle relay) first, then standby exits.
+    pub fn new(c: &Config) -> Self {
+        let order: Vec<SocketAddr> = c
+            .exit
+            .into_iter()
+            .chain(c.alternates.iter().copied())
+            .collect();
+        let mut h = NextHops {
+            order,
+            current: 0,
+            dead: BTreeMap::new(),
+            window: c.rotate_seconds,
+            rotate_at: None,
+        };
+        h.rotate_at = h.window.map(|_| Instant::now() + h.draw());
+        h
+    }
+    fn draw(&self) -> Duration {
+        let [lo, hi] = self.window.unwrap_or([0, 0]);
+        Duration::from_secs(lo + random_u64() % (hi - lo + 1))
+    }
+    fn is_dead(&self, a: &SocketAddr) -> bool {
+        self.dead
+            .get(a)
+            .is_some_and(|until| Instant::now() < *until)
+    }
+    /// The next hops to try for a new session, in order.
+    pub fn candidates(&mut self) -> Vec<SocketAddr> {
+        let n = self.order.len();
+        if n > 1 && self.rotate_at.is_some_and(|at| Instant::now() >= at) {
+            let others: Vec<usize> = (0..n)
+                .filter(|&k| k != self.current && !self.is_dead(&self.order[k]))
+                .collect();
+            if !others.is_empty() {
+                self.current = others[(random_u64() % others.len() as u64) as usize];
+            }
+            self.rotate_at = Some(Instant::now() + self.draw());
+        }
+        let ring: Vec<SocketAddr> = (0..n).map(|k| self.order[(self.current + k) % n]).collect();
+        let live: Vec<SocketAddr> = ring.iter().copied().filter(|a| !self.is_dead(a)).collect();
+        if live.is_empty() { ring } else { live }
+    }
+    /// Record that `a` carries the current sessions.
+    pub fn using(&mut self, a: SocketAddr) {
+        if let Some(k) = self.order.iter().position(|x| *x == a) {
+            self.current = k;
+        }
+        self.dead.remove(&a);
+    }
+    /// Record that `a` did not answer: skip it for a while.
+    pub fn lost(&mut self, a: SocketAddr) {
+        self.dead.insert(a, Instant::now() + DEAD_FOR);
+    }
+    /// Test-only: force the rotation deadline.
+    #[cfg(test)]
+    fn rotate_now(&mut self) {
+        self.rotate_at = Some(Instant::now());
+    }
+}
+
+/// Open the paced link from this relay to `next_hop`.
+async fn open_link(
+    c: &Config,
+    layer: usize,
+    next_hop: SocketAddr,
+    psk: [u8; 32],
+) -> Result<crate::link::Egress> {
+    let next = tls::layer_payload(c.mtu, c.layers, layer + 1) as usize;
+    let pace = crate::link::Pace::of(c.link_class().context("link rate required")?);
+    crate::link::egress(next_hop, psk, pace, link_cell(next)).await
+}
+
 async fn relay_session(
+    c: &Config,
+    conn: &Connection,
+    life: Duration,
+    layer: usize,
+    mut link: crate::link::Egress,
+) -> Result<Counts> {
+    let next = tls::layer_payload(c.mtu, c.layers, layer + 1) as usize;
+    let mut counts = Counts::default();
+    let mut health = tokio::time::interval(Duration::from_millis(250));
+    let started = Instant::now();
+    let mut up = Budget::new(c.packets_per_second, c.bytes_per_second);
+    let mut down = Budget::new(c.packets_per_second, c.bytes_per_second);
+    // Datagrams carry the next layer's packets, bounded by that layer's payload size.
+    let cell = cell_size(tls::layer_payload(c.mtu, c.layers, layer) as usize);
+    let deadline = sleep(life.min(Duration::from_secs(c.session_seconds)));
+    tokio::pin!(deadline);
+    loop {
+        tokio::select! {
+            _=&mut deadline=>break,
+            _=health.tick()=>{
+                // Never heard, or silent since: the next hop is gone; end the session.
+                let gone=match link.silent_for(){Some(s)=>s>LINK_DEAD,None=>started.elapsed()>LINK_DEAD};
+                if gone {counts.next_hop_lost=true;break;}
+            }
+            r=conn.read_datagram()=>{
+                let d=r?;
+                if !up.admit(d.len()) {counts.rate_dropped+=1;continue;}
+                let Some(p)=unframe(&d) else {counts.dropped+=1;continue;};
+                if p.len()>next || p.is_empty() {counts.dropped+=1;continue;}
+                // Into the paced link: a full queue drops, it never bursts.
+                if link.send(p) {counts.sent+=1;} else {counts.dropped+=1;}
+            }
+            r=link.rx.recv()=>{
+                let Some(b)=r else {break};
+                let n=b.len();
+                if n==0 || n>next {counts.dropped+=1;continue;}
+                if !down.admit(cell) {counts.rate_dropped+=1;continue;}
+                let f=frame(&b[..n],cell);audit(&c.role,f.len());if conn.send_datagram(f).is_err() {counts.dropped+=1;}else{counts.received+=1;}
+            }
+        }
+    }
+    Ok(counts)
+}
+
+/// Legacy relay session (MTU 1280, no per-hop shaping): plain UDP forwarding to the
+/// next hop without paced links. Managed chains (MTU 1100) always use paced links.
+async fn legacy_relay_session(
     c: &Config,
     conn: &Connection,
     life: Duration,
@@ -344,12 +525,45 @@ pub async fn serve(c: &Config, fds: &BTreeMap<String, i32>, tun_fd: Option<i32>)
     // Each server terminates exactly one layer: entry/middle relays forward the
     // next layer's ciphertext; the exit owns the innermost layer and the TUN.
     let (role, i, layer) = c.server_layer()?;
+    let (link_out, link_in) = link_keys(c, fds)?;
+    // Behind a relay, the public port belongs to the paced link; QUIC listens on
+    // loopback and sees each relay as one local peer.
+    let bind = if c.paced_ingress() {
+        "127.0.0.1:0".parse()?
+    } else {
+        c.listen
+    };
     let endpoint = endpoint_server(
-        c,
+        bind,
         i,
         fd(fds, role),
         tls::layer_payload(c.mtu, c.layers, layer),
     )?;
+    let _ingress = if c.paced_ingress() {
+        let pace = crate::link::Pace::of(c.link_class().context("link rate required")?);
+        let cell = link_cell(tls::layer_payload(c.mtu, c.layers, layer) as usize);
+        let quic = endpoint.local_addr()?;
+        let task = tokio::spawn(crate::link::ingress(
+            c.listen,
+            quic,
+            link_in,
+            pace,
+            cell,
+            2 * c.members.len().max(1) + 8,
+        ));
+        Some(crate::link::Guard::new(task))
+    } else {
+        None
+    };
+    let mut hops = NextHops::new(c);
+    let link_for = |next: SocketAddr| -> Result<[u8; 32]> {
+        let k = c
+            .link_out
+            .iter()
+            .position(|n| *n == next)
+            .context("no paced link to this next hop")?;
+        Ok(link_out[k])
+    };
     println!("{{\"event\":\"listening\"}}");
     if c.members.is_empty() {
         // Single-chain server: one session at a time.
@@ -374,7 +588,39 @@ pub async fn serve(c: &Config, fds: &BTreeMap<String, i32>, tun_fd: Option<i32>)
                 "{{\"event\":\"authenticated\",\"kx\":\"X25519MLKEM768\",\"cipher\":\"AES_256_GCM\"}}"
             );
             let result = if relay {
-                relay_session(c, &conn, life, layer, c.exit.context("exit missing")?).await
+                let next = c.exit.context("relay exit required")?;
+                // Legacy standalone mode (MTU 1280) has no paced links; forward directly.
+                if c.link_out.is_empty() {
+                    legacy_relay_session(c, &conn, life, layer, next).await
+                } else {
+                    // Managed chains use paced links with failover to standby exits.
+                    let mut chosen = None;
+                    for candidate in hops.candidates() {
+                        let link = open_link(c, layer, candidate, link_for(candidate)?).await?;
+                        if link.alive_within(LINK_LIVE_WAIT).await {
+                            chosen = Some((candidate, link));
+                            break;
+                        }
+                        hops.lost(candidate);
+                    }
+                    match chosen {
+                        None => Err(anyhow::anyhow!("no live next hop")),
+                        Some((candidate, link)) => {
+                            hops.using(candidate);
+                            let index = c
+                                .exit
+                                .into_iter()
+                                .chain(c.alternates.iter().copied())
+                                .position(|a| a == candidate);
+                            println!("{}", serde_json::json!({"event":"next_hop","index":index}));
+                            let r = relay_session(c, &conn, life, layer, link).await;
+                            if r.as_ref().is_ok_and(|k| k.next_hop_lost) {
+                                hops.lost(candidate);
+                            }
+                            r
+                        }
+                    }
+                }
             } else {
                 tunnel(c, &conn, life, tun_fd).await
             };
@@ -434,13 +680,29 @@ pub async fn serve(c: &Config, fds: &BTreeMap<String, i32>, tun_fd: Option<i32>)
         println!(
             "{{\"event\":\"authenticated\",\"kx\":\"X25519MLKEM768\",\"cipher\":\"AES_256_GCM\"}}"
         );
+        let psk = match member.exit {
+            Some(next) => link_for(next).ok(),
+            None => None,
+        };
+        let link_out_empty = c.link_out.is_empty();
         let (c, tun, demux) = (c.clone(), tun.clone(), demux.clone());
         tokio::spawn(async move {
             let _permit = permit;
             let result = if relay {
-                match member.exit {
-                    Some(next) => relay_session(&c, &conn, life, layer, next).await,
-                    None => Err(anyhow::anyhow!("member without a next hop")),
+                // Legacy standalone mode (MTU 1280) has no paced links.
+                if link_out_empty {
+                    match member.exit {
+                        Some(next) => legacy_relay_session(&c, &conn, life, layer, next).await,
+                        None => Err(anyhow::anyhow!("member without a next hop")),
+                    }
+                } else {
+                    match (member.exit, psk) {
+                        (Some(next), Some(psk)) => match open_link(&c, layer, next, psk).await {
+                            Ok(link) => relay_session(&c, &conn, life, layer, link).await,
+                            Err(e) => Err(e),
+                        },
+                        _ => Err(anyhow::anyhow!("member without a paced next hop")),
+                    }
                 }
             } else {
                 mesh_tunnel(
@@ -679,5 +941,66 @@ mod tests {
         assert!(!b.admit(5));
         assert!(b.admit(4));
         assert!(!b.admit(0));
+    }
+
+    fn hops(n: usize, window: Option<[u64; 2]>) -> NextHops {
+        let order: Vec<SocketAddr> = (0..n)
+            .map(|k| format!("198.51.100.{}:4444", k + 2).parse().unwrap())
+            .collect();
+        NextHops {
+            order,
+            current: 0,
+            dead: BTreeMap::new(),
+            window,
+            rotate_at: None,
+        }
+    }
+
+    #[test]
+    fn failover_skips_a_dead_next_hop_and_keeps_order() {
+        let mut h = hops(3, None);
+        let all = h.candidates();
+        assert_eq!(all.len(), 3);
+        h.lost(all[0]);
+        assert_eq!(h.candidates(), vec![all[1], all[2]]);
+        h.using(all[1]);
+        assert_eq!(h.candidates()[0], all[1]);
+        // Everything dead: still try them all rather than give up.
+        h.lost(all[1]);
+        h.lost(all[2]);
+        assert_eq!(h.candidates().len(), 3);
+    }
+
+    #[test]
+    fn rotation_moves_to_another_live_exit_only_when_due() {
+        let mut h = hops(3, Some([60, 120]));
+        h.rotate_at = Some(Instant::now() + Duration::from_secs(60));
+        let first = h.candidates()[0];
+        assert_eq!(h.candidates()[0], first, "not due: no rotation");
+        let mut moved = 0;
+        for _ in 0..40 {
+            h.rotate_now();
+            let before = h.order[h.current];
+            let after = h.candidates()[0];
+            if after != before {
+                moved += 1;
+            }
+        }
+        assert_eq!(moved, 40, "a due rotation always picks another exit");
+        // A dead exit is never rotated to.
+        let mut h = hops(2, Some([60, 60]));
+        let other = h.order[1];
+        h.lost(other);
+        h.rotate_now();
+        assert_eq!(h.candidates(), vec![h.order[0]]);
+    }
+
+    #[test]
+    fn the_rotation_window_is_respected() {
+        let h = hops(2, Some([900, 3600]));
+        for _ in 0..200 {
+            let d = h.draw().as_secs();
+            assert!((900..=3600).contains(&d));
+        }
     }
 }

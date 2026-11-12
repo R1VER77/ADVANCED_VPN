@@ -150,5 +150,49 @@ def argparse_ns(**kw):
     return argparse.Namespace(**kw)
 
 
+class SharedSelectionTests(unittest.TestCase):
+    def test_selection_matches_the_data_plane(self):
+        import mesh
+
+        doc = json.loads((Path(__file__).resolve().parent / "testdata/chain_selection.json").read_text())
+        for case in doc["cases"]:
+            nodes, names = [], {}
+            for name, roles, provider, country, op in case["nodes"]:
+                node_id = mesh.member_id(("key-" + name).encode())
+                names[node_id] = name
+                nodes.append(
+                    dict(
+                        node_id=node_id,
+                        roles=roles,
+                        provider=provider,
+                        country=country,
+                        operator=mesh.member_id(op.encode()),
+                        group="public",
+                        health=dict(uptime_30d=0.99, latency_ms_p50=20),
+                        capacity=dict(egress_gib_month=10240, cover_budget_mib_day=2048),
+                    )
+                )
+            own = case.get("own_operator")
+            try:
+                got = [
+                    names[d["node_id"]]
+                    for d in mesh.select_chain(
+                        nodes,
+                        case["hops"],
+                        own_operator=mesh.member_id(own.encode()) if own else None,
+                        allow_same_jurisdiction=case.get("allow_same_jurisdiction", False),
+                    )
+                ]
+            except SystemExit:
+                got = None
+            self.assertEqual(got, case["expect"], case["name"])
+
+    def test_us_clouds_are_one_legal_sphere(self):
+        import mesh
+
+        self.assertEqual({mesh.legal_parent(p, "DE") for p in ["oci", "aws", "gcp", "azure"]}, {"US"})
+        self.assertEqual(mesh.legal_parent("host", "is"), "IS")
+
+
 if __name__ == "__main__":
     unittest.main()

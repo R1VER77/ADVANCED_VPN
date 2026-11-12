@@ -24,6 +24,7 @@ mesh artifact.
 """
 
 import argparse
+import base64
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
@@ -35,6 +36,7 @@ import urllib.request
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import mesh  # noqa: E402  (descriptor validation + ML-DSA verification)
+import ohttp  # noqa: E402  (oblivious requests: the gateway side)
 
 GOSSIP_HOP_LIMIT = mesh.GOSSIP_HOP_LIMIT
 MAX_BODY_BYTES = 65536
@@ -186,47 +188,98 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def do_POST(self):
-        """Accept one gossiped descriptor (POST /gossip)."""
-        if self.path != "/gossip":
-            return self._reply(404, {"ok": False})
+    def _body(self):
         try:
             length = int(self.headers.get("Content-Length") or 0)
         except ValueError:
             length = 0
         if not 0 < length <= MAX_BODY_BYTES:
+            return None
+        return self.rfile.read(length)
+
+    def handle_request(self, method: str, path: str, body: bytes, peer: str):
+        """One beacon request, direct or opened from an oblivious one: (status, document)."""
+        if method == "POST" and path == "/gossip":
+            try:
+                doc = json.loads(body)
+                descriptor, hop = doc["descriptor"], int(doc.get("hop", 0))
+            except Exception:
+                return 400, {"ok": False}
+            status = self.state.ingest(descriptor, max(0, hop))
+            # Anti-amplification: one small fixed-shape ack for every outcome.
+            return 200, {"ok": status == "stored"}
+        if method == "GET" and path.startswith("/health"):
+            return 200, {"ok": True, "descriptors": len(self.state.descriptors)}
+        if method == "GET" and path.startswith("/descriptors"):
+            if not self.state.admit_get(peer):
+                return 200, {"ok": False, "descriptors": []}  # fixed shape
+            try:
+                q = path.split("limit=", 1)[1].split("&", 1)[0]
+                limit = min(GET_MAX_LIMIT, max(1, int(q)))
+            except (IndexError, ValueError):
+                limit = GET_DEFAULT_LIMIT
+            with self.state.lock:
+                self.state.prune()
+                batch = sorted(self.state.descriptors.values(), key=lambda d: -d.get("published", 0))[:limit]
+            return 200, {"schema": mesh.SCHEMA, "descriptors": batch}
+        return 404, {"ok": False}
+
+    def do_POST(self):
+        """Accept one gossiped descriptor (POST /gossip), or an oblivious request (POST /ohttp)."""
+        body = self._body()
+        if body is None:
             return self._reply(413, {"ok": False})
-        try:
-            doc = json.loads(self.rfile.read(length))
-            descriptor, hop = doc["descriptor"], int(doc.get("hop", 0))
-        except Exception:
-            return self._reply(400, {"ok": False})
-        status = self.state.ingest(descriptor, max(0, hop))
-        # Anti-amplification: one small fixed-shape ack for every outcome.
-        self._reply(200, {"ok": status == "stored"})
+        if self.path == "/ohttp":
+            return self._oblivious(body)
+        self._reply(*self.handle_request("POST", self.path, body, self.client_address[0]))
 
     def do_GET(self):
-        """Serve health or the descriptor set."""
-        if self.path.startswith("/health"):
-            return self._reply(200, {"ok": True, "descriptors": len(self.state.descriptors)})
-        if not self.path.startswith("/descriptors"):
+        """Serve health, the descriptor set, or this gateway's public key."""
+        if self.path.startswith("/ohttp-config") and self.state.gateway:
+            g = self.state.gateway
+            return self._reply(
+                200, {"key_id": g.key_id, "public": base64.b64encode(self.state.gateway_public).decode()}
+            )
+        self._reply(*self.handle_request("GET", self.path, b"", self.client_address[0]))
+
+    def _oblivious(self, wire: bytes):
+        """Gateway: open a sealed request (it arrives from a relay, never the member),
+        answer it as a direct one, and seal the answer to the member's reply key."""
+        g = self.state.gateway
+        if g is None:
             return self._reply(404, {"ok": False})
-        if not self.state.admit_get(self.client_address[0]):
-            return self._reply(200, {"ok": False, "descriptors": []})  # fixed shape
         try:
-            q = self.path.split("limit=", 1)[1].split("&", 1)[0]
-            limit = min(GET_MAX_LIMIT, max(1, int(q)))
-        except (IndexError, ValueError):
-            limit = GET_DEFAULT_LIMIT
-        with self.state.lock:
-            self.state.prune()
-            batch = sorted(self.state.descriptors.values(), key=lambda d: -d.get("published", 0))[:limit]
-        self._reply(200, {"schema": mesh.SCHEMA, "descriptors": batch})
+            method, path, body, reply = g.open(wire)
+        except ohttp.Refused:
+            return self._reply(400, {"ok": False})
+        status, doc = self.handle_request(method, path, body, self.client_address[0])
+        sealed = g.seal(reply, status, json.dumps(doc).encode())
+        self.send_response(200)
+        self.send_header("Content-Type", "message/ohttp-res")
+        self.send_header("Content-Length", str(len(sealed)))
+        self.end_headers()
+        self.wfile.write(sealed)
 
 
-def serve(state_dir: Path, host: str, port: int, peers: list[str]) -> ThreadingHTTPServer:
-    """A beacon server bound to host:port with its state directory."""
+def serve(
+    state_dir: Path, host: str, port: int, peers: list[str], gateway_key: Path | None = None
+) -> ThreadingHTTPServer:
+    """A beacon server bound to host:port with its state directory; with `gateway_key`
+    (created 0600 on first use) it also answers oblivious requests at /ohttp."""
     state = BeaconState(state_dir, peers)
+    state.gateway = state.gateway_public = None
+    if gateway_key is not None:
+        if gateway_key.exists():
+            private, public = ohttp.load_private(gateway_key.read_bytes())
+        else:
+            from cryptography.hazmat.primitives.asymmetric import mlkem, x25519
+
+            m, x = mlkem.MLKEM768PrivateKey.generate(), x25519.X25519PrivateKey.generate()
+            fd = os.open(gateway_key, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            with os.fdopen(fd, "wb") as f:
+                f.write(ohttp.private_bytes(m, x))
+            private, public = ohttp.load_private(gateway_key.read_bytes())
+        state.gateway, state.gateway_public = ohttp.Gateway(private, 1), public
     server = ThreadingHTTPServer((host, port), Handler)
     Handler.state = state
     return server
@@ -239,9 +292,12 @@ def main() -> int:
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=8787)
     p.add_argument("--peers", default="", help="comma-separated beacon base URLs to forward fresh descriptors to")
+    p.add_argument(
+        "--gateway-key", type=Path, help="answer oblivious requests at /ohttp with this key (created if missing)"
+    )
     a = p.parse_args()
     peers = [u.strip() for u in a.peers.split(",") if u.strip()]
-    server = serve(a.dir, a.host, a.port, peers)
+    server = serve(a.dir, a.host, a.port, peers, a.gateway_key)
     print(f"avpn-mesh-beacon on {a.host}:{a.port}, {len(peers)} peers", flush=True)
     try:
         server.serve_forever()

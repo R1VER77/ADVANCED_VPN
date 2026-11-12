@@ -19,7 +19,8 @@ and `oci` command-line tools, and plain SSH for everything else.
     avpn cloud host add --name avpn-NAME --ssh USER@HOST --key FILE [--provider P] [--shared]
     avpn cloud host setup --name avpn-NAME --out FILE [--role ROLE] [--replace]
     avpn cloud host forget --name avpn-NAME
-    avpn cloud chain --apply --client-request FILE --vault DIR [--order A,B,C]
+    avpn cloud chain --apply --client-request FILE --vault DIR [--order A,B,C] \
+        [--hours-per-day H] [--accept-cost]
 
 Every `--apply` and `--teardown` first shows its plan and asks before changing
 anything. `--dry-run` stops after the plan. `--yes` skips the question; scripts
@@ -194,7 +195,7 @@ passwordless sudo.
 - `--key FILE`: its SSH private key (mode 600; SSH never asks for a password).
 - `--ssh-config FILE`: an SSH config file, for bastions, jump hosts or other ports.
 - `--address IP`: its public IPv4, if HOST is not it (for example behind a bastion).
-- `--provider oci|aws|azure|gcp|own`: where it runs (default `own`). It sets the allowance used to order a chain.
+- `--provider KEY`: where it runs (default `own`): `oci`, `aws`, `azure`, `gcp` or `own`, or a non-US host (`hetzner`, `netcup`, `ovh`, `1984`, `infomaniak`, `exoscale`). It sets the allowance used to order a chain and the legal sphere shown in its plan.
 - `--shared`: the host also runs other things: setup leaves its system journal alone.
 
 This tool does not manage the firewall of an added server. The chain plan says which
@@ -236,6 +237,8 @@ Join the recorded servers into one chain and start it.
 - `--vault DIR`: the operator's Nitrokey vault; the chain is signed once (PIN + touch).
 - `--order A,B,C`: the hop order from the client side, overriding the automatic one.
 - `--source DIR`: the package to install on the servers, as for `host setup`.
+- `--hours-per-day H`: hours you are connected per day (default 8). The rate class is the fastest whose constant stream fits the smallest hop allowance at this many hours (`avpn help init`); a relay pays for two paced links.
+- `--accept-cost`: sign the class even when it exceeds a hop's free allowance. Without it, a chain whose slowest class still does not fit is refused, with the numbers.
 - `--dry-run`, `--yes`: as above.
 
 How hops are chosen: one server is a 1-hop chain, two make 2 hops, three or more make
@@ -243,7 +246,11 @@ How hops are chosen: one server is a 1-hop chain, two make 2 hops, three or more
 server with the largest monthly outbound allowance, because it carries everything.
 The entry relay prefers a different provider from the exit, so no single provider
 sees both your address and your destinations. A chain can carry about as much per
-month as its smallest hop allowance; the plan shows it.
+month as its smallest hop allowance; the plan shows it. The plan also shows the legal
+sphere of each end and warns when both answer to the same law: every free tier is a
+US company, and the US CLOUD Act reaches US providers wherever their servers stand, so
+put one end on a non-US host (`avpn cloud suggest` lists some) for ends in different
+spheres.
 
 What `--apply` does:
 1. Firewalls of managed servers (`aws relay`, `oci server`): the first hop's UDP 443 (the HTTP/3 camouflage in front of WireGuard) open to any address, and any older WireGuard port rule removed; each later hop's port (4445 middle, 4444 exit) only from the previous server; SSH from here for setup.
@@ -252,8 +259,9 @@ What `--apply` does:
 4. Enrolls and restarts each server, exit first, and checks it is running.
 5. Removes SSH from your address. From then on you administer the servers while connected: the other hops admit SSH from the exit's address (which is where your traffic now comes from), and the exit answers at `10.77.0.1`, its own address inside the tunnel, which needs no firewall rule. The exit's public address does not work from inside the tunnel, because cloud servers do not hold it locally. So no rule names you. Rerun `chain` (or `aws allow --admin-ip auto`) to get back in when you are not connected.
 
-Every chain is padded to constant cells on every hop, and the client's link to the
-first hop looks like HTTP/3 on UDP 443; there is no option to turn either off
+Every chain is padded to constant cells on every hop, every link between two servers
+is a paced, encrypted constant-rate stream (per-hop shaping), and the client's link to
+the first hop looks like HTTP/3 on UDP 443; there is no option to turn any of them off
 (`avpn help threat-model`). On AWS the first hop presents its provider DNS name as
 its server name, so name and address agree.
 

@@ -23,6 +23,21 @@ struct DirectoryFile {
     descriptors: Vec<Descriptor>,
 }
 
+/// The legal sphere a node's operator answers to: its provider's parent jurisdiction
+/// (the US CLOUD Act reaches US providers wherever the server stands), or, for a
+/// self-hosted node or an unknown provider, the node's own country. Derived from fields
+/// every descriptor already signs. Mirrors `legal_parent` in tools/mesh.py.
+pub fn legal_parent(provider: &str, country: &str) -> String {
+    match provider {
+        "oci" | "aws" | "gcp" | "azure" => "US".into(),
+        "hetzner" | "netcup" => "DE".into(),
+        "ovh" => "FR".into(),
+        "1984" => "IS".into(),
+        "infomaniak" | "exoscale" => "CH".into(),
+        _ => country.to_ascii_uppercase(),
+    }
+}
+
 /// A constraint set for building one chain.
 #[derive(Clone, Debug)]
 pub struct ChainRequest {
@@ -38,6 +53,12 @@ pub struct ChainRequest {
     /// Testing escape hatch: allow two hops to share a provider or country
     /// (never an operator). Defaults false.
     pub allow_weaker_diversity: bool,
+    /// The requesting member: a node it operates is preferred as the entry, so no
+    /// stranger ever learns the member's address.
+    pub own_operator: Option<MemberId>,
+    /// Allow the entry and the exit to answer to the same legal sphere ([`legal_parent`]).
+    /// Off by default: one legal order should never reach both ends of a chain.
+    pub allow_same_jurisdiction: bool,
 }
 
 /// The verified local view of the mesh.
@@ -111,6 +132,16 @@ impl NodeDb {
             if let Some(p) = req.prefer {
                 candidates.sort_by_key(|d| if d.node_id == p { 0 } else { 1 });
             }
+            // The member's own node is its entry when it offers one (stable sort).
+            if i == 0
+                && req.hops > 1
+                && let Some(me) = req.own_operator
+            {
+                candidates.sort_by_key(|d| if d.operator == me { 0 } else { 1 });
+            }
+            let entry_sphere = chosen
+                .first()
+                .map(|e| legal_parent(&e.provider, &e.country));
             let pick = candidates.iter().copied().find(|d| {
                 if operators.contains(&d.operator) {
                     return false; // never twice the same operator in one chain
@@ -124,12 +155,22 @@ impl NodeDb {
                 {
                     return false;
                 }
+                // Different legal spheres at the two ends (the middle does not help).
+                if is_exit
+                    && !req.allow_same_jurisdiction
+                    && entry_sphere
+                        .as_ref()
+                        .is_some_and(|s| *s == legal_parent(&d.provider, &d.country))
+                {
+                    return false;
+                }
                 req.allow_weaker_diversity
                     || (!providers.contains(&d.provider) && !countries.contains(&d.country))
             });
             let Some(node) = pick else {
                 anyhow::bail!(
-                    "no {:?} node in group `{}` satisfies the diversity rule; \
+                    "no {:?} node in group `{}` satisfies the diversity rule (distinct operator, \
+                     provider and country; the exit in another legal sphere than the entry); \
                      widen the mesh or relax constraints",
                     role,
                     req.group
@@ -183,7 +224,80 @@ mod tests {
             exit_country: None,
             prefer: None,
             allow_weaker_diversity: false,
+            own_operator: None,
+            allow_same_jurisdiction: false,
         }
+    }
+
+    #[test]
+    fn shared_selection_cases_match_the_control_plane() {
+        // The same file drives tools/test_mesh.py: both planes must choose alike.
+        let doc: serde_json::Value =
+            serde_json::from_str(include_str!("../../tools/testdata/chain_selection.json"))
+                .unwrap();
+        for case in doc["cases"].as_array().unwrap() {
+            let name = case["name"].as_str().unwrap();
+            let role = |r: &str| match r {
+                "entry" => Role::Entry,
+                "relay" => Role::Relay,
+                _ => Role::Exit,
+            };
+            let nodes: Vec<Descriptor> = case["nodes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|n| {
+                    node(
+                        n[0].as_str().unwrap(),
+                        n[1].as_array()
+                            .unwrap()
+                            .iter()
+                            .map(|r| role(r.as_str().unwrap()))
+                            .collect(),
+                        n[2].as_str().unwrap(),
+                        n[3].as_str().unwrap(),
+                        n[4].as_str().unwrap(),
+                    )
+                })
+                .collect();
+            let names: std::collections::BTreeMap<MemberId, String> = case["nodes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|n| {
+                    let key = format!("key-{}", n[0].as_str().unwrap());
+                    (
+                        MemberId::from_public_key(key.as_bytes()),
+                        n[0].as_str().unwrap().to_string(),
+                    )
+                })
+                .collect();
+            let db = NodeDb { nodes };
+            let mut r = req(case["hops"].as_u64().unwrap() as usize);
+            r.allow_same_jurisdiction = case["allow_same_jurisdiction"].as_bool().unwrap_or(false);
+            r.own_operator = case["own_operator"]
+                .as_str()
+                .map(|o| MemberId::from_public_key(o.as_bytes()));
+            let got = db.select_chain(&r).ok().map(|c| {
+                c.iter()
+                    .map(|d| names[&d.node_id].clone())
+                    .collect::<Vec<_>>()
+            });
+            let want = case["expect"].as_array().map(|a| {
+                a.iter()
+                    .map(|x| x.as_str().unwrap().to_string())
+                    .collect::<Vec<_>>()
+            });
+            assert_eq!(got, want, "{name}");
+        }
+    }
+
+    #[test]
+    fn legal_spheres_follow_the_provider_then_the_country() {
+        assert_eq!(legal_parent("oci", "DE"), "US");
+        assert_eq!(legal_parent("aws", "SE"), "US");
+        assert_eq!(legal_parent("1984", "IS"), "IS");
+        assert_eq!(legal_parent("host", "ch"), "CH");
     }
 
     #[test]

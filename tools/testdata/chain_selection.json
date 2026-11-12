@@ -1,0 +1,50 @@
+{
+ "about": "Chain-selection cases run by both src/mesh/directory.rs and tools/test_mesh.py, so the Rust data plane and the Python control plane choose identically. A node is [name, roles, provider, country, operator]; expect is the chosen node names in chain order, or null when no chain may be built.",
+ "cases": [
+  {
+   "name": "the exit must sit in another legal sphere than the entry: two US clouds are one sphere",
+   "nodes": [["e-aws", ["entry"], "aws", "SE", "alice"], ["x-oci", ["exit"], "oci", "DE", "bob"]],
+   "hops": 2,
+   "expect": null
+  },
+  {
+   "name": "a non-US exit pairs with a US-cloud entry",
+   "nodes": [["e-aws", ["entry"], "aws", "SE", "alice"], ["x-oci", ["exit"], "oci", "DE", "bob"], ["x-1984", ["exit"], "1984", "IS", "carol"]],
+   "hops": 2,
+   "expect": ["e-aws", "x-1984"]
+  },
+  {
+   "name": "allow_same_jurisdiction lifts the rule",
+   "nodes": [["e-aws", ["entry"], "aws", "SE", "alice"], ["x-oci", ["exit"], "oci", "DE", "bob"]],
+   "hops": 2,
+   "allow_same_jurisdiction": true,
+   "expect": ["e-aws", "x-oci"]
+  },
+  {
+   "name": "a self-hosted node answers to its own country",
+   "nodes": [["e-host", ["entry"], "host", "CH", "alice"], ["x-infomaniak", ["exit"], "infomaniak", "IS", "bob"], ["x-hetzner", ["exit"], "hetzner", "FR", "carol"]],
+   "hops": 2,
+   "expect": ["e-host", "x-hetzner"]
+  },
+  {
+   "name": "the member's own node is its entry",
+   "nodes": [["e-other", ["entry"], "hetzner", "DE", "bob"], ["e-mine", ["entry"], "ovh", "FR", "me"], ["x-1984", ["exit"], "1984", "IS", "carol"]],
+   "hops": 2,
+   "own_operator": "me",
+   "expect": ["e-mine", "x-1984"]
+  },
+  {
+   "name": "own preference shapes only the entry; the member's node may still serve as the exit",
+   "nodes": [["x-mine", ["exit"], "ovh", "FR", "me"], ["e-other", ["entry"], "hetzner", "DE", "bob"]],
+   "hops": 2,
+   "own_operator": "me",
+   "expect": ["e-other", "x-mine"]
+  },
+  {
+   "name": "the middle's sphere does not matter; only the ends",
+   "nodes": [["e-aws", ["entry"], "aws", "SE", "alice"], ["r-oci", ["relay"], "oci", "DE", "bob"], ["x-ch", ["exit"], "exoscale", "CH", "carol"]],
+   "hops": 3,
+   "expect": ["e-aws", "r-oci", "x-ch"]
+  }
+ ]
+}

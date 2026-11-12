@@ -1280,6 +1280,17 @@ def controller():
     return [override] if override else [sys.executable, str(Path(__file__).with_name("avpnctl.py"))]
 
 
+def rate_row(cap, hours_per_day, accept_cost, links):
+    """The chain plan's rate row: the class `avpn init --rate auto` will sign, or why none fits."""
+    from rates import choose_rate  # standard library only: cloud runs under the system Python
+
+    try:
+        rate, why = choose_rate("auto", cap, hours_per_day, accept_cost, links=links)
+        return dict(label="rate", value="%s (%s)" % (rate, why))
+    except ValueError as e:
+        return dict(label="rate", value=str(e))
+
+
 def chain_plan(a):
     """The hops `chain --apply` will build, and every change it will make."""
     inv = load_inventory()["resources"]
@@ -1305,13 +1316,28 @@ def chain_plan(a):
     cap = providers.capacity_gib(r["record"].get("catalog", r["record"]["provider"]) for r in hops)
     if cap:
         rows.append(dict(label="capacity", value="about %d GiB/month, the smallest hop allowance" % cap))
-        from managed_profile import choose_rate
-
-        try:
-            rate, why = choose_rate("auto", cap, 8)
-            rows.append(dict(label="rate", value="%s (%s)" % (rate, why)))
-        except ValueError as e:
-            rows.append(dict(label="rate", value=str(e)))
+    # Legal spheres of the two ends: one order should never reach both.
+    keys = [r["record"].get("catalog", r["record"]["provider"]) for r in hops]
+    ends = [providers.sphere(keys[0]), providers.sphere(keys[-1])] if len(hops) > 1 else []
+    if ends:
+        named = ["%s (%s)" % (k, s or "your host's country") for k, s in zip([keys[0], keys[-1]], ends, strict=True)]
+        same = ends[0] is not None and ends[0] == ends[1]
+        rows.append(
+            dict(
+                label="jurisdiction",
+                value="entry %s, exit %s%s"
+                % (
+                    named[0],
+                    named[1],
+                    "; WARNING: both ends answer to %s law, so one legal order reaches both. Put one end on a "
+                    "non-%s host (avpn cloud suggest lists some)" % (ends[0], ends[0])
+                    if same
+                    else "",
+                ),
+            )
+        )
+    if cap:
+        rows.append(rate_row(cap, a.hours_per_day, a.accept_cost, 2 if len(hops) > 1 else 1))
     rows.append(dict(label="sign", value="one Nitrokey PIN + touch (vault %s)" % a.vault))
     rows.append(
         dict(
@@ -1351,6 +1377,7 @@ def chain_apply(a, plan):
     cap = providers.capacity_gib(h["record"].get("catalog", h["record"]["provider"]) for h in hops)
     if cap:
         argv += ["--allowance-gib", str(cap)]
+    argv += ["--hours-per-day", "%g" % a.hours_per_day] + (["--accept-cost"] if a.accept_cost else [])
     if hops[0]["record"].get("public_dns"):
         argv += ["--cover-name", hops[0]["record"]["public_dns"]]
     for role in ("relay", "middle"):
@@ -1417,6 +1444,14 @@ def suggest(a):
         rows.append(dict(label="", value=("ready: " if ready else "not ready: ") + why))
         if providers.usable(p):
             rows.append(dict(label="", value="$ " + p["next"]))
+    rows.append(
+        dict(
+            label="non-US",
+            value="for ends in different legal spheres (every free tier above is a US company): "
+            + ", ".join("%s (%s) %s" % (p["name"], p["parent"], p["source"]) for p in providers.NON_US)
+            + "; paid, check terms; record one with avpn cloud host add --provider KEY",
+        )
+    )
     rows.append(dict(label="next", value=providers.recommendation(servers())))
     return rows
 
@@ -1692,6 +1727,12 @@ def build_parser():
     ch.add_argument("--order", help="hop order, client side first: NAME,NAME[,NAME] (default: automatic)")
     ch.add_argument(
         "--source", default=str(Path(__file__).resolve().parents[1]), help="built package or checkout to install"
+    )
+    ch.add_argument(
+        "--hours-per-day", type=float, default=8, help="hours connected per day, for the rate class (default 8)"
+    )
+    ch.add_argument(
+        "--accept-cost", action="store_true", help="sign the rate class even if it exceeds a hop's free allowance"
     )
     ch.add_argument("--dry-run", action="store_true", help="show the plan and stop")
     ch.add_argument("--yes", action="store_true", help="do not ask for confirmation")

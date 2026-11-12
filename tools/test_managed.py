@@ -487,6 +487,83 @@ class EnrollmentTests(unittest.TestCase):
             os.close(fd)
 
 
+class PerHopShapingTests(unittest.TestCase):
+    def test_every_server_link_is_keyed_paced_and_accepted_by_the_core(self):
+        from managed_profile import (
+            LINKS_REQUIRED,
+            SoftwareOperator,
+            load_keys,
+            profile_validate,
+            request,
+            require_current,
+        )
+
+        binary = Path(__file__).resolve().parents[1] / "target/release/advanced-vpn"
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            roles = ["client", "relay", "middle", "exit"]
+            (root / "dev").mkdir()
+            for r in roles:
+                request(r, root / "dev" / r, "none")
+            reqs = {r: (root / "dev" / r / "request.json").read_bytes() for r in roles}
+            out = root / "ops"
+            create(
+                out,
+                reqs,
+                "192.0.2.1:41194",
+                "198.51.100.2:4444",
+                SoftwareOperator(root / "opkeys"),
+                hops=3,
+                middle="198.18.0.2:4445",
+                rate="fast",
+            )
+            expected = {"relay": (1, 0), "middle": (1, 1), "exit": (0, 1)}
+            seen = {}
+            for role in roles:
+                p = enroll(out / (role + ".avpn"), out / "operator.pub", root / "dev" / role)
+                core = p["core"]
+                if role == "client":
+                    self.assertNotIn("link_rate", core)
+                    continue
+                self.assertEqual(core["link_rate"], "fast")
+                self.assertEqual((len(core["link_out"]), core["link_in"]), expected[role])
+                lane = {"relay": "outer", "middle": "middle", "exit": "inner"}[role]
+                keys = load_keys(root / "dev" / role, [lane, "link"])
+                self.assertEqual(len(keys["link"]), 32 * sum(expected[role]))
+                seen[role] = keys["link"]
+                cfg = root / (role + "-core.json")
+                cfg.write_text(json.dumps(runtime(p, root / "dev" / role)["core"]))
+                cfg.chmod(0o600)
+                fds = {n: memory_fd(v) for n, v in keys.items()}
+                try:
+                    args = [binary, "--config", cfg, "--check"]
+                    for n, f in fds.items():
+                        args += ["--key-fd", "%s=%d" % (n, f)]
+                    r = subprocess.run(args, pass_fds=list(fds.values()), capture_output=True, timeout=10)
+                    self.assertEqual(r.returncode, 0, (role, r.stderr))
+                    got = json.loads(r.stdout)
+                    self.assertEqual((got["paced_links_out"], got["paced_links_in"]), expected[role])
+                    # Without its link keys, a server refuses to start.
+                    lane_only = [binary, "--config", cfg, "--check", "--key-fd", "%s=%d" % (lane, fds[lane])]
+                    r = subprocess.run(lane_only, pass_fds=[fds[lane]], capture_output=True, timeout=10)
+                    self.assertNotEqual(r.returncode, 0, role)
+                finally:
+                    for f in fds.values():
+                        os.close(f)
+            # Each link's two ends hold the same key; different links hold different keys.
+            self.assertEqual(seen["relay"][:32], seen["middle"][32:])
+            self.assertEqual(seen["middle"][:32], seen["exit"])
+            self.assertNotEqual(seen["relay"][:32], seen["exit"])
+            # A multi-hop server profile signed before per-hop shaping is refused.
+            old = json.loads(zipfile.ZipFile(out / "exit.avpn").read("profile.json"))
+            for k in ["link_rate", "link_out", "link_in"]:
+                old["core"].pop(k)
+            profile_validate(old)
+            with self.assertRaises(ValueError) as e:
+                require_current(old)
+            self.assertEqual(str(e.exception), LINKS_REQUIRED)
+
+
 class RateClassTests(unittest.TestCase):
     def test_classes_mirror_the_carrier(self):
         from managed_profile import RATE_CLASSES

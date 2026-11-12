@@ -1,6 +1,6 @@
 [package]
 name = "advanced-vpn"
-version = "0.7.0"
+version = "0.8.0"
 edition = "2024"
 rust-version = "1.95"
 license = "Apache-2.0"
@@ -27,6 +27,7 @@ enum-map = "=2.7.3"
 rand = "=0.9.5"
 hex = "=0.4.3"
 tokio-rustls = { version = "=0.26.6", default-features = false, features = ["aws_lc_rs"] }
+aws-lc-rs = { version = "=1.19.0", default-features = false, features = ["aws-lc-sys", "alloc"] }
 webpki-roots = "=1.0.11"
 ratatui = { version = "=0.30.2", default-features = false, features = ["crossterm"] }
 

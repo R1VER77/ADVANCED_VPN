@@ -4,7 +4,7 @@
 
 # ADVANCED_VPN — managed Linux client
 
-A Rust VPN data plane with signed enrollment, automatic networking, a persistent kill switch, DNS isolation, real GotaTun/Maybenot DAITA on every hop, and the original two hybrid post-quantum QUIC layers. The cloud relay never holds the inner tunnel keys. No existing VPN is automatically replaced during build or installation.
+A Rust VPN data plane with signed enrollment, automatic networking, a persistent kill switch, DNS isolation, real GotaTun/Maybenot DAITA on your link to the first hop and paced, encrypted constant-rate links between every pair of servers behind it, and the original two hybrid post-quantum QUIC layers. The cloud relay never holds the inner tunnel keys. No existing VPN is automatically replaced during build or installation.
 
 ```mermaid
 flowchart LR
@@ -26,7 +26,7 @@ WireGuard is the outer carrier, implemented by **GotaTun 0.10.2**, with its actu
 - Twelve-hour TLS leaves rotate every six hours using the enrolled device key and its pinned SPKI. TLS/WebPKI/name validation is retained; no CA private key is deployed to a peer. Pin revocation requires an operator-authorized enrollment change.
 - There is **no data cap by default**. An optional daily cap (`preferences --daily-limit-mib N`) is metered in the kernel and fail-closed: durable reservations survive crashes and clock rollback, unused bytes are refunded when the carrier stops, and an exhausted cap blocks traffic (never disabling DAITA) while the supervisor stays up and resumes at the next UTC day or when the cap is raised. `--no-daily-limit` removes it.
 
-There is one defense posture: **strong** (`src/daita.rs`). Every hop runs a **bidirectional constant-rate packet stream** (`stream_grid` + self-sustaining `cover` under GotaTun's strict-blocking scheduler, `strict: true`, `Replace: true`), seeded independently from OS randomness at each hop. Every data packet is padded to constant size (1380 bytes inside WireGuard, 1420 bytes on the outer cloak), and every clock tick sends either a queued real packet or an indistinguishable decoy packet — so the outer packet rate and packet size stay flat (`< 1%` wire rate change between idle and full-speed transfers). Four rate classes (`preferences --rate metered|standard|fast|line`) trade cover bandwidth for application throughput without weakening the constant-rate invariant:
+There is one defense posture: **strong**. Your link to the first hop runs a **bidirectional constant-rate packet stream** (`src/daita.rs`: `stream_grid` + self-sustaining `cover` under GotaTun's strict-blocking scheduler, `strict: true`, `Replace: true`), and since v0.8.0 every link between two servers runs the same invariant as paced, AES-256-GCM-encrypted fixed-size cells (`src/link.rs`), each hop on its own clock. Every data packet is padded to constant size (1380 bytes inside WireGuard, 1420 bytes on the outer cloak), and every clock tick sends either a queued real packet or an indistinguishable decoy packet — so the outer packet rate and packet size stay flat (`< 1%` wire rate change between idle and full-speed transfers). Four rate classes, signed into the chain (`avpn init --rate auto|metered|standard|fast|line`), trade cover bandwidth for application throughput without weakening the constant-rate invariant:
 
 | Rate class | Grid pacing | Wire rate / direction | 2-hop app throughput | Cover volume / direction |
 |---|---|---|---|---|
@@ -96,9 +96,9 @@ reference pages in one package, with SHA256 checksums. The repository is private
 download while signed in to GitHub:
 
 ```bash
-gh release download v0.7.0 -R R1VER77/ADVANCED_VPN
+gh release download v0.8.0 -R R1VER77/ADVANCED_VPN
 sha256sum -c SHA256SUMS
-mkdir advanced-vpn && tar -C advanced-vpn -xzf advanced-vpn-v0.7.0-x86_64-linux-gnu.tar.gz && cd advanced-vpn
+mkdir advanced-vpn && tar -C advanced-vpn -xzf advanced-vpn-v0.8.0-x86_64-linux-gnu.tar.gz && cd advanced-vpn
 ```
 
 There are two ways to install from there:
@@ -121,7 +121,7 @@ Both need Python 3.10+ with `venv` (`sudo apt install python3-venv`). The binari
 built on Ubuntu 22.04, so they run on Ubuntu 22.04+ and Debian 12/13 (x86-64).
 
 To cut a release: bump `version` in `Cargo.toml`, commit, and push a matching tag
-(`git tag -s v0.7.0 && git push origin v0.7.0`). The release workflow builds only if the
+(`git tag -s v0.8.0 && git push origin v0.8.0`). The release workflow builds only if the
 tag matches the version and that commit's `verify` run passed.
 
 ## Build and verify
@@ -233,8 +233,9 @@ The early guard unit precedes normal networking services. Its boot ordering must
 
 How the layers work:
 - There is one post-quantum QUIC layer per server, wrapped inside each other like an onion. Each layer uses X25519 + ML-KEM-768 key exchange and ML-DSA-65 authentication.
-- WireGuard + DAITA runs between the client and the first hop.
+- WireGuard + DAITA runs between the client and the first hop; every link between two servers is a paced, encrypted constant-rate link (per-hop shaping, `src/link.rs`), keyed by a link key the operator seals to both servers.
 - Each server removes exactly one layer and forwards the rest to the next hop it was enrolled with. The client knows only the first hop's address.
+- **Standby exits** (`init --standby-exit NAME=IP:PORT`): the server before the exit fails over to a live standby within seconds when the exit goes silent, and rotates sessions among live exits in a signed window; your entry, the guard, never changes. Lab: 4.2 s outage, no leak ([FAILOVER.json](docs/evidence/FAILOVER.json)).
 - QUIC needs at least 1200 bytes of UDP payload per layer, so the layers are budgeted from the inside out: 1312, 1256 and 1200 bytes, all inside the 1340-byte WireGuard MTU. Apps see the same inner MTU of 1100 bytes in every mode.
 
 ```sh
@@ -251,6 +252,13 @@ sudo /opt/advanced-vpn/bin/avpn request --role middle --protect systemd-creds --
 2. On each device in the new chain, run `sudo avpn disconnect`, then `sudo avpn enroll <bundle> --operator-key operator.pub --replace`, then `connect`.
 
 Traffic stays blocked while you switch. In single-hop mode, give `--exit` the exit's port-443 endpoint: it is then the first hop.
+
+```sh
+# a standby exit: give its request under its name; the relay fails over and rotates
+/opt/advanced-vpn/bin/avpn init --hops 2 --out ./chain2 --vault ~/.config/advanced-vpn/vault \
+  --relay 192.0.2.10:443 --exit 198.51.100.20:4444 --standby-exit exit2=198.51.100.30:4444 \
+  --request client=client.req --request relay=relay.req --request exit=exit.req --request exit2=exit2.req
+```
 
 Measured in the namespace benchmark (`tools/throughput_bench.py --rate line --mib 32`, SHA-checked):
 
@@ -272,7 +280,7 @@ avpn mesh chain --hops 3         # every hop a distinct operator, provider and c
 avpn mesh quota                  # credits earned relaying vs spent on chains
 ```
 
-There is **no account anywhere**: a member is their hardware device — a Nitrokey (open source) by preference, but any token that can generate the required keys. The member ID is the hash of the device public key; the private key never leaves the token. Nodes can also be kept private (`avpn mesh offer --private`), usable only by you. Defense is strong-only and per-hop: every link runs the full Maybenot set plus a bidirectional constant-rate cover stream, seeded independently at each hop. The full design, the contribution economy (unlinkable blind-signed credits — Chaum RSA-FDH in the control plane today, VOPRF in the data plane once the verifier is vendored), the trust model for stranger-run nodes, and the website-fingerprinting measurements (100-site run: [docs/evidence/MESH_WF_SIM.json](docs/evidence/MESH_WF_SIM.json)) are in [docs/MESH_DESIGN.md](docs/MESH_DESIGN.md); the command reference is [docs/cli/mesh.md](docs/cli/mesh.md).
+There is **no account anywhere**: a member is their hardware device — a Nitrokey (open source) by preference, but any token that can generate the required keys. The member ID is the hash of the device public key; the private key never leaves the token. Nodes can also be kept private (`avpn mesh offer --private`), usable only by you. Defense is strong-only and per-hop: the client's link runs the constant-rate carrier stream and every server-to-server link a paced, encrypted constant-rate stream; your own node is your entry, and the exit must answer to another legal sphere than the entry. The full design, the contribution economy (unlinkable blind-signed credits — Chaum RSA-FDH in the control plane today, VOPRF in the data plane once the verifier is vendored), the trust model for stranger-run nodes, and the website-fingerprinting measurements (100-site run: [docs/evidence/MESH_WF_SIM.json](docs/evidence/MESH_WF_SIM.json)) are in [docs/MESH_DESIGN.md](docs/MESH_DESIGN.md); the command reference is [docs/cli/mesh.md](docs/cli/mesh.md).
 
 ## No retained data
 
@@ -308,7 +316,7 @@ If nobody answers, the prompt times out after 5 minutes. The service restarts an
 
 ## Limits and provenance
 
-The relay/provider can still observe addresses, sizes, timing and outages. The owned exit sees traffic after VPN decryption; HTTPS retains its independent TLS. No provider-no-logging, anonymity, TEE attestation, WAN-performance or independent-audit guarantee is made. A global passive adversary remains out of scope for any low-latency system; per-hop defense raises its cost, it does not produce mixnet-grade unlinkability (see `docs/MESH_DESIGN.md`, threat model).
+The relay/provider can still observe addresses, sizes, timing and outages. The owned exit sees traffic after VPN decryption; HTTPS retains its independent TLS. No provider-no-logging, anonymity, TEE attestation, WAN-performance or independent-audit guarantee is made. A global passive adversary remains out of scope for any low-latency system; per-hop defense raises its cost, it does not produce mixnet-grade unlinkability (a mixnet lane for async traffic is next) (see `docs/MESH_DESIGN.md`, threat model).
 
 The data plane is Linux/IPv4 only. **IPv6 is deliberately blocked** in every mode, so it can't escape around the tunnel. The managed profile uses inner MTU 1100 and WireGuard MTU 1340, requiring an IPv4 underlay MTU of at least 1420. A native desktop GUI, multi-user fleet control and a statistically evaluated defense dataset are not included. The standalone v0.1 QUIC interface remains available; see [historical interface](docs/LEGACY_QUIC.md).
 

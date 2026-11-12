@@ -157,7 +157,17 @@ Why per-hop is necessary (documented attacks):
    untouched hops and are readable client-side; only intermediate-hop
    re-shaping destroys them.
 
-The stack (`src/daita.rs`), every hop, both endpoints, independently seeded:
+Where it runs: the client↔entry link carries the WireGuard + DAITA carrier
+(`src/daita.rs`); every link between two servers carries a **paced,
+encrypted link** (`src/link.rs`, v0.8.0) with the same invariant — fixed-size
+AES-256-GCM cells under a per-link key the operator seals to both servers, a
+fixed number of cells per tick of the chain's clock, real or empty, and replies
+only on credit earned from authenticated cells (no reflection). Before v0.8.0
+the server↔server links were unshaped; measured on the link into the exit,
+idle 0.5 packets/s jumped to 34–3,419 packets/s during a download; now it holds
+the class's rate within 0.1% (`docs/evidence/RATE_CLASSES.json`, `inner_link`).
+
+The carrier's stack, both endpoints, independently seeded:
 a **bidirectional constant-rate packet stream** built from two Maybenot
 machines (`stream_grid` + self-sustaining `cover`) running under GotaTun's
 strict-blocking scheduler (`strict: true`, `Replace: true`). On every clock
@@ -255,9 +265,12 @@ announce timing) is visible to members — Meshtastic's candor rule.
 
 ## 10. What we still cannot defend
 
-Global passive adversaries at scale; volume/duration below the quantum;
-endpoint compromise; browser fingerprinting; a cloud provider's metadata on
-its own VM; exit operators' legal exposure; gossip metadata. Stated in
+Global passive adversaries at scale (a constant-rate stream keeps packet
+order, so it is still a circuit; only per-packet mixing defeats end-to-end
+correlation); endpoint compromise; browser fingerprinting; a cloud provider's
+metadata on its own VM; exit operators' legal exposure; gossip metadata
+between members (beacon queries themselves can go through an oblivious relay,
+see §11). Stated in
 `avpn help threat-model`, not buried.
 
 ## 11. Implementation status
@@ -278,7 +291,10 @@ its own VM; exit operators' legal exposure; gossip metadata. Stated in
 | Gossip transport + beacons | `tools/mesh.py`, `tools/mesh_beacon.py` | landed: store-and-forward gossip with TTL hop counter, dedup, per-member rate limits, auto-ban, anti-amplification (fixed-shape small responses; POSTs never trigger data-plane traffic) |
 | Descriptor signing via hardware unseal | `tools/keyguard.py`, `tools/mesh.py` | landed: `avpn mesh publish` signs through the sealed envelope (one PIN + touch per publish), self-checks the signed descriptor, and gossips it; unsigned publishing stays refused |
 | Ephemeral defense database (DAITA-v2-style) | `tools/defense_db.py`, `src/daita.rs` (`DefenseDb`), carrier `defense_db` | landed: rotating randomized strong-posture parameterizations, fail-closed validation mirrored in Rust and Python; no profile in force refuses the run |
-| Inter-relay chaff links | carrier `cover: "always-on"` | landed: 5 s keepalive on server roles starts the self-sustaining cover machine within seconds of tunnel setup, so idle relay↔relay links carry the same constant-rate stream as busy ones |
+| Per-hop shaping (server↔server links) | `src/link.rs`, `src/run.rs`, `tools/managed_profile.py` (`link.kem.json`) | landed in v0.8.0: paced, encrypted constant-rate links between every pair of consecutive servers, per-link PSK sealed to each device's hybrid KEM key; measured 0.0–0.1% idle-vs-busy change on the link into the exit (`RATE_CLASSES.json`, `inner_link`). (v0.7.0 listed "inter-relay chaff" here: the carrier only ever ran client↔entry, so that row was wrong.) |
+| Self-healing chains: standby exits, failover, rotation | `src/run.rs` (`NextHops`), `tools/managed_profile.py`, `avpn init --standby-exit` | landed for single-operator chains: failover 4.2 s in the lab with no leak, rotation within a signed window, entry fixed as the guard (`FAILOVER.json`); mesh relays do not fail over between members' exits yet |
+| Own node as entry + legal spheres | `src/mesh/directory.rs`, `tools/mesh.py`, `tools/providers.py` | landed: the member's own node is its entry; the exit must answer to another legal sphere than the entry (US clouds = one sphere); Rust and Python run one shared fixture (`tools/testdata/chain_selection.json`) |
+| Oblivious control plane | `tools/ohttp.py`, `tools/ohttp_relay.py`, beacon `/ohttp` | landed: beacon queries through a relay of another operator, sealed with PQ HPKE (ML-KEM-768 + X25519); RFC 9458 design, not wire-compatible (`OHTTP_LAB.json`) |
 | 100-site WF simulation + 30-site namespace WF lab | `docs/evidence/MESH_WF_SIM.json`, `docs/evidence/DAITA_LAB.json`, `docs/evidence/RATE_CLASSES.json` | landed (1.4–2.2% vs 1% chance in 100-site exit-vantage sim; 3.3% vs 3.3% chance at fixed 6 s window in 30-site namespace lab) |
 
 Non-goals: no token sale/cryptocurrency, no company, no GUI in v1, no mobile

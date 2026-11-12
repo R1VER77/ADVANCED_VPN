@@ -47,54 +47,20 @@ PADDING_REQUIRED = "this chain was signed without constant-cell padding, which i
 # way it was signed before the cloak existed, to prove such a chain is refused.)
 CLOAK = True
 BALANCED_REMOVED = "this chain was signed with the removed balanced defense; every chain now runs the constant-rate stream. Re-sign it (avpn cloud chain --apply, or avpn init) and enroll the new bundles with --replace"
-# The constant-rate stream's classes (src/daita.rs RateClass): wire packets per second
-# in each direction of each link while connected. Speed and cost differ; the shape does not.
-RATE_CLASSES = {"metered": 50, "standard": 500, "fast": 4000, "line": 16000}
-# Bytes per wire packet (IPv4 + UDP + the cloak's QUIC datagram carrying one cell),
-# measured in docs/evidence/RATE_CLASSES.json.
-WIRE_PACKET_BYTES = 1448
+# Rate classes and their cost live in rates.py (standard library only), so the
+# cloud tool, which runs under the system Python, can plan a chain too.
+from rates import RATE_CLASSES, WIRE_PACKET_BYTES, choose_rate, rate_cost_gib  # noqa: E402,F401
+
+LINKS_REQUIRED = "this chain was signed before per-hop shaping, which is now required: every link between servers is paced and encrypted. Re-sign it (avpn cloud chain --apply, or avpn init) and enroll the new bundles with --replace"
+LINK_AAD = b"advanced-vpn/link-psk/"
+# Standby exits: the server before the exit rotates among the live ones at a random
+# time in this window (seconds), at a session boundary. The entry never rotates.
+ROTATE_SECONDS = (900, 3600)
 
 
-def rate_cost_gib(rate, hours_per_day):
-    """Monthly (30-day) outbound GiB the stream costs one hop towards one neighbour."""
-    return RATE_CLASSES[rate] * WIRE_PACKET_BYTES * 3600 * hours_per_day * 30 / (1 << 30)
-
-
-def choose_rate(requested, allowance_gib, hours_per_day, accept_cost=False):
-    """(class, reason) for `avpn init --rate`. `auto` picks the fastest class whose
-    stream fits the chain's smallest monthly outbound allowance at `hours_per_day`
-    connected; an explicit class that does not fit is refused unless `accept_cost`."""
-    if not 0 < hours_per_day <= 24:
-        raise ValueError("hours per day must be 1..24")
-    if allowance_gib is not None and allowance_gib <= 0:
-        raise ValueError("the allowance must be positive")
-    fits = [r for r in RATE_CLASSES if allowance_gib is None or rate_cost_gib(r, hours_per_day) <= allowance_gib]
-    if requested == "auto":
-        if allowance_gib is None:
-            return "metered", "no hop allowance given (--allowance-gib): the slowest class"
-        if not fits:
-            if not accept_cost:
-                raise ValueError(
-                    "even the metered class needs about %d GiB/month at %g h/day, over the %d GiB allowance; "
-                    "connect fewer hours (--hours-per-day) or pass --accept-cost"
-                    % (rate_cost_gib("metered", hours_per_day), hours_per_day, allowance_gib)
-                )
-            return "metered", "over the allowance, accepted with --accept-cost"
-        best = fits[-1]
-        return best, "fastest class within %d GiB/month at %g h/day (about %d GiB/month)" % (
-            allowance_gib,
-            hours_per_day,
-            rate_cost_gib(best, hours_per_day),
-        )
-    if requested not in RATE_CLASSES:
-        raise ValueError("unknown rate class: " + str(requested))
-    if requested not in fits and not accept_cost:
-        raise ValueError(
-            "the %s class needs about %d GiB/month at %g h/day, over the %d GiB allowance; "
-            "choose a slower class or pass --accept-cost"
-            % (requested, rate_cost_gib(requested, hours_per_day), hours_per_day, allowance_gib)
-        )
-    return requested, "chosen explicitly"
+def link_fields(rate, outs, ins):
+    """Core fields of a server's paced links: next-hop endpoints out, inbound key count."""
+    return dict(link_rate=rate, link_out=list(outs), link_in=ins)
 
 
 CLOAK_REQUIRED = "this chain was signed before the HTTP/3 camouflage, which is now required; re-sign it (avpn cloud chain --apply, or avpn init) and enroll the new bundles with --replace"
@@ -133,6 +99,8 @@ def require_current(p):
         raise ValueError(CLOAK_REQUIRED)
     if p["carrier"] and p["carrier"]["defense"] != "strong":
         raise ValueError(BALANCED_REMOVED)
+    if p["role"] != "client" and p["hops"] > 1 and not p["core"].get("link_rate"):
+        raise ValueError(LINKS_REQUIRED)
     return p
 
 
@@ -171,6 +139,17 @@ def profile_validate(p):
     # (require_padding). Anything other than true or absent is malformed.
     if "cells" in p["core"] and p["core"]["cells"] is not True:
         raise ValueError("malformed padding flag")
+    # Per-hop shaping: absent on chains signed before it (require_current refuses them).
+    link_rate = p["core"].get("link_rate")
+    if link_rate is not None and link_rate not in RATE_CLASSES:
+        raise ValueError("unknown link rate class")
+    outs, ins = p["core"].get("link_out", []), p["core"].get("link_in", 0)
+    if type(outs) is not list or type(ins) is not int or not 0 <= ins <= 256 or len(outs) > 256:
+        raise ValueError("malformed link table")
+    for endpoint in outs:
+        ipaddress.IPv4Address(endpoint.rsplit(":", 1)[0])
+    if p["role"] == "client" and (link_rate or outs or ins):
+        raise ValueError("a client's only link is the carrier")
     lanes = {l for l in ALL_LANES if p["core"].get(l)}
     if lanes != (set(CHAIN_LANES[h]) if p["role"] == "client" else {SERVER_LANE[p["role"]]}):
         raise ValueError("identity role separation failed")
@@ -182,6 +161,25 @@ def profile_validate(p):
                 raise ValueError("unsafe identity path")
         if i.get("pin_kind") != "spki":
             raise ValueError("managed profiles require public-key identity pins")
+        # A client may trust a set of exits (standby exits) on its inner layer only;
+        # its entry, the guard, is always exactly one pinned relay.
+        if p["role"] == "client" and i.get("peer_members"):
+            if lane != "inner" or i.get("peer_sha256") != "" or not 2 <= len(i["peer_members"]) <= 8:
+                raise ValueError("a client pins one entry and at most a small set of exits")
+    # Standby exits and rotation: only on the server before the exit.
+    alts, rotate = p["core"].get("alternates"), p["core"].get("rotate_seconds")
+    if alts is not None or rotate is not None:
+        if p["role"] not in ("relay", "middle") or type(alts) is not list or not 1 <= len(alts) <= 7:
+            raise ValueError("standby exits belong to the server before the exit")
+        for endpoint in alts:
+            ipaddress.IPv4Address(endpoint.rsplit(":", 1)[0])
+        if (
+            type(rotate) is not list
+            or len(rotate) != 2
+            or not all(type(x) is int for x in rotate)
+            or not 60 <= rotate[0] <= rotate[1] <= 86400
+        ):
+            raise ValueError("bad rotation window")
     members = p["core"].get("members", [])
     if members:
         # Mesh servers: the admitted member set, routed by pin. Clients never carry one.
@@ -386,6 +384,7 @@ PLAINTEXT = {
     "inner": "inner-key.der",
     "wireguard": "wireguard-key.bin",
     "kem": "kem-key.bin",
+    "link": "link-key.bin",
     "cloak": "cloak-key.der",
 }
 MLDSA65_OID = "2.16.840.1.101.3.4.3.18"
@@ -434,6 +433,8 @@ def binding(state, name):
         return b"wireguard:" + bytes.fromhex(request["wireguard_public_hex"])
     if name == "kem":
         return b"kem:" + base64.b64decode(request["kem_public"])
+    if name == "link":
+        return b"link:" + base64.b64decode(request["kem_public"])
     raise ValueError("unknown key")
 
 
@@ -532,8 +533,10 @@ def request(role, state, protect, vault=None):
         req["wireguard_public_hex"] = (
             w.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw).hex()
         )
-        keys["kem"], kem_public = kem_keypair()
-        req["kem_public"] = b64(kem_public)
+    # Every device gets a hybrid KEM key: the operator seals each chain's secrets to it
+    # (the WireGuard PSK on carrier roles, the paced-link keys on every server).
+    keys["kem"], kem_public = kem_keypair()
+    req["kem_public"] = b64(kem_public)
     if role in FIRST_HOP_ROLES:
         # The HTTP/3 cloak's server key (ECDSA P-256, as a web server's would be). Clients
         # pin its public key; the certificate is self-signed at each start.
@@ -570,9 +573,9 @@ def load_request(raw, role):
         ):
             raise ValueError("ML-DSA-65 identity required")
         cert.public_key().verify(cert.signature, cert.tbs_certificate_bytes)  # proof of possession
-    if role in CARRIER_ROLES:
-        if not re.fullmatch("[0-9a-f]{64}", r["wireguard_public_hex"]):
-            raise ValueError("bad WireGuard key")
+    if role in CARRIER_ROLES and not re.fullmatch("[0-9a-f]{64}", r["wireguard_public_hex"]):
+        raise ValueError("bad WireGuard key")
+    if role in CARRIER_ROLES or "kem_public" in r:
         from keyguard import KEM_PUBLIC
 
         if len(base64.b64decode(r["kem_public"], validate=True)) != KEM_PUBLIC:
@@ -701,6 +704,8 @@ def create(
     middle=None,
     cover_name=None,
     rate="metered",
+    alternates=None,
+    rotate=ROTATE_SECONDS,
 ):
     """Operator: build signed bundles for a 1-, 2- or 3-hop chain from public device
     requests. Bundles carry no private key; the WireGuard PSK is hybrid-KEM encrypted
@@ -708,7 +713,10 @@ def create(
 
     relay  = entry relay's public WireGuard endpoint (2-3 hops)
     middle = middle relay's public QUIC endpoint (3 hops)
-    exit_address = exit's public QUIC endpoint (2-3 hops) or WireGuard endpoint (1 hop)"""
+    exit_address = exit's public QUIC endpoint (2-3 hops) or WireGuard endpoint (1 hop)
+    alternates = [(name, endpoint)]: standby exits (requests under those names). The
+        server before the exit fails over to them and rotates among them every
+        `rotate` = (min, max) seconds; the entry, your guard, never changes."""
     from keyguard import kem_seal
 
     if hops not in CHAINS:
@@ -719,6 +727,17 @@ def create(
         raise ValueError("unknown rate class: " + str(rate))
     servers = CHAINS[hops]
     first = servers[0]
+    alternates = [(n, e) for n, e in (alternates or [])]
+    alt_names = [n for n, _ in alternates]
+    alt_endpoint = dict(alternates)
+    if alternates and hops == 1:
+        raise ValueError("a one-hop chain's exit is its entry, your guard: standby exits need 2 or 3 hops")
+    if len(set(alt_names)) != len(alt_names) or set(alt_names) & set(CHAINS[3] + ["client"]):
+        raise ValueError("standby exit names must be unique and not a role name")
+    if alternates and not (
+        len(rotate) == 2 and all(type(x) is int for x in rotate) and 60 <= rotate[0] <= rotate[1] <= 86400
+    ):
+        raise ValueError("rotation window must be 60..86400 seconds, min <= max")
     if (relay is None) != (hops == 1) or (middle is None) != (hops != 3):
         raise ValueError("endpoints do not match the chain")
     for a in [x for x in [relay, middle, exit_address] if x]:
@@ -726,9 +745,11 @@ def create(
     carrier_endpoint = relay if hops > 1 else exit_address
     root.mkdir(mode=0o700, parents=False, exist_ok=False)
     roles = ["client"] + servers
-    if set(requests) != set(roles):
-        raise ValueError("requests needed exactly for: " + ", ".join(roles))
+    if set(requests) != set(roles + alt_names):
+        raise ValueError("requests needed exactly for: " + ", ".join(roles + alt_names))
     reqs = {role: load_request(requests[role], role) for role in roles}
+    reqs.update({n: load_request(requests[n], "exit") for n in alt_names})
+    forwarder = servers[-2] if hops > 1 else None
     valid_cover_name(cover_name)
     if CLOAK and "cloak_spki_sha256" not in reqs[first][0]:
         raise ValueError(
@@ -750,15 +771,31 @@ def create(
     }
     nxt = {"relay": middle if hops == 3 else exit_address, "middle": exit_address}
     psk = os.urandom(32)
+    # Per-hop shaping: one fresh link key per pair of consecutive servers.
+    pair_psk = {(servers[k], servers[k + 1]): os.urandom(32) for k in range(len(servers) - 1)}
+    pair_psk.update({(forwarder, n): os.urandom(32) for n in alt_names})
+    for role in servers + alt_names:
+        if hops > 1 and "kem_public" not in reqs[role][0]:
+            raise ValueError(
+                "the %s's keys predate per-hop shaping; create them again with this release "
+                "(avpn reset, then avpn request)" % role
+            )
     payloads = {}
-    for role in roles:
-        req, certs = reqs[role]
+    role_of = {}
+    exits = ["exit"] + alt_names
+    for name, role in [(r, r) for r in roles] + [(n, "exit") for n in alt_names]:
+        req, certs = reqs[name]
+        role_of[name] = role
         files = {}
         lanes = CHAIN_LANES[hops] if role == "client" else [SERVER_LANE[role]]
         core = dict(
             schema=1,
             role="relay" if role in ("relay", "middle") else role,
-            listen="10.78.0.2:0" if role == "client" else listen[role],
+            listen="10.78.0.2:0"
+            if role == "client"
+            else any_address(alt_endpoint[name])
+            if name in alt_endpoint
+            else listen[role],
             relay="10.78.0.1:4433" if role == "client" else None,
             exit=nxt.get(role),
             outer=None,
@@ -779,10 +816,22 @@ def create(
             core["cells"] = True
         if rates:
             core.update(rates)
+        if role != "client" and hops > 1:
+            k = servers.index(role)
+            nexts = ([servers[k + 1]] + (alt_names if role == forwarder else [])) if k + 1 < len(servers) else []
+            outs = [pair_psk[(role, x)] for x in nexts]
+            ins = [pair_psk[(servers[k - 1], name)]] if k > 0 else []
+            out_eps = [nxt[role]] + [alt_endpoint[x] for x in nexts[1:]] if nexts else []
+            core.update(link_fields(rate, out_eps, len(ins)))
+            if role == forwarder and alternates:
+                core["alternates"] = out_eps[1:]
+                core["rotate_seconds"] = list(rotate)
+            files["link.kem.json"] = canonical(
+                [kem_seal(base64.b64decode(req["kem_public"]), x, LINK_AAD + role.encode()) for x in outs + ins]
+            )
         for lane in lanes:
             peer_role, peer_lane = PEER[(role, lane)]
             peer_cert = reqs[peer_role][1][peer_lane]
-            files[lane + "-ca.der"] = peer_cert
             files[lane + "-cert.der"] = certs[lane]
             core[lane] = dict(
                 ca=lane + "-ca.der",
@@ -792,6 +841,13 @@ def create(
                 server_name=NAMES[(peer_role, peer_lane)] + ".advanced-vpn.internal",
                 pin_kind="spki",
             )
+            if role == "client" and lane == "inner" and alternates:
+                # The client trusts every exit of the set; any one may terminate it.
+                peers = [reqs[x][1]["inner"] for x in exits]
+                peer_cert = b"".join(peers)
+                core[lane]["peer_sha256"] = ""
+                core[lane]["peer_members"] = [spki_sha256(x) for x in peers]
+            files[lane + "-ca.der"] = peer_cert
         carrier = None
         dns_cfg = None
         local = "10.78.0.2" if role == "client" else "10.78.0.1"
@@ -858,7 +914,7 @@ def create(
             network=dict(
                 relay_endpoint=carrier_endpoint,
                 middle_endpoint=middle,
-                exit_endpoint=exit_address,
+                exit_endpoint=alt_endpoint.get(name, exit_address),
                 dns_ip="10.77.0.1",
                 dns_port=53,
                 protected_destinations=allowed,
@@ -871,11 +927,18 @@ def create(
             profile["network"]["cover_name"] = cover_name
         profile_validate(profile)
         files["profile.json"] = canonical(profile)
-        payloads[role] = files
-    del psk
+        payloads[name] = files
+    del psk, pair_psk
     manifests = {
-        role: canonical(dict(schema=2, role=role, files={n: hashlib.sha256(b).hexdigest() for n, b in files.items()}))
-        for role, files in payloads.items()
+        name: canonical(
+            dict(
+                schema=2,
+                role=role_of[name],
+                files={n: hashlib.sha256(b).hexdigest() for n, b in files.items()},
+                **({"name": name} if name != role_of[name] else {}),
+            )
+        )
+        for name, files in payloads.items()
     }
     enrollment_set = canonical(
         dict(
@@ -1113,6 +1176,8 @@ def mesh_bundles(root, mesh, signer, defense="strong", daily_mib=None, dns=None,
         req, certs = load_request(canonical(h["request"]), h["role"])
         if h["role"] == first and CLOAK and "cloak_spki_sha256" not in req:
             raise ValueError("hop %s predates the HTTP/3 camouflage" % name)
+        if hops_len > 1 and "kem_public" not in req:
+            raise ValueError("hop %s's keys predate per-hop shaping; create them again" % name)
         hop_req[name] = req
         hop_cert[name] = certs
 
@@ -1122,6 +1187,11 @@ def mesh_bundles(root, mesh, signer, defense="strong", daily_mib=None, dns=None,
     allowed = ["0.0.0.0/0"]
     payloads = {}
     psks = {name: os.urandom(32) for name in members}
+    # Per-hop shaping: one link key per consecutive pair of hops in any member's chain.
+    pair_psk = {}
+    for m in members.values():
+        for a, b in zip(m["chain"], m["chain"][1:], strict=False):
+            pair_psk.setdefault((a, b), os.urandom(32))
 
     # Server bundles: one per registered hop, carrying every member admitted onto it.
     for name, hop in hops.items():
@@ -1166,6 +1236,15 @@ def mesh_bundles(root, mesh, signer, defense="strong", daily_mib=None, dns=None,
             cells=True,
             members=routing,
         )
+        if hops_len > 1:
+            nexts = sorted({b for a, b in pair_psk if a == name})
+            prevs = sorted({a for a, b in pair_psk if b == name})
+            core.update(link_fields(rate, [hops[b]["endpoint"] for b in nexts], len(prevs)))
+            keys = [pair_psk[(name, b)] for b in nexts] + [pair_psk[(a, name)] for a in prevs]
+            if keys:
+                files["link.kem.json"] = canonical(
+                    [kem_seal(base64.b64decode(hop_req[name]["kem_public"]), x, LINK_AAD + role.encode()) for x in keys]
+                )
         core[lane] = dict(
             ca=lane + "-ca.der",
             cert=lane + "-cert.der",
@@ -1480,6 +1559,9 @@ def enroll(bundle, operator_public, state, replace=False):
         allowed.add("dns-ca.der")
     if profile["dns"] and profile["dns"].get("blocklist"):
         allowed.add("dns-blocklist.txt")
+    links = len(profile["core"].get("link_out", [])) + profile["core"].get("link_in", 0)
+    if links:
+        allowed.add("link.kem.json")
     if set(contents) != allowed:
         raise ValueError("reserved or unreferenced enrollment member")
     # The bundle must name exactly the keys this device generated.
@@ -1499,12 +1581,22 @@ def enroll(bundle, operator_public, state, replace=False):
             raise ValueError("bundle is for another device")
     secret = meta = None
     protection = json.loads(read_private(state / "protection.json"))
-    if profile["carrier"]:
+    link_blob = None
+    if profile["carrier"] or links:
         from keyguard import kem_open, hardware_secret
 
         if protection["mode"] == "nitrokey":
             secret, meta = hardware_secret(Path(protection["vault"]))
-        keys = load_keys(state, ["wireguard", "kem"], secret, meta)
+        keys = load_keys(state, (["wireguard"] if profile["carrier"] else []) + ["kem"], secret, meta)
+    if links:
+        envelopes = json.loads(contents["link.kem.json"])
+        if type(envelopes) is not list or len(envelopes) != links:
+            raise ValueError("bad link keys")
+        parts = [kem_open(keys["kem"], env, LINK_AAD + role.encode()) for env in envelopes]
+        if any(len(x) != 32 for x in parts):
+            raise ValueError("bad link keys")
+        link_blob = b"".join(parts)
+    if profile["carrier"]:
         aad = b"advanced-vpn/wireguard-psk/" + role.encode()
         if mesh_carrier:
             envelopes = json.loads(contents["psk-members.kem.json"])
@@ -1523,13 +1615,17 @@ def enroll(bundle, operator_public, state, replace=False):
             if (state / name).exists():
                 (state / name).unlink()
     for name, b in contents.items():
-        if name.endswith("-cert.der") or name in ("psk.kem.json", "psk-members.kem.json"):
+        if name.endswith("-cert.der") or name in ("psk.kem.json", "psk-members.kem.json", "link.kem.json"):
             continue
         put(state / name, b)
     if profile["carrier"]:
         # Private key (first 32 bytes) is the device's own; the PSK belongs to this chain.
         # The KEM key stays protected at rest so later chains can deliver a new PSK.
         store_keys(state, {"wireguard": keys["wireguard"][:32] + psk}, secret, meta)
+    if link_blob is not None:
+        store_keys(state, {"link": link_blob}, secret, meta)
+    else:
+        forget_key(state, "link")
     put(state / "operator.pub", raw_operator)
     put(
         state / "ENROLLMENT.json",
@@ -1651,20 +1747,26 @@ def lab_setup(
     middle=None,
     cover_name=None,
     rate="metered",
+    standby=None,
+    rotate=ROTATE_SECONDS,
 ):
     """TEST/LAB: run the real request -> init -> enroll flow for every role in the
-    chain. `protect` maps role -> protection (default 'none'); the operator is
-    software unless a HardwareOperator is passed."""
+    chain (and every standby exit, `standby` = [(name, endpoint)]). `protect` maps
+    role -> protection (default 'none'); the operator is software unless a
+    HardwareOperator is passed."""
     protect = protect or {}
     roles = ["client"] + CHAINS[hops]
+    standby = list(standby or [])
     for role in roles:
         mode = protect.get(role, "none")
         request(role, root / role, mode, vault if mode == "nitrokey" else None)
+    for name, _ in standby:
+        request("exit", root / name, protect.get(name, "none"), None)
     ops = root / "operator"
     signer = operator or SoftwareOperator(root / "operator-keys")
     create(
         ops,
-        {r: read_private(root / r / "request.json") for r in roles},
+        {r: read_private(root / r / "request.json") for r in roles + [n for n, _ in standby]},
         relay if hops > 1 else None,
         exit_address,
         signer,
@@ -1677,7 +1779,9 @@ def lab_setup(
         middle=middle,
         cover_name=cover_name,
         rate=rate,
+        alternates=standby,
+        rotate=rotate,
     )
-    for role in roles:
-        enroll(ops / (role + ".avpn"), ops / "operator.pub", root / role)
+    for name in roles + [n for n, _ in standby]:
+        enroll(ops / (name + ".avpn"), ops / "operator.pub", root / name)
     return ops

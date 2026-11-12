@@ -559,7 +559,7 @@ BINARIES = {
     "dns": "advanced-vpn-dns",
     "cloak": "advanced-vpn-cloak",
 }
-CHILD_KEYS = {"core": ["outer", "middle", "inner"], "carrier": ["wireguard"], "cloak": ["token", "cloak"]}
+CHILD_KEYS = {"core": ["outer", "middle", "inner", "link"], "carrier": ["wireguard"], "cloak": ["token", "cloak"]}
 CLOAK_TOKEN_LABEL = b"advanced-vpn cloak"
 
 
@@ -1035,8 +1035,11 @@ def fd_bytes(fd):
 
 
 def managed_identities(cfg):
-    """The certificate identities this profile's data-plane processes present, by role."""
+    """The keys this profile's data-plane processes need, by role: certificate
+    identities, plus the paced-link keys of a server in a multi-hop chain."""
     out = {r: cfg["core"][r] for r in ["outer", "middle", "inner"] if cfg["core"].get(r)}
+    if cfg["core"].get("link_out") or cfg["core"].get("link_in"):
+        out["link"] = {}  # per-hop shaping: the sealed link keys, no certificate
     if "carrier" in cfg:
         out["wireguard"] = cfg["carrier"]["identity"]
     if cfg.get("cloak", {}).get("role") == "server":
@@ -1438,6 +1441,17 @@ def build_parser():
     )
     init.add_argument("--accept-cost", action="store_true", help="sign a class even if it exceeds the allowance")
     init.add_argument(
+        "--standby-exit",
+        action="append",
+        default=[],
+        help="NAME=IP:PORT: a standby exit (2-3 hops); give its request as --request NAME=FILE",
+    )
+    init.add_argument(
+        "--rotate-seconds",
+        default="900,3600",
+        help="MIN,MAX: with standby exits, rotate among the live ones at a random time in this window",
+    )
+    init.add_argument(
         "--daily-limit-mib", type=int, default=None, help="optional fail-closed daily carrier cap; default none"
     )
     init.add_argument(
@@ -1520,7 +1534,13 @@ def main():
         for item in a.request:
             role, path = item.split("=", 1)
             requests[role] = Path(path).read_bytes()
-        rate, why = choose_rate(a.rate, a.allowance_gib, a.hours_per_day, a.accept_cost)
+        # A relay sends the stream on two links (client side and next hop).
+        links = 2 if a.hops > 1 else 1
+        rate, why = choose_rate(a.rate, a.allowance_gib, a.hours_per_day, a.accept_cost, links)
+        standby = [tuple(x.split("=", 1)) for x in a.standby_exit]
+        if any(len(x) != 2 for x in standby):
+            raise ValueError("--standby-exit takes NAME=IP:PORT")
+        rotate = tuple(int(x) for x in a.rotate_seconds.split(","))
         signer_impl = HardwareOperator(a.vault) if a.vault else SoftwareOperator(a.software_operator.resolve())
         dns_arg = (
             dict(upstream="9.9.9.9:853", server_name="dns.quad9.net", blocklist=a.dns_blocklist.read_bytes())
@@ -1539,17 +1559,19 @@ def main():
             middle=a.middle,
             cover_name=a.cover_name,
             rate=rate,
+            alternates=standby,
+            rotate=rotate,
         )
         emit(
             a,
             "Signed %d-hop chain written to %s (operator %s), rate %s: %s; about %d GiB/month per hop at %g h/day."
-            % (a.hops, a.out, operator[:16], rate, why, rate_cost_gib(rate, a.hours_per_day), a.hours_per_day),
+            % (a.hops, a.out, operator[:16], rate, why, rate_cost_gib(rate, a.hours_per_day, links), a.hours_per_day),
             operator_sha256=operator,
             out=str(a.out),
             hops=a.hops,
             rate=rate,
             rate_reason=why,
-            monthly_gib_per_hop=round(rate_cost_gib(rate, a.hours_per_day)),
+            monthly_gib_per_hop=round(rate_cost_gib(rate, a.hours_per_day, links)),
         )
         return
     if a.action == "enroll":

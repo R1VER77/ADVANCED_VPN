@@ -1,0 +1,43 @@
+{
+ "what": "Oblivious control plane (tools/ohttp.py, tools/ohttp_relay.py, the beacon's /ohttp gateway): who sees what, on real interfaces in network namespaces (tools/ohttp_lab.py). The member has no route to the beacon; it publishes a request carrying a marker and fetches descriptors through a relay, sealed to the beacon's gateway key.",
+ "date": "2026-11-12",
+ "tool": "unshare --user --map-root-user --map-auto --net --mount python3 tools/ohttp_lab.py --state DIR",
+ "crypto": "RFC 9458 design: HPKE base mode with the hybrid post-quantum KEM ML-KEM-768 + X25519 (cryptography 50, KEM.MLKEM768_X25519), HKDF-SHA256, AES-256-GCM; RFC 9458 request header. Not wire-compatible with RFC 9458: the pinned library has no HPKE exporter, so the response is sealed to a fresh per-request reply key carried inside the encrypted request. Requests carry a timestamp and nonce; the gateway refuses stale (60 s) or replayed ones.",
+ "result": {
+  "member": {
+   "gossip": [
+    200,
+    {
+     "ok": false
+    }
+   ],
+   "descriptors": [
+    200,
+    0
+   ],
+   "health": [
+    200,
+    {
+     "ok": true,
+     "descriptors": 0
+    }
+   ],
+   "forged": 502,
+   "direct_to_beacon": "unreachable"
+  },
+  "beacon_sources": [
+   "10.82.0.1",
+   "10.82.0.2"
+  ],
+  "member_address_seen_by_beacon": false,
+  "marker_seen_on_relay_links": false,
+  "relay_sources": [
+   "10.81.0.1",
+   "10.81.0.2",
+   "10.82.0.1",
+   "10.82.0.2"
+  ]
+ },
+ "reading": "The beacon saw only the relay's address (10.82.0.1) and its own; the member's address (10.81.0.2) never reached it. The marker never crossed the relay's links in the clear. The member got authentic sealed answers; a forged request was refused; the member could not reach the beacon directly.",
+ "limits": "The split protects only if the relay and the gateway's beacon belong to different, non-colluding operators (mesh.beacon_entry refuses a route that names the same operator for both). Timing between the two links is not hidden."
+}

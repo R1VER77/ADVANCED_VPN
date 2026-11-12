@@ -26,6 +26,8 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+import providers  # the catalog's legal-parent table (same directory)
+
 SCHEMA = 1
 DESCRIPTOR_TTL_SECONDS = 7 * 24 * 3600
 GOSSIP_HOP_LIMIT = 3
@@ -199,6 +201,16 @@ def ranked(nodes: list[dict], role: str, group: str) -> list[dict]:
     )
 
 
+# Parent jurisdiction of each provider (the US CLOUD Act reaches US providers wherever
+# the server stands): the catalog's table. Mirrors legal_parent in src/mesh/directory.rs.
+PROVIDER_PARENT = providers.LEGAL_PARENT
+
+
+def legal_parent(provider: str, country: str) -> str:
+    """The legal sphere a node answers to: its provider's parent, else its own country."""
+    return PROVIDER_PARENT.get(provider, country.upper())
+
+
 def select_chain(
     nodes: list[dict],
     hops: int,
@@ -206,8 +218,11 @@ def select_chain(
     exit_country: str | None = None,
     prefer: str | None = None,
     allow_weaker_diversity: bool = False,
+    own_operator: str | None = None,
+    allow_same_jurisdiction: bool = False,
 ) -> list[dict]:
-    """Diversity first: every hop a distinct operator, provider and country.
+    """Diversity first: every hop a distinct operator, provider and country; the
+    member's own node as the entry; the exit in another legal sphere than the entry.
     Mirrors NodeDb::select_chain in src/mesh/directory.rs."""
     if not 1 <= hops <= 3:
         raise SystemExit("chains have 1 to 3 hops")
@@ -217,11 +232,22 @@ def select_chain(
         candidates = ranked(nodes, role, group)
         if prefer:
             candidates.sort(key=lambda d: 0 if d["node_id"] == prefer else 1)
+        if i == 0 and hops > 1 and own_operator:
+            candidates.sort(key=lambda d: 0 if d["operator"] == own_operator else 1)
+        entry_sphere = legal_parent(chosen[0]["provider"], chosen[0]["country"]) if chosen else None
+        is_exit = i == len(roles) - 1
         pick = None
         for d in candidates:
             if d["operator"] in ops or any(c["node_id"] == d["node_id"] for c in chosen):
                 continue
-            if i == len(roles) - 1 and exit_country and d["country"] != exit_country:
+            if is_exit and exit_country and d["country"] != exit_country:
+                continue
+            if (
+                is_exit
+                and not allow_same_jurisdiction
+                and entry_sphere is not None
+                and legal_parent(d["provider"], d["country"]) == entry_sphere
+            ):
                 continue
             if not allow_weaker_diversity and (d["provider"] in provs or d["country"] in cts):
                 continue
@@ -506,19 +532,61 @@ def gossip_descriptor(descriptor: dict, hop: int = 0) -> dict:
     cfg = MESH_DIR / "beacons.json"
     if not cfg.exists():
         return {"sent": 0, "beacons": 0, "hint": f'no beacons configured; write ["https://host:8787"] to {cfg}'}
-    beacons = [beacon_url(u) for u in json.loads(cfg.read_text())]
+    beacons = [beacon_entry(u) for u in json.loads(cfg.read_text())]
     body = json.dumps({"descriptor": descriptor, "hop": hop}).encode()
     sent = 0
-    for url in beacons:
+    for entry in beacons:
         try:
-            req = urllib.request.Request(  # noqa: S310 (scheme checked by beacon_url)
-                url.rstrip("/") + "/gossip", data=body, headers={"Content-Type": "application/json"}
-            )
-            with urllib.request.urlopen(req, timeout=10) as r:  # noqa: S310 (scheme checked by beacon_url)
-                sent += 1 if json.loads(r.read()).get("ok") else 0
+            status, doc = beacon_call(entry, "POST", "/gossip", body)
+            sent += 1 if status == 200 and doc.get("ok") else 0
         except (OSError, ValueError):
             continue  # an unreachable beacon is skipped, never fatal
     return {"sent": sent, "beacons": len(beacons)}
+
+
+def beacon_entry(entry):
+    """A configured beacon: a direct http(s) URL, or an oblivious route
+    {"relay": URL, "gateway_public": B64, "key_id": N, "relay_operator": "!..",
+    "gateway_operator": "!.."} whose relay and gateway belong to different operators."""
+    if isinstance(entry, str):
+        return beacon_url(entry)
+    if not isinstance(entry, dict) or set(entry) != {
+        "relay",
+        "gateway_public",
+        "key_id",
+        "relay_operator",
+        "gateway_operator",
+    }:
+        raise ValueError("a beacon is a URL or an oblivious route")
+    if entry["relay_operator"] == entry["gateway_operator"]:
+        raise ValueError("an oblivious route needs a relay and a gateway of different operators")
+    import ohttp
+
+    ohttp.load_public(base64.b64decode(entry["gateway_public"], validate=True))
+    return dict(entry, relay=beacon_url(entry["relay"]))
+
+
+def beacon_call(entry, method, path, body=b""):
+    """(status, document) of one beacon request: direct, or sealed through a relay so
+    the beacon never sees this member's address and the relay never sees the request."""
+    if isinstance(entry, str):
+        req = urllib.request.Request(  # noqa: S310 (scheme checked by beacon_url)
+            entry + path,
+            data=body if method == "POST" else None,
+            headers={"Content-Type": "application/json"},
+            method=method,
+        )
+        with urllib.request.urlopen(req, timeout=10) as r:  # noqa: S310 (scheme checked by beacon_url)
+            return r.status, json.loads(r.read())
+    import ohttp
+
+    wire, reply = ohttp.encapsulate(base64.b64decode(entry["gateway_public"]), int(entry["key_id"]), method, path, body)
+    req = urllib.request.Request(  # noqa: S310 (scheme checked by beacon_url)
+        entry["relay"] + "/relay", data=wire, headers={"Content-Type": "message/ohttp-req"}
+    )
+    with urllib.request.urlopen(req, timeout=20) as r:  # noqa: S310 (scheme checked by beacon_url)
+        status, answer = ohttp.decapsulate(r.read(), reply)
+    return status, json.loads(answer)
 
 
 def beacon_url(url) -> str:
@@ -533,13 +601,12 @@ def fetch_from_beacons() -> int:
     cfg = MESH_DIR / "beacons.json"
     if not cfg.exists():
         return 0
-    beacons = [beacon_url(u) for u in json.loads(cfg.read_text())]
+    beacons = [beacon_entry(u) for u in json.loads(cfg.read_text())]
     added = 0
     directory = {d["node_id"]: d for d in load_directory()}
-    for url in beacons:
+    for entry in beacons:
         try:
-            with urllib.request.urlopen(url + "/descriptors", timeout=10) as r:  # noqa: S310 (beacon_url)
-                batch = json.loads(r.read())
+            _, batch = beacon_call(entry, "GET", "/descriptors")
         except (OSError, ValueError):
             continue  # an unreachable beacon is skipped, never fatal
         for d in batch.get("descriptors", []):
@@ -596,6 +663,10 @@ def cmd_nodes(args) -> dict:
 
 def cmd_chain(args) -> dict:
     """`avpn mesh chain`: pick a diverse chain from the directory."""
+    try:
+        own = member_id(load_operator_key())
+    except (OSError, ValueError):
+        own = None  # no identity here yet: no own-entry preference
     chain = select_chain(
         load_directory(),
         args.hops,
@@ -603,11 +674,15 @@ def cmd_chain(args) -> dict:
         exit_country=args.exit_country,
         prefer=args.prefer,
         allow_weaker_diversity=args.allow_weaker_diversity,
+        own_operator=own,
+        allow_same_jurisdiction=args.allow_same_jurisdiction,
     )
     rows = [
         {
             "label": f"hop {i + 1}",
-            "value": f"{d['node_id']}  {d['roles'][0]}  {d['provider']} {d['country']}  {d['cloak_endpoint']}",
+            "value": f"{d['node_id']}  {d['roles'][0]}  {d['provider']} {d['country']}"
+            f" (legal sphere {legal_parent(d['provider'], d['country'])})  {d['cloak_endpoint']}"
+            + ("  your own node" if own and d["operator"] == own else ""),
         }
         for i, d in enumerate(chain)
     ]
@@ -655,6 +730,7 @@ def main() -> int:
     sp.add_argument("--exit-country")
     sp.add_argument("--prefer")
     sp.add_argument("--allow-weaker-diversity", action="store_true")
+    sp.add_argument("--allow-same-jurisdiction", action="store_true")
     sp.add_argument("--apply", action="store_true")
     sp.add_argument("--dry-run", action="store_true")
     sp.add_argument("--yes", action="store_true")

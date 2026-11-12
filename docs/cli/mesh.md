@@ -24,9 +24,14 @@ is no account.
         --i-understand-exit-risk and shows ToS/abuse guidance.
 
     avpn mesh chain [--hops 1..3] [--group public|GROUP] [--exit-country CC]
-                    [--prefer !xxxxxxxx] [--apply]
+                    [--prefer !xxxxxxxx] [--allow-same-jurisdiction] [--apply]
         Plan (or build) a chain. Every hop is a distinct operator, provider
-        and country; an operator never appears twice.
+        and country; an operator never appears twice. Your own node is your
+        entry when it offers one, so no stranger learns your address. The
+        exit answers to another legal sphere than the entry (US clouds are
+        one sphere under the CLOUD Act; a self-hosted node answers to its
+        country): one legal order never reaches both ends. The middle does
+        not count. --allow-same-jurisdiction lifts that rule.
 
     avpn mesh quota
         Contribution credits: earned relaying, spent on chains, today's
