@@ -116,8 +116,7 @@ class IngestTests(BeaconCase):
 
     def test_oversize_body_is_refused(self):
         conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
-        conn.request("POST", "/gossip", "x" * (mb.MAX_BODY_BYTES + 1),
-                     {"Content-Type": "application/json"})
+        conn.request("POST", "/gossip", "x" * (mb.MAX_BODY_BYTES + 1), {"Content-Type": "application/json"})
         r = conn.getresponse()
         self.assertEqual(r.status, 413)
         r.read()

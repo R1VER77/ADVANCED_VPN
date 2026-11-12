@@ -46,6 +46,57 @@ PADDING_REQUIRED = "this chain was signed without constant-cell padding, which i
 # WireGuard is reached only through it. (A constant only so tests can build a chain the
 # way it was signed before the cloak existed, to prove such a chain is refused.)
 CLOAK = True
+BALANCED_REMOVED = "this chain was signed with the removed balanced defense; every chain now runs the constant-rate stream. Re-sign it (avpn cloud chain --apply, or avpn init) and enroll the new bundles with --replace"
+# The constant-rate stream's classes (src/daita.rs RateClass): wire packets per second
+# in each direction of each link while connected. Speed and cost differ; the shape does not.
+RATE_CLASSES = {"metered": 50, "standard": 500, "fast": 4000, "line": 16000}
+# Bytes per wire packet (IPv4 + UDP + the cloak's QUIC datagram carrying one cell),
+# measured in docs/evidence/RATE_CLASSES.json.
+WIRE_PACKET_BYTES = 1448
+
+
+def rate_cost_gib(rate, hours_per_day):
+    """Monthly (30-day) outbound GiB the stream costs one hop towards one neighbour."""
+    return RATE_CLASSES[rate] * WIRE_PACKET_BYTES * 3600 * hours_per_day * 30 / (1 << 30)
+
+
+def choose_rate(requested, allowance_gib, hours_per_day, accept_cost=False):
+    """(class, reason) for `avpn init --rate`. `auto` picks the fastest class whose
+    stream fits the chain's smallest monthly outbound allowance at `hours_per_day`
+    connected; an explicit class that does not fit is refused unless `accept_cost`."""
+    if not 0 < hours_per_day <= 24:
+        raise ValueError("hours per day must be 1..24")
+    if allowance_gib is not None and allowance_gib <= 0:
+        raise ValueError("the allowance must be positive")
+    fits = [r for r in RATE_CLASSES if allowance_gib is None or rate_cost_gib(r, hours_per_day) <= allowance_gib]
+    if requested == "auto":
+        if allowance_gib is None:
+            return "metered", "no hop allowance given (--allowance-gib): the slowest class"
+        if not fits:
+            if not accept_cost:
+                raise ValueError(
+                    "even the metered class needs about %d GiB/month at %g h/day, over the %d GiB allowance; "
+                    "connect fewer hours (--hours-per-day) or pass --accept-cost"
+                    % (rate_cost_gib("metered", hours_per_day), hours_per_day, allowance_gib)
+                )
+            return "metered", "over the allowance, accepted with --accept-cost"
+        best = fits[-1]
+        return best, "fastest class within %d GiB/month at %g h/day (about %d GiB/month)" % (
+            allowance_gib,
+            hours_per_day,
+            rate_cost_gib(best, hours_per_day),
+        )
+    if requested not in RATE_CLASSES:
+        raise ValueError("unknown rate class: " + str(requested))
+    if requested not in fits and not accept_cost:
+        raise ValueError(
+            "the %s class needs about %d GiB/month at %g h/day, over the %d GiB allowance; "
+            "choose a slower class or pass --accept-cost"
+            % (requested, rate_cost_gib(requested, hours_per_day), hours_per_day, allowance_gib)
+        )
+    return requested, "chosen explicitly"
+
+
 CLOAK_REQUIRED = "this chain was signed before the HTTP/3 camouflage, which is now required; re-sign it (avpn cloud chain --apply, or avpn init) and enroll the new bundles with --replace"
 # Fixed cloak and carrier addresses: the client's carrier sends to its local cloak; the
 # first hop's cloak listens on 8443 (its firewall redirects the public port there) and
@@ -74,11 +125,14 @@ def require_padding(p):
 
 
 def require_current(p):
-    """Refuse a profile signed before padding or before the HTTP/3 camouflage (connect and
-    enroll call this; reset, guard and info still load such a profile)."""
+    """Refuse a profile signed before padding, before the HTTP/3 camouflage or with the
+    removed balanced defense (connect and enroll call this; reset, guard and info still
+    load such a profile)."""
     require_padding(p)
     if p["carrier"] and not p.get("cloak"):
         raise ValueError(CLOAK_REQUIRED)
+    if p["carrier"] and p["carrier"]["defense"] != "strong":
+        raise ValueError(BALANCED_REMOVED)
     return p
 
 
@@ -128,6 +182,42 @@ def profile_validate(p):
                 raise ValueError("unsafe identity path")
         if i.get("pin_kind") != "spki":
             raise ValueError("managed profiles require public-key identity pins")
+    members = p["core"].get("members", [])
+    if members:
+        # Mesh servers: the admitted member set, routed by pin. Clients never carry one.
+        if p["role"] == "client" or type(members) is not list or not 1 <= len(members) <= 256:
+            raise ValueError("member routing is server-only and bounded")
+        lane = SERVER_LANE[p["role"]]
+        accepted = set(p["core"][lane].get("peer_members", []))
+        if p["core"][lane].get("peer_sha256", "") != "" or len(accepted) != len(members):
+            raise ValueError("member pins must be the serving layer's accepted set")
+        inner_overlay = r"10\.77\.0\.(?:[2-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-3])"
+        seen = set()
+        for m in members:
+            if (
+                type(m) is not dict
+                or not re.fullmatch("[0-9a-f]{64}", str(m.get("pin_sha256")))
+                or m["pin_sha256"] not in accepted
+                or m["pin_sha256"] in seen
+            ):
+                raise ValueError("bad member pin")
+            seen.add(m["pin_sha256"])
+            if p["role"] in ("relay", "middle"):
+                host, port = str(m.get("exit", "")).rsplit(":", 1) if ":" in str(m.get("exit")) else ("", "")
+                try:
+                    ip = ipaddress.IPv4Address(host)
+                    ok = not ip.is_multicast and not ip.is_unspecified and 1 <= int(port) <= 65535
+                except ValueError:
+                    ok = False
+                if not ok or m.get("peer_ip") is not None:
+                    raise ValueError("relay members need a concrete next hop and no tunnel address")
+            else:
+                if m.get("exit") is not None or not re.fullmatch(inner_overlay, str(m.get("peer_ip"))):
+                    raise ValueError("exit members need a tunnel address and no next hop")
+    elif p["role"] != "client":
+        lane = SERVER_LANE[p["role"]]
+        if p["core"][lane].get("peer_members"):
+            raise ValueError("member pins without member routing")
     n = p["network"]
     network = {
         "relay_endpoint",
@@ -151,8 +241,11 @@ def profile_validate(p):
         raise ValueError("middle endpoint only in three-hop chains")
     if n["dns_ip"] != "10.77.0.1" or n["dns_port"] != 53:
         raise ValueError("managed DNS required")
-    if n["local_overlay"] not in ["10.78.0.1", "10.78.0.2"] or n["peer_overlay"] not in ["10.78.0.1", "10.78.0.2"]:
-        raise ValueError("fixed carrier subnet required")
+    overlay = r"10\.78\.0\.(?:[1-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-3])"
+    if not re.fullmatch(overlay, n["local_overlay"]) or not re.fullmatch(overlay, n["peer_overlay"]):
+        raise ValueError("addresses outside the fixed carrier subnet")
+    if n["local_overlay"] == n["peer_overlay"]:
+        raise ValueError("overlay addresses must differ")
     for route in n["protected_destinations"]:
         ipaddress.IPv4Network(route)
     # The carrier (WireGuard+DAITA) runs on the client and on the chain's first hop.
@@ -165,8 +258,11 @@ def profile_validate(p):
         raise ValueError("fixed managed TUN required")
     if p["carrier"]:
         w = p["carrier"]
+        # "balanced" still loads (so reset/guard/info work); require_current refuses it.
         if w["tun"] != "avwg0" or w["role"] != "wireguard" or w["defense"] not in ["balanced", "strong"]:
             raise ValueError("managed DAITA required")
+        if "rate" in w and w["rate"] not in RATE_CLASSES:
+            raise ValueError("unknown rate class")
         if type(w["listen_port"]) is not int or not 1024 <= w["listen_port"] <= 65535:
             raise ValueError("unprivileged carrier port required")
         if (
@@ -174,7 +270,29 @@ def profile_validate(p):
             or w["statistics"] != "carrier-status.json"
         ):
             raise ValueError("carrier path rejected")
-        if not re.fullmatch("[0-9a-f]{64}", w["peer_public_hex"]) or w["allowed_ip"] != n["peer_overlay"] + "/32":
+        if w.get("members") is not None:
+            # Mesh first hop: admitted members, each with its own WireGuard key, its own
+            # preshared key (in the key material, in member order) and its own overlay
+            # address. There is no single pinned peer.
+            if w["peer_public_hex"] != "" or w["allowed_ip"] != "":
+                raise ValueError("a mesh carrier names no single peer")
+            if type(w["members"]) is not list or not 1 <= len(w["members"]) <= 256:
+                raise ValueError("carrier member list out of bounds")
+            member_overlay = r"10\.78\.0\.(?:[2-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-3])"
+            seen_keys, seen_ips = set(), set()
+            for m in w["members"]:
+                if (
+                    type(m) is not dict
+                    or set(m) != {"public_hex", "allowed_ip"}
+                    or not re.fullmatch("[0-9a-f]{64}", m["public_hex"])
+                    or not re.fullmatch(member_overlay + r"/32", m["allowed_ip"])
+                    or m["public_hex"] in seen_keys
+                    or m["allowed_ip"] in seen_ips
+                ):
+                    raise ValueError("bad carrier member")
+                seen_keys.add(m["public_hex"])
+                seen_ips.add(m["allowed_ip"])
+        elif not re.fullmatch("[0-9a-f]{64}", w["peer_public_hex"]) or w["allowed_ip"] != n["peer_overlay"] + "/32":
             raise ValueError("carrier peer rejected")
         if "cloak" in p:
             # Schema 2: WireGuard only behind the cloak, on fixed loopback addresses.
@@ -212,8 +330,29 @@ def profile_validate(p):
                 raise ValueError("cloak server rejected")
     if p["dns"]:
         d = p["dns"]
-        if d["listen"] != "10.77.0.1:1053" or d["client_ip"] != "10.77.0.2" or d["test_ca"] not in [None, "dns-ca.der"]:
+        if set(d) - {
+            "schema",
+            "listen",
+            "client_ip",
+            "client_network",
+            "upstream",
+            "server_name",
+            "test_ca",
+            "blocklist",
+            "blocked_domains",
+        }:
+            raise ValueError("unknown DNS field")
+        if (
+            d["listen"] != "10.77.0.1:1053"
+            or d["client_ip"] != "10.77.0.2"
+            or d["test_ca"] not in [None, "dns-ca.der"]
+            or d.get("blocklist") not in [None, "dns-blocklist.txt"]
+        ):
             raise ValueError("DNS binding rejected")
+        for dom in d.get("blocked_domains") or []:
+            valid_cover_name(dom)
+        if d.get("client_network") not in [None, "10.77.0.0/24"]:
+            raise ValueError("member DNS outside the tunnel subnet")
         host, port = d["upstream"].rsplit(":", 1)
         ipaddress.IPv4Address(host)
         if not 1 <= int(port) <= 65535 or not re.fullmatch("[A-Za-z0-9.-]{1,253}", d["server_name"]):
@@ -553,7 +692,7 @@ def create(
     relay,
     exit_address,
     signer,
-    defense="balanced",
+    defense="strong",
     destinations=None,
     daily_mib=None,
     dns=None,
@@ -561,6 +700,7 @@ def create(
     hops=2,
     middle=None,
     cover_name=None,
+    rate="metered",
 ):
     """Operator: build signed bundles for a 1-, 2- or 3-hop chain from public device
     requests. Bundles carry no private key; the WireGuard PSK is hybrid-KEM encrypted
@@ -573,6 +713,10 @@ def create(
 
     if hops not in CHAINS:
         raise ValueError("hops must be 1, 2 or 3")
+    if defense != "strong":
+        raise ValueError(BALANCED_REMOVED)
+    if rate not in RATE_CLASSES:
+        raise ValueError("unknown rate class: " + str(rate))
     servers = CHAINS[hops]
     first = servers[0]
     if (relay is None) != (hops == 1) or (middle is None) != (hops != 3):
@@ -673,6 +817,7 @@ def create(
                 allowed_ip=peer + "/32",
                 identity=dict(key="wireguard-key.bin", cert="wireguard-binding.json"),
                 defense=defense,
+                rate=rate,
                 statistics="carrier-status.json",
                 byte_budget=67_108_864,
             )
@@ -696,6 +841,11 @@ def create(
                 if dns.get("test_ca"):
                     files["dns-ca.der"] = dns["test_ca"]
                     d["test_ca"] = "dns-ca.der"
+                if dns.get("blocklist"):
+                    files["dns-blocklist.txt"] = dns["blocklist"]
+                    d["blocklist"] = "dns-blocklist.txt"
+                if dns.get("blocked_domains"):
+                    d["blocked_domains"] = list(dns["blocked_domains"])
             dns_cfg = dict(schema=1, listen="10.77.0.1:1053", client_ip="10.77.0.2", **d)
         profile = dict(
             schema=3,
@@ -769,9 +919,514 @@ def read_operator(path):
     return raw, operator
 
 
-ENROLLMENT_FILES = ["profile.json", "ENROLLMENT.json", "operator.pub", "wireguard-binding.json", "dns-ca.der"] + [
-    l + "-ca.der" for l in ["outer", "middle", "inner"]
-]
+# ---------------------------------------------------------------------------
+# Mesh: one operator, many members, selectable hops.
+#
+# A mesh is a signed directory of hops (relays and exits with spare capacity) plus a
+# signed set of bundles: one per hop server carrying its admitted members, and one per
+# member pinning the chain that member selected. Admission and revocation are explicit
+# operator acts; there is no open enrollment, so a published hop is never an open relay.
+# All chains in one mesh have the same hop count: a hop's cell sizes depend on it.
+
+MESH_NAME = r"[a-z][a-z0-9-]{0,31}"
+MESH_MAX_INDEX = 253  # member overlays run 10.78.0.2 / 10.77.0.2 upward; .1 is the server
+MESH_HOP_CAPACITY = 16  # most members one hop serves; keeps signed bundles small
+
+
+def mesh_state_new():
+    """An empty mesh registry."""
+    return dict(schema=1, hops={}, members={}, hops_len=None, next_index=1)
+
+
+def mesh_state_load(directory):
+    """Read and check the operator's mesh registry."""
+    m = json.loads(read_private(Path(directory) / "mesh.json"))
+    if m.get("schema") != 1 or set(m) != {"schema", "hops", "members", "hops_len", "next_index"}:
+        raise ValueError("unknown mesh registry")
+    return m
+
+
+def mesh_state_save(directory, mesh):
+    """Write the operator's mesh registry atomically."""
+    from keyguard import atomic
+
+    atomic(Path(directory) / "mesh.json", canonical(mesh))
+
+
+def _mesh_request(raw):
+    """A device request stored in the registry (as its dict) revalidated for use."""
+    return json.loads(canonical(raw))
+
+
+def mesh_add_hop(mesh, name, role, endpoint, request_bytes, capacity=MESH_HOP_CAPACITY):
+    """Register a server device in the mesh, from its public enrollment request."""
+    if not re.fullmatch(MESH_NAME, name) or name in mesh["hops"]:
+        raise ValueError("bad or duplicate hop name")
+    if role not in ("relay", "middle", "exit"):
+        raise ValueError("hops are relays or exits")
+    host, port = endpoint.rsplit(":", 1)
+    ip = ipaddress.IPv4Address(host)
+    if ip.is_multicast or ip.is_unspecified or not 1 <= int(port) <= 65535:
+        raise ValueError("bad hop endpoint")
+    if not 1 <= capacity <= MESH_HOP_CAPACITY:
+        raise ValueError("capacity out of bounds")
+    request, _ = load_request(request_bytes, role)
+    if role in FIRST_HOP_ROLES and "cloak_spki_sha256" not in request:
+        raise ValueError("a first hop needs cloak keys: re-create its request with this release")
+    mesh["hops"][name] = dict(role=role, endpoint=endpoint, capacity=capacity, request=request)
+    return mesh
+
+
+def mesh_admit(mesh, name, request_bytes, chain):
+    """Admit a member on its chosen chain of registered hops; assigns its overlays."""
+    if not re.fullmatch(MESH_NAME, name) or name in mesh["members"] or name in mesh["hops"]:
+        raise ValueError("bad or duplicate member name")
+    if mesh["next_index"] > MESH_MAX_INDEX:
+        raise ValueError("mesh is full")
+    request, _ = load_request(request_bytes, "client")
+    if not 1 <= len(chain) <= 3:
+        raise ValueError("chains have 1 to 3 hops")
+    hops_len = mesh["hops_len"] or len(chain)
+    if len(chain) != hops_len:
+        raise ValueError("all chains in one mesh have the same hop count")
+    if mesh["hops_len"] is None:
+        mesh["hops_len"] = hops_len
+    roles = []
+    for hop_name in chain:
+        hop = mesh["hops"].get(hop_name)
+        if not hop:
+            raise ValueError("unknown hop: " + hop_name)
+        roles.append(hop["role"])
+    if roles != CHAINS[hops_len]:
+        raise ValueError("the chain's roles do not make a %d-hop chain" % hops_len)
+    for hop_name in set(chain):
+        used = sum(1 for m in mesh["members"].values() if hop_name in m["chain"])
+        if used >= mesh["hops"][hop_name]["capacity"]:
+            raise ValueError("hop %s is full" % hop_name)
+    index = mesh["next_index"]
+    mesh["next_index"] += 1
+    mesh["members"][name] = dict(
+        request=request,
+        chain=list(chain),
+        index=index,
+        admitted=dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
+    )
+    return mesh
+
+
+def mesh_revoke(mesh, name):
+    """Remove a member. Its bundle stops being valid once its hops re-enroll."""
+    if name not in mesh["members"]:
+        raise ValueError("unknown member")
+    del mesh["members"][name]
+    return mesh
+
+
+def _overlay(index, net):
+    return "10.%d.0.%d" % (net, index + 1)
+
+
+def mesh_directory(mesh):
+    """The public directory members select from: hops, roles, endpoints, free capacity.
+    No member identity appears in it."""
+    used = {}
+    for m in mesh["members"].values():
+        for hop_name in m["chain"]:
+            used[hop_name] = used.get(hop_name, 0) + 1
+    hops = []
+    for name, hop in sorted(mesh["hops"].items()):
+        first = hop["role"] in FIRST_HOP_ROLES
+        hops.append(
+            dict(
+                name=name,
+                role=hop["role"],
+                endpoint=hop["endpoint"],
+                capacity=hop["capacity"],
+                used=used.get(name, 0),
+                wireguard_public_hex=hop["request"].get("wireguard_public_hex") if first else None,
+                cloak_spki_sha256=hop["request"].get("cloak_spki_sha256") if first else None,
+            )
+        )
+    return dict(
+        schema=1,
+        hops_len=mesh["hops_len"],
+        issued=dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
+        hops=hops,
+    )
+
+
+def mesh_verify_directory(bundle, operator_public):
+    """Verify a signed directory against the operator key; returns the directory."""
+    raw_operator, operator = read_operator(operator_public)
+    if bundle.stat().st_size > 1_048_576:
+        raise ValueError("oversized directory")
+    with zipfile.ZipFile(bundle) as z:
+        names = sorted(z.namelist())
+        if names != ["directory.json", "set.classical.json", "set.json", "set.mldsa65.sig"]:
+            raise ValueError("not a signed directory")
+        enrollment_set = z.read("set.json")
+        verify_operator(operator, enrollment_set, json.loads(z.read("set.classical.json")), z.read("set.mldsa65.sig"))
+        raw = z.read("directory.json")
+    if json.loads(enrollment_set).get("directory") != hashlib.sha256(raw).hexdigest():
+        raise ValueError("directory not covered by the signature")
+    directory = json.loads(raw)
+    if directory.get("schema") != 1 or set(directory) != {"schema", "hops_len", "issued", "hops"}:
+        raise ValueError("unknown directory")
+    for hop in directory["hops"]:
+        host, port = hop["endpoint"].rsplit(":", 1)
+        ip = ipaddress.IPv4Address(host)
+        if ip.is_multicast or ip.is_unspecified or not 1 <= int(port) <= 65535:
+            raise ValueError("bad endpoint in directory")
+    del raw_operator
+    return directory
+
+
+def mesh_bundles(root, mesh, signer, defense="strong", daily_mib=None, dns=None, cover_name=None, rate="metered"):
+    """Operator: sign every hop and member bundle of the mesh plus its directory, in one
+    signing operation. Every bundle changes (fresh PSKs), so every device re-enrolls."""
+    from keyguard import kem_seal
+
+    if not mesh["members"]:
+        raise ValueError("no members admitted")
+    if not mesh["hops"]:
+        raise ValueError("no hops registered")
+    hops_len = mesh["hops_len"]
+    servers = CHAINS[hops_len]
+    first = servers[0]
+    valid_cover_name(cover_name)
+    if defense != "strong":
+        raise ValueError(BALANCED_REMOVED)
+    if rate not in RATE_CLASSES:
+        raise ValueError("unknown rate class: " + str(rate))
+
+    members = {name: mesh["members"][name] for name in sorted(mesh["members"])}
+    hops = {name: mesh["hops"][name] for name in sorted(mesh["hops"])}
+    member_req = {}
+    member_cert = {}
+    for name, m in members.items():
+        req, certs = load_request(canonical(m["request"]), "client")
+        member_req[name] = req
+        member_cert[name] = certs
+    hop_req = {}
+    hop_cert = {}
+    for name, h in hops.items():
+        req, certs = load_request(canonical(h["request"]), h["role"])
+        if h["role"] == first and CLOAK and "cloak_spki_sha256" not in req:
+            raise ValueError("hop %s predates the HTTP/3 camouflage" % name)
+        hop_req[name] = req
+        hop_cert[name] = certs
+
+    def any_address(endpoint):
+        return "0.0.0.0:" + endpoint.rsplit(":", 1)[1]
+
+    allowed = ["0.0.0.0/0"]
+    payloads = {}
+    psks = {name: os.urandom(32) for name in members}
+
+    # Server bundles: one per registered hop, carrying every member admitted onto it.
+    for name, hop in hops.items():
+        role = hop["role"]
+        lane = SERVER_LANE[role]
+        on_me = [(n, m) for n, m in members.items() if name in m["chain"]]
+        certs = [member_cert[n][lane] for n, _ in on_me]
+        pin_of = {n: spki_sha256(member_cert[n][lane]) for n, _ in on_me}
+        pins = [pin_of[n] for n, _ in on_me]
+        routing = []
+        for n, m in on_me:
+            if role == "exit":
+                routing.append(dict(pin_sha256=pin_of[n], exit=None, peer_ip=_overlay(m["index"], 77)))
+            else:
+                position = m["chain"].index(name)
+                routing.append(
+                    dict(pin_sha256=pin_of[n], exit=hops[m["chain"][position + 1]]["endpoint"], peer_ip=None)
+                )
+        files = {}
+        files[lane + "-ca.der"] = b"".join(certs)
+        files[lane + "-cert.der"] = hop_cert[name][lane]
+        core = dict(
+            schema=1,
+            role="relay" if role in ("relay", "middle") else "exit",
+            listen="10.78.0.1:4433"
+            if role == "relay" or (role == "exit" and hops_len == 1)
+            else any_address(hop["endpoint"]),
+            relay=None,
+            exit=None,
+            outer=None,
+            middle=None,
+            inner=None,
+            tun="avpn0" if role == "exit" else None,
+            local_ip="10.77.0.1" if role == "exit" else None,
+            peer_ip="10.77.0.2" if role == "exit" else None,
+            destinations=allowed if role == "exit" else [],
+            session_seconds=300,
+            packets_per_second=RATE_PACKETS,
+            bytes_per_second=RATE_BYTES,
+            mtu=MANAGED_MTU,
+            layers=hops_len,
+            cells=True,
+            members=routing,
+        )
+        core[lane] = dict(
+            ca=lane + "-ca.der",
+            cert=lane + "-cert.der",
+            key=lane + "-key.der",
+            peer_sha256="",
+            server_name=NAMES[("client", lane)] + ".advanced-vpn.internal",
+            pin_kind="spki",
+            peer_members=pins,
+        )
+        carrier = cloak = None
+        if role == first:
+            files["wireguard-binding.json"] = canonical(
+                dict(
+                    schema=2,
+                    role=role,
+                    own_public_hex=hop_req[name]["wireguard_public_hex"],
+                    peer_public_hex="",
+                    members=[member_req[n]["wireguard_public_hex"] for n, _ in on_me],
+                )
+            )
+            files["psk-members.kem.json"] = canonical(
+                [
+                    kem_seal(
+                        base64.b64decode(hop_req[name]["kem_public"]),
+                        psks[n],
+                        b"advanced-vpn/wireguard-psk/" + role.encode(),
+                    )
+                    for n, _ in on_me
+                ]
+            )
+            carrier = dict(
+                schema=2,
+                role="wireguard",
+                tun="avwg0",
+                listen_port=41194,
+                endpoint=None,
+                peer_public_hex="",
+                allowed_ip="",
+                members=[
+                    dict(public_hex=member_req[n]["wireguard_public_hex"], allowed_ip=_overlay(m["index"], 78) + "/32")
+                    for n, m in on_me
+                ],
+                identity=dict(key="wireguard-key.bin", cert="wireguard-binding.json"),
+                defense=defense,
+                rate=rate,
+                statistics="carrier-status.json",
+                byte_budget=67_108_864,
+            )
+            cloak = dict(
+                schema=1,
+                role="server",
+                remote=None,
+                cover_name=cover_name,
+                server_spki_sha256=None,
+                cert="cloak-cert.der",
+                statistics="cloak-status.json",
+                **CLOAK_SERVER,
+            )
+        dns_cfg = None
+        if role == "exit":
+            d = dict(upstream="9.9.9.9:853", server_name="dns.quad9.net", test_ca=None)
+            if dns:
+                d.update(upstream=dns["upstream"], server_name=dns["server_name"])
+                if dns.get("test_ca"):
+                    files["dns-ca.der"] = dns["test_ca"]
+                    d["test_ca"] = "dns-ca.der"
+                if dns.get("blocklist"):
+                    files["dns-blocklist.txt"] = dns["blocklist"]
+                    d["blocklist"] = "dns-blocklist.txt"
+                if dns.get("blocked_domains"):
+                    d["blocked_domains"] = list(dns["blocked_domains"])
+            dns_cfg = dict(schema=1, listen="10.77.0.1:1053", client_ip="10.77.0.2", client_network="10.77.0.0/24", **d)
+        profile = dict(
+            schema=3,
+            role=role,
+            hops=hops_len,
+            core=core,
+            carrier=carrier,
+            dns=dns_cfg,
+            daily_budget_bytes=None if daily_mib is None else daily_mib * 1048576,
+            network=dict(
+                relay_endpoint=hop["endpoint"],
+                middle_endpoint=None,
+                exit_endpoint=hop["endpoint"],
+                dns_ip="10.77.0.1",
+                dns_port=53,
+                protected_destinations=allowed,
+                peer_overlay="10.78.0.2",
+                local_overlay="10.78.0.1",
+                cover_name=cover_name,
+            ),
+            cloak=cloak,
+        )
+        profile_validate(profile)
+        files["profile.json"] = canonical(profile)
+        payloads[name] = files
+
+    # Member bundles: the standard client profile, pinning the member's chosen chain.
+    for name, m in members.items():
+        chain = m["chain"]
+        first_hop = hops[chain[0]]
+        exit_hop = hops[chain[-1]]
+        middle_hop = hops[chain[1]] if hops_len == 3 else None
+        overlay78 = _overlay(m["index"], 78)
+        overlay77 = _overlay(m["index"], 77)
+        files = {}
+        lanes = CHAIN_LANES[hops_len]
+        core = dict(
+            schema=1,
+            role="client",
+            listen=overlay78 + ":0",
+            relay="10.78.0.1:4433",
+            exit=None,
+            outer=None,
+            middle=None,
+            inner=None,
+            tun="avpn0",
+            local_ip=overlay77,
+            peer_ip="10.77.0.1",
+            destinations=allowed,
+            session_seconds=300,
+            packets_per_second=RATE_PACKETS,
+            bytes_per_second=RATE_BYTES,
+            mtu=MANAGED_MTU,
+            layers=hops_len,
+            cells=True,
+        )
+        server_for = dict(zip(lanes, chain, strict=True))
+        for lane in lanes:
+            server = hops[server_for[lane]]
+            server_lane = SERVER_LANE[server["role"]]
+            server_cert = hop_cert[server_for[lane]][server_lane]
+            files[lane + "-ca.der"] = server_cert
+            files[lane + "-cert.der"] = member_cert[name][lane]
+            core[lane] = dict(
+                ca=lane + "-ca.der",
+                cert=lane + "-cert.der",
+                key=lane + "-key.der",
+                peer_sha256=spki_sha256(server_cert),
+                server_name=NAMES[(server["role"], server_lane)] + ".advanced-vpn.internal",
+                pin_kind="spki",
+            )
+        files["wireguard-binding.json"] = canonical(
+            dict(
+                schema=2,
+                role="client",
+                own_public_hex=member_req[name]["wireguard_public_hex"],
+                peer_public_hex=first_hop["request"]["wireguard_public_hex"],
+            )
+        )
+        files["psk.kem.json"] = canonical(
+            kem_seal(base64.b64decode(member_req[name]["kem_public"]), psks[name], b"advanced-vpn/wireguard-psk/client")
+        )
+        carrier = dict(
+            schema=2,
+            role="wireguard",
+            tun="avwg0",
+            listen_port=41195,
+            endpoint=CLOAK_CLIENT["listen"],
+            peer_public_hex=first_hop["request"]["wireguard_public_hex"],
+            allowed_ip="10.78.0.1/32",
+            identity=dict(key="wireguard-key.bin", cert="wireguard-binding.json"),
+            defense=defense,
+            rate=rate,
+            statistics="carrier-status.json",
+            byte_budget=67_108_864,
+        )
+        cloak = dict(
+            schema=1,
+            role="client",
+            remote=first_hop["endpoint"],
+            cover_name=cover_name,
+            server_spki_sha256=first_hop["request"]["cloak_spki_sha256"],
+            cert=None,
+            statistics="cloak-status.json",
+            **CLOAK_CLIENT,
+        )
+        profile = dict(
+            schema=3,
+            role="client",
+            hops=hops_len,
+            core=core,
+            carrier=carrier,
+            dns=None,
+            daily_budget_bytes=None if daily_mib is None else daily_mib * 1048576,
+            network=dict(
+                relay_endpoint=first_hop["endpoint"],
+                middle_endpoint=middle_hop["endpoint"] if middle_hop else None,
+                exit_endpoint=exit_hop["endpoint"],
+                dns_ip="10.77.0.1",
+                dns_port=53,
+                protected_destinations=allowed,
+                peer_overlay="10.78.0.1",
+                local_overlay=overlay78,
+                cover_name=cover_name,
+            ),
+            cloak=cloak,
+        )
+        profile_validate(profile)
+        files["profile.json"] = canonical(profile)
+        payloads[name] = files
+    del psks
+    directory = canonical(mesh_directory(mesh))
+    manifests = {
+        name: canonical(
+            dict(
+                schema=2,
+                role=hops[name]["role"] if name in hops else "client",
+                name=name,
+                files={n: hashlib.sha256(b).hexdigest() for n, b in files.items()},
+            )
+        )
+        for name, files in payloads.items()
+    }
+    enrollment_set = canonical(
+        dict(
+            schema=2,
+            mesh=True,
+            hops=hops_len,
+            issued=dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
+            directory=hashlib.sha256(directory).hexdigest(),
+            bundles={name: hashlib.sha256(m).hexdigest() for name, m in manifests.items()},
+        )
+    )
+    classical, pq_signature = signer.sign(enrollment_set)
+    operator = signer.public()
+    verify_operator(operator, enrollment_set, classical, pq_signature)
+    root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    put(root / "operator.pub", canonical(operator))
+    for name, files in payloads.items():
+        path = root / (name + ".avpn")
+        if path.exists():
+            path.unlink()
+        with zipfile.ZipFile(path, "x", compression=zipfile.ZIP_STORED) as z:
+            z.writestr("manifest.json", manifests[name])
+            z.writestr("set.json", enrollment_set)
+            z.writestr("set.classical.json", canonical(classical))
+            z.writestr("set.mldsa65.sig", pq_signature)
+            for fname, b in files.items():
+                z.writestr(fname, b)
+        os.chmod(path, 0o600)
+    directory_path = root / "directory.avpnd"
+    if directory_path.exists():
+        directory_path.unlink()
+    with zipfile.ZipFile(directory_path, "x", compression=zipfile.ZIP_STORED) as z:
+        z.writestr("directory.json", directory)
+        z.writestr("set.json", enrollment_set)
+        z.writestr("set.classical.json", canonical(classical))
+        z.writestr("set.mldsa65.sig", pq_signature)
+    os.chmod(directory_path, 0o600)
+    return hashlib.sha256(canonical(operator)).hexdigest()
+
+
+ENROLLMENT_FILES = [
+    "profile.json",
+    "ENROLLMENT.json",
+    "operator.pub",
+    "wireguard-binding.json",
+    "dns-ca.der",
+    "dns-blocklist.txt",
+] + [l + "-ca.der" for l in ["outer", "middle", "inner"]]
 
 
 def enroll(bundle, operator_public, state, replace=False):
@@ -802,7 +1457,8 @@ def enroll(bundle, operator_public, state, replace=False):
         raw = z.read("manifest.json")
         manifest = json.loads(raw)
         role = manifest["role"]
-        if json.loads(enrollment_set)["bundles"].get(role) != hashlib.sha256(raw).hexdigest():
+        bundle_key = manifest.get("name", role)
+        if json.loads(enrollment_set)["bundles"].get(bundle_key) != hashlib.sha256(raw).hexdigest():
             raise ValueError("manifest not covered by signature")
         if manifest["schema"] != 2 or set(names) != set(manifest["files"]) | signed:
             raise ValueError("unsigned bundle content")
@@ -817,10 +1473,13 @@ def enroll(bundle, operator_public, state, replace=False):
     for lane in ALL_LANES:
         if profile["core"].get(lane):
             allowed.update([lane + "-ca.der", lane + "-cert.der"])
+    mesh_carrier = bool(profile["carrier"] and "members" in profile["carrier"])
     if profile["carrier"]:
-        allowed.update(["wireguard-binding.json", "psk.kem.json"])
+        allowed.update(["wireguard-binding.json", "psk-members.kem.json" if mesh_carrier else "psk.kem.json"])
     if profile["dns"] and profile["dns"]["test_ca"]:
         allowed.add("dns-ca.der")
+    if profile["dns"] and profile["dns"].get("blocklist"):
+        allowed.add("dns-blocklist.txt")
     if set(contents) != allowed:
         raise ValueError("reserved or unreferenced enrollment member")
     # The bundle must name exactly the keys this device generated.
@@ -829,7 +1488,11 @@ def enroll(bundle, operator_public, state, replace=False):
             raise ValueError("bundle is for another device")
     if profile["carrier"]:
         b = json.loads(contents["wireguard-binding.json"])
-        if (
+        if mesh_carrier:
+            expected_members = [m["public_hex"] for m in profile["carrier"]["members"]]
+            if b["own_public_hex"] != request_doc["wireguard_public_hex"] or b.get("members") != expected_members:
+                raise ValueError("bundle is for another device")
+        elif (
             b["own_public_hex"] != request_doc["wireguard_public_hex"]
             or b["peer_public_hex"] != profile["carrier"]["peer_public_hex"]
         ):
@@ -842,17 +1505,25 @@ def enroll(bundle, operator_public, state, replace=False):
         if protection["mode"] == "nitrokey":
             secret, meta = hardware_secret(Path(protection["vault"]))
         keys = load_keys(state, ["wireguard", "kem"], secret, meta)
-        psk = kem_open(
-            keys["kem"], json.loads(contents["psk.kem.json"]), b"advanced-vpn/wireguard-psk/" + role.encode()
-        )
-        if len(psk) != 32:
-            raise ValueError("bad PSK")
+        aad = b"advanced-vpn/wireguard-psk/" + role.encode()
+        if mesh_carrier:
+            envelopes = json.loads(contents["psk-members.kem.json"])
+            if len(envelopes) != len(profile["carrier"]["members"]):
+                raise ValueError("bad PSK")
+            parts = [kem_open(keys["kem"], env, aad) for env in envelopes]
+            if any(len(p) != 32 for p in parts):
+                raise ValueError("bad PSK")
+            psk = b"".join(parts)
+        else:
+            psk = kem_open(keys["kem"], json.loads(contents["psk.kem.json"]), aad)
+            if len(psk) != 32:
+                raise ValueError("bad PSK")
     if replace:
         for name in ENROLLMENT_FILES:
             if (state / name).exists():
                 (state / name).unlink()
     for name, b in contents.items():
-        if name.endswith("-cert.der") or name == "psk.kem.json":
+        if name.endswith("-cert.der") or name in ("psk.kem.json", "psk-members.kem.json"):
             continue
         put(state / name, b)
     if profile["carrier"]:
@@ -898,6 +1569,8 @@ def runtime(profile, root):
         out["dns"] = dict(profile["dns"])
         if out["dns"].get("test_ca"):
             out["dns"]["test_ca"] = str(root / Path(out["dns"]["test_ca"]).name)
+        if out["dns"].get("blocklist"):
+            out["dns"]["blocklist"] = str(root / Path(out["dns"]["blocklist"]).name)
     return out
 
 
@@ -973,10 +1646,11 @@ def lab_setup(
     destinations=None,
     operator=None,
     rates=None,
-    defense="balanced",
+    defense="strong",
     hops=2,
     middle=None,
     cover_name=None,
+    rate="metered",
 ):
     """TEST/LAB: run the real request -> init -> enroll flow for every role in the
     chain. `protect` maps role -> protection (default 'none'); the operator is
@@ -1002,6 +1676,7 @@ def lab_setup(
         hops=hops,
         middle=middle,
         cover_name=cover_name,
+        rate=rate,
     )
     for role in roles:
         enroll(ops / (role + ".avpn"), ops / "operator.pub", root / role)

@@ -24,7 +24,7 @@ pub const GOSSIP_HOP_LIMIT: u8 = 3;
 
 /// What a node offers to do for other members. Relaying is the default duty
 /// of every contributed node; exiting is a separate explicit opt-in.
-#[derive(Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Role {
     /// First hop: sees the member's address, carries only cloaked ciphertext.
@@ -103,28 +103,30 @@ impl Descriptor {
     /// identity binding, freshness and field shapes. Called on every
     /// descriptor before use, even on already-verified directory reads.
     pub fn validate(&self, now: u64) -> Result<()> {
-        ensure!(self.schema == DESCRIPTOR_SCHEMA, "unsupported descriptor schema");
+        ensure!(
+            self.schema == DESCRIPTOR_SCHEMA,
+            "unsupported descriptor schema"
+        );
         ensure!(
             self.node_id == MemberId::from_public_key(self.node_public_key.as_bytes()),
             "node id does not match the node public key"
         );
-        ensure!(!self.roles.is_empty(), "a node must offer at least one role");
+        ensure!(
+            !self.roles.is_empty(),
+            "a node must offer at least one role"
+        );
         ensure!(self.expires > now, "descriptor expired");
         ensure!(
             self.expires <= self.published + DESCRIPTOR_TTL_SECONDS,
             "descriptor lifetime above the TTL"
         );
-        ensure!(
-            self.published <= now + 3600,
-            "descriptor from the future"
-        );
+        ensure!(self.published <= now + 3600, "descriptor from the future");
         ensure!(
             (0.0..=1.0).contains(&self.health.uptime_30d),
             "uptime out of range"
         );
         ensure!(
-            self.country.len() == 2
-                && self.country.bytes().all(|b| b.is_ascii_uppercase()),
+            self.country.len() == 2 && self.country.bytes().all(|b| b.is_ascii_uppercase()),
             "country must be ISO alpha-2 uppercase"
         );
         ensure!(

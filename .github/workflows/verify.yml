@@ -63,11 +63,11 @@ jobs:
       - name: Privacy budget lifecycle (opt-in cap, refunds, blocked-not-exited)
         run: unshare --user --map-root-user --map-auto --net --mount python tools/budget_test.py --state /tmp/advanced-vpn-budget-ci
       - name: Tunnel throughput floor (default per-session limits)
-        run: unshare --user --map-root-user --map-auto --net --mount python tools/throughput_bench.py --state /tmp/advanced-vpn-bench-ci --mib 32 --min-mbit 50
+        run: unshare --user --map-root-user --map-auto --net --mount python tools/throughput_bench.py --state /tmp/advanced-vpn-bench-ci --rate line --mib 32 --min-mbit 50 --shape-idle 5 --max-rate-change 0.15
       - name: Multi-hop chains, switching, onion and no-retained-data audits
         run: |
-          unshare --user --map-root-user --map-auto --net --mount python tools/throughput_bench.py --state /tmp/avpn-hops-3-1 --hops 3 --switch-to 1 --mib 16 --min-mbit 20
-          unshare --user --map-root-user --map-auto --net --mount python tools/throughput_bench.py --state /tmp/avpn-hops-2-3 --hops 2 --switch-to 3 --mib 16 --min-mbit 20
+          unshare --user --map-root-user --map-auto --net --mount python tools/throughput_bench.py --state /tmp/avpn-hops-3-1 --hops 3 --switch-to 1 --rate line --mib 16 --min-mbit 20 --shape-idle 5 --max-rate-change 0.15
+          unshare --user --map-root-user --map-auto --net --mount python tools/throughput_bench.py --state /tmp/avpn-hops-2-3 --hops 2 --switch-to 3 --rate line --mib 16 --min-mbit 20 --shape-idle 5 --max-rate-change 0.15
       - name: Known dependency vulnerabilities
         run: |
           cargo install cargo-audit --version 0.22.1 --locked

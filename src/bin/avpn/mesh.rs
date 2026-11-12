@@ -48,7 +48,7 @@ pub fn call(args: &[String]) -> Outcome {
             code: 1,
             value: serde_json::json!({"ok": false, "error": "NotInstalled"}),
             stderr: format!("cannot run {}: {e}", program().display()),
-        }
+        },
     }
 }
 

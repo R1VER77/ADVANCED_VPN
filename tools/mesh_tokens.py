@@ -38,8 +38,8 @@ import time
 from cryptography.hazmat.primitives.asymmetric import rsa
 
 SCHEMA = 1
-TOKEN_BYTES = 32          # 256-bit tokens: guessing one is out of reach
-KEY_BITS = 3072           # RSA-3072 ~ 128-bit classical security
+TOKEN_BYTES = 32  # 256-bit tokens: guessing one is out of reach
+KEY_BITS = 3072  # RSA-3072 ~ 128-bit classical security
 PUBLIC_EXPONENT = 65537
 
 
@@ -61,6 +61,7 @@ class UntrustedIssuer(CreditError):
 
 # ------------------------------------------------------------------ keys
 
+
 def generate_issuer_key():
     """A fresh RSA-3072 issuer key pair."""
     return rsa.generate_private_key(PUBLIC_EXPONENT, KEY_BITS)
@@ -71,9 +72,7 @@ def issuer_id(public_key) -> str:
     shape as src/mesh/identity.rs, so an issuer can be its mesh member ID."""
     from cryptography.hazmat.primitives import serialization
 
-    der = public_key.public_bytes(
-        serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
-    )
+    der = public_key.public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)
     return "!" + hashlib.sha256(der).hexdigest()[:8]
 
 
@@ -86,6 +85,7 @@ def _numbers(key):
 
 
 # ------------------------------------------------- full-domain hash (FDH)
+
 
 def fdh(token: bytes, n: int) -> int:
     """Hash `token` to an integer in [1, n) with SHA-256 in counter mode.
@@ -100,14 +100,13 @@ def fdh(token: bytes, n: int) -> int:
     out = b""
     counter = 0
     while len(out) < nbytes:
-        out += hashlib.sha256(
-            b"avpn-mesh-credit/fdh/v1|" + token + counter.to_bytes(8, "big")
-        ).digest()
+        out += hashlib.sha256(b"avpn-mesh-credit/fdh/v1|" + token + counter.to_bytes(8, "big")).digest()
         counter += 1
     return int.from_bytes(out[:nbytes], "big") % n
 
 
 # ------------------------------------------------------------ blind issue
+
 
 def new_token() -> bytes:
     """A fresh random token."""
@@ -164,6 +163,7 @@ def _gcd(a: int, b: int) -> int:
 
 # ------------------------------------------------------- grants and spends
 
+
 def make_grant(token: bytes, public_key, epoch: int | None = None) -> dict:
     """The spendable half of a credit: mirrors TokenGrant in src/mesh/tokens.rs."""
     return {
@@ -186,6 +186,7 @@ def token_digest(token: bytes) -> str:
 
 # ------------------------------------------------------------------ ledger
 
+
 class Ledger:
     """A JSON double-spend ledger at PATH: {schema, spent: {issuer: [digests]}}.
 
@@ -204,6 +205,7 @@ class Ledger:
             self._spent = {}
 
     def seen(self, issuer: str, digest: str) -> bool:
+        """Whether this spend digest was already redeemed with `issuer`."""
         return digest in self._spent.get(issuer, set())
 
     def redeem(self, spend: dict, public_key, epoch: int | None = None) -> dict:
@@ -235,6 +237,7 @@ class Ledger:
 
 
 # ------------------------------------------------------------------- demo
+
 
 def issue_credit(private_key, epoch: int | None = None) -> tuple[dict, dict]:
     """Convenience: mint a full credit round-trip (for tests and the private-

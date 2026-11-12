@@ -1,6 +1,6 @@
 {
  "what": "Website-fingerprinting mechanism comparison for the AVPN/Mesh defense design, simulated by tools/mesh_wf_sim.py at the acceptance scale (100 sites). The vantage is the exit-side link - the one first-link-only defenses such as Mullvad's DAITA placement do not protect - where the observer sees timing and direction of constant-size packets after two hops of queueing jitter.",
- "date": "2026-11-12",
+ "date": "2026-11-11",
  "tool": "tools/mesh_wf_sim.py --sites 100 --traces 80 --json (seed 42)",
  "setup": {
   "world": "closed world, 100 synthetic site profiles, 80 traces per site, chance = 1%",

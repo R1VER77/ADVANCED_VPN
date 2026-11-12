@@ -94,8 +94,22 @@ fn initial_suite() -> rustls::quic::Suite {
     }
 }
 fn roots(i: &Identity) -> Result<RootCertStore> {
+    // The authority file holds one certificate, or — on a mesh server — every member's
+    // certificate concatenated. Each is self-signed and acts as its own root.
+    let raw = private_read(&i.ca, 262144)?;
     let mut r = RootCertStore::empty();
-    r.add(CertificateDer::from(private_read(&i.ca, 16384)?))?;
+    let mut rest = raw.as_slice();
+    let mut added = 0usize;
+    while !rest.is_empty() {
+        let (used, _) =
+            parse_x509_certificate(rest).map_err(|_| anyhow::anyhow!("invalid CA bundle"))?;
+        let (consumed, remainder) = rest.split_at(rest.len() - used.len());
+        r.add(CertificateDer::from(consumed.to_vec()))?;
+        added += 1;
+        rest = remainder;
+        ensure!(added <= 257, "too many certificates in the authority file");
+    }
+    ensure!(added >= 1, "empty authority file");
     Ok(r)
 }
 fn material(
@@ -137,13 +151,16 @@ fn material(
 /// a server frees a stale session quickly and the client can reconnect at once; keep-
 /// alives every 2 s hold the path open through NAT. See `avpn help threat-model`.
 pub fn transport(mtu: u16) -> Arc<TransportConfig> {
+    let mut cc = quinn::congestion::NewRenoConfig::default();
+    cc.initial_window(1 << 20);
     let mut t = TransportConfig::default();
     t.max_concurrent_bidi_streams(0u8.into())
         .max_concurrent_uni_streams(0u8.into())
-        .datagram_receive_buffer_size(Some(65536))
-        .datagram_send_buffer_size(65536)
-        .receive_window(65536u32.into())
-        .send_window(65536)
+        .datagram_receive_buffer_size(Some(1 << 20))
+        .datagram_send_buffer_size(1 << 20)
+        .receive_window((1u32 << 20).into())
+        .send_window(1 << 20)
+        .congestion_controller_factory(Arc::new(cc))
         .initial_mtu(mtu)
         .min_mtu(mtu)
         .mtu_discovery_config(None)
@@ -170,7 +187,7 @@ pub fn server(i: &Identity, fd: Option<i32>, mtu: u16) -> Result<ServerConfig> {
     let crypto = QuicServerConfig::with_initial(Arc::new(t), initial_suite())?;
     let mut s = ServerConfig::with_crypto(Arc::new(crypto));
     s.transport_config(transport(mtu))
-        .max_incoming(4)
+        .max_incoming(64)
         .incoming_buffer_size(65536)
         .incoming_buffer_size_total(262144);
     Ok(s)
@@ -213,8 +230,10 @@ pub fn certificate_lifetime(cert: &[u8]) -> Result<Duration> {
         (parsed.validity().not_after.timestamp() - now) as u64,
     ))
 }
-/// Verify a finished handshake (ALPN, hybrid-PQ group, pinned peer) and return how long the peer's leaf stays valid.
-pub fn authenticated(c: &quinn::Connection, i: &Identity) -> Result<Duration> {
+/// Verify a finished handshake (ALPN, hybrid-PQ group, pinned peer) and return how long
+/// the peer's leaf stays valid plus the matched peer pin. On a mesh server the peer may
+/// carry any admitted member's pin; everywhere else it must be the one pinned peer.
+pub fn authenticated(c: &quinn::Connection, i: &Identity) -> Result<(Duration, String)> {
     let data = c
         .handshake_data()
         .context("missing handshake evidence")?
@@ -240,8 +259,15 @@ pub fn authenticated(c: &quinn::Connection, i: &Identity) -> Result<Duration> {
         }
     };
     let digest = format!("{:x}", Sha256::digest(pinned_bytes));
-    ensure!(digest == i.peer_sha256, "peer revoked or not pinned");
+    if i.peer_members.is_empty() {
+        ensure!(digest == i.peer_sha256, "peer revoked or not pinned");
+    } else {
+        ensure!(
+            i.peer_members.iter().any(|m| m == &digest),
+            "peer is not an admitted member"
+        );
+    }
     let peer = certificate_lifetime(cert)?;
     let own = certificate_lifetime(&private_read(&i.cert, 16384)?)?;
-    Ok(peer.min(own))
+    Ok((peer.min(own), digest))
 }

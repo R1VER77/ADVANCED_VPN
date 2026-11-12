@@ -34,8 +34,8 @@ import time
 from pathlib import Path
 
 SCHEMA = 1
-DEFAULT_WINDOW_SECONDS = 6 * 3600   # one profile every 6 h
-DEFAULT_COUNT = 56                  # two weeks of windows per generation
+DEFAULT_WINDOW_SECONDS = 6 * 3600  # one profile every 6 h
+DEFAULT_COUNT = 56  # two weeks of windows per generation
 
 # Every bound mirrors DefenseProfile::validate in src/daita.rs. The ranges are
 # the strong posture's safe operating envelope: wide enough that fingerprints
@@ -54,9 +54,18 @@ SAFE_RANGES = {
 }
 
 PROFILE_FIELDS = [
-    "id", "not_before", "not_after", "tamaraw_interval_seconds", "tamaraw_l",
-    "front_budget_max", "front_window_seconds", "front_states", "burst_packets",
-    "burst_window_seconds", "front_cooldown_seconds", "cover_interval_seconds",
+    "id",
+    "not_before",
+    "not_after",
+    "tamaraw_interval_seconds",
+    "tamaraw_l",
+    "front_budget_max",
+    "front_window_seconds",
+    "front_states",
+    "burst_packets",
+    "burst_window_seconds",
+    "front_cooldown_seconds",
+    "cover_interval_seconds",
 ]
 
 
@@ -64,8 +73,7 @@ def draw_profile(rng: random.Random, not_before: int, not_after: int) -> dict:
     """One randomized parameterization within SAFE_RANGES (fail-closed elsewhere)."""
     interval = round(rng.uniform(*SAFE_RANGES["tamaraw_interval_seconds"]), 4)
     lo = round(rng.uniform(*SAFE_RANGES["front_window_lo"]), 3)
-    hi = round(rng.uniform(max(lo, SAFE_RANGES["front_window_hi"][0]),
-                           SAFE_RANGES["front_window_hi"][1]), 3)
+    hi = round(rng.uniform(max(lo, SAFE_RANGES["front_window_hi"][0]), SAFE_RANGES["front_window_hi"][1]), 3)
     return {
         "id": secrets.token_hex(8),
         "not_before": not_before,
@@ -108,22 +116,31 @@ def validate_profile(p: dict) -> list[str]:
         errors.append("FRONT states out of range")
     if not SAFE_RANGES["burst_packets"][0] <= p.get("burst_packets", 0) <= SAFE_RANGES["burst_packets"][1]:
         errors.append("burst size out of range")
-    if not SAFE_RANGES["burst_window_seconds"][0] <= p.get("burst_window_seconds", 0) <= SAFE_RANGES["burst_window_seconds"][1]:
+    if (
+        not SAFE_RANGES["burst_window_seconds"][0]
+        <= p.get("burst_window_seconds", 0)
+        <= SAFE_RANGES["burst_window_seconds"][1]
+    ):
         errors.append("burst window out of range")
-    if not SAFE_RANGES["front_cooldown_seconds"][0] <= p.get("front_cooldown_seconds", 0) <= SAFE_RANGES["front_cooldown_seconds"][1]:
+    if (
+        not SAFE_RANGES["front_cooldown_seconds"][0]
+        <= p.get("front_cooldown_seconds", 0)
+        <= SAFE_RANGES["front_cooldown_seconds"][1]
+    ):
         errors.append("FRONT cooldown out of range")
     return errors
 
 
 def generate(seed: int, start: int, count: int, step: int) -> dict:
     """A full database: COUNT contiguous windows of STEP seconds from START."""
-    rng = random.Random(seed)
-    profiles = [draw_profile(rng, start + i * step, start + (i + 1) * step)
-                for i in range(count)]
+    # Tests pass a seed for reproducibility; real schedules draw from the OS CSPRNG.
+    rng = random.Random(seed) if seed is not None else random.SystemRandom()  # noqa: S311 (seeded only in tests)
+    profiles = [draw_profile(rng, start + i * step, start + (i + 1) * step) for i in range(count)]
     return {"schema": SCHEMA, "profiles": profiles}
 
 
 def load(path) -> dict:
+    """Load and fully validate a database file (fail closed)."""
     if isinstance(path, str):
         path = Path(path)
     doc = json.loads(path.read_bytes())
@@ -143,12 +160,12 @@ def select(profiles: list[dict], now: int) -> dict | None:
 
 
 def main() -> int:
+    """Command-line entry point."""
     p = argparse.ArgumentParser(prog="defense-db")
     sub = p.add_subparsers(dest="cmd", required=True)
     g = sub.add_parser("generate", help="write a fresh rotation schedule")
     g.add_argument("--out", required=True)
-    g.add_argument("--seed", type=int, default=None,
-                   help="reproducible for tests; default: OS random")
+    g.add_argument("--seed", type=int, default=None, help="reproducible for tests; default: OS random")
     g.add_argument("--start", type=int, default=None, help="default: now, floored to the hour")
     g.add_argument("--count", type=int, default=DEFAULT_COUNT)
     g.add_argument("--step", type=int, default=DEFAULT_WINDOW_SECONDS)
@@ -166,8 +183,10 @@ def main() -> int:
             f.write(json.dumps(db, indent=1) + "\n")
         os.replace(tmp, a.out)
         print(f"defense database: {a.count} windows of {a.step}s from {start} -> {a.out}")
-        print("rotate before the last window ends; the carrier refuses a run with "
-              "no profile in force, never a weakened one.")
+        print(
+            "rotate before the last window ends; the carrier refuses a run with "
+            "no profile in force, never a weakened one."
+        )
         return 0
     db = load(a.db)
     now = int(time.time()) if a.now is None else a.now

@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/cypherpunk-vpn-logo.png" alt="Cypherpunk VPN" width="520" />
+</p>
+
 # ADVANCED_VPN — managed Linux client
 
 A Rust VPN data plane with signed enrollment, automatic networking, a persistent kill switch, DNS isolation, real GotaTun/Maybenot DAITA on every hop, and the original two hybrid post-quantum QUIC layers. The cloud relay never holds the inner tunnel keys. No existing VPN is automatically replaced during build or installation.
@@ -15,15 +19,23 @@ WireGuard is the outer carrier, implemented by **GotaTun 0.10.2**, with its actu
 ## What is automatic
 
 - A signed role bundle supplies endpoints, identities, pins and safe defaults. No JSON, firewall, route or DNS editing is needed on an enrolled device.
-- The supervisor creates WireGuard/TUN interfaces, addresses, routes, nftables rules, an application namespace, owned-exit NAT and DNS-over-TLS forwarding.
+- The supervisor creates WireGuard/TUN interfaces, addresses, routes, nftables rules, an application namespace, owned-exit NAT, local DNS blocklist filtering (`NXDOMAIN` before upstream resolution), and DNS-over-TLS forwarding.
+- The carrier rides inside `advanced-vpn-cloak` on port 443: HTTP/3 (QUIC) on UDP 443 by default, with automatic 2-second fallback to TCP/TLS 1.3 on port 443 when UDP is blocked, periodic 10-second QUIC recovery probes, and a realistic `200 OK` HTML5 decoy page for unauthenticated HTTP/3 or HTTPS probes.
 - The app namespace has no physical interface. The optional whole-device mode blocks direct IPv4/IPv6 fallback routes. Disconnect, controller death and data-plane death retain the guard.
 - Data-plane children run under a dedicated non-root service UID, have no Linux capabilities, cannot gain privileges, and die if their supervisor dies. Private keys enter through immutable memory descriptors. The controller restarts failed children under the active guard.
 - Twelve-hour TLS leaves rotate every six hours using the enrolled device key and its pinned SPKI. TLS/WebPKI/name validation is retained; no CA private key is deployed to a peer. Pin revocation requires an operator-authorized enrollment change.
 - There is **no data cap by default**. An optional daily cap (`preferences --daily-limit-mib N`) is metered in the kernel and fail-closed: durable reservations survive crashes and clock rollback, unused bytes are refunded when the carrier stops, and an exhausted cap blocks traffic (never disabling DAITA) while the supervisor stays up and resumes at the next UTC day or when the cap is raised. `--no-daily-limit` removes it.
 
-There is one defense posture: **strong** (`src/daita.rs`). Every hop of every chain runs NetFlow padding, FRONT decoys re-armed for every burst of traffic, Tamaraw constant-rate shaping that rounds each trace to a multiple of 100 packets on its own clock, and a bidirectional constant-rate cover stream — each hop building its machines from its own OS-seeded randomness, so per-hop schedules are independent (identical schedules would preserve cross-link correlation). The `balanced` profile was removed; bundles that name it are refused with a re-enroll hint. Nonempty WireGuard data packets are padded to constant size; handshake/empty keepalive control packets remain distinguishable. Earlier measurements against a website-fingerprinting classifier (8 sites, chance 12.5%): 60% and 26% for the old balanced and strong profiles (`docs/evidence/DAITA_LAB.json`, `avpn help threat-model`). The mesh redesign's own exit-vantage simulation is `tools/mesh_wf_sim.py`, with the mechanism analysis in [docs/MESH_DESIGN.md](docs/MESH_DESIGN.md).
+There is one defense posture: **strong** (`src/daita.rs`). Every hop runs a **bidirectional constant-rate packet stream** (`stream_grid` + self-sustaining `cover` under GotaTun's strict-blocking scheduler, `strict: true`, `Replace: true`), seeded independently from OS randomness at each hop. Every data packet is padded to constant size (1380 bytes inside WireGuard, 1420 bytes on the outer cloak), and every clock tick sends either a queued real packet or an indistinguishable decoy packet — so the outer packet rate and packet size stay flat (`< 1%` wire rate change between idle and full-speed transfers). Four rate classes (`preferences --rate metered|standard|fast|line`) trade cover bandwidth for application throughput without weakening the constant-rate invariant:
 
-Measured in the namespace benchmark (`tools/throughput_bench.py`, 32 MiB, SHA-checked): the strong profile paces packets at a constant rate, which gave about **0.34 Mbit/s** — traffic-shape hiding over speed, always. The WireGuard + DAITA carrier on its own measured about 960 Mbit/s. The daily cover budget a node spends is set by its operator and enforced by the controller, fail-closed at the carrier byte budget; the defense itself is never weakened.
+| Rate class | Grid pacing | Wire rate / direction | 2-hop app throughput | Cover volume / direction |
+|---|---|---|---|---|
+| `metered` (default) | 20 ms × 1 slot (50 pps) | ~0.55 Mbit/s | ~0.27–0.34 Mbit/s | ~5.7 GiB/day (~171 GiB/mo) |
+| `standard` | 2 ms × 1 slot (500 pps) | ~5.5 Mbit/s | ~3.1–4.5 Mbit/s | ~57 GiB/day |
+| `fast` | 2 ms × 8 staggered slots (4,000 pps) | ~44 Mbit/s | ~24.7–32.8 Mbit/s | ~455 GiB/day |
+| `line` | 2 ms × 32 staggered slots (16,000 pps) | ~177 Mbit/s | ~115.3–131.5 Mbit/s | ~1.8 TiB/day |
+
+Against a 500-tree random-forest website-fingerprinting classifier across 30 sites (`tools/daita_lab.py`, `tools/wf_attack.py`, chance = **3.3%**), the camouflaged carrier at the fixed 6 s observation window scores **3.3%** on `metered` and **1.7%** on `fast` (both at or below random chance), versus **27.0–74.7%** on the unshaped inner link (`docs/evidence/DAITA_LAB.json`, `docs/evidence/RATE_CLASSES.json`, `avpn help threat-model`). The 100-site exit-vantage simulation is in `tools/mesh_wf_sim.py` (`docs/evidence/MESH_WF_SIM.json`), the mesh design is in [docs/MESH_DESIGN.md](docs/MESH_DESIGN.md), and a side-by-side comparison with Mullvad and IVPN is in [docs/COMPARISON.md](docs/COMPARISON.md).
 
 ## Command line
 
@@ -84,9 +96,9 @@ reference pages in one package, with SHA256 checksums. The repository is private
 download while signed in to GitHub:
 
 ```bash
-gh release download v0.6.0 -R R1VER77/ADVANCED_VPN
+gh release download v0.7.0 -R R1VER77/ADVANCED_VPN
 sha256sum -c SHA256SUMS
-mkdir advanced-vpn && tar -C advanced-vpn -xzf advanced-vpn-v0.6.0-x86_64-linux-gnu.tar.gz && cd advanced-vpn
+mkdir advanced-vpn && tar -C advanced-vpn -xzf advanced-vpn-v0.7.0-x86_64-linux-gnu.tar.gz && cd advanced-vpn
 ```
 
 There are two ways to install from there:
@@ -109,7 +121,7 @@ Both need Python 3.10+ with `venv` (`sudo apt install python3-venv`). The binari
 built on Ubuntu 22.04, so they run on Ubuntu 22.04+ and Debian 12/13 (x86-64).
 
 To cut a release: bump `version` in `Cargo.toml`, commit, and push a matching tag
-(`git tag -s v0.6.0 && git push origin v0.6.0`). The release workflow builds only if the
+(`git tag -s v0.7.0 && git push origin v0.7.0`). The release workflow builds only if the
 tag matches the version and that commit's `verify` run passed.
 
 ## Build and verify
@@ -195,7 +207,7 @@ The default client protects explicitly launched applications and can coexist wit
 ```sh
 sudo /opt/advanced-vpn/bin/avpn run -- curl https://example.com
 sudo /opt/advanced-vpn/bin/avpn status
-sudo /opt/advanced-vpn/bin/avpn preferences --defense strong
+sudo /opt/advanced-vpn/bin/avpn preferences --defense strong --rate fast
 sudo /opt/advanced-vpn/bin/avpn preferences --daily-limit-mib 1024   # optional fail-closed cap
 sudo /opt/advanced-vpn/bin/avpn preferences --no-daily-limit         # default
 ```
@@ -240,13 +252,13 @@ sudo /opt/advanced-vpn/bin/avpn request --role middle --protect systemd-creds --
 
 Traffic stays blocked while you switch. In single-hop mode, give `--exit` the exit's port-443 endpoint: it is then the first hop.
 
-Measured in the namespace benchmark (32 MiB, SHA-checked):
+Measured in the namespace benchmark (`tools/throughput_bench.py --rate line --mib 32`, SHA-checked):
 
-| Hops | Throughput |
+| Hops | Throughput (`line` class) |
 |---|---|
-| 1 | about 360 Mbit/s |
-| 2 | about 250 Mbit/s |
-| 3 | about 160 Mbit/s |
+| 1 | about 122 Mbit/s |
+| 2 | about 115 Mbit/s |
+| 3 | about 112 Mbit/s |
 
 Every run also proves two things on the wire. Raw packet observers on each server's ingress never see the payload, and only the first hop ever sees the client's address. The same runs check that no server writes anything persistent while carrying traffic. CI enforces all three.
 

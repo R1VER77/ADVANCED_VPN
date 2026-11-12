@@ -13,7 +13,7 @@ about 10% of objects. Writes to --out:
 Score it with tools/wf_attack.py. Captures are kernel-timestamped nanosecond pcaps.
 
 usage: unshare --user --map-root-user --map-auto --net --mount python3 tools/daita_lab.py
-       --state DIR --out DIR [--defense balanced|strong] [--sites 8] [--loads 15]
+       --state DIR --out DIR [--rate metered|standard|fast|line] [--sites 8] [--loads 15]
        [--delay-ms 10] [--gap 5] [--idle 30] [--bin-dir target/release]
 Needs ethtool/tc/ip and a release build. Not run in CI.
 """
@@ -33,18 +33,21 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 import throughput_bench as tb  # noqa: E402
 from avpnctl import identity_of, lab_guard, runtime_dir  # noqa: E402
-from managed_profile import lab_setup  # noqa: E402
+from managed_profile import lab_setup, RATE_CLASSES  # noqa: E402
 
 # Raw capture with kernel timestamps, written as nanosecond pcap (both directions).
+# Headers only (96 bytes, original length kept): the attack uses sizes and timing, and
+# the faster rate classes would otherwise write tens of GB per run.
 CAPTURE = r"""
 import signal, socket, struct, sys
 dev, out = sys.argv[1], sys.argv[2]
 SO_TIMESTAMPNS = 35
 s = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.htons(3))
 s.setsockopt(socket.SOL_SOCKET, SO_TIMESTAMPNS, 1)
+s.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1 << 25)
 s.bind((dev, 0))
 f = open(out, "wb")
-f.write(struct.pack("<IHHiIII", 0xA1B23C4D, 2, 4, 0, 0, 65535, 1))
+f.write(struct.pack("<IHHiIII", 0xA1B23C4D, 2, 4, 0, 0, 96, 1))
 def stop(*_):
     f.flush(); f.close(); sys.exit(0)
 signal.signal(signal.SIGTERM, stop)
@@ -54,7 +57,7 @@ while True:
     for level, kind, val in anc:
         if level == socket.SOL_SOCKET and kind == SO_TIMESTAMPNS:
             sec, nsec = struct.unpack("qq", val[:16])
-    f.write(struct.pack("<IIII", sec, nsec, len(data), len(data)) + data)
+    f.write(struct.pack("<IIII", sec, nsec, min(len(data), 96), len(data)) + data[:96])
 """
 # Web server stand-in: each 300-byte request names an object size; it replies with that many bytes.
 SITES_SERVER = r"""
@@ -116,7 +119,7 @@ def main():
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     p.add_argument("--state", type=Path, required=True)
     p.add_argument("--out", type=Path, required=True)
-    p.add_argument("--defense", choices=["balanced", "strong"], default="balanced")
+    p.add_argument("--rate", choices=list(RATE_CLASSES), default="metered")
     p.add_argument("--sites", type=int, default=8)
     p.add_argument("--loads", type=int, default=15)
     p.add_argument("--idle", type=float, default=30.0)
@@ -131,7 +134,7 @@ def main():
     a.out.mkdir(parents=True, exist_ok=True)
     nodes, links = tb.topology(2)
     ep = tb.endpoints(2, 2)
-    lab_setup(state, ep["relay"], ep["exit"], destinations=["203.0.113.0/30"], defense=a.defense, hops=2,
+    lab_setup(state, ep["relay"], ep["exit"], destinations=["203.0.113.0/30"], rate=a.rate, hops=2,
               middle=None, dns=dict(upstream="203.0.113.2:8530", server_name="dns.lab.internal"))  # fmt: skip
     tb.run("mount", "--make-rprivate", "/")
     tb.run("mount", "-t", "tmpfs", "-o", "size=64m", "tmpfs", "/run")
@@ -196,7 +199,7 @@ def main():
                        "tso", "off", check=False)  # fmt: skip
                 if a.delay_ms:
                     tb.run("ip", "netns", "exec", ns, "/usr/sbin/tc", "qdisc", "add", "dev", dev, "root", "netem",
-                           "delay", "%gms" % a.delay_ms, "%gms" % (a.delay_ms / 10), "limit", "100000")  # fmt: skip
+                           "delay", "%gms" % a.delay_ms, "limit", "100000")  # fmt: skip
             devs[(n1, n2)] = (d1, d2)
         for node, net, via in tb.routes(nodes, links):
             tb.run("ip", "-n", "av-" + node, "route", "add", net, "via", via)
@@ -271,7 +274,7 @@ def main():
         for name in ("client_link.pcap", "inner_link.pcap"):
             if (state / name).exists():
                 (a.out / name).write_bytes((state / name).read_bytes())
-        (a.out / "phases.json").write_text(json.dumps(dict(defense=a.defense, phases=phases), indent=1))
+        (a.out / "phases.json").write_text(json.dumps(dict(rate=a.rate, phases=phases), indent=1))
         (a.out / "timeline.json").write_text(json.dumps(timeline))
         for f in a.out.iterdir():
             f.chmod(0o644)

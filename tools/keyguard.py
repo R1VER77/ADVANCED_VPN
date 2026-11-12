@@ -486,12 +486,16 @@ def mesh_sign(vault, envelope_path, cert_path, descriptor_path):
         descriptor["signature"] = b64(priv.sign(message))
     finally:
         key = b"\x00" * len(key)  # best-effort scrub; CPython gives no guarantee
-    print(json.dumps({
-        "descriptor": descriptor,
-        "credential": meta["credential"],
-        "assertion": assertion,
-        "challenge_sha256": hashlib.sha256(message).hexdigest(),
-    }))
+    print(
+        json.dumps(
+            {
+                "descriptor": descriptor,
+                "credential": meta["credential"],
+                "assertion": assertion,
+                "challenge_sha256": hashlib.sha256(message).hexdigest(),
+            }
+        )
+    )
 
 
 def main():

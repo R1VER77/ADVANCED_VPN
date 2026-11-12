@@ -1,0 +1,126 @@
+{
+ "what": "Throughput, wire-rate constancy, onion-routing verification, and disk-retention audit across all four constant-rate stream classes (metered, standard, fast, line) and 1-, 2-, and 3-hop chains, measured with tools/throughput_bench.py",
+ "date": "2026-11-11",
+ "tool": "tools/throughput_bench.py --shape-idle 5",
+ "invariant": "Every rate class runs the same Maybenot constant-rate stream (stream_grid + self-sustaining cover with GotaTun strict blocking and Replace=true). On every grid tick and staggered slot, each endpoint sends either one queued real WireGuard packet (padded to 1380 bytes inside the 1420-byte cloak cell) or one 1380-byte decoy packet. Idle and full-load transfer windows therefore exhibit the same outer packet size (1448 bytes IPv4 on wire) and packet rate.",
+ "classes_2hop": {
+  "metered": {
+   "grid": "20 ms tick x 1 slot (50 pps per direction)",
+   "wire_rate_per_direction_mbit_s": 0.55,
+   "cover_gib_per_day_per_direction": 5.7,
+   "transfer_bytes": 1048576,
+   "transfer_seconds": 34.139,
+   "app_mbit_s": 0.25,
+   "sha256_verified": true,
+   "client_to_hop_pps": {
+    "idle": 50.0,
+    "transfer": 50.0,
+    "rate_change": 0.0
+   },
+   "hop_to_client_pps": {
+    "idle": 50.0,
+    "transfer": 50.0,
+    "rate_change": 0.0
+   },
+   "wire_ip_packet_sizes": {
+    "1448": "100%"
+   }
+  },
+  "standard": {
+   "grid": "2 ms tick x 1 slot (500 pps per direction)",
+   "wire_rate_per_direction_mbit_s": 5.5,
+   "cover_gib_per_day_per_direction": 56.9,
+   "transfer_bytes": 8388608,
+   "transfer_seconds": 21.701,
+   "app_mbit_s": 3.09,
+   "sha256_verified": true,
+   "client_to_hop_pps": {
+    "idle": 612.6,
+    "transfer": 629.3,
+    "rate_change": 0.0273
+   },
+   "hop_to_client_pps": {
+    "idle": 606.6,
+    "transfer": 592.4,
+    "rate_change": 0.0234
+   },
+   "wire_ip_packet_sizes": {
+    "1448": "100%"
+   }
+  },
+  "fast": {
+   "grid": "2 ms tick x 8 staggered slots (4,000 pps per direction)",
+   "wire_rate_per_direction_mbit_s": 44.2,
+   "cover_gib_per_day_per_direction": 454.8,
+   "transfer_bytes": 33554432,
+   "transfer_seconds": 10.886,
+   "app_mbit_s": 24.66,
+   "sha256_verified": true,
+   "client_to_hop_pps": {
+    "idle": 4890.2,
+    "transfer": 4963.9,
+    "rate_change": 0.0151
+   },
+   "hop_to_client_pps": {
+    "idle": 4851.8,
+    "transfer": 4888.5,
+    "rate_change": 0.0076
+   },
+   "wire_ip_packet_sizes": {
+    "1448": "100%"
+   }
+  },
+  "line": {
+   "grid": "2 ms tick x 32 staggered slots (16,000 pps per direction)",
+   "wire_rate_per_direction_mbit_s": 176.6,
+   "cover_gib_per_day_per_direction": 1819.3,
+   "transfer_bytes": 33554432,
+   "transfer_seconds": 2.327,
+   "app_mbit_s": 115.34,
+   "sha256_verified": true,
+   "client_to_hop_pps": {
+    "idle": 17014.4,
+    "transfer": 17360.5,
+    "rate_change": 0.0203
+   },
+   "hop_to_client_pps": {
+    "idle": 16963.2,
+    "transfer": 17219.8,
+    "rate_change": 0.0151
+   },
+   "wire_ip_packet_sizes": {
+    "1448": "100%"
+   }
+  }
+ },
+ "hops_line_32mib": {
+  "1_hop": {
+   "mbit_s": 122.16,
+   "seconds": 2.197,
+   "client_to_hop_rate_change": 0.0121,
+   "hop_to_client_rate_change": 0.0203,
+   "sha256_verified": true
+  },
+  "2_hop": {
+   "mbit_s": 115.34,
+   "seconds": 2.327,
+   "client_to_hop_rate_change": 0.0203,
+   "hop_to_client_rate_change": 0.0151,
+   "sha256_verified": true
+  },
+  "3_hop": {
+   "mbit_s": 111.81,
+   "seconds": 2.401,
+   "client_to_hop_rate_change": 0.0368,
+   "hop_to_client_rate_change": 0.0193,
+   "sha256_verified": true
+  }
+ },
+ "audits": {
+  "marker_seen_by_any_server": false,
+  "client_ip_seen_beyond_first_hop": false,
+  "first_hop_sees_client": true,
+  "server_files_written": [],
+  "client_ip_or_payload_in_server_state": []
+ }
+}

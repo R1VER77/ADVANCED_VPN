@@ -949,9 +949,11 @@ sudo -n apt-get install -y -qq nftables python3-venv $TSS >/dev/null
 # Images that reject by default (OCI's Ubuntu) need the tunnel port accepted on the host.
 if sudo -n iptables -S INPUT 2>/dev/null | grep -q -- '-j REJECT'; then
   sudo -n iptables -C INPUT -p udp --dport "$PORT" -j ACCEPT 2>/dev/null || sudo -n iptables -I INPUT 1 -p udp --dport "$PORT" -j ACCEPT
+  sudo -n iptables -C INPUT -p tcp --dport "$PORT" -j ACCEPT 2>/dev/null || sudo -n iptables -I INPUT 1 -p tcp --dport "$PORT" -j ACCEPT
   # A first hop redirects its public port to the cloak's unprivileged listener first.
   if [ "$ROLE" != middle ] && [ "$PORT" = 443 ]; then
     sudo -n iptables -C INPUT -p udp --dport 8443 -j ACCEPT 2>/dev/null || sudo -n iptables -I INPUT 1 -p udp --dport 8443 -j ACCEPT
+    sudo -n iptables -C INPUT -p tcp --dport 8443 -j ACCEPT 2>/dev/null || sudo -n iptables -I INPUT 1 -p tcp --dport 8443 -j ACCEPT
   fi
   # Persisting would also save a shared host's other runtime rules, so only a dedicated one does.
   if [ "$SHARED" != yes ] && command -v netfilter-persistent >/dev/null; then sudo -n netfilter-persistent save >/dev/null 2>&1 || true; fi
@@ -1303,6 +1305,13 @@ def chain_plan(a):
     cap = providers.capacity_gib(r["record"].get("catalog", r["record"]["provider"]) for r in hops)
     if cap:
         rows.append(dict(label="capacity", value="about %d GiB/month, the smallest hop allowance" % cap))
+        from managed_profile import choose_rate
+
+        try:
+            rate, why = choose_rate("auto", cap, 8)
+            rows.append(dict(label="rate", value="%s (%s)" % (rate, why)))
+        except ValueError as e:
+            rows.append(dict(label="rate", value=str(e)))
     rows.append(dict(label="sign", value="one Nitrokey PIN + touch (vault %s)" % a.vault))
     rows.append(
         dict(
@@ -1338,6 +1347,10 @@ def chain_apply(a, plan):
     endpoint = {h["role"]: "%s:%d" % (h["record"]["public_ip"], h["port"]) for h in hops}
     argv = [*controller(), "--json", "init", "--out", str(work / "bundles"), "--hops", str(len(hops))]
     argv += ["--exit", endpoint["exit"], "--vault", str(a.vault)]
+    # The rate class: auto picks the fastest the smallest hop allowance fits.
+    cap = providers.capacity_gib(h["record"].get("catalog", h["record"]["provider"]) for h in hops)
+    if cap:
+        argv += ["--allowance-gib", str(cap)]
     if hops[0]["record"].get("public_dns"):
         argv += ["--cover-name", hops[0]["record"]["public_dns"]]
     for role in ("relay", "middle"):

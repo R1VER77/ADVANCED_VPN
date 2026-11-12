@@ -8,7 +8,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from cryptography.hazmat.primitives.asymmetric import rsa  # noqa: E402
 
 import mesh_tokens as mt  # noqa: E402
 
@@ -98,9 +97,7 @@ class LedgerTests(unittest.TestCase):
 
     def test_invalid_signature_is_rejected(self):
         _, spend = mt.issue_credit(self.key)
-        spend["redemption"] = (int(spend["redemption"], 16) ^ 1).to_bytes(
-            mt.KEY_BITS // 8, "big"
-        ).hex()
+        spend["redemption"] = (int(spend["redemption"], 16) ^ 1).to_bytes(mt.KEY_BITS // 8, "big").hex()
         with self.assertRaises(mt.InvalidSignature):
             mt.Ledger(self.path).redeem(spend, self.key.public_key())
 

@@ -22,6 +22,7 @@ import os
 import subprocess
 import sys
 import time
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -33,8 +34,9 @@ CLOUD = os.environ.get("AVPN_CLOUD", "/opt/advanced-vpn/bin/avpn-cloud")
 OPERATOR_KEY = Path(os.environ.get("AVPN_OPERATOR_KEY", Path.home() / ".config" / "advanced-vpn" / "operator.pub"))
 KEYGUARD = os.environ.get("AVPN_KEYGUARD", "/opt/advanced-vpn/tools/keyguard.py")
 VAULT = Path(os.environ.get("AVPN_VAULT", Path.home() / ".config" / "advanced-vpn" / "vault"))
-OPERATOR_ENVELOPE = Path(os.environ.get(
-    "AVPN_MESH_ENVELOPE", Path.home() / ".config" / "advanced-vpn" / "mesh" / "operator-key.sealed.json"))
+OPERATOR_ENVELOPE = Path(
+    os.environ.get("AVPN_MESH_ENVELOPE", Path.home() / ".config" / "advanced-vpn" / "mesh" / "operator-key.sealed.json")
+)
 
 # Always-free capacity a member can contribute. Ranked by free egress: egress is
 # what a relay burns. egress_gib_month=0 means "unsuitable as a relay".
@@ -110,6 +112,7 @@ def _mldsa():
     """ML-DSA-65 from the hash-locked environment (cryptography >= 43)."""
     try:
         from cryptography.hazmat.primitives.asymmetric.ml_dsa import MLDSAPrivateKey, MLDSAPublicKey
+
         return MLDSAPrivateKey, MLDSAPublicKey
     except Exception as e:  # pragma: no cover - environment dependent
         raise SystemExit(
@@ -125,6 +128,7 @@ def canonical(descriptor: dict) -> bytes:
 
 
 def sign_descriptor(descriptor: dict, private_key) -> dict:
+    """Return the descriptor with its signature over the canonical encoding."""
     sig = private_key.sign(canonical(descriptor))
     return {**descriptor, "signature": base64.b64encode(sig).decode()}
 
@@ -162,11 +166,14 @@ def validate(descriptor: dict, now: float | None = None) -> list[str]:
 
 # ---------------------------------------------------------------- directory
 
+
 def directory_path() -> Path:
+    """The local directory file."""
     return MESH_DIR / "directory.json"
 
 
 def load_directory(now: float | None = None) -> list[dict]:
+    """Verified, unexpired descriptors from the local directory."""
     p = directory_path()
     if not p.exists():
         return []
@@ -179,6 +186,7 @@ def load_directory(now: float | None = None) -> list[dict]:
 
 
 def ranked(nodes: list[dict], role: str, group: str) -> list[dict]:
+    """Nodes offering `role` in `group`, best first."""
     v = [d for d in nodes if role in d.get("roles", []) and d.get("group", "public") == group]
     return sorted(
         v,
@@ -191,9 +199,14 @@ def ranked(nodes: list[dict], role: str, group: str) -> list[dict]:
     )
 
 
-def select_chain(nodes: list[dict], hops: int, group: str = "public",
-                 exit_country: str | None = None, prefer: str | None = None,
-                 allow_weaker_diversity: bool = False) -> list[dict]:
+def select_chain(
+    nodes: list[dict],
+    hops: int,
+    group: str = "public",
+    exit_country: str | None = None,
+    prefer: str | None = None,
+    allow_weaker_diversity: bool = False,
+) -> list[dict]:
     """Diversity first: every hop a distinct operator, provider and country.
     Mirrors NodeDb::select_chain in src/mesh/directory.rs."""
     if not 1 <= hops <= 3:
@@ -216,8 +229,7 @@ def select_chain(nodes: list[dict], hops: int, group: str = "public",
             break
         if pick is None:
             raise SystemExit(
-                f"no {role} node in group `{group}` satisfies the diversity rule; "
-                "widen the mesh or relax constraints"
+                f"no {role} node in group `{group}` satisfies the diversity rule; widen the mesh or relax constraints"
             )
         chosen.append(pick)
         ops.add(pick["operator"])
@@ -228,11 +240,14 @@ def select_chain(nodes: list[dict], hops: int, group: str = "public",
 
 # ------------------------------------------------------------------ tokens
 
+
 def token_store_path() -> Path:
+    """The local credit store file."""
     return MESH_DIR / "tokens.json"
 
 
 def load_tokens() -> dict:
+    """The local credit store (empty when none exists yet)."""
     p = token_store_path()
     if not p.exists():
         return {"schema": 1, "grants": [], "spent": []}
@@ -240,6 +255,7 @@ def load_tokens() -> dict:
 
 
 def current_epoch(now: float | None = None) -> int:
+    """The daily credit epoch for `now` (default: the current time)."""
     return int((time.time() if now is None else now) // 86400)
 
 
@@ -261,35 +277,49 @@ def quota_view(now: float | None = None) -> dict:
         "spent_today": len(spent),
         "balance": len(fresh) - len(spent),
         "public_pool": "blind-RSA credits via tools/mesh_tokens.py (control plane); "
-                       "data-plane redemption stays fail-closed until vendored in Rust",
+        "data-plane redemption stays fail-closed until vendored in Rust",
     }
 
 
 # ------------------------------------------------------------------ offer
 
+
 def offer_plan() -> list[dict]:
+    """Rows ranking the free tiers for contributing a node."""
     rows = []
     for t in FREE_TIERS:
-        fit = "relay-capable" if t["egress_gib_month"] >= MIN_RELAY_EGRESS_GIB_MONTH else (
-            "beacon only" if t["egress_gib_month"] > 0 else "your own plan")
-        rows.append({
-            "label": t["slug"],
-            "value": f"{t['name']} - {t['spec']}; ~{t['egress_gib_month']} GiB/mo free egress "
-                     f"({t['expiry']}); fit: {', '.join(t['role_fit']) or fit}; {t['notes']}",
-        })
+        fit = (
+            "relay-capable"
+            if t["egress_gib_month"] >= MIN_RELAY_EGRESS_GIB_MONTH
+            else ("beacon only" if t["egress_gib_month"] > 0 else "your own plan")
+        )
+        rows.append(
+            {
+                "label": t["slug"],
+                "value": f"{t['name']} - {t['spec']}; ~{t['egress_gib_month']} GiB/mo free egress "
+                f"({t['expiry']}); fit: {', '.join(t['role_fit']) or fit}; {t['notes']}",
+            }
+        )
     return rows
 
 
 def cmd_offer(args) -> dict:
+    """`avpn mesh offer`: show the plan, or provision with --apply."""
     if args.guided or not args.apply:
         return {
             "ok": True,
-            "rows": offer_plan() + [
-                {"label": "cover budget", "value": f"{DEFAULT_COVER_BUDGET_MIB_DAY} MiB/day "
-                 "fits every relay-capable tier; exit requires an explicit --role exit "
-                 "and shows provider-ToS and abuse guidance first."},
-                {"label": "private", "value": "--private keeps the node out of the mesh "
-                 "directory; it is then usable only by you."},
+            "rows": offer_plan()
+            + [
+                {
+                    "label": "cover budget",
+                    "value": f"{DEFAULT_COVER_BUDGET_MIB_DAY} MiB/day "
+                    "fits every relay-capable tier; exit requires an explicit --role exit "
+                    "and shows provider-ToS and abuse guidance first.",
+                },
+                {
+                    "label": "private",
+                    "value": "--private keeps the node out of the mesh directory; it is then usable only by you.",
+                },
             ],
         }
     tier = next((t for t in FREE_TIERS if t["slug"] == args.provider), None)
@@ -300,7 +330,7 @@ def cmd_offer(args) -> dict:
             "ok": False,
             "error": "ExitRequiresAcknowledgement",
             "hint": "an exit sees destinations and draws abuse complaints; re-run with "
-                    "--i-understand-exit-risk after reading `avpn help mesh-exit`",
+            "--i-understand-exit-risk after reading `avpn help mesh-exit`",
         }
     name = args.name or f"avpn-mesh-{tier['slug']}"
     cmd = [CLOUD, *tier["provision"], "--apply", "--name", name, "--yes"]
@@ -312,8 +342,7 @@ def cmd_offer(args) -> dict:
     if proc.returncode != 0:
         return {"ok": False, "error": "ProvisioningFailed", "stderr": proc.stderr[-2000:]}
     descriptor = build_descriptor(args, tier, name)
-    return {"ok": True, "rows": [{"label": "node", "value": json.dumps(descriptor)}],
-            "descriptor": descriptor}
+    return {"ok": True, "rows": [{"label": "node", "value": json.dumps(descriptor)}], "descriptor": descriptor}
 
 
 def build_descriptor(args, tier: dict, name: str) -> dict:
@@ -351,6 +380,7 @@ def build_descriptor(args, tier: dict, name: str) -> dict:
 
 # ------------------------------------------------------------------ publish
 
+
 def cmd_publish(args) -> dict:
     """Sign the local node descriptor and gossip it (TTL 3, dup-suppressed).
 
@@ -369,31 +399,56 @@ def cmd_publish(args) -> dict:
     if errors:
         return {"ok": False, "error": "InvalidDescriptor", "hint": "; ".join(errors)}
     if args.dry_run:
-        return {"ok": True, "rows": [{"label": "plan", "value":
-                f"sign + gossip {d['node_id']} to group `{d['group']}` (ttl {GOSSIP_HOP_LIMIT})"}]}
+        return {
+            "ok": True,
+            "rows": [
+                {
+                    "label": "plan",
+                    "value": f"sign + gossip {d['node_id']} to group `{d['group']}` (ttl {GOSSIP_HOP_LIMIT})",
+                }
+            ],
+        }
     # The operator ML-DSA key is sealed under the hardware credential and is
     # only unsealed in memory for one signing operation, exactly as in
     # `avpn init`: keyguard mesh-sign does one PIN + touch, signs the
     # canonical descriptor, and returns it as the last JSON stdout line,
     # together with the FIDO2 membership assertion over the same bytes.
     if not OPERATOR_ENVELOPE.exists():
-        return {"ok": False, "error": "NoSealedOperatorKey",
-                "hint": f"seal the operator key once: keyguard.py mesh-seal --vault {VAULT} "
-                        f"--key <operator.key> --cert {OPERATOR_KEY} --envelope {OPERATOR_ENVELOPE} "
-                        "--remove-plaintext"}
+        return {
+            "ok": False,
+            "error": "NoSealedOperatorKey",
+            "hint": f"seal the operator key once: keyguard.py mesh-seal --vault {VAULT} "
+            f"--key <operator.key> --cert {OPERATOR_KEY} --envelope {OPERATOR_ENVELOPE} "
+            "--remove-plaintext",
+        }
     MESH_DIR.mkdir(parents=True, exist_ok=True)
     tmp = MESH_DIR / ".publish.tmp"
     tmp.write_text(json.dumps(d))
     os.chmod(tmp, 0o600)
     proc = subprocess.run(
-        [sys.executable, KEYGUARD, "mesh-sign", "--vault", str(VAULT),
-         "--envelope", str(OPERATOR_ENVELOPE), "--cert", str(OPERATOR_KEY),
-         "--descriptor", str(tmp)],
-        capture_output=True, text=True)
+        [
+            sys.executable,
+            KEYGUARD,
+            "mesh-sign",
+            "--vault",
+            str(VAULT),
+            "--envelope",
+            str(OPERATOR_ENVELOPE),
+            "--cert",
+            str(OPERATOR_KEY),
+            "--descriptor",
+            str(tmp),
+        ],
+        capture_output=True,
+        text=True,
+    )
     tmp.unlink(missing_ok=True)
     if proc.returncode != 0:
-        return {"ok": False, "error": "HardwareSignRefused",
-                "hint": "the hardware token refused or was absent; nothing was published"}
+        return {
+            "ok": False,
+            "error": "HardwareSignRefused",
+            "hint": "the hardware token refused or was absent; nothing was published",
+        }
     try:
         out = parse_last_json(proc.stdout)
         signed = out["descriptor"]
@@ -401,25 +456,36 @@ def cmd_publish(args) -> dict:
         return {"ok": False, "error": "SignerOutputInvalid"}
     # Fail-closed self-check: a descriptor we cannot verify never leaves us.
     if validate(signed, now) or not verify_descriptor(signed):
-        return {"ok": False, "error": "SelfCheckFailed",
-                "hint": "the signed descriptor did not verify; refusing to gossip it"}
+        return {
+            "ok": False,
+            "error": "SelfCheckFailed",
+            "hint": "the signed descriptor did not verify; refusing to gossip it",
+        }
     if out.get("assertion"):
         proof = MESH_DIR / "membership-proof.json"
-        proof.write_text(json.dumps({
-            "schema": SCHEMA,
-            "member": d["node_id"],
-            "credential": out.get("credential"),
-            "assertion": out["assertion"],
-            "challenge_sha256": out.get("challenge_sha256"),
-        }))
+        proof.write_text(
+            json.dumps(
+                {
+                    "schema": SCHEMA,
+                    "member": d["node_id"],
+                    "credential": out.get("credential"),
+                    "assertion": out["assertion"],
+                    "challenge_sha256": out.get("challenge_sha256"),
+                }
+            )
+        )
         os.chmod(proof, 0o600)
     node_desc.write_text(json.dumps(signed))
     os.chmod(node_desc, 0o600)
     g = gossip_descriptor(signed)
-    return {"ok": True, "rows": [
-        {"label": "node", "value": f"{d['node_id']} signed (hardware, one PIN + touch)"},
-        {"label": "gossip", "value": f"{g['sent']}/{g['beacons']} beacons accepted"},
-    ], "gossip": g}
+    return {
+        "ok": True,
+        "rows": [
+            {"label": "node", "value": f"{d['node_id']} signed (hardware, one PIN + touch)"},
+            {"label": "gossip", "value": f"{g['sent']}/{g['beacons']} beacons accepted"},
+        ],
+        "gossip": g,
+    }
 
 
 def parse_last_json(stdout: str) -> dict:
@@ -439,20 +505,27 @@ def gossip_descriptor(descriptor: dict, hop: int = 0) -> dict:
     never fatal."""
     cfg = MESH_DIR / "beacons.json"
     if not cfg.exists():
-        return {"sent": 0, "beacons": 0,
-                "hint": f"no beacons configured; write [\"https://host:8787\"] to {cfg}"}
-    beacons = json.loads(cfg.read_text())
+        return {"sent": 0, "beacons": 0, "hint": f'no beacons configured; write ["https://host:8787"] to {cfg}'}
+    beacons = [beacon_url(u) for u in json.loads(cfg.read_text())]
     body = json.dumps({"descriptor": descriptor, "hop": hop}).encode()
     sent = 0
     for url in beacons:
         try:
-            req = urllib.request.Request(url.rstrip("/") + "/gossip", data=body,
-                                         headers={"Content-Type": "application/json"})
-            with urllib.request.urlopen(req, timeout=10) as r:
+            req = urllib.request.Request(  # noqa: S310 (scheme checked by beacon_url)
+                url.rstrip("/") + "/gossip", data=body, headers={"Content-Type": "application/json"}
+            )
+            with urllib.request.urlopen(req, timeout=10) as r:  # noqa: S310 (scheme checked by beacon_url)
                 sent += 1 if json.loads(r.read()).get("ok") else 0
-        except Exception:
-            continue
+        except (OSError, ValueError):
+            continue  # an unreachable beacon is skipped, never fatal
     return {"sent": sent, "beacons": len(beacons)}
+
+
+def beacon_url(url) -> str:
+    """A configured beacon URL, http(s) only (never file: or a custom scheme)."""
+    if not isinstance(url, str) or urllib.parse.urlsplit(url).scheme not in ("https", "http"):
+        raise ValueError("beacon URLs must be http(s): %r" % (url,))
+    return url.rstrip("/")
 
 
 def fetch_from_beacons() -> int:
@@ -460,14 +533,14 @@ def fetch_from_beacons() -> int:
     cfg = MESH_DIR / "beacons.json"
     if not cfg.exists():
         return 0
-    beacons = json.loads(cfg.read_text())
+    beacons = [beacon_url(u) for u in json.loads(cfg.read_text())]
     added = 0
     directory = {d["node_id"]: d for d in load_directory()}
     for url in beacons:
         try:
-            with urllib.request.urlopen(url + "/descriptors", timeout=10) as r:
+            with urllib.request.urlopen(url + "/descriptors", timeout=10) as r:  # noqa: S310 (beacon_url)
                 batch = json.loads(r.read())
-        except Exception:
+        except (OSError, ValueError):
             continue  # an unreachable beacon is skipped, never fatal
         for d in batch.get("descriptors", []):
             if d.get("node_id") in directory:
@@ -486,35 +559,58 @@ def fetch_from_beacons() -> int:
 
 # ------------------------------------------------------------------- cmds
 
+
 def cmd_identity(_args) -> dict:
+    """`avpn mesh identity`: this member's ID and key."""
     mid = member_id(load_operator_key())
-    return {"ok": True, "rows": [
-        {"label": "member", "value": mid},
-        {"label": "identity", "value": "your hardware device key (operator.pub); "
-                                        "no account exists anywhere"},
-    ], "member": mid}
+    return {
+        "ok": True,
+        "rows": [
+            {"label": "member", "value": mid},
+            {"label": "identity", "value": "your hardware device key (operator.pub); no account exists anywhere"},
+        ],
+        "member": mid,
+    }
 
 
 def cmd_nodes(args) -> dict:
+    """`avpn mesh nodes`: the directory (optionally fetched from beacons first)."""
     if args.fetch:
         fetch_from_beacons()
     nodes = load_directory()
-    rows = [{"label": d["node_id"],
-             "value": f"{'+'.join(d['roles'])}  {d['provider']}  {d['country']}  "
-                      f"{d['health']['latency_ms_p50']} ms  up {d['health']['uptime_30d']:.1%}  "
-                      f"cover {d['capacity']['cover_budget_mib_day']} MiB/d  by {d['operator']}"}
-            for d in nodes]
-    return {"ok": True, "rows": rows or [{"label": "empty",
-            "value": "no descriptors yet; avpn mesh nodes --fetch, or offer your first node"}]}
+    rows = [
+        {
+            "label": d["node_id"],
+            "value": f"{'+'.join(d['roles'])}  {d['provider']}  {d['country']}  "
+            f"{d['health']['latency_ms_p50']} ms  up {d['health']['uptime_30d']:.1%}  "
+            f"cover {d['capacity']['cover_budget_mib_day']} MiB/d  by {d['operator']}",
+        }
+        for d in nodes
+    ]
+    return {
+        "ok": True,
+        "rows": rows
+        or [{"label": "empty", "value": "no descriptors yet; avpn mesh nodes --fetch, or offer your first node"}],
+    }
 
 
 def cmd_chain(args) -> dict:
-    chain = select_chain(load_directory(), args.hops, group=args.group,
-                         exit_country=args.exit_country, prefer=args.prefer,
-                         allow_weaker_diversity=args.allow_weaker_diversity)
-    rows = [{"label": f"hop {i + 1}",
-             "value": f"{d['node_id']}  {d['roles'][0]}  {d['provider']} {d['country']}  "
-                      f"{d['cloak_endpoint']}"} for i, d in enumerate(chain)]
+    """`avpn mesh chain`: pick a diverse chain from the directory."""
+    chain = select_chain(
+        load_directory(),
+        args.hops,
+        group=args.group,
+        exit_country=args.exit_country,
+        prefer=args.prefer,
+        allow_weaker_diversity=args.allow_weaker_diversity,
+    )
+    rows = [
+        {
+            "label": f"hop {i + 1}",
+            "value": f"{d['node_id']}  {d['roles'][0]}  {d['provider']} {d['country']}  {d['cloak_endpoint']}",
+        }
+        for i, d in enumerate(chain)
+    ]
     if args.dry_run or not args.apply:
         return {"ok": True, "rows": rows}
     # Enrollment itself goes through the existing flow: request/init/enroll,
@@ -528,17 +624,23 @@ def cmd_chain(args) -> dict:
 
 
 def cmd_quota(_args) -> dict:
+    """`avpn mesh quota`: credits held and spent this epoch."""
     q = quota_view()
-    return {"ok": True, "rows": [
-        {"label": "epoch", "value": str(q["epoch"])},
-        {"label": "earned", "value": f"{q['earned_today']} credits (relaying for the mesh)"},
-        {"label": "spent", "value": f"{q['spent_today']} credits (chains through others)"},
-        {"label": "balance", "value": str(q["balance"])},
-        {"label": "public pool", "value": q["public_pool"]},
-    ], **q}
+    return {
+        "ok": True,
+        "rows": [
+            {"label": "epoch", "value": str(q["epoch"])},
+            {"label": "earned", "value": f"{q['earned_today']} credits (relaying for the mesh)"},
+            {"label": "spent", "value": f"{q['spent_today']} credits (chains through others)"},
+            {"label": "balance", "value": str(q["balance"])},
+            {"label": "public pool", "value": q["public_pool"]},
+        ],
+        **q,
+    }
 
 
 def main() -> int:
+    """Command-line entry point."""
     p = argparse.ArgumentParser(prog="avpn-mesh")
     p.add_argument("--json", action="store_true")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -564,8 +666,9 @@ def main() -> int:
     sp.add_argument("--role", choices=["entry", "relay", "exit"], default="relay")
     sp.add_argument("--country", default="DE")
     sp.add_argument("--name")
-    sp.add_argument("--private", action="store_true",
-                    help="keep the node out of the mesh directory (usable only by you)")
+    sp.add_argument(
+        "--private", action="store_true", help="keep the node out of the mesh directory (usable only by you)"
+    )
     sp.add_argument("--cover-budget-mib-day", type=int, default=DEFAULT_COVER_BUDGET_MIB_DAY)
     sp.add_argument("--i-understand-exit-risk", action="store_true")
     sp.add_argument("--dry-run", action="store_true")
@@ -579,8 +682,14 @@ def main() -> int:
     sub.add_parser("quota")
 
     args = p.parse_args()
-    handlers = {"identity": cmd_identity, "nodes": cmd_nodes, "chain": cmd_chain,
-                "offer": cmd_offer, "publish": cmd_publish, "quota": cmd_quota}
+    handlers = {
+        "identity": cmd_identity,
+        "nodes": cmd_nodes,
+        "chain": cmd_chain,
+        "offer": cmd_offer,
+        "publish": cmd_publish,
+        "quota": cmd_quota,
+    }
     try:
         result = handlers[args.cmd](args)
     except SystemExit as e:

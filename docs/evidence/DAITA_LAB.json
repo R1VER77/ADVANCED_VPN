@@ -1,92 +1,63 @@
 {
- "what": "Website-fingerprinting resistance of the WireGuard + DAITA carrier, measured with tools/daita_lab.py and tools/wf_attack.py, and protocol identification with nDPI 4.2 (ndpiReader) and TShark 4.4.19",
- "date": "2026-11-10",
+ "what": "Website-fingerprinting resistance of the constant-rate WireGuard + DAITA carrier wrapped in the HTTP/3 cloak, measured with tools/daita_lab.py and tools/wf_attack.py across 30 synthetic sites (300 page loads per rate class), and protocol identification with nDPI 4.2 (ndpiReader) and TShark 4.4.19",
+ "date": "2026-11-11",
  "setup": {
   "chain": "2 hops in network namespaces (client, relay, exit, destination), constant cells on every hop",
-  "latency": "netem 10 ms (+-1 ms) at each end of every link: about 60 ms round trip end to end",
-  "workload": "8 synthetic sites (main document plus 3-28 objects, 77-594 KB), 15 loads each in shuffled order, 2 parallel connections, sizes +-15% and ~10% of objects skipped per load, 5 s between loads",
-  "attack": "k-FP-style features plus CUMUL, 500-tree random forest, stratified 5-fold cross-validation; closed world, chance 0.125",
+  "latency": "netem 10 ms at each end of every link: about 60 ms round trip end to end",
+  "workload": "30 synthetic sites (main document plus 3-28 objects, 77-594 KB), 10 loads each in shuffled order (300 loads per run), 2 parallel connections, sizes +-15% and ~10% of objects skipped per load, 5 s between loads, 20 s initial idle capture",
+  "attack": "k-FP-style features plus CUMUL, 500-tree random forest, stratified 5-fold cross-validation; closed world, 30 sites, random chance = 0.033 (3.3%)",
   "views": {
-   "carrier": "client <-> first hop: WireGuard + DAITA, what the client's ISP sees",
-   "inner link": "first hop <-> exit: QUIC with constant cells, no DAITA (the same loads, as a baseline)"
+   "carrier": "client <-> first hop: constant-rate WireGuard + DAITA inside HTTP/3 cloak on UDP 443, what the client's ISP sees",
+   "inner link": "first hop <-> exit: QUIC with constant cells, no DAITA constant-rate stream (the same loads, as a baseline)"
   },
   "windows": {
-   "true end + 3 s": "each load cut at its true end: the attacker is told where every page finished",
-   "fixed 6 s": "every load gets the same 6 s from its true start: the fairer view of a constant-rate stream"
+   "fixed 6 s": "every load gets the same 6 s from its true start: the realistic view of a continuous constant-rate stream that emits no start or end marker on the wire",
+   "true end + 3 s": "each load cut at its true end + 3 s: an oracle-assisted view where the attacker is told the exact timestamp every page finished loading"
   }
  },
- "accuracy": {
-  "measured_on": "the camouflaged carrier (QUIC on UDP 443), ~60 ms RTT, 8 sites x 15 loads, chance 0.125",
-  "no DAITA (inner link, same loads)": {
-   "true end + 3 s": "0.74-0.82",
-   "fixed 6 s": "0.46-0.70"
-  },
-  "balanced": {
-   "true end + 3 s": 0.617,
-   "fixed 6 s": 0.625
-  },
-  "strong": {
-   "true end + 3 s": 0.55,
-   "fixed 6 s": 0.225
-  },
-  "reading": "balanced does not stop the attacker; strong reduces it to the shortest site (whose trace ends inside the window), the rest at or near chance. Wrapping in the HTTP/3 cloak did not change these versus the pre-cloak measurement."
- },
- "cost": {
-  "balanced": {
-   "idle": "6-7 GB/month per side (unchanged)",
-   "decoys per page load": {
-    "client": 62,
-    "relay": 22
+ "accuracy_30_sites": {
+  "chance": 0.033,
+  "metered": {
+   "grid": "20 ms x 1 slot (50 pps per direction)",
+   "mean_load_seconds": 12.16,
+   "fixed_6s": {
+    "carrier_daita": 0.033,
+    "inner_link_no_daita": 0.27
    },
-   "decoy share of sent bytes during browsing": {
-    "client": 0.12,
-    "relay": 0.04
-   },
-   "mean load seconds": 2.26
+   "true_end_plus_3s": {
+    "carrier_daita": 0.213,
+    "inner_link_no_daita": 0.427
+   }
   },
-  "strong": {
-   "idle": "168 GB/month per side (v0.5.0: 187-223)",
-   "decoys per page load": {
-    "client": 347,
-    "relay": 307
+  "fast": {
+   "grid": "2 ms x 8 staggered slots (4,000 pps per direction)",
+   "mean_load_seconds": 0.76,
+   "fixed_6s": {
+    "carrier_daita": 0.017,
+    "inner_link_no_daita": 0.747
    },
-   "decoy share of sent bytes during browsing": {
-    "client": 0.46,
-    "relay": 0.41
-   },
-   "mean load seconds": 10.84,
-   "rate": "one 1380-byte packet every ~21 ms per direction, continuously while keepalives flow"
+   "true_end_plus_3s": {
+    "carrier_daita": 0.2,
+    "inner_link_no_daita": 0.813
+   }
   },
-  "no defense reference": {
-   "mean load seconds": 2.31
-  }
+  "reading": "Under the fixed 6 s window (no external page-completion oracle), both metered (3.3%) and fast (1.7%) are at or below the 3.3% random-chance floor for 30 sites, whereas the unshaped inner link scores 27.0% (metered pacing) and 74.7% (fast pacing). Even when an external oracle tells the classifier the exact instant each page finished loading (true end + 3 s), carrier accuracy drops from 42.7-81.3% on the inner link to 20.0-21.3% (driven by oracle duration alone)."
  },
- "defects found in v0.5.0": [
-  "FRONT got its padding window as 1-4 microseconds (maybenot-machines takes microseconds; Tamaraw scales seconds itself): every decoy left at once, 1.1 ms apart, at the tunnel's first packet",
-  "FRONT ran once per tunnel: no decoys around any later page load, including after WireGuard rekeys",
-  "Upstream Tamaraw stopped counting packets once data flowed, so traces were never rounded (5 of 120 a multiple of 100); each ended with ~98 decoys sent 1 us apart, marking when the page finished, and one more decoy after the trace",
-  "The QUIC ClientHello between hops named the tool: SNI <role>.advanced-vpn.internal and ALPN advanced-vpn/1, readable by anyone on the path (QUIC Initial packets are decryptable)"
- ],
- "protocol identification": {
-  "carrier, now": "nDPI 4.2: QUIC (proto 188), category Web \u2014 the WireGuard+DAITA carrier rides inside the HTTP/3 cloak on UDP 443, so it is not identified as a VPN (was: WireGuard, category VPN)",
-  "between hops": "nDPI: QUIC, category Web, ALPN h3, no hostname",
-  "caveat": "the outer QUIC is real but its handshake fingerprint (quinn transport parameters, TLS ClientHello) is not a mainstream browser's; a JA4-style QUIC fingerprinter can tell it is not Chrome, and the certificate is self-signed"
+ "protocol_identification": {
+  "carrier_udp_primary": "nDPI 4.2: QUIC (proto 188), category Web - the WireGuard+DAITA carrier rides inside the HTTP/3 cloak on UDP 443, so it is not identified as a VPN",
+  "carrier_tcp_fallback": "TLS 1.3 on TCP 443 (ALPN http/1.1) with constant 1420-byte cells when UDP 443 is blocked; automatic 2 s fallback and 10 s QUIC recovery probes",
+  "active_probing_origin": "Unauthenticated HTTP/3 (UDP 443) and HTTPS (TCP 443) probes receive a 200 OK static HTML5 status page with Alt-Svc: h3=\":443\"; ma=86400 and forward nothing to the carrier",
+  "between_hops": "nDPI: QUIC, category Web, ALPN h3, no hostname",
+  "caveat": "the outer QUIC/TLS handshake uses standard rustls/quinn parameters rather than a Chrome uTLS fingerprint, and the certificate is self-signed and SPKI-pinned"
  },
- "padding": {
-  "carrier data packets": "every WireGuard data packet 1380 bytes on the wire (14,706 balanced, 29,565 strong); only handshakes (156/100) and empty keepalives (40) differ",
-  "Tamaraw spacing": "20-21 ms between packets per direction"
+ "padding_and_shaping": {
+  "carrier_data_packets": "every WireGuard packet inside the cloak travels as a 1420-byte outer payload (1448-byte IPv4 packet on the wire)",
+  "multi_slot_staggering": "MachineTimers::decoy_expiry staggers multi-slot initial deadlines evenly across the 2 ms grid tick ((timeout * idx) / slots), eliminating multi-slot burst quantization and bringing fast fixed-window WF accuracy to 1.7% (chance 3.3%)"
  },
- "http3_camouflage": {
-  "what": "advanced-vpn-cloak carries each WireGuard datagram as a QUIC DATAGRAM frame on UDP 443 (ALPN h3, no SNI unless a cover name is set, server key pinned by SPKI)",
-  "on_the_wire": "managed_test.py confirms zero WireGuard messages on the client's physical link; only QUIC, with one padded outer packet size (quinn pad_to_mtu). The first hop answers an unauthenticated probe with an HTTP/3 404 and forwards nothing (src/cloak.rs tests).",
-  "fingerprinting_unchanged": "wrapping does not change DAITA's protection: balanced website-fingerprinting accuracy is 0.625 over the camouflaged carrier (fixed 6 s window, 8 sites, chance 0.125), the same as before the cloak",
-  "fails_closed": "the cloak needs an underlay IPv4 MTU >= 1448 (a 1420-byte QUIC UDP payload); below that the client refuses to connect and keeps the kill switch (whole-device: all traffic dropped; applications: no route). Proven at MTU 1440 (refused) vs 1448 (accepted) in tools/mtu_test.py-style runs.",
-  "roaming": "changing the client's address mid-transfer is survived in both defenses (the cloak reconnects, the carrier keepalive re-learns the address); strong recovers more slowly as its shaping restarts"
- },
- "strong_mode_stall_fix": {
-  "symptom": "before the fix, if the first hop was unreachable while the client started in strong mode, DAITA's Tamaraw shaper could hold traffic and never resume once the path returned",
-  "cause": "GotaTun fired maybenot PaddingSent for decoys that could not be sent (no session), permanently exhausting the cumulative max_decoy_frac budget, so decoys (the only delay-queue drain) stopped; the delay state then never ended",
-  "fix": "vendor/gotatun: do not count a decoy that has no session to send on, and add a liveness guard that flushes the delay queue when real packets sit behind active blocking with no decoy drain for 3 s",
-  "proven": "with the carrier watchdog disabled, strong mode self-recovers from 15 s and 40 s start outages (tools/daita_lab.py, OUTAGE mode); the avpnctl carrier watchdog remains as a backstop"
+ "http3_and_tcp_camouflage": {
+  "what": "advanced-vpn-cloak carries each WireGuard datagram as a 1420-byte QUIC DATAGRAM frame on UDP 443 (or a 1420-byte TCP/TLS 1.3 cell on TCP 443 when UDP is blocked), authenticated by a 32-byte TLS 1.3 exporter HMAC (EXPORTER-advanced-vpn-cloak)",
+  "fails_closed": "the cloak requires an underlay IPv4 MTU >= 1448; below that the client refuses to connect and keeps the kill switch",
+  "roaming": "changing the client's address mid-transfer is survived: the cloak reconnects and the carrier keepalive re-learns the address",
+  "liveness_guard": "vendor/gotatun flushes the strict-blocking delay queue if real packets sit behind active blocking with no decoy drain for 3 s, preventing start-outage stalls"
  }
 }

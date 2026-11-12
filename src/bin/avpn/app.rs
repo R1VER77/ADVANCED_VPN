@@ -65,7 +65,7 @@ pub const KEYS: &[(&str, &str)] = &[
 pub struct Header {
     /// `client → relay → exit`, or `not enrolled`.
     pub chain: String,
-    /// `applications · defense balanced`.
+    /// `applications · rate fast`.
     pub mode: String,
     /// `nitrokey`, `systemd-creds (host+tpm2)`, ...
     pub protection: String,
@@ -82,8 +82,8 @@ impl Header {
             .get("chain")
             .and_then(chain_short)
             .unwrap_or_else(|| "not enrolled".into());
-        let mode = match (get("mode"), get("defense")) {
-            (Some(m), Some(d)) => format!("{m} · defense {d}"),
+        let mode = match (get("mode"), get("rate")) {
+            (Some(m), Some(r)) => format!("{m} · rate {r}"),
             (Some(m), None) => m,
             _ => "—".into(),
         };
@@ -389,7 +389,7 @@ mod tests {
     fn header() -> Header {
         Header::from_info(&json!({"ok": true, "info": {
             "enrolled": true, "role": "client", "hops": 2, "protection": "nitrokey",
-            "mode": "applications", "defense": "balanced",
+            "mode": "applications", "defense": "strong", "rate": "fast",
             "chain": [{"hop": "relay", "endpoint": "192.0.2.1:41194"}, {"hop": "exit", "endpoint": "198.51.100.2:4444"}],
             "status": {"state": "supervising"}}}))
     }
@@ -414,7 +414,7 @@ mod tests {
             "{s:#?}"
         );
         assert!(
-            s[4].starts_with("│ mode:       applications · defense balanced"),
+            s[4].starts_with("│ mode:       applications · rate fast"),
             "{s:#?}"
         );
         assert!(

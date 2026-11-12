@@ -59,7 +59,7 @@ class BeaconState:
     def __init__(self, state_dir: Path, peers: list[str] | None = None):
         self.dir = Path(state_dir)
         self.dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-        self.peers = list(peers or [])
+        self.peers = [mesh.beacon_url(u) for u in peers or []]
         self.lock = threading.Lock()
         self.descriptors: dict[str, dict] = {}
         self.forwarded: set[tuple[str, int]] = set()
@@ -89,8 +89,8 @@ class BeaconState:
         return len(dead)
 
     def flush(self):
-        doc = {"schema": mesh.SCHEMA, "descriptors": sorted(
-            self.descriptors.values(), key=lambda d: d["node_id"])}
+        """Persist the directory and ban list atomically."""
+        doc = {"schema": mesh.SCHEMA, "descriptors": sorted(self.descriptors.values(), key=lambda d: d["node_id"])}
         _atomic_write(self.dir / "directory.json", doc)
         _atomic_write(self.dir / "bans.json", {"schema": 1, "banned": sorted(self.bans)})
 
@@ -108,6 +108,7 @@ class BeaconState:
         return True
 
     def admit_get(self, ip: str, now: float | None = None) -> bool:
+        """Whether this address may make another GET this minute."""
         now = time.time() if now is None else now
         stamps = [t for t in self.get_budget.get(ip, []) if now - t < 60]
         if len(stamps) >= MAX_GETS_PER_IP_PER_MINUTE:
@@ -159,13 +160,13 @@ class BeaconState:
     @staticmethod
     def _forward_one(url: str, body: bytes):
         try:
-            req = urllib.request.Request(
-                url.rstrip("/") + "/gossip", data=body,
-                headers={"Content-Type": "application/json"})
-            with urllib.request.urlopen(req, timeout=5):
+            req = urllib.request.Request(  # noqa: S310 (peers checked by mesh.beacon_url)
+                url.rstrip("/") + "/gossip", data=body, headers={"Content-Type": "application/json"}
+            )
+            with urllib.request.urlopen(req, timeout=5):  # noqa: S310 (peers checked by mesh.beacon_url)
                 pass
-        except Exception:
-            pass  # an unreachable peer is skipped, never fatal
+        except OSError:
+            return  # an unreachable peer is skipped, never fatal
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -174,8 +175,8 @@ class Handler(BaseHTTPRequestHandler):
     state: BeaconState = None  # set by serve()
     protocol_version = "HTTP/1.1"
 
-    def log_message(self, *args):  # quiet by default; beacons log nothing per-request
-        pass
+    def log_message(self, *args):
+        """Log nothing per request (beacons are quiet by default)."""
 
     def _reply(self, code: int, doc: dict):
         body = json.dumps(doc).encode()
@@ -186,6 +187,7 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_POST(self):
+        """Accept one gossiped descriptor (POST /gossip)."""
         if self.path != "/gossip":
             return self._reply(404, {"ok": False})
         try:
@@ -204,6 +206,7 @@ class Handler(BaseHTTPRequestHandler):
         self._reply(200, {"ok": status == "stored"})
 
     def do_GET(self):
+        """Serve health or the descriptor set."""
         if self.path.startswith("/health"):
             return self._reply(200, {"ok": True, "descriptors": len(self.state.descriptors)})
         if not self.path.startswith("/descriptors"):
@@ -217,12 +220,12 @@ class Handler(BaseHTTPRequestHandler):
             limit = GET_DEFAULT_LIMIT
         with self.state.lock:
             self.state.prune()
-            batch = sorted(self.state.descriptors.values(),
-                           key=lambda d: -d.get("published", 0))[:limit]
+            batch = sorted(self.state.descriptors.values(), key=lambda d: -d.get("published", 0))[:limit]
         self._reply(200, {"schema": mesh.SCHEMA, "descriptors": batch})
 
 
 def serve(state_dir: Path, host: str, port: int, peers: list[str]) -> ThreadingHTTPServer:
+    """A beacon server bound to host:port with its state directory."""
     state = BeaconState(state_dir, peers)
     server = ThreadingHTTPServer((host, port), Handler)
     Handler.state = state
@@ -230,12 +233,12 @@ def serve(state_dir: Path, host: str, port: int, peers: list[str]) -> ThreadingH
 
 
 def main() -> int:
+    """Command-line entry point."""
     p = argparse.ArgumentParser(prog="avpn-mesh-beacon", description=__doc__.splitlines()[0])
     p.add_argument("--dir", type=Path, default=Path("/var/lib/avpn-mesh-beacon"))
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=8787)
-    p.add_argument("--peers", default="",
-                   help="comma-separated beacon base URLs to forward fresh descriptors to")
+    p.add_argument("--peers", default="", help="comma-separated beacon base URLs to forward fresh descriptors to")
     a = p.parse_args()
     peers = [u.strip() for u in a.peers.split(",") if u.strip()]
     server = serve(a.dir, a.host, a.port, peers)

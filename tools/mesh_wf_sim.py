@@ -22,24 +22,29 @@ Usage: python3 tools/mesh_wf_sim.py [--sites N] [--traces N] [--json]
 import argparse
 import json
 
-GRID_MS = 20.0          # constant-rate clock (matches daita.rs TAMARAW/COVER interval)
+GRID_MS = 20.0  # constant-rate clock (matches daita.rs TAMARAW/COVER interval)
 COVER_GRACE_MS = 400.0
 ROUND_MS = 2000.0
-JITTER_SIGMA = 12.0     # queueing noise per traversed hop
+JITTER_SIGMA = 12.0  # queueing noise per traversed hop
 
 
 def make_sites(rng, n_sites):
-    return [{
-        "n_bursts_lam": rng.uniform(3, 10),
-        "burst_len_mu": rng.uniform(0.8, 2.2),
-        "burst_len_sig": rng.uniform(0.3, 0.7),
-        "pkt_rate_ms": rng.uniform(1.5, 8.0),
-        "gap_mu_ms": rng.uniform(80, 600),
-        "gap_sig": rng.uniform(0.4, 0.9),
-    } for _ in range(n_sites)]
+    """Synthetic site profiles (burst counts, lengths, gaps)."""
+    return [
+        {
+            "n_bursts_lam": rng.uniform(3, 10),
+            "burst_len_mu": rng.uniform(0.8, 2.2),
+            "burst_len_sig": rng.uniform(0.3, 0.7),
+            "pkt_rate_ms": rng.uniform(1.5, 8.0),
+            "gap_mu_ms": rng.uniform(80, 600),
+            "gap_sig": rng.uniform(0.4, 0.9),
+        }
+        for _ in range(n_sites)
+    ]
 
 
 def gen_trace(rng, site):
+    """One synthetic page-load trace (times, directions) for a site."""
     times, dirs, t, direction = [], [], 0.0, 1
     for _ in range(int(rng.poisson(site["n_bursts_lam"]) + 1) * 2):
         n = max(1, int(rng.lognormal(site["burst_len_mu"], site["burst_len_sig"])))
@@ -53,11 +58,13 @@ def gen_trace(rng, site):
 
 
 def defense_none(rng, np, times, dirs):
+    """No defense: the trace after two hops of queueing jitter."""
     t = np.array(times) + rng.normal(0, JITTER_SIGMA, len(times)) * np.sqrt(2)
     return t, np.array(dirs)
 
 
 def defense_client_only(rng, np, times, dirs):
+    """Constant-rate shaping at the client only."""
     tq = np.round(np.array(times) / GRID_MS) * GRID_MS
     for k in range(1, len(tq)):
         if tq[k] <= tq[k - 1]:
@@ -71,6 +78,7 @@ def defense_client_only(rng, np, times, dirs):
 
 
 def defense_per_hop_grace(rng, np, times, dirs):
+    """Per-hop re-shaping, cover only after an idle grace."""
     t, d = np.array(times, dtype=float), list(dirs)
     for _ in range(2):
         t = np.round(t / GRID_MS) * GRID_MS
@@ -95,6 +103,7 @@ def defense_per_hop_grace(rng, np, times, dirs):
 
 
 def defense_per_hop_full(rng, np, times, dirs, quant_ms=4000.0):
+    """Per-hop full constant-rate cover, duration rounded to a quantum."""
     end = np.ceil(times[-1] / quant_ms) * quant_ms
     n_slots = int(end / GRID_MS)
     grid_t = np.arange(1, n_slots + 1) * GRID_MS
@@ -106,6 +115,7 @@ def defense_per_hop_full(rng, np, times, dirs, quant_ms=4000.0):
 
 
 def defense_bidir_const(rng, np, times, dirs, quant_ms):
+    """Bidirectional constant-rate streams, duration rounded to a quantum."""
     end = np.ceil(times[-1] / quant_ms) * quant_ms
     n_slots = int(end / GRID_MS)
     grid_t = np.arange(1, n_slots + 1) * GRID_MS
@@ -118,16 +128,26 @@ def defense_bidir_const(rng, np, times, dirs, quant_ms):
 
 
 def features(np, times, dirs, bins=40, bin_ms=150.0):
+    """Timing and direction features for the classifier."""
     order = np.argsort(times)
     t, d = times[order], dirs[order]
     iat = np.diff(t) if len(t) > 1 else np.array([0.0])
     switches = np.where(np.diff(d) != 0)[0]
     runs = np.diff(switches) if len(switches) > 1 else np.array([len(d)])
     counts, _ = np.histogram(t, bins=bins, range=(0, bins * bin_ms))
-    base = [len(t), t[-1] - t[0] if len(t) > 1 else 0,
-            iat.mean(), iat.std() if len(iat) > 1 else 0, np.median(iat),
-            (iat < 25).mean(), (iat > 100).sum(), (iat > 400).sum(),
-            (d > 0).mean(), len(runs), runs.max() if len(runs) else 0]
+    base = [
+        len(t),
+        t[-1] - t[0] if len(t) > 1 else 0,
+        iat.mean(),
+        iat.std() if len(iat) > 1 else 0,
+        np.median(iat),
+        (iat < 25).mean(),
+        (iat > 100).sum(),
+        (iat > 400).sum(),
+        (d > 0).mean(),
+        len(runs),
+        runs.max() if len(runs) else 0,
+    ]
     return np.concatenate([base, counts])
 
 
@@ -143,6 +163,7 @@ DEFENSES = {
 
 
 def run(n_sites=10, n_traces=80, seed=42, defenses=None):
+    """Score every defense with a random forest; returns accuracies and overheads."""
     import numpy as np
     from sklearn.ensemble import RandomForestClassifier
     from sklearn.model_selection import train_test_split
@@ -169,11 +190,11 @@ def run(n_sites=10, n_traces=80, seed=42, defenses=None):
             "accuracy": round(float(accuracy_score(yte, clf.predict(Xte))), 4),
             "overhead_x": round(float(np.mean(overhead)), 1),
         }
-    return {"sites": n_sites, "traces_per_site": n_traces, "chance": round(1 / n_sites, 4),
-            "results": results}
+    return {"sites": n_sites, "traces_per_site": n_traces, "chance": round(1 / n_sites, 4), "results": results}
 
 
 def main():
+    """Command-line entry point."""
     p = argparse.ArgumentParser()
     p.add_argument("--sites", type=int, default=10)
     p.add_argument("--traces", type=int, default=80)

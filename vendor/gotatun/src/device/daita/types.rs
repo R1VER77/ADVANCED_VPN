@@ -95,8 +95,12 @@ pub(crate) struct PacketCount {
 
 impl PacketCount {
     pub fn dec(&self, amount: u32) {
-        self.outbound_normal
-            .fetch_sub(amount, atomic::Ordering::SeqCst);
+        // Saturating: a queued decoy that replaces a slot must not wrap the count.
+        let _ = self.outbound_normal.fetch_update(
+            atomic::Ordering::SeqCst,
+            atomic::Ordering::SeqCst,
+            |n| Some(n.saturating_sub(amount)),
+        );
     }
 
     pub fn inc(&self, amount: u32) {
@@ -131,10 +135,15 @@ pub struct DelayWatcher {
     pub(super) delay_state: Arc<RwLock<DelayState>>,
     delay_abort: Arc<Notify>,
     min_delay_capacity: usize,
+    strict: bool,
 }
 
 impl DelayWatcher {
-    pub fn new(delay_queue_tx: mpsc::Sender<Packet<WgData>>, min_delay_capacity: usize) -> Self {
+    pub fn new(
+        delay_queue_tx: mpsc::Sender<Packet<WgData>>,
+        min_delay_capacity: usize,
+        strict: bool,
+    ) -> Self {
         let delay_state = Arc::new(RwLock::new(DelayState::Inactive));
         let delay_abort = Arc::new(Notify::const_new());
         Self {
@@ -142,6 +151,7 @@ impl DelayWatcher {
             delay_state,
             delay_abort,
             min_delay_capacity,
+            strict,
         }
     }
 
@@ -173,21 +183,25 @@ impl DelayWatcher {
             && delay.is_active()
         {
             // Notify the delay handler to abort the delay state when the capacity is low
-            if self.delay_queue_tx.capacity() < self.min_delay_capacity {
+            if !self.strict && self.delay_queue_tx.capacity() < self.min_delay_capacity {
                 self.delay_abort.notify_one();
             }
 
-            if let Err(TrySendError::Closed(packet) | TrySendError::Full(packet)) =
-                self.delay_queue_tx.try_send(packet)
-            {
-                tracing::trace!("Packet sent as it couldn't be delayed");
-                // If the queue is closed or full, we can't delay anymore, so we
-                // send the packet anyway.
-                // TODO: this would be an out of order packet, not ideal.
-                // Should we drop the packet instead?
-                Some(packet)
-            } else {
-                None
+            match self.delay_queue_tx.try_send(packet) {
+                // Strict shaping: a full queue drops, it never bursts past the slots.
+                Err(TrySendError::Full(_)) if self.strict => {
+                    tracing::trace!("Packet dropped: strict delay queue full");
+                    None
+                }
+                Err(TrySendError::Closed(packet) | TrySendError::Full(packet)) => {
+                    tracing::trace!("Packet sent as it couldn't be delayed");
+                    // If the queue is closed or full, we can't delay anymore, so we
+                    // send the packet anyway.
+                    // TODO: this would be an out of order packet, not ideal.
+                    // Should we drop the packet instead?
+                    Some(packet)
+                }
+                Ok(()) => None,
             }
         } else {
             Some(packet)
@@ -200,7 +214,13 @@ impl DelayWatcher {
 /// Use [`MachineTimers::wait_next_timer`] to wait for the next time expiration.
 // INVARIANT: VecDeque is sorted by Instant, which represents the time of expiration.
 // INVARIANT: Only one internal and one action timer per machine can exist at a time.
-pub(crate) struct MachineTimers(VecDeque<(Instant, MachineId, MachineTimer)>);
+pub(crate) struct MachineTimers(
+    VecDeque<(Instant, MachineId, MachineTimer)>,
+    /// ADVANCED_VPN strict shaping: each machine's last decoy deadline. A decoy re-armed
+    /// after its predecessor fired is scheduled from that deadline, not from when the
+    /// late timer was serviced, so a slot clock stays on a fixed grid whatever the load.
+    Option<Vec<Option<Instant>>>,
+);
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum Action {
@@ -229,7 +249,38 @@ pub(crate) enum MachineTimer {
 
 impl MachineTimers {
     pub(crate) fn new(cap: usize) -> Self {
-        Self(VecDeque::with_capacity(cap))
+        Self(VecDeque::with_capacity(cap), None)
+    }
+
+    /// Timers whose decoys keep a fixed grid per machine (strict shaping).
+    pub(crate) fn with_grid(cap: usize, machines: usize) -> Self {
+        Self(VecDeque::with_capacity(cap), Some(vec![None; machines]))
+    }
+
+    /// When a decoy re-armed now with `timeout` is due. Off-grid (or the first decoy):
+    /// `now + timeout`. On the grid: the previous deadline plus `timeout`, or, when one or
+    /// more ticks were missed, the next grid point after now (skipped, never burst).
+    fn decoy_expiry(&mut self, machine: MachineId, timeout: std::time::Duration) -> Instant {
+        let now = Instant::now();
+        let Some(grid) = self.1.as_mut() else {
+            return now + timeout;
+        };
+        let slots = grid.len().saturating_sub(1).max(1) as u32;
+        let idx = machine.into_raw();
+        let phase = (timeout * idx.saturating_sub(1) as u32) / slots;
+        let Some(slot) = grid.get_mut(idx) else {
+            return now + timeout;
+        };
+        let expiry = match *slot {
+            // Far behind (a suspended host, say): restart the grid rather than count ticks.
+            Some(prev) if prev <= now && !timeout.is_zero() && now - prev < timeout * 1000 => {
+                let missed = (now - prev).as_nanos() / timeout.as_nanos();
+                prev + timeout * (missed as u32 + 1)
+            }
+            _ => now + timeout + phase,
+        };
+        *slot = Some(expiry);
+        expiry
     }
 
     pub(crate) fn remove_action(&mut self, machine: &MachineId) {
@@ -255,7 +306,7 @@ impl MachineTimers {
         bypass: bool,
     ) {
         self.remove_action(&machine);
-        let expiration_time = Instant::now() + timeout;
+        let expiration_time = self.decoy_expiry(machine, timeout);
         let insert_at = self
             .0
             .binary_search_by_key(&expiration_time, |&(time, _, _)| time)

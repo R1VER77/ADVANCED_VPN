@@ -58,6 +58,9 @@ where
     /// When the decoy loop last ran (upstream builder leaves this at the epoch; set on use).
     #[builder(default = Instant::now())]
     last_decoy_activity: Instant,
+    /// ADVANCED_VPN strict shaping (see `DaitaSettings::strict`).
+    #[builder(default = false)]
+    strict: bool,
 }
 
 /// If blocking stays active this long with no decoy activity, the shaping loop has stalled
@@ -164,6 +167,13 @@ where
         // and stop all shaping once the path returns. With no session there is nothing to shape,
         // so drop the decoy and leave the accounting untouched.
         if !self.get_peer().await?.tunnel.has_active_session() {
+            // Strict shaping: a constant-rate slot machine re-arms on PaddingSent, so a tick
+            // with no session must still count as sent or the clock dies for the rest of the
+            // run (the client's first tick usually precedes its handshake). Strict machines
+            // are unbudgeted, so the accounting concern above does not apply.
+            if self.strict {
+                self.send_event(TriggerEvent::PaddingSent { machine })?;
+            }
             return Ok(());
         }
         self.last_decoy_activity = Instant::now();
@@ -173,7 +183,9 @@ where
         match delay_state {
             DelayState::Active { bypass: true, .. } if replace && decoy_bypass => {
                 if let Ok(packet) = self.delay_queue_rx.try_recv() {
-                    // Replace decoy with a delayed packet
+                    // Replace decoy with a delayed packet (it leaves the outbound count here,
+                    // as flushed packets do in `end_delay`).
+                    self.packet_count.dec(1);
                     let peer = self.get_peer().await?;
                     self.send(packet, peer).await
                 } else {

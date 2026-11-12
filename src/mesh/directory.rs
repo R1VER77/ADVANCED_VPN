@@ -80,7 +80,11 @@ impl NodeDb {
                 .partial_cmp(&a.health.uptime_30d)
                 .unwrap_or(std::cmp::Ordering::Equal)
                 .then(a.health.latency_ms_p50.cmp(&b.health.latency_ms_p50))
-                .then(b.capacity.cover_budget_mib_day.cmp(&a.capacity.cover_budget_mib_day))
+                .then(
+                    b.capacity
+                        .cover_budget_mib_day
+                        .cmp(&a.capacity.cover_budget_mib_day),
+                )
                 .then(a.node_id.cmp(&b.node_id))
         });
         v
@@ -114,12 +118,11 @@ impl NodeDb {
                 if chosen.iter().any(|c| c.node_id == d.node_id) {
                     return false;
                 }
-                if is_exit {
-                    if let Some(c) = &req.exit_country {
-                        if &d.country != c {
-                            return false;
-                        }
-                    }
+                if is_exit
+                    && let Some(c) = &req.exit_country
+                    && &d.country != c
+                {
+                    return false;
                 }
                 req.allow_weaker_diversity
                     || (!providers.contains(&d.provider) && !countries.contains(&d.country))

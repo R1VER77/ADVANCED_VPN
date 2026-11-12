@@ -2,9 +2,7 @@
 """Tests for tools/mesh.py: identity, descriptor validation, chain selection, quota."""
 
 import json
-import os
 import tempfile
-import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -79,8 +77,7 @@ class TestChainSelection(unittest.TestCase):
         self.assertEqual(len({d["country"] for d in chain}), 3)
 
     def test_operator_never_reused(self):
-        nodes = [node("e1", ["entry"], "oci", "DE", "alice"),
-                 node("x1", ["exit"], "host", "CH", "alice")]
+        nodes = [node("e1", ["entry"], "oci", "DE", "alice"), node("x1", ["exit"], "host", "CH", "alice")]
         with self.assertRaises(SystemExit):
             mesh.select_chain(nodes, 2)
 
@@ -102,11 +99,15 @@ class TestQuota(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             store = Path(td) / "tokens.json"
             epoch = mesh.current_epoch(NOW)
-            store.write_text(json.dumps({
-                "schema": 1,
-                "grants": [{"epoch": epoch}, {"epoch": epoch}, {"epoch": epoch - 1}],
-                "spent": [{"epoch": epoch}],
-            }))
+            store.write_text(
+                json.dumps(
+                    {
+                        "schema": 1,
+                        "grants": [{"epoch": epoch}, {"epoch": epoch}, {"epoch": epoch - 1}],
+                        "spent": [{"epoch": epoch}],
+                    }
+                )
+            )
             with mock.patch.object(mesh, "token_store_path", return_value=store):
                 q = mesh.quota_view(NOW)
         self.assertEqual(q["earned_today"], 2)
@@ -127,14 +128,25 @@ class TestOffer(unittest.TestCase):
         self.assertEqual(gcp["role_fit"], [])
 
     def test_exit_requires_acknowledgement(self):
-        ns = argparse_ns(guided=False, apply=True, provider="oci", role="exit",
-                         i_understand_exit_risk=False, country="DE", name=None,
-                         private=False, cover_budget_mib_day=2048, dry_run=False, yes=True)
+        ns = argparse_ns(
+            guided=False,
+            apply=True,
+            provider="oci",
+            role="exit",
+            i_understand_exit_risk=False,
+            country="DE",
+            name=None,
+            private=False,
+            cover_budget_mib_day=2048,
+            dry_run=False,
+            yes=True,
+        )
         self.assertEqual(mesh.cmd_offer(ns)["error"], "ExitRequiresAcknowledgement")
 
 
 def argparse_ns(**kw):
     import argparse
+
     return argparse.Namespace(**kw)
 
 

@@ -287,7 +287,7 @@ pub fn from_outcome(action: &str, o: &Outcome) -> Vec<Cell> {
                 ("hops", "hops"),
                 ("protection", "protection"),
                 ("mode", "mode"),
-                ("defense", "defense"),
+                ("rate", "rate"),
             ] {
                 if let Some(x) = s(&i, key) {
                     let x = if key == "protection" {
@@ -462,7 +462,7 @@ mod tests {
     fn info_aligns_pairs_and_shows_protection_key() {
         let o = ok(json!({"ok": true, "info": {
             "enrolled": true, "role": "client", "hops": 1, "protection": "systemd-creds",
-            "creds_key": "host+tpm2", "mode": "applications", "defense": "balanced",
+            "creds_key": "host+tpm2", "mode": "applications", "defense": "strong", "rate": "metered",
             "chain": [{"hop": "exit", "endpoint": "198.51.100.2:51820"}],
             "daily_limit_bytes": null, "status": {"state": "supervising"}, "state": "/etc/advanced-vpn/enrolled"}}));
         let text = plain(&from_outcome("info", &o));

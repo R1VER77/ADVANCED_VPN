@@ -150,7 +150,7 @@ fn endpoint_client(bind: SocketAddr, i: &Identity, fd: Option<i32>, mtu: u16) ->
 async fn connect(e: &Endpoint, addr: SocketAddr, i: &Identity) -> Result<(Connection, Duration)> {
     let c = timeout(Duration::from_secs(5), e.connect(addr, &i.server_name)?).await??;
     let life = match tls::authenticated(&c, i) {
-        Ok(life) => life,
+        Ok((life, _pin)) => life,
         Err(e) => {
             c.close(1u32.into(), b"policy rejected");
             return Err(e);
@@ -167,9 +167,10 @@ async fn relay_session(
     conn: &Connection,
     life: Duration,
     layer: usize,
+    next_hop: SocketAddr,
 ) -> Result<Counts> {
     let udp = UdpSocket::bind("0.0.0.0:0").await?;
-    udp.connect(c.exit.context("exit missing")?).await?;
+    udp.connect(next_hop).await?;
     let mut b = vec![0; 65536];
     let mut counts = Counts::default();
     let mut up = Budget::new(c.packets_per_second, c.bytes_per_second);
@@ -255,6 +256,88 @@ async fn tunnel(
     Ok(counts)
 }
 
+/// Sessions of one mesh exit, keyed by member tunnel address: the shared TUN reader
+/// hands each downlink packet to the owning session over a bounded channel.
+type Demux = Arc<std::sync::Mutex<BTreeMap<Ipv4Addr, tokio::sync::mpsc::Sender<Bytes>>>>;
+
+/// Read the exit's shared TUN and route every packet to the session that owns its
+/// destination address. Packets for an unknown address are dropped, never misdelivered.
+async fn demux_tun(tun: Arc<Tun>, demux: Demux, mtu: usize) -> Result<()> {
+    let mut buf = vec![0; 65536];
+    loop {
+        let n = tun.read(&mut buf).await?;
+        if !(20..=mtu).contains(&n) {
+            continue;
+        }
+        let dst = Ipv4Addr::new(buf[16], buf[17], buf[18], buf[19]);
+        let sender = demux.lock().unwrap().get(&dst).cloned();
+        if let Some(tx) = sender {
+            let _ = tx.try_send(Bytes::copy_from_slice(&buf[..n]));
+        }
+    }
+}
+
+/// One mesh exit session: the member's uplink goes to the shared TUN; its downlink
+/// arrives from the demux. The member's own tunnel address is the only source its
+/// packets may carry and the only destination it receives.
+async fn mesh_tunnel(
+    c: Arc<Config>,
+    conn: Connection,
+    life: Duration,
+    member: crate::config::Member,
+    tun: Arc<Tun>,
+    demux: Demux,
+) -> Result<Counts> {
+    let member_ip: Ipv4Addr = member
+        .peer_ip
+        .as_deref()
+        .context("member tunnel address missing")?
+        .parse()?;
+    let local: Ipv4Addr = c
+        .local_ip
+        .as_deref()
+        .context("local_ip required")?
+        .parse()?;
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<Bytes>(256);
+    demux.lock().unwrap().insert(member_ip, tx);
+    let mut routes = c
+        .destinations
+        .iter()
+        .map(|s| network(s))
+        .collect::<Result<Vec<_>>>()?;
+    // The exit itself (its DNS forwarder) stays reachable for every member.
+    routes.push((u32::from(local), u32::MAX));
+    let mut counts = Counts::default();
+    let mut up = Budget::new(c.packets_per_second, c.bytes_per_second);
+    let mut down = Budget::new(c.packets_per_second, c.bytes_per_second);
+    let cell = cell_size(tls::layer_payload(c.mtu, c.layers, c.layers - 1) as usize);
+    let deadline = sleep(life.min(Duration::from_secs(c.session_seconds)));
+    tokio::pin!(deadline);
+    println!("{{\"event\":\"tunnel_ready\",\"kx\":\"X25519MLKEM768\",\"cipher\":\"AES_256_GCM\"}}");
+    let result = loop {
+        tokio::select! {
+            _=&mut deadline=>break Ok(()),
+            r=conn.read_datagram()=>{
+                let d=match r { Ok(d)=>d, Err(e)=>break Err(e.into()) };
+                if !up.admit(d.len()){counts.rate_dropped+=1;continue;}
+                let Some(p)=unframe(&d) else {counts.dropped+=1;continue;};
+                if !allowed_packet(p,member_ip,&routes,true,c.mtu){counts.dropped+=1;continue;}
+                tun.write(p).await?;counts.sent+=1;
+            }
+            r=rx.recv()=>{
+                let Some(p)=r else {break Ok(())};
+                if !allowed_packet(&p,member_ip,&routes,false,c.mtu){counts.dropped+=1;continue;}
+                if !down.admit(cell){counts.rate_dropped+=1;continue;}
+                let f=frame(&p,cell);audit(&c.role,f.len());
+                if conn.send_datagram(f).is_err(){counts.dropped+=1;}else{counts.received+=1;}
+            }
+        }
+    };
+    // Deregister before reporting: no downlink is routed to a closing session.
+    demux.lock().unwrap().remove(&member_ip);
+    result.map(|_| counts)
+}
+
 /// Run a relay or exit: accept authenticated sessions and terminate this server's layer.
 pub async fn serve(c: &Config, fds: &BTreeMap<String, i32>, tun_fd: Option<i32>) -> Result<()> {
     let relay = c.role == "relay";
@@ -268,8 +351,63 @@ pub async fn serve(c: &Config, fds: &BTreeMap<String, i32>, tun_fd: Option<i32>)
         tls::layer_payload(c.mtu, c.layers, layer),
     )?;
     println!("{{\"event\":\"listening\"}}");
+    if c.members.is_empty() {
+        // Single-chain server: one session at a time.
+        while let Some(incoming) = endpoint.accept().await {
+            // QUIC Retry verifies return routability before expensive handshake allocation.
+            if !incoming.remote_address_validated() {
+                let _ = incoming.retry();
+                continue;
+            }
+            let conn = match timeout(Duration::from_secs(5), incoming).await {
+                Ok(Ok(c)) => c,
+                _ => continue,
+            };
+            let (life, _pin) = match tls::authenticated(&conn, i) {
+                Ok(v) => v,
+                Err(_) => {
+                    conn.close(1u32.into(), b"policy rejected");
+                    continue;
+                }
+            };
+            println!(
+                "{{\"event\":\"authenticated\",\"kx\":\"X25519MLKEM768\",\"cipher\":\"AES_256_GCM\"}}"
+            );
+            let result = if relay {
+                relay_session(c, &conn, life, layer, c.exit.context("exit missing")?).await
+            } else {
+                tunnel(c, &conn, life, tun_fd).await
+            };
+            conn.close(0u32.into(), b"session ended");
+            if let Ok(counts) = result {
+                println!(
+                    "{}",
+                    serde_json::json!({"event":"session_ended","counts":counts})
+                );
+            } else {
+                println!("{{\"event\":\"session_closed\"}}");
+            }
+        }
+        return Ok(());
+    }
+    // Mesh server: admitted members share this process, one task per session, bounded
+    // by the member count. A member is identified by the pin its certificate proved.
+    let c = Arc::new(c.clone());
+    let (tun, demux) = if relay {
+        (None, None)
+    } else {
+        let name = c.tun.as_deref().context("TUN missing")?;
+        let tun = Arc::new(if let Some(fd) = tun_fd {
+            Tun::inherited(fd, name)?
+        } else {
+            Tun::open(name)?
+        });
+        let demux: Demux = Arc::default();
+        tokio::spawn(demux_tun(tun.clone(), demux.clone(), c.mtu));
+        (Some(tun), Some(demux))
+    };
+    let slots = Arc::new(tokio::sync::Semaphore::new(2 * c.members.len() + 8));
     while let Some(incoming) = endpoint.accept().await {
-        // QUIC Retry verifies return routability before expensive handshake allocation.
         if !incoming.remote_address_validated() {
             let _ = incoming.retry();
             continue;
@@ -278,30 +416,53 @@ pub async fn serve(c: &Config, fds: &BTreeMap<String, i32>, tun_fd: Option<i32>)
             Ok(Ok(c)) => c,
             _ => continue,
         };
-        let life = match tls::authenticated(&conn, i) {
-            Ok(l) => l,
+        let (life, pin) = match tls::authenticated(&conn, i) {
+            Ok(v) => v,
             Err(_) => {
                 conn.close(1u32.into(), b"policy rejected");
                 continue;
             }
         };
+        let Some(member) = c.member(&pin).cloned() else {
+            conn.close(1u32.into(), b"unknown member");
+            continue;
+        };
+        let Ok(permit) = slots.clone().try_acquire_owned() else {
+            conn.close(1u32.into(), b"server busy");
+            continue;
+        };
         println!(
             "{{\"event\":\"authenticated\",\"kx\":\"X25519MLKEM768\",\"cipher\":\"AES_256_GCM\"}}"
         );
-        let result = if relay {
-            relay_session(c, &conn, life, layer).await
-        } else {
-            tunnel(c, &conn, life, tun_fd).await
-        };
-        conn.close(0u32.into(), b"session ended");
-        if let Ok(counts) = result {
-            println!(
-                "{}",
-                serde_json::json!({"event":"session_ended","counts":counts})
-            );
-        } else {
-            println!("{{\"event\":\"session_closed\"}}");
-        }
+        let (c, tun, demux) = (c.clone(), tun.clone(), demux.clone());
+        tokio::spawn(async move {
+            let _permit = permit;
+            let result = if relay {
+                match member.exit {
+                    Some(next) => relay_session(&c, &conn, life, layer, next).await,
+                    None => Err(anyhow::anyhow!("member without a next hop")),
+                }
+            } else {
+                mesh_tunnel(
+                    c,
+                    conn.clone(),
+                    life,
+                    member,
+                    tun.expect("exit TUN"),
+                    demux.expect("exit demux"),
+                )
+                .await
+            };
+            conn.close(0u32.into(), b"session ended");
+            if let Ok(counts) = result {
+                println!(
+                    "{}",
+                    serde_json::json!({"event":"session_ended","counts":counts})
+                );
+            } else {
+                println!("{{\"event\":\"session_closed\"}}");
+            }
+        });
     }
     Ok(())
 }

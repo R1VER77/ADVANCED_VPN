@@ -18,7 +18,8 @@ class GenerateTests(unittest.TestCase):
         a = ddb.generate(7, 1_000_000, 4, 3600)
         b = ddb.generate(7, 1_000_000, 4, 3600)
         a_ids = [p.pop("id") for p in a["profiles"]]
-        b_ids = [p.pop("id") for p in b["profiles"]]
+        for p in b["profiles"]:
+            p.pop("id")
         self.assertEqual(a, b)  # ids are secrets; everything else is seeded
         self.assertTrue(all(len(i) == 16 for i in a_ids))
 
@@ -30,7 +31,7 @@ class GenerateTests(unittest.TestCase):
     def test_windows_are_contiguous(self):
         db = ddb.generate(2, 1_000_000, 8, 600)
         ws = [(p["not_before"], p["not_after"]) for p in db["profiles"]]
-        for (a0, a1), (b0, _) in zip(ws, ws[1:]):
+        for (_, a1), (b0, _) in zip(ws, ws[1:], strict=False):
             self.assertEqual(a1, b0)
 
     def test_cover_clock_equals_tamaraw_clock_everywhere(self):
@@ -70,7 +71,7 @@ class SelectTests(unittest.TestCase):
         self.assertIs(ddb.select(ps, 1_000_050), ps[0])
         self.assertIs(ddb.select(ps, 1_000_150), ps[1])
         self.assertIs(ddb.select(ps, 1_000_200), ps[2])  # boundary: next window
-        self.assertIsNone(ddb.select(ps, 1_000_300))     # nothing in force: refuse
+        self.assertIsNone(ddb.select(ps, 1_000_300))  # nothing in force: refuse
 
     def test_load_rejects_a_bad_schema(self):
         with tempfile.TemporaryDirectory() as t:
@@ -85,21 +86,54 @@ class CliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as t:
             out = Path(t) / "db.json"
             subprocess.run(
-                [sys.executable, str(Path(__file__).parent / "defense_db.py"), "generate",
-                 "--out", str(out), "--seed", "11", "--start", "1000000", "--count", "2",
-                 "--step", "100"],
-                check=True, capture_output=True)
+                [
+                    sys.executable,
+                    str(Path(__file__).parent / "defense_db.py"),
+                    "generate",
+                    "--out",
+                    str(out),
+                    "--seed",
+                    "11",
+                    "--start",
+                    "1000000",
+                    "--count",
+                    "2",
+                    "--step",
+                    "100",
+                ],
+                check=True,
+                capture_output=True,
+            )
             self.assertEqual(out.stat().st_mode & 0o777, 0o600)
             r = subprocess.run(
-                [sys.executable, str(Path(__file__).parent / "defense_db.py"), "current",
-                 "--db", str(out), "--now", "1000050"],
-                check=True, capture_output=True, text=True)
+                [
+                    sys.executable,
+                    str(Path(__file__).parent / "defense_db.py"),
+                    "current",
+                    "--db",
+                    str(out),
+                    "--now",
+                    "1000050",
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
             profile = json.loads(r.stdout.strip().splitlines()[-1])["profile"]
             self.assertEqual(profile["not_before"], 1000000)
             r = subprocess.run(
-                [sys.executable, str(Path(__file__).parent / "defense_db.py"), "current",
-                 "--db", str(out), "--now", "1000200"],
-                capture_output=True, text=True)
+                [
+                    sys.executable,
+                    str(Path(__file__).parent / "defense_db.py"),
+                    "current",
+                    "--db",
+                    str(out),
+                    "--now",
+                    "1000200",
+                ],
+                capture_output=True,
+                text=True,
+            )
             self.assertEqual(r.returncode, 1, "no profile in force must fail closed")
 
 

@@ -41,18 +41,17 @@ Oblivious HTTP gateways, MASQUE proxies and Private Relay nodes do **no** paddin
 allows. That leaves packet sizes, counts and timing correlated across the proxy, which
 is what flow-correlation and website-fingerprinting attacks feed on.
 
-This design's carrier runs **DAITA** (Maybenot): every data packet padded to one size,
-FRONT decoys around every burst of traffic (a page load, say), and in the `strong`
-defense Tamaraw constant-rate shaping that rounds every trace up to a multiple of 100
-packets on its own clock. On top of that,
+This design's carrier runs a **constant-rate DAITA stream** (Maybenot `stream_grid` +
+`cover` with strict blocking): every data packet is padded to one size (1380 bytes inside
+WireGuard, 1420 bytes on the outer cloak), and every clock tick sends either a queued
+real packet or an indistinguishable decoy packet. Whether your applications are idle or
+downloading at full speed, the outer packet rate and packet size stay flat (`< 1%` wire
+rate change between idle and busy). Four rate classes (`metered`, `standard`, `fast`,
+`line`) trade cover bandwidth for application throughput without weakening the
+constant-rate invariant (`avpn help preferences`). On top of that,
 every chain pads **every** hop's datagrams to one size per layer (constant cells), so
 inner packet sizes do not leak on the outer path at all — not just on the first link.
 Padding is always on and cannot be turned off; a chain signed without it is refused.
-The cost is bandwidth on the links between hops: every datagram travels as a full cell
-(1152 bytes on the innermost layer). A full-size 1100-byte packet costs about 5% more;
-a 60-byte acknowledgement costs about 19 times as much, so the overall cost depends on
-how much of your traffic is small packets. Count it against each provider's monthly
-outbound allowance.
 
 ## Roaming between networks
 
@@ -61,11 +60,9 @@ to the first hop keeps a persistent keepalive, so when your address changes the 
 hop re-learns it from the next authenticated packet. The inner QUIC layers ride on the
 carrier's stable overlay addresses and never see the change. Nothing falls back to an
 unprotected path while this happens — the kill switch holds throughout.
-Now that the carrier rides inside the HTTP/3 cloak's QUIC, a changed address is also a
-changed QUIC path: the cloak reconnects and the carrier's keepalive re-learns the address,
-so a transfer survives the move (measured for both defenses with `tools/daita_lab.py`,
-`ROBUST=roam`). `strong` recovers more slowly, because its constant-rate shaping only
-resumes once a session is re-established.
+Now that the carrier rides inside the HTTP/3 cloak, a changed address is also a
+changed outer path: the cloak reconnects and the carrier's keepalive re-learns the address,
+so a transfer survives the move (measured with `tools/daita_lab.py`, `ROBUST=roam`).
 
 ## Fails closed, not open
 
@@ -74,51 +71,64 @@ least 1448 bytes). On a smaller path the client refuses to bring the tunnel up r
 send anything in the clear, and the kill switch stays in place: in whole-device mode every
 packet is dropped; in applications mode a protected program simply has no route. There is
 no automatic fallback to a direct or smaller-MTU path. If the first hop is briefly
-unreachable, `strong` mode used to be able to wedge its traffic shaper; it now flushes and
-recovers on its own (a fix carried in the vendored `gotatun`), and the supervisor restarts
-the carrier as a backstop if it ever stays stuck.
+unreachable, the carrier's strict-blocking shaper flushes and recovers on its own (a
+liveness guard carried in the vendored `gotatun`), and the supervisor restarts the
+carrier as a backstop if it ever stays stuck.
 
 ## Measured: which website you are on
 
 An observer next to you (your ISP, the Wi-Fi) cannot read the traffic, but can try to
 recognise a website from the shape of its traffic. The lab (`tools/daita_lab.py`,
-`tools/wf_attack.py`) loads 8 synthetic sites 15 times each over a ~60 ms chain, and a
-random-forest classifier of the kind used in website-fingerprinting research guesses
-the site from the carrier. A random guess is right 12.5% of the time. (These are measured
-on the camouflaged carrier, now that it is QUIC on UDP 443; the cloak wraps the same shaped
-traffic, so the numbers match what DAITA gave before it.)
+`tools/wf_attack.py`) loads 30 synthetic sites 10 times each (300 page loads) over a
+~60 ms 2-hop chain, and a 500-tree random-forest classifier (`k-FP` + `CUMUL` features,
+stratified 5-fold cross-validation) guesses the site from the camouflaged carrier. A
+random guess is right **3.3%** of the time (`1/30`).
 
-| Defense | Right, told where each page ended | Right, given 6 s from each page's start |
+| View / Rate class | Right, given 6 s from each page's start | Right, told the exact timestamp each page ended |
 |---|---|---|
-| no DAITA (the same loads between hops) | 74-82% | 46-70% |
-| `balanced` | 62% | 62% |
-| `strong` | 55% | 22% |
+| Inner link (no DAITA baseline, same loads) | 27.0–74.7% | 42.7–81.3% |
+| Carrier — `metered` (50 pps / direction) | **3.3%** (= 1/30 random chance) | 21.3% |
+| Carrier — `fast` (4,000 pps / direction) | **1.7%** (≤ 1/30 random chance) | 20.0% |
 
-- `balanced` costs almost nothing (6-7 GB a month idle, about 12% decoys while browsing) and does **not** stop this attacker.
-- `strong` sends one 1380-byte packet every ~21 ms each way for as long as the tunnel is busy, and pads every trace to a whole 2 s step. The attacker then recognised only the shortest site; the other seven were at or near chance. The cost is real: pages load about 4.7 times slower, and an idle tunnel sends about 168 GB a month each way.
-- Real browsing is harder for the attacker than 8 known sites, and easier if it trains on your exact sites with more samples. Treat these as orders of magnitude.
+- In a continuous constant-rate stream, there is no on-wire start or end marker: under the fixed 6 s observation window, the classifier on both `metered` (**3.3%**) and `fast` (**1.7%**) is at or below the **3.3%** random-chance floor.
+- Even when an external oracle tells the attacker the exact instant each page finished loading (`true end + 3 s`), accuracy drops from `42.7–81.3%` on the unshaped inner link to `20.0–21.3%` on the carrier.
+- All four rate classes keep the outer wire rate constant between idle and full-load transfers (`tools/throughput_bench.py --shape-idle 5`):
 
-Details are in `docs/evidence/DAITA_LAB.json`.
+| Rate class | Grid pacing | Wire rate / direction | 2-hop app throughput | Cover volume / direction |
+|---|---|---|---|---|
+| `metered` (default) | 20 ms × 1 slot (50 pps) | ~0.55 Mbit/s | ~0.27–0.34 Mbit/s | ~5.7 GiB/day (~171 GiB/mo) |
+| `standard` | 2 ms × 1 slot (500 pps) | ~5.5 Mbit/s | ~3.1–4.5 Mbit/s | ~57 GiB/day |
+| `fast` | 2 ms × 8 staggered slots (4,000 pps) | ~44 Mbit/s | ~24.7–32.8 Mbit/s | ~455 GiB/day |
+| `line` | 2 ms × 32 staggered slots (16,000 pps) | ~177 Mbit/s | ~115.3–131.5 Mbit/s | ~1.8 TiB/day |
+
+Details are in `docs/evidence/DAITA_LAB.json` and `docs/evidence/RATE_CLASSES.json`.
 
 ## What it does show
 
 The link to the first hop no longer looks like WireGuard. The carrier (WireGuard + DAITA)
-rides inside QUIC on UDP 443 (`advanced-vpn-cloak`), so deep packet inspection (nDPI in the
-lab) labels it QUIC, category Web, as it would an HTTP/3 website — not a VPN. The first hop
-answers an unauthenticated connection like a web server (an HTTP/3 `404`), so a probe learns
-nothing; only a peer that proves the chain's key is carried. The hops behind the first one
-were already QUIC that offers HTTP/3's `h3` and names no server.
+rides inside `advanced-vpn-cloak` on port 443:
+
+- **Primary transport (UDP 443, HTTP/3 / QUIC).** Deep packet inspection (nDPI in the lab)
+  labels the outer flow `QUIC, category Web`, as it would an HTTP/3 website — not a VPN.
+- **Censorship fallback (TCP 443, HTTP/1.1 over TLS 1.3).** When a network blocks UDP 443,
+  the cloak automatically falls back within 2 seconds to TCP/TLS 1.3 on port 443 using the
+  same post-quantum `X25519MLKEM768` + `ML-DSA-65` SPKI pin and TLS exporter proof, framing
+  every packet as a constant 1420-byte cell. While on TCP, the client probes UDP 443 every
+  10 seconds and upgrades back to QUIC automatically once UDP is reachable.
+- **Active-probing resistance.** An unauthenticated browser or scanner hitting UDP 443
+  (HTTP/3) or TCP 443 (HTTPS) receives a normal `200 OK` static HTML5 status page with
+  `Alt-Svc: h3=":443"; ma=86400` and forwards nothing to the VPN carrier; only a peer that
+  proves knowledge of the enrolled PSK over the TLS 1.3 exporter is admitted.
 
 What a capable observer can still tell:
 
-- **That it is QUIC, not which site.** The outer stream is real QUIC with HTTP/3's ALPN, but its
-  handshake fingerprint (the QUIC library's transport parameters, the TLS ClientHello) is not a
-  mainstream browser's; an adversary that fingerprints QUIC stacks (JA4) can see it is not Chrome.
-  The certificate is self-signed, so an adversary that completes the handshake sees that too.
-- **The volume and timing of the outer stream**, which is what the fingerprinting measurement
-  above is about. The camouflage changes what the stream *looks like*, not DAITA's shaping of it.
-- **Nothing, on a network that blocks UDP.** There is no TCP fallback; the tunnel simply fails
-  to form (and fails closed — see below), rather than falling back to anything weaker.
+- **That it is QUIC or TLS, not which site.** The outer stream uses `h3` (or `http/1.1` on
+  TCP fallback), but its handshake fingerprint (the Rustls/Quinn transport parameters and
+  ClientHello) is not a mainstream browser's; an adversary that fingerprints TLS/QUIC stacks
+  (JA4) can see it is not Chrome, and the certificate is self-signed.
+- **The constant rate of the outer stream.** An observer can see Which rate class (`metered`,
+  `standard`, `fast`, or `line`) is active from the fixed packet rate, even though that rate
+  does not change when you start or stop browsing.
 
 ## What it does not stop
 

@@ -529,9 +529,8 @@ def main():
             time.sleep(0.1)
         assert (runtime_dir(state / "client") / "inner-active-cert.der").read_bytes() != before
         wait_online(client)
-        # Switching defense profiles is an authenticated local preference, not a
-        # fallback that silently turns padding off.
-        run(
+        # The removed defense preference is refused: no local setting changes the stream.
+        refused = run(
             "ip",
             "netns",
             "exec",
@@ -543,9 +542,10 @@ def main():
             "--lab",
             "preferences",
             "--defense",
-            "strong",
+            "balanced",
+            check=False,
         )
-        time.sleep(2)
+        assert refused.returncode != 0, "preferences --defense must be refused"
         wait_online(client)
         # Crash the WireGuard child; the supervisor recreates it without opening a direct route.
         status = json.loads((runtime_dir(state / "client") / "status.json").read_text())

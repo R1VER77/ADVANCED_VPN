@@ -130,8 +130,12 @@ def _install_user(data, bin_dir, python, stage):
         "# ADVANCED_VPN command line, user installation (tools/install.py --user).\n"
         "# As root, avpn ignores these variables by design and uses /opt/advanced-vpn.\n"
         'export AVPN_CONTROLLER=%s AVPN_CLOUD=%s AVPN_MESH=%s\nexec %s "$@"'
-        % (q(str(app / "bin/avpnctl")), q(str(app / "bin/avpn-cloud")), q(str(app / "bin/avpn-mesh")),
-           q(str(app / "bin/avpn"))),
+        % (
+            q(str(app / "bin/avpnctl")),
+            q(str(app / "bin/avpn-cloud")),
+            q(str(app / "bin/avpn-mesh")),
+            q(str(app / "bin/avpn")),
+        ),
     )
     return app
 

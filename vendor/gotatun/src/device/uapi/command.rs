@@ -437,6 +437,7 @@ impl Display for GetPeer {
                 max_delay_frac: daita_max_delay_frac,
                 max_delayed_packets: daita_max_delayed_packets,
                 min_delay_capacity: daita_min_delay_capacity,
+                strict: _,
             } = daita;
 
             writeln!(f, "daita_enable=1")?;

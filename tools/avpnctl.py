@@ -30,6 +30,9 @@ import time
 from keyguard import atomic, read_private, trusted_exe
 import retention
 from managed_profile import (
+    RATE_CLASSES,
+    choose_rate,
+    rate_cost_gib,
     create,
     enroll,
     profile_validate,
@@ -174,6 +177,12 @@ def whole_firewall(profile, service_uid=None):
             + str(int(port))
             + " accept\n  meta skuid "
             + str(service_uid)
+            + " ip daddr "
+            + host
+            + " tcp dport "
+            + str(int(port))
+            + " accept\n  meta skuid "
+            + str(service_uid)
             + ' ip daddr 10.78.0.1 udp dport 4433 oifname "avwg0" accept\n'
         )
     )
@@ -201,17 +210,15 @@ def first_hop_rules(profile):
     public = int(profile["network"]["relay_endpoint"].rsplit(":", 1)[1])
     if not 1 <= public <= 65535:
         raise ValueError("bad public port")
-    return (
-        """
+    return """
  chain input { type filter hook input priority -100; policy accept;
   udp dport 4433 iifname != "avwg0" drop
   udp dport 41194 iifname != "lo" drop
  }
  chain cloak { type nat hook prerouting priority dstnat;
   fib daddr type local udp dport %d redirect to :8443
- }"""
-        % public
-    )
+  fib daddr type local tcp dport %d redirect to :8443
+ }""" % (public, public)
 
 
 def resolved_managed(target):
@@ -255,10 +262,12 @@ def upstream_firewall(endpoint, iface):
     text = "delete table inet %s\n" % UPSTREAM_TABLE if exists else ""
     if iface:
         host, port = endpoint.rsplit(":", 1)
+        addr, pnum, dev = ipaddress.IPv4Address(host), int(port), valid_interface(iface)
         text += (
             "table inet %s {\n chain output { type filter hook output priority -110; policy accept;\n"
-            '  ip daddr %s udp dport %d oifname != "%s" drop\n }\n}\n'
-        ) % (UPSTREAM_TABLE, ipaddress.IPv4Address(host), int(port), valid_interface(iface))
+            '  ip daddr %s udp dport %d oifname != "%s" drop\n'
+            '  ip daddr %s tcp dport %d oifname != "%s" drop\n }\n}\n'
+        ) % (UPSTREAM_TABLE, addr, pnum, dev, addr, pnum, dev)
     if text:
         nft(text)
 
@@ -629,6 +638,11 @@ def publish_runtime(cfg, directory, uid, gid):
         target = directory / source.name
         owned_public(target, read_private(source), uid, gid)
         published["dns"]["test_ca"] = str(target)
+    if published.get("dns", {}).get("blocklist"):
+        source = Path(published["dns"]["blocklist"])
+        target = directory / source.name
+        owned_public(target, read_private(source), uid, gid)
+        published["dns"]["blocklist"] = str(target)
     for name, value in published.items():
         owned_public(directory / (name + ".runtime.json"), canonical(value), uid, gid)
 
@@ -801,8 +815,6 @@ def supervise(state, bin_dir, lab=False, whole=False):
     )
     cfg = runtime(profile, state)
     preferences = json.loads(read_private(state / "preferences.json")) if (state / "preferences.json").exists() else {}
-    if cfg.get("carrier"):
-        cfg["carrier"]["defense"] = preferences.get("defense", cfg["carrier"]["defense"])
     from keyguard import memory_fd
 
     # One unlock (Nitrokey PIN+touch, TPM-bound systemd-creds, or explicit plaintext)
@@ -923,15 +935,6 @@ def supervise(state, bin_dir, lab=False, whole=False):
                 if "carrier" in children:
                     stop(children["carrier"])
             allowance.limit = new_limit
-            if (
-                current_preferences.get("defense")
-                and current_preferences.get("defense") != cfg.get("carrier", {}).get("defense")
-                and "carrier" in cfg
-            ):
-                cfg["carrier"]["defense"] = current_preferences["defense"]
-                publish_runtime(cfg, device_dir, uid, gid)
-                if "carrier" in children:
-                    stop(children["carrier"])
             for name in cfg:
                 proc = children.get(name)
                 if proc and proc.poll() is None:
@@ -1235,7 +1238,8 @@ def device_info(state):
             # None: this device runs no carrier (a middle relay, or the exit of a longer chain).
             camouflaged=bool(profile.get("cloak")) if profile["carrier"] else None,
             chain=[dict(hop=name, endpoint=endpoint) for name, endpoint in chain_of(profile)],
-            defense=preferences.get("defense", (profile["carrier"] or {}).get("defense")),
+            defense=(profile["carrier"] or {}).get("defense"),
+            rate=(profile["carrier"] or {}).get("rate", "metered") if profile["carrier"] else None,
             mode=preferences.get("mode", "applications"),
             upstream_interface=preferences.get("upstream_interface"),
             daily_limit_bytes=daily_limit(preferences, profile) if profile["role"] == "client" else None,
@@ -1248,7 +1252,7 @@ def device_info(state):
 def describe(info):
     """Human-readable lines for `info`: one `name: value` pair per line, chain as a path."""
     lines = ["enrolled: " + ("yes" if info["enrolled"] else "no"), "state: " + info["state"]]
-    for key in ["role", "hops", "protection", "creds_key", "mode", "defense", "upstream_interface"]:
+    for key in ["role", "hops", "protection", "creds_key", "mode", "defense", "rate", "upstream_interface"]:
         if info.get(key) is not None:
             lines.append("%s: %s" % (key, info[key]))
     if info.get("chain"):
@@ -1423,10 +1427,24 @@ def build_parser():
     signer.add_argument("--vault", type=Path, help="Nitrokey vault: hardware-signed operator (production)")
     signer.add_argument("--software-operator", type=Path, help="LAB ONLY: plaintext operator keys in this directory")
     init.add_argument(
-        "--defense", choices=["balanced", "strong"], default="balanced", help="DAITA traffic-analysis defense"
+        "--rate",
+        choices=["auto", *RATE_CLASSES],
+        default="auto",
+        help="the constant-rate stream's class (default auto: the fastest the allowance fits)",
     )
+    init.add_argument("--allowance-gib", type=int, help="the smallest hop's monthly outbound allowance, GiB")
+    init.add_argument(
+        "--hours-per-day", type=float, default=8, help="hours connected per day, for the cost (default 8)"
+    )
+    init.add_argument("--accept-cost", action="store_true", help="sign a class even if it exceeds the allowance")
     init.add_argument(
         "--daily-limit-mib", type=int, default=None, help="optional fail-closed daily carrier cap; default none"
+    )
+    init.add_argument(
+        "--dns-blocklist",
+        type=Path,
+        default=None,
+        help="optional domain blocklist file (one domain per line) signed into the exit bundle",
     )
     imp = s.add_parser("enroll", help="verify and install this device's signed bundle")
     imp.add_argument("bundle", type=Path, help="the .avpn bundle the operator produced for this device")
@@ -1447,7 +1465,6 @@ def build_parser():
     s.add_parser("guard", help="(re)apply the boot-time kill switch (used by advanced-vpn-guard.service)")
     pref = s.add_parser("preferences", help="change saved connection preferences")
     pref.add_argument("--mode", choices=["applications", "whole-device"], help="what the tunnel protects by default")
-    pref.add_argument("--defense", choices=["balanced", "strong"], help="DAITA traffic-analysis defense")
     cap = pref.add_mutually_exclusive_group()
     cap.add_argument("--daily-limit-mib", type=int, help="fail-closed daily cap, 1..10240 MiB (client only)")
     cap.add_argument("--no-daily-limit", action="store_true", help="remove the daily cap (default)")
@@ -1503,25 +1520,36 @@ def main():
         for item in a.request:
             role, path = item.split("=", 1)
             requests[role] = Path(path).read_bytes()
+        rate, why = choose_rate(a.rate, a.allowance_gib, a.hours_per_day, a.accept_cost)
         signer_impl = HardwareOperator(a.vault) if a.vault else SoftwareOperator(a.software_operator.resolve())
+        dns_arg = (
+            dict(upstream="9.9.9.9:853", server_name="dns.quad9.net", blocklist=a.dns_blocklist.read_bytes())
+            if a.dns_blocklist
+            else None
+        )
         operator = create(
             a.out.resolve(),
             requests,
             a.relay,
             a.exit,
             signer_impl,
-            a.defense,
             daily_mib=a.daily_limit_mib,
+            dns=dns_arg,
             hops=a.hops,
             middle=a.middle,
             cover_name=a.cover_name,
+            rate=rate,
         )
         emit(
             a,
-            "Signed %d-hop chain written to %s (operator %s)." % (a.hops, a.out, operator[:16]),
+            "Signed %d-hop chain written to %s (operator %s), rate %s: %s; about %d GiB/month per hop at %g h/day."
+            % (a.hops, a.out, operator[:16], rate, why, rate_cost_gib(rate, a.hours_per_day), a.hours_per_day),
             operator_sha256=operator,
             out=str(a.out),
             hops=a.hops,
+            rate=rate,
+            rate_reason=why,
+            monthly_gib_per_hop=round(rate_cost_gib(rate, a.hours_per_day)),
         )
         return
     if a.action == "enroll":
@@ -1559,8 +1587,8 @@ def main():
         old = json.loads(read_private(a.state / "preferences.json")) if (a.state / "preferences.json").exists() else {}
         if a.mode:
             old["mode"] = a.mode
-        if a.defense:
-            old["defense"] = a.defense
+        # A "defense" key left by an older release is ignored: every chain runs the stream.
+        old.pop("defense", None)
         if a.daily_limit_mib is not None:
             if load_profile(a.state)["role"] != "client":
                 raise ValueError("the daily cap is client-only: servers store no byte counts")

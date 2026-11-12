@@ -11,7 +11,6 @@ provides it.
 import argparse
 import base64
 import json
-import os
 import sys
 import tempfile
 import unittest
@@ -24,12 +23,16 @@ import mesh  # noqa: E402
 
 
 def fake_secret_meta():
-    return (b"\x01" * 32, {
-        "schema": 1, "rp": keyguard.RP,
-        "credential": base64.b64encode(b"cred").decode(),
-        "salt": base64.b64encode(b"\x02" * 32).decode(),
-        "counter": 0,
-    })
+    return (
+        b"\x01" * 32,
+        {
+            "schema": 1,
+            "rp": keyguard.RP,
+            "credential": base64.b64encode(b"cred").decode(),
+            "salt": base64.b64encode(b"\x02" * 32).decode(),
+            "counter": 0,
+        },
+    )
 
 
 class MeshEnvelopeTests(unittest.TestCase):
@@ -43,9 +46,7 @@ class MeshEnvelopeTests(unittest.TestCase):
 
     def test_round_trip(self):
         env = keyguard.seal_bytes(self.secret, self.meta, keyguard.MESH_ROLE, self.cert, self.key)
-        self.assertEqual(
-            keyguard.open_bytes(self.secret, self.meta, keyguard.MESH_ROLE, self.cert, env),
-            self.key)
+        self.assertEqual(keyguard.open_bytes(self.secret, self.meta, keyguard.MESH_ROLE, self.cert, env), self.key)
 
     def test_wrong_role_is_rejected(self):
         env = keyguard.seal_bytes(self.secret, self.meta, keyguard.MESH_ROLE, self.cert, self.key)
@@ -65,11 +66,11 @@ class MeshEnvelopeTests(unittest.TestCase):
 
 class ParseLastJsonTests(unittest.TestCase):
     def test_extracts_the_last_json_line(self):
-        out = "Touch your hardware key when it flashes.\n{\"descriptor\": {\"a\": 1}}\n"
+        out = 'Touch your hardware key when it flashes.\n{"descriptor": {"a": 1}}\n'
         self.assertEqual(mesh.parse_last_json(out), {"descriptor": {"a": 1}})
 
     def test_logs_after_json_are_ignored_only_if_not_json(self):
-        out = "{\"a\": 1}\nnot json\n"
+        out = '{"a": 1}\nnot json\n'
         self.assertEqual(mesh.parse_last_json(out), {"a": 1})
 
     def test_no_json_line_raises(self):
@@ -144,8 +145,7 @@ class MembershipProofShapeTests(unittest.TestCase):
             "schema": 1,
             "member": "!abcd1234",
             "credential": "Y3JlZA==",
-            "assertion": {"authenticator_data": "AA==", "client_data": "AA==",
-                          "signature": "AA=="},
+            "assertion": {"authenticator_data": "AA==", "client_data": "AA==", "signature": "AA=="},
             "challenge_sha256": "00" * 32,
         }
         for field in ["member", "credential", "assertion", "challenge_sha256"]:

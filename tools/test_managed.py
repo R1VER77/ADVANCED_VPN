@@ -224,6 +224,7 @@ class EnrollmentTests(unittest.TestCase):
         text = avpnctl.first_hop_rules({"network": {"relay_endpoint": "192.0.2.1:443"}})
         self.assertIn('udp dport 41194 iifname != "lo" drop', text)
         self.assertIn("fib daddr type local udp dport 443 redirect to :8443", text)
+        self.assertIn("fib daddr type local tcp dport 443 redirect to :8443", text)
         self.assertIn('udp dport 4433 iifname != "avwg0" drop', text)
 
     def test_profiles_for_one_two_and_three_hops(self):
@@ -316,6 +317,43 @@ class EnrollmentTests(unittest.TestCase):
         bad = self._rewritten("t.avpn", lambda m, b: b + b"x" if m == "profile.json" else b)
         with self.assertRaises(ValueError):
             enroll(bad, self.ops / "operator.pub", self.dev("client"))
+
+    def test_mesh_bundles_and_dns_blocklist_enroll(self):
+        from managed_profile import (
+            mesh_add_hop,
+            mesh_admit,
+            mesh_bundles,
+            mesh_state_new,
+            mesh_verify_directory,
+            request,
+        )
+
+        request("client", self.dev("alice"), "none")
+        request("client", self.dev("bob"), "none")
+        mesh = mesh_state_new()
+        mesh_add_hop(mesh, "r1", "relay", "192.0.2.1:443", (self.dev("relay") / "request.json").read_bytes())
+        mesh_add_hop(mesh, "e1", "exit", "198.51.100.2:4444", (self.dev("exit") / "request.json").read_bytes())
+        mesh_admit(mesh, "alice", (self.dev("alice") / "request.json").read_bytes(), ["r1", "e1"])
+        mesh_admit(mesh, "bob", (self.dev("bob") / "request.json").read_bytes(), ["r1", "e1"])
+        out = self.root / "mesh-ops"
+        mesh_bundles(
+            out,
+            mesh,
+            self.signer,
+            dns=dict(upstream="9.9.9.9:853", server_name="dns.quad9.net", blocklist=b"ads.example.com\n"),
+        )
+        directory = mesh_verify_directory(out / "directory.avpnd", out / "operator.pub")
+        self.assertEqual(directory["hops_len"], 2)
+        p_relay = enroll(out / "r1.avpn", out / "operator.pub", self.dev("relay"))
+        self.assertEqual(len(p_relay["carrier"]["members"]), 2)
+        self.assertEqual(len((self.dev("relay") / "wireguard-key.bin").read_bytes()), 32 + 32 * 2)
+        p_exit = enroll(out / "e1.avpn", out / "operator.pub", self.dev("exit"))
+        self.assertEqual(p_exit["dns"]["blocklist"], "dns-blocklist.txt")
+        self.assertEqual((self.dev("exit") / "dns-blocklist.txt").read_bytes(), b"ads.example.com\n")
+        p_alice = enroll(out / "alice.avpn", out / "operator.pub", self.dev("alice"))
+        self.assertEqual(p_alice["core"]["local_ip"], "10.77.0.2")
+        p_bob = enroll(out / "bob.avpn", out / "operator.pub", self.dev("bob"))
+        self.assertEqual(p_bob["core"]["local_ip"], "10.77.0.3")
 
     def test_zip_traversal_and_unsigned_extras_rejected(self):
         bad = self._rewritten("z.avpn", add=("../escape", b"bad"))
@@ -427,14 +465,82 @@ class EnrollmentTests(unittest.TestCase):
         binary = Path(__file__).resolve().parents[1] / "target/release/advanced-vpn-wireguard"
         try:
             args = [binary, "--config", cfg, "--check", "--key-fd", "wireguard=" + str(fd)]
+            # The default chain (what `avpn init` signs) is what the carrier accepts.
+            self.assertEqual((w["defense"], w["rate"]), ("strong", "metered"))
             r = subprocess.run(args, pass_fds=[fd], capture_output=True, timeout=5)
             self.assertEqual(r.returncode, 0, r.stderr)
-            w["defense"] = "off"
-            cfg.write_text(json.dumps(w))
-            r = subprocess.run(args, pass_fds=[fd], capture_output=True, timeout=5)
-            self.assertNotEqual(r.returncode, 0)
+            self.assertEqual(json.loads(r.stdout)["rate"], "metered")
+            # Every signed class runs; a bundle signed before rate classes runs metered.
+            from managed_profile import RATE_CLASSES
+
+            for rate in [*RATE_CLASSES, None]:
+                v = dict(w, rate=rate) if rate else {k: x for k, x in w.items() if k != "rate"}
+                cfg.write_text(json.dumps(v))
+                r = subprocess.run(args, pass_fds=[fd], capture_output=True, timeout=5)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertEqual(json.loads(r.stdout)["rate"], rate or "metered")
+            for field, value in [("defense", "off"), ("defense", "balanced"), ("rate", "turbo"), ("rate", "")]:
+                cfg.write_text(json.dumps(dict(w, **{field: value})))
+                r = subprocess.run(args, pass_fds=[fd], capture_output=True, timeout=5)
+                self.assertNotEqual(r.returncode, 0, (field, value))
         finally:
             os.close(fd)
+
+
+class RateClassTests(unittest.TestCase):
+    def test_classes_mirror_the_carrier(self):
+        from managed_profile import RATE_CLASSES
+
+        src = (Path(__file__).resolve().parents[1] / "src/daita.rs").read_text()
+        for name in RATE_CLASSES:
+            self.assertIn('RateClass::%s => "%s"' % (name.capitalize(), name), src)
+        # packets/s = slots per tick / tick; the Rust table is the source of truth.
+        self.assertEqual(RATE_CLASSES, {"metered": 50, "standard": 500, "fast": 4000, "line": 16000})
+
+    def test_auto_picks_the_fastest_class_the_allowance_fits(self):
+        from managed_profile import choose_rate
+
+        self.assertEqual(choose_rate("auto", 100, 8)[0], "metered")  # an AWS free-plan hop
+        self.assertEqual(choose_rate("auto", 10240, 8)[0], "fast")  # OCI Always Free only
+        self.assertEqual(choose_rate("auto", 10240, 1)[0], "line")
+        self.assertEqual(choose_rate("auto", None, 8)[0], "metered")  # nothing known: slowest
+
+    def test_a_class_over_the_allowance_needs_explicit_acceptance(self):
+        from managed_profile import choose_rate
+
+        with self.assertRaises(ValueError):
+            choose_rate("fast", 100, 8)
+        with self.assertRaises(ValueError):
+            choose_rate("auto", 100, 24)  # even metered is over
+        self.assertEqual(choose_rate("fast", 100, 8, accept_cost=True)[0], "fast")
+        self.assertEqual(choose_rate("auto", 100, 24, accept_cost=True)[0], "metered")
+        for bad in [("turbo", None, 8), ("auto", 0, 8), ("auto", 100, 0), ("auto", 100, 25)]:
+            with self.assertRaises(ValueError):
+                choose_rate(*bad)
+
+    def test_only_the_stream_is_signed_and_old_balanced_chains_are_refused(self):
+        from managed_profile import BALANCED_REMOVED, SoftwareOperator, profile_validate, require_current
+
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / "dev").mkdir()
+            reqs = _requests(root)
+            signer = SoftwareOperator(root / "opkeys")
+            with self.assertRaises(ValueError):
+                create(root / "a", reqs, "192.0.2.1:41194", "198.51.100.2:4444", signer, defense="balanced")
+            with self.assertRaises(ValueError):
+                create(root / "b", reqs, "192.0.2.1:41194", "198.51.100.2:4444", signer, rate="turbo")
+            create(root / "c", reqs, "192.0.2.1:41194", "198.51.100.2:4444", signer, rate="fast")
+            client = json.loads(zipfile.ZipFile(root / "c" / "client.avpn").read("profile.json"))
+            self.assertEqual(client["carrier"]["rate"], "fast")
+            require_current(profile_validate(client))
+            # A profile signed by an older release with balanced still loads (reset,
+            # guard and info work) but connect and enroll refuse it with the fix.
+            client["carrier"]["defense"] = "balanced"
+            profile_validate(client)
+            with self.assertRaises(ValueError) as e:
+                require_current(client)
+            self.assertEqual(str(e.exception), BALANCED_REMOVED)
 
 
 class HardwareVerificationTests(unittest.TestCase):

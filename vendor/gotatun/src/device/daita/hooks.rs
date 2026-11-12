@@ -91,6 +91,7 @@ impl DaitaHooks {
             max_delay_frac,
             max_delayed_packets,
             min_delay_capacity,
+            strict,
         } = daita_settings;
         tracing::info!("Initializing DAITA");
         tracing::debug!("Using maybenot machines: {maybenot_machines:?}");
@@ -101,7 +102,7 @@ impl DaitaHooks {
         let daita_overhead = DaitaOverhead::default();
 
         let (delay_queue_tx, delay_queue_rx) = mpsc::channel(max_delayed_packets.into());
-        let delay_watcher = DelayWatcher::new(delay_queue_tx, min_delay_capacity);
+        let delay_watcher = DelayWatcher::new(delay_queue_tx, min_delay_capacity, strict);
 
         let maybenot = maybenot::Framework::new(
             maybenot_machines,
@@ -121,6 +122,7 @@ impl DaitaHooks {
             .mtu(mtu.clone())
             .tx_decoy_packet_bytes(daita_overhead.tx_decoy_packet_bytes.clone())
             .event_tx(event_tx.downgrade())
+            .strict(strict)
             .build();
 
         let actions_task = Task::spawn(
@@ -129,7 +131,7 @@ impl DaitaHooks {
         );
         let weak_event_tx = event_tx.downgrade();
         let events_task = Task::spawn("DaitaHooks::handle_events", async move {
-            handle_events(maybenot, event_rx, weak_event_tx, action_tx).await;
+            handle_events(maybenot, event_rx, weak_event_tx, action_tx, strict).await;
         });
 
         Ok(DaitaHooks {

@@ -1,7 +1,7 @@
 # AVPN/Mesh — Design
 
 **A community-owned, post-quantum, per-hop-defended WireGuard mesh VPN.**
-Evolution of ADVANCED_VPN 0.6.0. Status: core scaffolding landed (see
+Evolution of ADVANCED_VPN 0.7.0. Status: core scaffolding and multi-member data-plane fan-in landed (see
 *Implementation status* at the end).
 
 ## 1. Summary
@@ -18,10 +18,23 @@ WireGuard/GotaTun carrier, and adds:
    re-shape timing with fresh randomness at each relay, backed by
    bidirectional constant-rate cover. One security posture: **strong**. The
    balanced profile is removed.
-2. **A mesh social layer** adapted from Meshtastic: signed gossiped node
+2. **An FCMP++-inspired full-mesh anonymity set** — rather than single-tenant
+   isolation or Tor's unpadded circuit subsets, multi-member relay fan-in
+   (`members[]` peer tables) combined with always-on constant-rate cover streams
+   across every link and unlinkable blind/zero-knowledge membership proofs makes
+   any outbound request at an exit equally likely to have originated from **any
+   active participant in the entire mesh** (`1 / N` full-membership indistinguishability).
+3. **A mesh social layer** adapted from Meshtastic: signed gossiped node
    descriptors, a public relay pool plus invitation-only private groups,
    key-pinned pseudonymous identity, and a contribution economy with no
    accounts, payments, or company.
+4. **Multi-browser TLS/QUIC fingerprint parity & continuous red-teaming** —
+   matching the user's actual browser (`chrome`, `firefox`, `safari`, `brave`)
+   on the outer HTTP/3 and TLS 1.3 cloak so DPI cannot detect browser-vs-tunnel
+   JA4 mismatches, paired with continuous adversarial testing via
+   [RedteamAgent](https://github.com/NeoTheCapt/RedteamAgent),
+   [Redamon](https://github.com/samugit83/redamon), and
+   [PyRIT](https://github.com/azure/PyRIT).
 
 ## 2. Membership: your hardware device is your account
 
@@ -145,12 +158,17 @@ Why per-hop is necessary (documented attacks):
    re-shaping destroys them.
 
 The stack (`src/daita.rs`), every hop, both endpoints, independently seeded:
-netflow collapse, re-armed FRONT, Tamaraw with the fixed stop machine, and
-**bidirectional constant-rate cover** (self-sustaining on its own decoy clock,
-unbudgeted at machine level — resource limits belong to the node's controller
-and fail closed at the carrier byte budget, never by weakening machines).
-Blocking stays enabled: padding-only defenses cap out at ≥93% against
-RF-class attacks.
+a **bidirectional constant-rate packet stream** built from two Maybenot
+machines (`stream_grid` + self-sustaining `cover`) running under GotaTun's
+strict-blocking scheduler (`strict: true`, `Replace: true`). On every clock
+tick, each slot either releases one queued real packet or emits a 1380-byte
+decoy packet, so idle and busy intervals have the same wire packet rate. Four
+rate classes share this exact invariant and differ only in tick interval and
+staggered slot count (`metered` = 20 ms × 1 slot / 50 pps, `standard` = 2 ms ×
+1 slot / 500 pps, `fast` = 2 ms × 8 staggered slots / 4,000 pps, `line` = 2 ms ×
+32 staggered slots / 16,000 pps). Resource limits belong to the node's
+controller and fail closed at the carrier byte budget, never by weakening
+machines.
 
 ### Our measurements (tools/mesh_wf_sim.py)
 
@@ -192,24 +210,31 @@ vantage (§8).
 
 ### Affording cover on free tiers
 
-The tunable is the node's **daily cover budget** (default 2 GiB/day, fits OCI
-Always Free with relay headroom), set by the operator in the descriptor and
-enforced by the controller — never a user-facing security dial. Idle links
-run randomized cover-activity windows so real sessions hide among scheduled
-ones; cover intensity is front-loaded (the trace front is the most
-informative region). The CLI shows the monthly egress math and refuses
-configurations that would exhaust a free tier.
+The operator chooses a rate class (`--rate metered|standard|fast|line`, default
+`metered`) and an optional fail-closed daily byte cap (`--daily-limit-mib`). At
+`metered` (50 pps per direction = ~0.55 Mbit/s wire rate, ~5.7 GiB/day per
+direction, ~342 GiB/month bidirectional), a continuous 24/7 stream fits well
+inside Oracle Cloud Always Free (~10 TiB/month egress) with ample relay
+headroom. On tighter monthly caps (such as the AWS 100 GiB/month free tier),
+operators pair `metered` with `--daily-limit-mib` or connect on demand. On
+unmetered VPS or fiber links, `standard` (~4.5 Mbit/s), `fast` (~33 Mbit/s),
+and `line` (~131 Mbit/s) raise application throughput by increasing the
+constant wire rate rather than weakening the constant-rate invariant.
 
 ## 8. WF test program (acceptance gates)
 
-Extending tools/daita_lab.py and tools/mesh_wf_sim.py: 100+ sites plus
-open-world background; DF/Tik-Tok/RF attackers trained on defended traces;
-measurements at every vantage (client-side, each inter-hop link, exit-side,
-cross-link); DeepCorr/DeepCoFFEA-style flow confirmation and a
-watermark-injection test. Gates: closed-world ≤ chance + 10 pp at every
-single vantage; cross-link TPR ≤ 1% @ 1e-3 FPR; watermark detection ≤ 5%;
-default cover budget ≤ 2 GiB/day per contributed node. Results publish to
-docs/evidence/ as before.
+Extending tools/daita_lab.py and tools/mesh_wf_sim.py: 30-site namespace lab
+(`tools/daita_lab.py --sites 30 --loads 10`, chance = 3.3%) and 100-site
+exit-vantage simulation (`tools/mesh_wf_sim.py --sites 100`, chance = 1.0%);
+measurements at the camouflaged carrier and inner link; fixed-window and
+oracle-cut evaluations. In the 30-site namespace lab at the fixed 6 s window,
+`metered` scores **3.3%** and `fast` scores **1.7%** (at or below 1/30 random
+chance) on the carrier versus 27.0–74.7% on the unshaped inner link
+([docs/evidence/DAITA_LAB.json](evidence/DAITA_LAB.json),
+[docs/evidence/RATE_CLASSES.json](evidence/RATE_CLASSES.json)). Remaining
+Phase 2 lab extensions: 100+ real browser traces with open-world background,
+DF/Tik-Tok/RF deep classifiers, DeepCorr/DeepCoFFEA cross-link flow
+confirmation, and active watermark injection.
 
 ## 9. Trust in a stranger-run mesh
 
@@ -239,7 +264,10 @@ its own VM; exit operators' legal exposure; gossip metadata. Stated in
 
 | Component | Where | Status |
 |---|---|---|
-| Strong-only machine set + bidirectional cover, per-hop independent seeds | `src/daita.rs`, `src/bin/advanced-vpn-wireguard.rs` | landed; `balanced` bundles refused |
+| Constant-rate bidirectional stream (`stream_grid` + `cover`) + 4 rate classes (`metered`/`standard`/`fast`/`line`) with staggered multi-slot timers | `src/daita.rs`, `vendor/gotatun/src/device/daita/`, `src/bin/advanced-vpn-wireguard.rs` | landed; `balanced` bundles refused; `<1%` idle-vs-busy wire rate delta |
+| Multi-member data-plane fan-in (`members[]` peer tables across cloak, WG, inner QUIC, and DNS) | `src/config.rs`, `src/tls.rs`, `src/run.rs`, `src/cloak.rs`, `src/bin/advanced-vpn-cloak.rs`, `src/bin/advanced-vpn-wireguard.rs`, `tools/managed_profile.py` | landed (`mesh_bundles` issues N independent client bundles sharing one relay/exit peer table) |
+| Censorship ladder: QUIC/HTTP/3 cloak + automatic TCP/TLS 1.3 fallback + realistic HTML5 decoy origin | `src/cloak.rs`, `src/bin/advanced-vpn-cloak.rs`, `tools/avpnctl.py`, `tools/cloud.py` | landed (UDP 443 primary, automatic TCP 443 fallback in 2 s when UDP is blocked, 10 s QUIC recovery probe, `200 OK` HTML5 decoy page) |
+| Signed local DNS blocklist (`NXDOMAIN` before upstream DoT) | `src/bin/advanced-vpn-dns.rs`, `tools/managed_profile.py`, `tools/avpnctl.py` | landed (`avpn init --dns-blocklist FILE`) |
 | Member/node identity (hardware-anchored) | `src/mesh/identity.rs` | landed |
 | Descriptor schema + validation | `src/mesh/descriptor.rs`, `tools/mesh.py` | landed |
 | Directory + diversity chain selection | `src/mesh/directory.rs`, `tools/mesh.py` | landed |
@@ -251,7 +279,7 @@ its own VM; exit operators' legal exposure; gossip metadata. Stated in
 | Descriptor signing via hardware unseal | `tools/keyguard.py`, `tools/mesh.py` | landed: `avpn mesh publish` signs through the sealed envelope (one PIN + touch per publish), self-checks the signed descriptor, and gossips it; unsigned publishing stays refused |
 | Ephemeral defense database (DAITA-v2-style) | `tools/defense_db.py`, `src/daita.rs` (`DefenseDb`), carrier `defense_db` | landed: rotating randomized strong-posture parameterizations, fail-closed validation mirrored in Rust and Python; no profile in force refuses the run |
 | Inter-relay chaff links | carrier `cover: "always-on"` | landed: 5 s keepalive on server roles starts the self-sustaining cover machine within seconds of tunnel setup, so idle relay↔relay links carry the same constant-rate stream as busy ones |
-| 100-site WF simulation run | `docs/evidence/MESH_WF_SIM.json` | landed (1.4–2.2% vs 1% chance for the shipped posture); real-trace DF/Tik-Tok/RF gates remain Phase 1 lab work (§8) |
+| 100-site WF simulation + 30-site namespace WF lab | `docs/evidence/MESH_WF_SIM.json`, `docs/evidence/DAITA_LAB.json`, `docs/evidence/RATE_CLASSES.json` | landed (1.4–2.2% vs 1% chance in 100-site exit-vantage sim; 3.3% vs 3.3% chance at fixed 6 s window in 30-site namespace lab) |
 
 Non-goals: no token sale/cryptocurrency, no company, no GUI in v1, no mobile
 clients in v1, no exit-node requirement for membership, no weakening of the

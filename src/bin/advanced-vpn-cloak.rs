@@ -105,23 +105,42 @@ async fn work() -> Result<()> {
     let c: Config = serde_json::from_slice(&private_read(&a.config, 16384)?)?;
     validate(&c)?;
     let fds = fds(&a.key_fd)?;
-    let token: [u8; cloak::TOKEN_LEN] =
-        sealed_fd(*fds.get("token").context("token key required")?, 32)?
-            .try_into()
-            .map_err(|_| anyhow::anyhow!("the token key is 32 bytes"))?;
+    // The token descriptor holds one 32-byte proof key per admitted member (exactly
+    // one on a client and on a single-chain server, up to 256 on a mesh server).
+    let raw = sealed_fd(*fds.get("token").context("token key required")?, 32 * 256)?;
+    ensure!(
+        !raw.is_empty() && raw.len() % cloak::TOKEN_LEN == 0,
+        "token keys are 32 bytes each"
+    );
+    let tokens: Vec<[u8; cloak::TOKEN_LEN]> = raw
+        .chunks_exact(cloak::TOKEN_LEN)
+        .map(|t| t.try_into().expect("chunk length"))
+        .collect();
     let stats = Arc::new(cloak::Stats::default());
     let task = if c.role == "server" {
         let cert = private_read(c.cert.as_ref().unwrap(), 16384)?;
         let key = sealed_fd(*fds.get("cloak").context("server key required")?, 4096)?;
-        let config = cloak::server_config(cert, key)?;
+        let config = cloak::server_config(cert.clone(), key.clone())?;
+        let tls_config = cloak::tls_server_config(cert, key)?;
         if a.check {
             println!("{{\"configuration_valid\":true,\"role\":\"server\"}}");
             return Ok(());
         }
         let endpoint = quinn::Endpoint::server(config, c.listen)?;
-        tokio::spawn(cloak::serve(endpoint, c.wireguard, token, stats.clone()))
+        let tcp_listener = tokio::net::TcpListener::bind(c.listen).await?;
+        let acceptor = tokio_rustls::TlsAcceptor::from(tls_config);
+        let (wg, tokens_tcp, stats_quic, stats_tcp) =
+            (c.wireguard, tokens.clone(), stats.clone(), stats.clone());
+        tokio::spawn(async move {
+            tokio::select! {
+                r = cloak::serve(endpoint, c.wireguard, tokens, stats_quic) => r,
+                r = cloak::serve_tcp(tcp_listener, acceptor, wg, tokens_tcp, stats_tcp) => r,
+            }
+        })
     } else {
         ensure!(!fds.contains_key("cloak"), "a client has no server key");
+        ensure!(tokens.len() == 1, "a client proves exactly one cloak key");
+        let token = tokens[0];
         let pin: [u8; 32] = hex::decode(c.server_spki_sha256.as_deref().unwrap())?
             .try_into()
             .map_err(|_| anyhow::anyhow!("bad pin"))?;

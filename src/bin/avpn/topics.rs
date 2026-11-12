@@ -77,7 +77,7 @@ pub const TOPICS: &[Topic] = &[
     },
     Topic {
         name: "preferences",
-        summary: "mode, defense, daily cap and upstream entry",
+        summary: "mode, daily cap and upstream entry",
         body: include_str!("../../../docs/cli/preferences.md"),
     },
     Topic {

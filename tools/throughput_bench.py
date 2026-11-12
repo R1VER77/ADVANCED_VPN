@@ -31,7 +31,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
-from managed_profile import lab_setup, CHAINS  # noqa: E402
+from managed_profile import lab_setup, CHAINS, RATE_CLASSES  # noqa: E402
 from avpnctl import lab_guard, identity_of, runtime_dir  # noqa: E402
 
 CLIENT_IP = "192.0.2.2"
@@ -77,6 +77,67 @@ while True:
     packets+=1;srcs.add(socket.inet_ntoa(b[26:30]))
     if marker in b:seen=True
 """
+# Shape observer on the client <-> first-hop link (what the client's ISP sees): the
+# wall time, IPv4 length and direction of every UDP packet, as packed records.
+SHAPE = r"""
+import signal,socket,struct,sys
+dev,out=sys.argv[1],sys.argv[2]
+s=socket.socket(socket.AF_PACKET,socket.SOCK_RAW,socket.htons(3));s.bind((dev,0));s.settimeout(.2)
+s.setsockopt(socket.SOL_SOCKET,socket.SO_RCVBUF,1<<24)
+import time
+buf=bytearray();n=0
+def dump(*_):
+    open(out,'wb').write(bytes(buf));sys.exit(0)
+signal.signal(signal.SIGTERM,dump)
+while True:
+    try:b,addr=s.recvfrom(128)
+    except socket.timeout:continue
+    if len(b)<34 or b[12:14]!=b'\x08\x00' or b[23]!=17:continue
+    if n<4000000:buf+=struct.pack('<dHB',time.time(),int.from_bytes(b[16:18],'big'),addr[2]==socket.PACKET_OUTGOING);n+=1
+"""
+
+
+# The cloak's UDP payload per wire packet (constant cells): 1448-byte IPv4 packets.
+WIRE_SEGMENT = 1420
+
+
+def shape_window(records, a, b, outgoing):
+    """Wire shape in [a, b): packets/s, the 100 ms bins' spread, and the IPv4 sizes seen."""
+    import collections
+
+    # GSO hands the observer up to 64 KiB super-frames on veth: count wire segments
+    # (one per WIRE_SEGMENT bytes of UDP payload), and sizes per segment.
+    window = [(t, n) for t, n, o in records if a <= t < b and o == outgoing]
+    times = [t for t, n in window for _ in range(max(1, round((n - 28) / WIRE_SEGMENT)))]
+    sizes = collections.Counter(
+        28 + (n - 28) // max(1, round((n - 28) / WIRE_SEGMENT))
+        for t, n in window
+        for _ in range(max(1, round((n - 28) / WIRE_SEGMENT)))
+    )
+    bins = collections.Counter(int((t - a) * 10) for t in times)
+    counts = [bins.get(i, 0) for i in range(int((b - a) * 10))]
+    return dict(
+        seconds=round(b - a, 2),
+        packets_per_second=round(len(times) / (b - a), 1),
+        bin_100ms_min=min(counts) if counts else 0,
+        bin_100ms_max=max(counts) if counts else 0,
+        sizes=dict(sizes.most_common(4)),
+    )
+
+
+def shape_report(path, marks):
+    """Idle vs transfer shape in both directions of the first link."""
+    import struct
+
+    raw = path.read_bytes()
+    records = [struct.unpack_from("<dHB", raw, i) for i in range(0, len(raw) - len(raw) % 11, 11)]
+    out = {}
+    for direction, outgoing in [("client_to_hop", 0), ("hop_to_client", 1)]:
+        idle = shape_window(records, *marks["idle"], outgoing)
+        busy = shape_window(records, *marks["transfer"], outgoing)
+        drift = abs(busy["packets_per_second"] - idle["packets_per_second"]) / max(idle["packets_per_second"], 1e-9)
+        out[direction] = dict(idle=idle, transfer=busy, rate_change=round(drift, 4))
+    return out
 
 
 def run(*args, check=True, timeout=15):
@@ -143,7 +204,14 @@ def main():
         choices=[1, 2, 3],
         help="then re-enroll the same devices into this chain (enroll --replace) and test again",
     )
-    p.add_argument("--defense", choices=["balanced", "strong"], default="balanced")
+    p.add_argument("--rate", choices=list(RATE_CLASSES), default="metered", help="the chain's signed rate class")
+    p.add_argument(
+        "--shape-idle",
+        type=float,
+        default=0,
+        help="record the first link's shape: this many idle seconds, then the transfer (0: off)",
+    )
+    p.add_argument("--max-rate-change", type=float, help="fail if the transfer changes the wire rate by more than this")
     p.add_argument("--rate-bytes", type=int)
     p.add_argument("--rate-packets", type=int)
     p.add_argument("--mode", choices=["tunnel", "carrier"], default="tunnel")
@@ -167,7 +235,7 @@ def main():
         ep["exit"],
         destinations=["203.0.113.0/30"],
         rates=rates or None,
-        defense=a.defense,
+        rate=a.rate,
         hops=a.hops,
         middle=ep["middle"],
         dns=lab_dns,
@@ -292,7 +360,7 @@ def main():
                     SoftwareOperator(state / "operator-keys"),
                     destinations=["203.0.113.0/30"],
                     rates=rates or None,
-                    defense=a.defense,
+                    rate=a.rate,
                     hops=hops,
                     middle=ep["middle"],
                     dns=lab_dns,
@@ -326,6 +394,14 @@ def main():
                 )
                 for s in chain
             ]
+            if a.shape_idle:
+                shape_file = state / ("shape-%d.bin" % phase)
+                observers.append(
+                    (
+                        "shape",
+                        spawn("av-" + chain[0], [sys.executable, "-c", SHAPE, ingress[chain[0]], shape_file], "shape"),
+                    )
+                )
             # Mullvad-style: servers must write nothing persistent while carrying traffic.
             before_disk = {role: disk_snapshot(state / role) for role in ["client"] + chain}
             managers = [manager(s) for s in reversed(chain)]
@@ -345,6 +421,12 @@ def main():
             else:
                 raise RuntimeError("tunnel did not come up within 90 s; last app error: " + probe.stderr[-800:])
             online_seconds = round(time.monotonic() - started, 2)
+            marks = {}
+            if a.shape_idle:
+                time.sleep(2)  # let the stream settle after the readiness pings
+                marks["idle"] = (time.time(), time.time() + a.shape_idle)
+                time.sleep(a.shape_idle)
+            started_transfer = time.time()
             if a.mode == "carrier":
                 sink = spawn("av-" + chain[0], [sys.executable, "-c", SINK, "10.78.0.1", 5300], "sink-carrier")
                 time.sleep(0.5)
@@ -369,11 +451,17 @@ def main():
                     [sys.executable, "-c", SEND, "203.0.113.2", 5300, a.mib * 1048576, marker], timeout=300
                 ).stdout
             r = json.loads(out)
+            # The sender's clock ends after the sink's digest; trim 0.5 s at both ends.
+            marks["transfer"] = (started_transfer + 0.5, time.time() - 0.5)
             audit = {}
             for server, proc in observers:
                 proc.send_signal(signal.SIGTERM)
                 proc.wait(timeout=5)
+                if server == "shape":
+                    continue
                 audit[server] = json.loads((state / ("observe-%d-%s.json" % (phase, server))).read_text())
+            if a.shape_idle:
+                r["shape"] = shape_report(shape_file, marks)
             changed = {
                 role: sorted(k for k, v in disk_snapshot(state / role).items() if before_disk[role].get(k) != v)
                 for role in ["client"] + chain
@@ -400,7 +488,7 @@ def main():
             r.update(
                 hops=hops,
                 mode=a.mode,
-                defense=a.defense,
+                rate=a.rate,
                 rates=rates or "profile default",
                 online_seconds=online_seconds,
                 onion=onion,
@@ -423,6 +511,8 @@ def main():
                 or set(disk["client_files_written"]) - {"network-before.json"}
             ):
                 raise SystemExit("persistent data written during a session: " + json.dumps(disk))
+            if a.max_rate_change is not None and any(v["rate_change"] > a.max_rate_change for v in r["shape"].values()):
+                raise SystemExit("the transfer changed the wire rate: " + json.dumps(r["shape"]))
             if a.min_mbit is not None and r["mbit_s"] < a.min_mbit:
                 raise SystemExit("throughput %.2f Mbit/s below floor %.1f" % (r["mbit_s"], a.min_mbit))
             if phase + 1 < len(phases):

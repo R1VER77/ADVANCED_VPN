@@ -1,6 +1,6 @@
 # avpn
 
-`avpn` is the command-line front end of ADVANCED_VPN, a single-user, self-hosted,
+`avpn` is the command-line front end of ADVANCED_VPN, a self-hosted,
 post-quantum VPN. Run `avpn` with no arguments in a terminal for the interactive
 view, or give it a command.
 
@@ -25,7 +25,7 @@ Everyday:
 - `doctor`: self-checks; `--check-egress` shows the address your first hop sees
 - `connect` / `disconnect`: start or stop the VPN service
 - `run -- CMD`: run one program inside the protected namespace
-- `preferences`: mode, defense, daily cap, upstream entry
+- `preferences`: mode, daily cap, upstream entry
 - `unlock`: answer the Nitrokey PIN prompt after boot
 
 Setup:
@@ -34,6 +34,7 @@ Setup:
 - `init`: operator only; sign a chain from the requests
 - `enroll`: install this device's signed bundle
 - `cloud`: find free servers, create or record them, and join them into one chain (`cloud suggest`, `cloud chain`)
+- `mesh`: publish a node descriptor, verify the volunteer mesh directory, or select a multi-operator chain (`mesh descriptor`, `mesh directory`, `mesh select`)
 
 Maintenance:
 

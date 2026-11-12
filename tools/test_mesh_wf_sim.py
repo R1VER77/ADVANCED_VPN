@@ -16,6 +16,7 @@ class TestWfSim(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         import mesh_wf_sim
+
         cls.out = mesh_wf_sim.run(n_sites=5, n_traces=24, seed=7)
 
     def acc(self, name):

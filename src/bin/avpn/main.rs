@@ -92,7 +92,7 @@ enum Cmd {
     /// Verify and install this device's bundle.
     #[command(disable_help_flag = true)]
     Enroll(Rest),
-    /// Mode, defense, daily cap and upstream entry.
+    /// Mode, daily cap and upstream entry.
     #[command(disable_help_flag = true)]
     Preferences(Rest),
     /// Rotate session certificates now.

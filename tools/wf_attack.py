@@ -84,7 +84,7 @@ def attack(run, tail, fixed):
     run = Path(run).resolve()
     meta = json.loads((run / "phases.json").read_text())
     loads = [p for p in meta["phases"] if p.get("site")]
-    res = dict(defense=meta["defense"], loads=len(loads), sites=len({p["site"] for p in loads}),
+    res = dict(rate=meta.get("rate", meta.get("defense")), loads=len(loads), sites=len({p["site"] for p in loads}),
                window="fixed %g s" % fixed if fixed else "true end + %g s" % tail)  # fmt: skip
     for name, pcap in (("inner link (no DAITA)", "inner_link.pcap"), ("carrier (DAITA)", "client_link.pcap")):
         pk = packets(run, pcap)

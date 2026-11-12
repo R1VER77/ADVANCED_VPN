@@ -20,12 +20,17 @@ pub async fn handle_events<M, R>(
     mut event_rx: mpsc::UnboundedReceiver<TriggerEvent>,
     event_tx: mpsc::WeakUnboundedSender<TriggerEvent>,
     action_tx: mpsc::UnboundedSender<(types::Action, MachineId)>,
+    strict: bool,
 ) -> Option<()>
 where
     M: AsRef<[Machine]> + Send + 'static,
     R: RngCore,
 {
-    let mut machine_timers = MachineTimers::new(maybenot.num_machines() * 2);
+    let mut machine_timers = if strict {
+        MachineTimers::with_grid(maybenot.num_machines() * 2, maybenot.num_machines())
+    } else {
+        MachineTimers::new(maybenot.num_machines() * 2)
+    };
     let mut event_buf = Vec::new();
 
     loop {
