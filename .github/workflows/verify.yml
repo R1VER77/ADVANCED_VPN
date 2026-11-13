@@ -21,7 +21,7 @@ jobs:
           curl -fsSL -o /tmp/cpython.tgz https://github.com/astral-sh/python-build-standalone/releases/download/20260602/cpython-3.13.13%2B20260602-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz
           echo "c249d2b96af6912c3910f234b96aa8d20d30e8b0c46d0584fa956d7a77036ea9  /tmp/cpython.tgz" | sha256sum -c -
           tar -xzf /tmp/cpython.tgz -C "$RUNNER_TEMP"
-          ln -s python3 "$RUNNER_TEMP/python/bin/python"
+          [ -e "$RUNNER_TEMP/python/bin/python" ] || ln -s python3 "$RUNNER_TEMP/python/bin/python"
           echo "$RUNNER_TEMP/python/bin" >> "$GITHUB_PATH"
           "$RUNNER_TEMP/python/bin/python" -c "import ssl; assert ssl.OPENSSL_VERSION_INFO >= (3, 5), ssl.OPENSSL_VERSION; print(ssl.OPENSSL_VERSION)"
       - name: Install namespace test dependencies
