@@ -259,9 +259,33 @@ who controls every hop, that is the better trade, with three limits stated plain
   or anyone watching the exit learns that this one exit's visitor is the same person each
   time. A shared commercial exit hides you among its users; yours cannot. The mesh
   (`docs/MESH_DESIGN.md`) is the route to a shared exit run by others.
+- **Paying for the servers is part of your identity.** Free tiers and most clouds want a
+  card in your name, which ties the servers to you whatever runs on them. If that link is
+  the danger, rent from a host that takes Monero or cash, from a network you do not
+  otherwise use, and expect to pay for what the free tiers would have given you.
 - **Legal spheres limit one order's reach, not linkage.** Putting the entry and the exit
   in different jurisdictions means no single court order can compel both, but both remain
   attributable to the account holder.
+
+## Your browser
+
+The tunnel hides your address; it does not hide your browser. A site's own scripts can
+read your fonts, screen, language and time zone through any tunnel, and such a
+fingerprint can recognise you across visits and across exits. What helps is a browser
+whose fingerprint many other people share and that is coherent with itself: Mullvad
+Browser, Tor Browser used without Tor, or Firefox with `privacy.resistFingerprinting`,
+all of which report one common set of values (a UTC clock, standard fonts and window
+sizes, English) to every site. Changing the values on every request does not help: a
+fingerprint that never matches anyone else's is a mark of its own.
+
+- **One identity, one browser profile.** For separate identities, use separate
+  profiles, each started through `avpn run`, and never sign in to the same account
+  from two of them.
+- **The mix lane's fetches all look alike.** The fetch service sends the same short
+  headers for everyone (one User-Agent, `Accept: */*`, gzip only), whatever your browser
+  would have sent, so the site sees one kind of visitor from the service node. If you
+  open what it fetched in a browser, that browser's own scripts and fingerprint apply
+  as above.
 
 ## Deliberately not used
 

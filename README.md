@@ -294,7 +294,7 @@ Like Mullvad, servers are built to hold nothing that could be handed over:
 
 In installed Debian 13 VMs, after real traffic, the relay and exit had **written no files** under `/etc/advanced-vpn` and had **no journal entries** for the VPN units. The client keeps only its own preferences and a pre-VPN network snapshot, which it needs to restore its routes after a reboot.
 
-**Zero-knowledge proofs aren't used in the single-operator design, and nothing there needs them.** Mullvad and Nym use ZK credentials to separate a paying account from what that account does on someone else's servers. With one person owning every device and every hop, there's no account or payment to unlink. AVPN/Mesh is the point where that changes: once strangers use each other's servers, usage must be decoupled from identity, so mesh contribution credits are blind-signed VOPRF tokens (see [docs/MESH_DESIGN.md](docs/MESH_DESIGN.md)) — not accounts, and still no ledger.
+**Zero-knowledge proofs aren't used in the single-operator design, and nothing there needs them.** Mullvad and Nym use ZK credentials to separate a paying account from what that account does on someone else's servers. With one person owning every device and every hop, there's no account or payment to unlink. AVPN/Mesh is the point where that changes: once strangers use each other's servers, usage must be decoupled from identity, so mesh contribution credits are blind-signed tokens today (Chaum blind RSA, see [docs/MESH_DESIGN.md](docs/MESH_DESIGN.md)) — not accounts, and still no ledger — and the v1.0 design replaces them with zero-knowledge membership proofs as hash-based STARKs, post-quantum and measured on a prototype ([docs/ZK_MEMBERSHIP_DESIGN.md](docs/ZK_MEMBERSHIP_DESIGN.md)).
 
 ## Key exposure
 

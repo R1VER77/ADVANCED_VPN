@@ -37,8 +37,11 @@ OPENSSL_POLICY = (
 FETCH_TIMEOUT = 20
 # Content codings passed on to the site when the client's own request accepts them: a
 # compressed page fits about 3.7 times as much into one mixnet reply (measured on the
-# lab's 30 sites, 12 Nov 2026). Nothing else from the client's headers reaches the site.
-ENCODINGS = ("br", "gzip", "zstd")
+# lab's 30 sites, 12 Nov 2026). Only gzip, which every client takes: every fetch leaves
+# the one service node with the same headers, so a site cannot sort mix-lane users by
+# what their browser accepts (a browser would add br and zstd, `avpn mix fetch` would not).
+# Nothing else from the client's headers reaches the site.
+ENCODINGS = ("gzip",)
 
 
 def accepted_encodings(raw_request):

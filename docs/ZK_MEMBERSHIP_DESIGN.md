@@ -39,6 +39,20 @@ a leaf cannot pose as a node. The proof is RISC Zero's *succinct* receipt, a sin
 deliberately not its Groth16 wrapper, which is smaller but rests on elliptic curves and
 is not post-quantum.
 
+## Several identities from one key
+
+The nullifier binds a purpose (`scope`), so one secret can act as several unlinkable
+identities at once: give each browser profile or role its own scope, and proofs made for
+one say nothing about any other, though they come from the same hardware key and the same
+registered commitment.
+
+That must not multiply anything that is rationed. A member choosing its own scopes could
+invent a new "profile" for every extra allowance, so for a rationed resource (credits,
+anything rate-limited) the **verifier** fixes the scopes it accepts, and every profile of
+one member draws on the same allowance. Member-chosen scopes are only for actions that
+are not rationed, such as proving membership to a service, where a separate identity per
+profile costs the network nothing.
+
 ## What it does not do
 
 - **Relays and exits stay public.** Clients need their keys to build paths, and the

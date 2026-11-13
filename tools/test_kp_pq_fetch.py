@@ -128,8 +128,9 @@ class EncodingTests(unittest.TestCase):
                 b"GET https://a.test/ HTTP/1.1\r\nAccept-Encoding: %s\r\n\r\n" % value
             )
 
-        self.assertEqual(codings(b"gzip, deflate, br"), ["br", "gzip"])
-        self.assertEqual(codings(b"br;q=1.0, GZIP ;q=0"), ["br"])  # q=0 means "not acceptable"
+        # Only gzip passes, whatever else a browser offers: every fetch looks the same.
+        self.assertEqual(codings(b"gzip, deflate, br, zstd"), ["gzip"])
+        self.assertEqual(codings(b"br;q=1.0, GZIP ;q=0"), [])  # q=0 means "not acceptable"
         self.assertEqual(codings(b"identity, compress, x-evil"), [])
         self.assertEqual(kp_pq_fetch.accepted_encodings(b"GET https://a.test/ HTTP/1.1\r\n\r\n"), [])
 
