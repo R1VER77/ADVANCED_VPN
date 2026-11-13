@@ -41,6 +41,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 import i2p  # noqa: E402
+from lab_resolver import private_resolver  # noqa: E402
 import throughput_bench as tb  # noqa: E402
 from avpnctl import identity_of, lab_guard, runtime_dir  # noqa: E402
 from managed_profile import lab_setup  # noqa: E402
@@ -120,10 +121,7 @@ def main():
     tb.run("mount", "-t", "tmpfs", "-o", "size=256m,mode=0755", "tmpfs", "/run")
     # Whole-device mode rewrites the resolver file: give it a private one in this lab's
     # mount namespace (the host's file is never written).
-    private_resolver = Path("/run/lab-resolv.conf")
-    private_resolver.write_text("")
-    private_resolver.chmod(0o644)
-    tb.run("mount", "--bind", private_resolver, "/etc/resolv.conf")
+    private_resolver()
     # i2pd runs as an unprivileged user that cannot enter the developer's home: give it
     # its own copy, with its libraries, on the lab's tmpfs.
     lab_i2p = Path("/run/i2p-lab")

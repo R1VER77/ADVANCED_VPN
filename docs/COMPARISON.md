@@ -1,10 +1,10 @@
-# Technical Comparison: ADVANCED_VPN v0.9.0 vs Mullvad and IVPN
+# Technical Comparison: ADVANCED_VPN v0.9.1 vs Mullvad and IVPN
 
-This document compares **ADVANCED_VPN v0.9.0** against the two strongest privacy-focused commercial VPNs (**Mullvad** and **IVPN**) across cryptography, traffic-analysis resistance, censorship circumvention, DNS privacy, sovereignty, and operational limits. Every claim below regarding ADVANCED_VPN is backed by an executable test or a committed measurement in [`docs/evidence/`](evidence/).
+This document compares **ADVANCED_VPN v0.9.1** against the two strongest privacy-focused commercial VPNs (**Mullvad** and **IVPN**) across cryptography, traffic-analysis resistance, censorship circumvention, DNS privacy, sovereignty, and operational limits. Every claim below regarding ADVANCED_VPN is backed by an executable test or a committed measurement in [`docs/evidence/`](evidence/).
 
 ## 1. Side-by-side scoreboard
 
-| Dimension | ADVANCED_VPN v0.9.0 | Mullvad (2025–2026) | IVPN (2025–2026) |
+| Dimension | ADVANCED_VPN v0.9.1 | Mullvad (2025–2026) | IVPN (2025–2026) |
 |---|---|---|---|
 | **Trust & operator model** | **Self-hosted single-operator or hardware-anchored community mesh (`AVPN/Mesh`)**. Entry, middle, and exit hops run on distinct cloud providers/countries under your own keys; no central company holds both ends. | Provider-operated fleet under one legal entity (Sweden). | Provider-operated fleet under one legal entity (Gibraltar). |
 | **Account & payment linkability** | **No account or payment record exists.** Single-operator mode has no user database; `AVPN/Mesh` anchors membership to a FIDO2/Nitrokey hardware key (`!xxxxxxxx`) and uses blind-signed contribution credits. | Numbered account; cash/Monero/voucher payments supported. | Numbered account; cash/Monero supported. |
@@ -32,7 +32,7 @@ Commercial VPNs face a fundamental tension between **bandwidth overhead** and **
 
 1. **Undefended tunnels (IVPN, standard WireGuard)** forward packets immediately and preserve packet lengths up to MTU boundaries. A passive ISP observer running a standard `k-FP` + `CUMUL` random-forest classifier identifies pages well above chance (`27–81%` on 30 sites in our lab; `74–82%` on 8 sites).
 2. **Event-driven DAITA (Mullvad DAITA v2)** runs Maybenot machines that inject padding bursts and short blocking delays around real traffic bursts. While much stronger than undefended WireGuard, event-driven machines still vary their packet rate between idle periods and active downloads, leaking total transfer volume and burst boundaries.
-3. **ADVANCED_VPN v0.9.0 constant-rate stream (`src/daita.rs`)** eliminates the distinction between idle and active tunnel states on the wire:
+3. **ADVANCED_VPN v0.9.1 constant-rate stream (`src/daita.rs`)** eliminates the distinction between idle and active tunnel states on the wire:
    - Two Maybenot machines (`stream_grid` + self-sustaining `cover`) run under GotaTun's strict-blocking scheduler (`strict: true`, `Replace: true`).
    - Every clock tick on every staggered slot either releases one queued real WireGuard packet (padded to 1380 bytes inside the 1420-byte cloak cell) or emits a 1380-byte decoy packet.
    - Across `metered` (50 pps/dir), `standard` (500 pps/dir), `fast` (4,000 pps/dir), and `line` (16,000 pps/dir), `tools/throughput_bench.py --shape-idle 5` verifies in CI that the wire packet rate stays constant between an idle tunnel and a saturated bulk download (`docs/evidence/RATE_CLASSES.json`).
