@@ -1245,6 +1245,7 @@ mod forward_secrecy_tests {
         rekey: Duration,
         packets: usize,
         drop_replies: usize,
+        linger: Duration,
     ) -> (Vec<Vec<u8>>, Vec<Vec<u8>>, usize) {
         let echo = UdpSocket::bind("127.0.0.1:0").await.unwrap();
         let quic = echo.local_addr().unwrap();
@@ -1312,7 +1313,9 @@ mod forward_secrecy_tests {
                 got += 1;
             }
         }
-        tokio::time::sleep(Duration::from_millis(200)).await;
+        // Keep recording for a fixed time after the transfer, so what the recording holds
+        // does not depend on how fast this machine moved the packets.
+        tokio::time::sleep(linger).await;
         let (f, r) = (fwd.lock().unwrap().clone(), rev.lock().unwrap().clone());
         (f, r, got)
     }
@@ -1403,7 +1406,7 @@ mod forward_secrecy_tests {
 
     #[tokio::test]
     async fn a_recorded_link_reveals_no_packet_to_a_later_stolen_psk() {
-        let (fwd, rev, got) = recorded_link(REKEY, 40, 0).await;
+        let (fwd, rev, got) = recorded_link(REKEY, 40, 0, Duration::from_millis(200)).await;
         assert_eq!(got, 40, "every packet crossed the link and back");
         let (packets, handshake) = attack_with_psk(&fwd, &rev);
         assert!(
@@ -1416,13 +1419,20 @@ mod forward_secrecy_tests {
 
     #[tokio::test]
     async fn lost_answers_are_resent_and_the_link_still_carries_packets() {
-        let (_, _, got) = recorded_link(REKEY, 20, 6).await;
+        let (_, _, got) = recorded_link(REKEY, 20, 6, Duration::from_millis(200)).await;
         assert_eq!(got, 20);
     }
 
     #[tokio::test]
     async fn the_link_rekeys_without_losing_packets_and_stays_sealed() {
-        let (fwd, rev, got) = recorded_link(Duration::from_millis(300), 120, 0).await;
+        // 1.5 s of recording after the transfer holds at least four 300 ms rekeys.
+        let (fwd, rev, got) = recorded_link(
+            Duration::from_millis(300),
+            120,
+            0,
+            Duration::from_millis(1500),
+        )
+        .await;
         assert_eq!(got, 120);
         let ids: std::collections::HashSet<_> =
             fwd.iter().map(|c| c[..SESSION_ID].to_vec()).collect();
