@@ -99,6 +99,27 @@ print(json.dumps(dict(bytes=n,sha256=h.hexdigest(),seconds=round(time.time()-t,2
 """
 
 
+def dump_logs(state, lines=40):
+    """On failure, print the tail of every log that explains it (CI shows nothing else):
+    the supervisors, their children (the I2P routers and the cloaks, in RAM) and the
+    lab's own I2P routers."""
+    logs = sorted(state.glob("*.log"))
+    for role in ["client", "relay", "exit"]:
+        rt = runtime_dir(state / "keys" / role, create=False)
+        if rt.exists():
+            logs += sorted(rt.glob("*.lab.log"))
+    for log in logs:
+        try:
+            text = log.read_text(errors="replace").splitlines()
+        except OSError:
+            continue
+        # Repeated errors fill the tail; the cause is usually near the start.
+        shown = text if len(text) <= 2 * lines else text[:lines] + ["..."] + text[-lines:]
+        print("===== %s (%d lines)" % (log, len(text)), file=sys.stderr)
+        for line in shown:
+            print(line[:300], file=sys.stderr)
+
+
 def main():
     """Build the lab, run it, gate the result."""
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
@@ -348,6 +369,9 @@ def main():
         failed = [k for k, v in gates.items() if not v]
         if failed:
             raise SystemExit("I2P front gates failed: " + ", ".join(failed))
+    except BaseException:
+        dump_logs(state)
+        raise
     finally:
         for role in ["client", "relay", "exit"]:
             path = runtime_dir(state / "keys" / role, create=False) / "status.json"

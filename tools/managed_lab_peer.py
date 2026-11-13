@@ -17,16 +17,32 @@ def read_exact(s, n):
     return b
 
 
-def answer(query):
-    off = 12
+# A first-party name that resolves through a tracker's domain (CNAME cloaking).
+CLOAKED = {"cloaked.test": "edge.tracker.test"}
+
+
+def qname_of(query):
+    labels, off = [], 12
     while query[off]:
+        labels.append(query[off + 1 : off + 1 + query[off]].decode().lower())
         off += query[off] + 1
-    off += 1
+    return ".".join(labels), off + 1
+
+
+def answer(query):
+    name, off = qname_of(query)
     qtype = int.from_bytes(query[off : off + 2], "big")
     end = off + 4
+    a_record = b"\0\1\0\1\0\0\0\x1e\0\4" + bytes([203, 0, 113, 2])
+    if qtype == 1 and name in CLOAKED:
+        target = b"".join(bytes([len(x)]) + x.encode() for x in CLOAKED[name].split(".")) + b"\0"
+        head = query[:2] + b"\x81\x80\0\1\0\2\0\0\0\0" + query[12:end]
+        cname = b"\xc0\x0c\0\5\0\1\0\0\0\x1e" + len(target).to_bytes(2, "big") + target
+        target_at = len(head) + len(cname) - len(target)
+        return head + cname + (0xC000 | target_at).to_bytes(2, "big") + a_record
     response = query[:2] + b"\x81\x80" + b"\0\1" + (b"\0\1" if qtype == 1 else b"\0\0") + b"\0\0\0\0" + query[12:end]
     if qtype == 1:
-        response += b"\xc0\x0c\0\1\0\1\0\0\0\x1e\0\4" + bytes([203, 0, 113, 2])
+        response += b"\xc0\x0c" + a_record
     return response
 
 

@@ -340,7 +340,12 @@ class EnrollmentTests(unittest.TestCase):
             out,
             mesh,
             self.signer,
-            dns=dict(upstream="9.9.9.9:853", server_name="dns.quad9.net", blocklist=b"ads.example.com\n"),
+            dns=dict(
+                upstream="1.1.1.1:853",
+                server_name="one.one.one.one",
+                blocklist=b"ads.example.com\n",
+                allowlist=b"needed.ads.example.com\n",
+            ),
         )
         directory = mesh_verify_directory(out / "directory.avpnd", out / "operator.pub")
         self.assertEqual(directory["hops_len"], 2)
@@ -350,6 +355,8 @@ class EnrollmentTests(unittest.TestCase):
         p_exit = enroll(out / "e1.avpn", out / "operator.pub", self.dev("exit"))
         self.assertEqual(p_exit["dns"]["blocklist"], "dns-blocklist.txt")
         self.assertEqual((self.dev("exit") / "dns-blocklist.txt").read_bytes(), b"ads.example.com\n")
+        self.assertEqual(p_exit["dns"]["allowlist"], "dns-allowlist.txt")
+        self.assertEqual((self.dev("exit") / "dns-allowlist.txt").read_bytes(), b"needed.ads.example.com\n")
         p_alice = enroll(out / "alice.avpn", out / "operator.pub", self.dev("alice"))
         self.assertEqual(p_alice["core"]["local_ip"], "10.77.0.2")
         p_bob = enroll(out / "bob.avpn", out / "operator.pub", self.dev("bob"))

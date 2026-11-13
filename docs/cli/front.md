@@ -18,7 +18,7 @@ With `avpn init --front i2p`, the client reaches the chain's entry only through 
 
 ## Setting it up
 
-- On your device and on the entry: `sudo apt install i2pd`, then `sudo systemctl disable --now i2pd`. The package's own service is a public, general-purpose router; the VPN service runs its own instance with the configuration above. The installer creates the `advanced-vpn-i2p` user.
+- On your device and on the entry: i2pd **2.56 or newer** (`sudo apt install i2pd` on Debian 13; Ubuntu 24.04 ships 2.49, which never bootstrapped in the lab, so use the i2pd project's own packages there), then `sudo systemctl disable --now i2pd`. The VPN service refuses an older i2pd. The package's own service is a public, general-purpose router; the VPN service runs its own instance with the configuration above. The installer creates the `advanced-vpn-i2p` user.
 - Request the entry's keys with this release, then sign with `avpn init --front i2p` and enroll as usual.
 
 ## The kill switch

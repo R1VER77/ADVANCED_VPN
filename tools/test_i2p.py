@@ -208,6 +208,31 @@ class KillSwitchTests(unittest.TestCase):
         self.assertNotIn("l4proto", text)
 
 
+class RouterVersionTests(unittest.TestCase):
+    def fake(self, d, text):
+        path = Path(d) / "i2pd"
+        path.write_text("#!/bin/sh\necho '%s'\n" % text)
+        path.chmod(0o755)
+        return path
+
+    def test_only_proven_i2pd_versions_run_the_front(self):
+        import avpnctl
+
+        with tempfile.TemporaryDirectory() as d:
+            for text, ok in [
+                ("i2pd version 2.56.0 (0.9.65)", True),
+                ("i2pd version 2.58.1 (0.9.67)", True),
+                ("i2pd version 2.49.0 (0.9.60)", False),
+                ("something else", False),
+            ]:
+                with mock.patch.dict("os.environ", {"AVPN_I2PD": str(self.fake(d, text))}):
+                    if ok:
+                        self.assertEqual(avpnctl.front_binary(True).name, "i2pd")
+                    else:
+                        with self.assertRaisesRegex(RuntimeError, "2.56.0 or newer"):
+                            avpnctl.front_binary(True)
+
+
 class HardwareSealingTests(unittest.TestCase):
     def test_a_first_hop_can_seal_every_key_under_a_nitrokey(self):
         # Regression: the cloak key had no envelope binding, so a first hop with Nitrokey
@@ -229,3 +254,54 @@ class HardwareSealingTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TableWatchTests(unittest.TestCase):
+    """The kill-switch drift watchdog (avpnctl.TableWatch), against a fake nft."""
+
+    def fake(self, tables):
+        import avpnctl
+
+        loaded = []
+
+        def cmd(*args, check=True, input=None):
+            name = args[-1]
+            out = tables.get(name)
+            return mock.Mock(returncode=0 if out is not None else 1, stdout=out or "")
+
+        def nft(text, ns=None):
+            loaded.append((text, ns))
+            name = text.split("table inet ")[-1].split(" ")[0]
+            tables[name] = text.split("\n", 1)[1] if text.startswith("delete") else text
+
+        return mock.patch.multiple(avpnctl, cmd=cmd, nft=nft), loaded
+
+    def test_deleted_and_altered_tables_are_restored_exactly(self):
+        import avpnctl
+
+        tables = {"advanced_vpn": "table inet advanced_vpn { policy drop }\n"}
+        patch, loaded = self.fake(tables)
+        with patch:
+            watch = avpnctl.TableWatch([("advanced_vpn", None), ("advanced_vpn_front", None)])
+            self.assertEqual(watch.check(), [])  # untouched, and an absent table is not watched
+            del tables["advanced_vpn"]
+            self.assertEqual(watch.check(), [("advanced_vpn", None)])
+            self.assertEqual(tables["advanced_vpn"], "table inet advanced_vpn { policy drop }\n")
+            tables["advanced_vpn"] = "table inet advanced_vpn { policy accept }\n"
+            watch.check()
+            self.assertTrue(loaded[-1][0].startswith("delete table inet advanced_vpn\n"))
+            self.assertEqual(tables["advanced_vpn"], "table inet advanced_vpn { policy drop }\n")
+
+    def test_a_restore_storm_fails_closed(self):
+        import avpnctl
+
+        tables = {"advanced_vpn": "table inet advanced_vpn { policy drop }\n"}
+        patch, _ = self.fake(tables)
+        with patch:
+            watch = avpnctl.TableWatch([("advanced_vpn", None)], limit=3, window=60)
+            for k in range(3):
+                del tables["advanced_vpn"]
+                watch.check(now=k)
+            del tables["advanced_vpn"]
+            with self.assertRaisesRegex(RuntimeError, "kill switch keeps being altered"):
+                watch.check(now=10)

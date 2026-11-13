@@ -76,6 +76,7 @@ Chaum blind RSA with a full-domain hash, issued by the mesh and spent at relays.
 - **Unlinkability** of issuance and spending: a signer who sees every issuance cannot tell which one a spend came from (ProVerif, with the blind-signature equational theory).
 - **No double spending**: a token is accepted at most once across every relay sharing the spent set (Tamarin, with a persistent set).
 - One-more unforgeability is a computational property that symbolic tools cannot prove. It rests on the RSA blind-signature literature, so the plan also replaces our FDH construction with RFC 9474's RSABSSA (SHA-384, PSS, deterministic) from a reviewed library. Then the computational argument is the published one and the model covers the protocol around it.
+- **Not post-quantum.** RSA blind signatures fall to a quantum adversary, and one who can forge credits never needs to break a tunnel. The credits move to a lattice-based blind signature (a reviewed implementation, once one exists) before the project describes itself as post-quantum throughout. The protocol model above carries over unchanged; only the signature's equational theory changes.
 
 ### 6. Signed enrollment (`tools/managed_profile.py`)
 
@@ -83,6 +84,24 @@ Every bundle needs both signatures (the Nitrokey's FIDO2 credential and ML-DSA-6
 one set that names every bundle's manifest hash.
 
 - A device accepts only a bundle covered by both signatures and naming its own keys; no role substitution; no bundle moved between chains (Tamarin, with either signature scheme breakable but not both).
+
+### 7. DC-net control channel (`src/dcnet.rs`)
+
+Pairwise PRG pads that cancel in the group XOR; one event per round. The model from the
+design pack (`formal/dcnet/dcnet.spthy`) is a starting point, unproved.
+
+- **Sender anonymity within a cell** against everyone but the sender (ProVerif equivalence: any two members sending the same event are indistinguishable).
+- **Round binding**: a body replayed from another round never decodes (Tamarin; the mutation drops the round from the pad context; the Rust and Python golden vectors already fail on it).
+- The claim stays computational (PRG pads), never information-theoretic.
+
+### 8. Option E's re-blinding (`crates/avpn-mix-lane`, design §2.3)
+
+The one non-standard construction in the option E header: the entry hop removes an XOR
+pad from hop 2's X25519 element. Model: `crates/avpn-mix-lane/tamarin/pq_sphinx_reblind.spthy`
+(from the pack, unproved).
+
+- **Unlinkability across an honest hop**: no observer of two links can match a cell (ProVerif equivalence).
+- An external cryptographer's review (gate G3 of the cutover) is still required; no security claim rests on §2.3 until both are done.
 
 ## Not formal, and where it is covered instead
 

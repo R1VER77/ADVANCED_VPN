@@ -9,7 +9,7 @@ bundle per device.
         --request ROLE=FILE ... (--vault DIR | --software-operator DIR) \
         [--rate auto|metered|standard|fast|line] [--allowance-gib N] \
         [--hours-per-day H] [--accept-cost] [--daily-limit-mib N] \
-        [--dns-blocklist FILE] [--cover-name NAME] \
+        [--dns-blocklist FILE] [--dns-allowlist FILE] [--cover-name NAME] \
         [--standby-exit NAME=IP:PORT ...] [--rotate-seconds MIN,MAX] \
         [--front i2p] [--front-hops 1|2|3]
 
@@ -28,7 +28,8 @@ bundle per device.
 - `--hours-per-day H`: expected hours connected per day for the monthly GiB cost calculation (default `8`).
 - `--accept-cost`: sign a rate class even when its monthly GiB exceeds `--allowance-gib`.
 - `--daily-limit-mib N`: an optional fail-closed daily cap for the client.
-- `--dns-blocklist FILE`: optional domain blocklist file (one domain per line) signed into the exit bundle so the exit's DoT forwarder immediately answers `NXDOMAIN` for matching domains and subdomains.
+- `--dns-blocklist FILE`: an optional domain blocklist signed into the exit bundle; the exit's DoT forwarder answers `NXDOMAIN` for matching names. One rule per line, in the common list formats: `example.com` or `.example.com` (the domain and its subdomains), `*.example.com` (subdomains only), hosts-file `0.0.0.0 example.com`, or adblock `||example.com^`; `#` and `!` start comments (OISD and hagezi lists load as published). Answers are checked too: a name whose CNAME chain leads into a blocked domain (CNAME cloaking) is also answered `NXDOMAIN`. Filtering happens at your exit, inside the tunnel; no list, query or verdict leaves it.
+- `--dns-allowlist FILE`: an optional allowlist in the same formats, signed into the exit bundle. Its names are never blocked, by name or through a CNAME.
 - `--standby-exit NAME=IP:PORT`: a standby exit (2 and 3 hops; repeat for up to 7). Give its request with `--request NAME=FILE`. The server before the exit opens a session through the first live exit, fails over to the next when one stops answering (3 s of silence on the paced link), and the client trusts exactly the signed set of exits. Your entry, the guard, never changes.
 - `--rotate-seconds MIN,MAX`: with standby exits, move to another live exit at a random time in this window (default `900,3600`), always at a session boundary. Between 60 and 86400 seconds.
 - `--front i2p`: the client reaches the entry only through I2P. The entry (and its cloud provider) sees I2P routers, never your address; your network sees I2P, never a VPN server. Carries the `metered` and `standard` classes (`auto` picks `standard` at most). The entry's request must come from this release (it holds the entry's I2P destination). See `avpn help front`.

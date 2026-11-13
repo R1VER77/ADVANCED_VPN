@@ -171,6 +171,10 @@ def main():
         upstream="203.0.113.2:8530",
         server_name="dns.lab.internal",
         test_ca=ca[1].public_bytes(serialization.Encoding.DER),
+        # The exit's anti-tracker: a tracker domain, one allowed name under it, and the
+        # lab upstream answers cloaked.test with a CNAME into it (managed_lab_peer.CLOAKED).
+        blocklist=b"tracker.test\n",
+        allowlist=b"ok.tracker.test\n",
     )
     if a.hardware_vault:
         print(
@@ -444,6 +448,45 @@ def main():
             print(json.dumps(result), flush=True)
             return
         app('import socket;assert socket.gethostbyname("vpn.test")=="203.0.113.2"')
+        # Anti-tracker at the exit: a blocked name, a name cloaked behind a CNAME into the
+        # blocked domain, and an allowlisted name under it.
+        app(
+            "import socket\n"
+            "for name in ['x.tracker.test', 'cloaked.test']:\n"
+            "    try:\n"
+            "        socket.gethostbyname(name)\n"
+            "    except socket.gaierror:\n"
+            "        continue\n"
+            "    raise SystemExit(name + ' resolved through the anti-tracker')\n"
+            "assert socket.gethostbyname('ok.tracker.test') == '203.0.113.2'"
+        )
+        # Kill-switch drift watchdog: another process deletes the app namespace's kill
+        # switch, then slips an accept rule into it. The supervisor restores the exact
+        # table each time, within a few seconds.
+
+        def app_table():
+            r = run("ip", "netns", "exec", "av-client", "ip", "netns", "exec", "avpn-app", "/usr/sbin/nft", "list",
+                    "table", "inet", "advanced_vpn", check=False)  # fmt: skip
+            return r.stdout if r.returncode == 0 else None
+
+        def restored_within(expected, limit=8):
+            t0 = time.monotonic()
+            while time.monotonic() - t0 < limit:
+                if app_table() == expected:
+                    return round(time.monotonic() - t0, 2)
+                time.sleep(0.2)
+            raise RuntimeError("the kill switch was not restored")
+
+        expected_table = app_table()
+        assert expected_table and "policy drop" in expected_table, expected_table
+        run("ip", "netns", "exec", "av-client", "ip", "netns", "exec", "avpn-app", "/usr/sbin/nft", "delete", "table",
+            "inet", "advanced_vpn")  # fmt: skip
+        assert app_table() is None
+        restore_deleted = restored_within(expected_table)
+        run("ip", "netns", "exec", "av-client", "ip", "netns", "exec", "avpn-app", "/usr/sbin/nft", "insert", "rule",
+            "inet", "advanced_vpn", "output", "accept")  # fmt: skip
+        assert app_table() != expected_table
+        restore_altered = restored_within(expected_table)
         marker = "PRIVATE-MANAGED-" + os.urandom(16).hex()
         app(
             "import socket;s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.settimeout(3);b="
@@ -700,6 +743,7 @@ def main():
             signed_enrollment_verified=True,
             automatic_network_setup=True,
             dns_tls_verified=True,
+            kill_switch_restored_seconds=dict(deleted=restore_deleted, altered=restore_altered),
             system_resolver_inside_namespace=True,
             dns_bypass_rejected=True,
             ipv6_leak_rejected=True,

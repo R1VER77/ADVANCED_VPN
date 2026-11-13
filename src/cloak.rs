@@ -155,8 +155,25 @@ pub fn tls_proof<D>(
 }
 
 fn provider() -> Arc<CryptoProvider> {
-    // The default provider: TLS 1.3 suites and X25519MLKEM768 first, as browsers offer.
+    // The default provider: TLS 1.3 suites and X25519MLKEM768 first, as browsers offer, so
+    // the handshake looks like any browser's. Classical groups stay offered for that look
+    // only: no tunnel ever runs over them (see `quic_hybrid` / `tls_hybrid`).
     Arc::new(aws_lc_rs::default_provider())
+}
+
+/// Whether a QUIC connection's TLS key exchange was hybrid post-quantum (X25519MLKEM768).
+/// A cloak tunnel exists only over such a connection: the server answers a correct proof on
+/// any other with the decoy, and the client never sends its proof over one.
+pub fn quic_hybrid(c: &Connection) -> bool {
+    c.handshake_data()
+        .and_then(|d| d.downcast::<quinn::crypto::rustls::HandshakeData>().ok())
+        .is_some_and(|d| d.negotiated_key_exchange_group == rustls::NamedGroup::X25519MLKEM768)
+}
+
+/// The same check for a `rustls` TCP/TLS 1.3 connection.
+pub fn tls_hybrid<D>(c: &rustls::ConnectionCommon<D>) -> bool {
+    c.negotiated_key_exchange_group()
+        .is_some_and(|g| g.name() == rustls::NamedGroup::X25519MLKEM768)
 }
 
 /// QUIC transport for the cloak: browser-like stream limits, DATAGRAM support sized for a
@@ -399,8 +416,9 @@ async fn prove(c: &Connection, keys: &[[u8; TOKEN_LEN]]) -> Result<usize> {
             && b[..2] == TOKEN_STREAM
         {
             let mut found = None;
+            let pq = quic_hybrid(c);
             for (k, key) in keys.iter().enumerate() {
-                if equal(&b[2..], &proof(c, key)?) {
+                if equal(&b[2..], &proof(c, key)?) && pq {
                     found = Some(k);
                 }
             }
@@ -574,6 +592,7 @@ pub async fn serve_tcp(
                 for (k, key) in keys.iter().enumerate() {
                     if let Ok(expected) = tls_proof(tls.get_ref().1, key)
                         && equal(&cand, &expected)
+                        && tls_hybrid(tls.get_ref().1)
                     {
                         which = Some(k);
                     }
@@ -806,6 +825,10 @@ async fn session(
         c.max_datagram_size().unwrap_or(0) >= CARRIER_DATAGRAM,
         "path too small for a WireGuard datagram"
     );
+    ensure!(
+        quic_hybrid(c),
+        "cloak session without hybrid post-quantum key exchange"
+    );
     let mut s = c.open_uni().await?;
     let mut msg = TOKEN_STREAM.to_vec();
     msg.extend_from_slice(&proof(c, key)?);
@@ -849,6 +872,10 @@ async fn tcp_session(
         ServerName::try_from("localhost".to_owned()).expect("valid placeholder SNI")
     });
     let mut tls = tokio::time::timeout(window, connector.connect(sni, tcp)).await??;
+    ensure!(
+        tls_hybrid(tls.get_ref().1),
+        "cloak session without hybrid post-quantum key exchange"
+    );
     let p = tls_proof(tls.get_ref().1, key)?;
     let req = format!(
         "GET / HTTP/1.1\r\nHost: {}\r\nUser-Agent: Mozilla/5.0\r\nIf-None-Match: \"{}\"\r\n\r\n",
@@ -1173,6 +1200,50 @@ mod tests {
         assert_eq!(stats.sessions.load(Ordering::Relaxed), 0);
         // The right proof on its own connection works.
         send_proof(&first, replay).await;
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert_eq!(stats.sessions.load(Ordering::Relaxed), 1);
+    }
+
+    /// A client that offers only classical X25519 (a downgraded or non-PQ peer): it still
+    /// completes the handshake and sees the decoy, but the right proof earns it no tunnel.
+    async fn classical(addr: SocketAddr, pin: [u8; 32]) -> (Endpoint, Connection) {
+        let mut p = aws_lc_rs::default_provider();
+        p.kx_groups = vec![aws_lc_rs::kx_group::X25519];
+        let p = Arc::new(p);
+        let mut t = rustls::ClientConfig::builder_with_provider(p.clone())
+            .with_protocol_versions(&[&rustls::version::TLS13])
+            .unwrap()
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(Pinned {
+                spki_sha256: pin,
+                provider: p,
+            }))
+            .with_no_client_auth();
+        t.alpn_protocols = vec![ALPN.to_vec()];
+        let mut c = ClientConfig::new(Arc::new(QuicClientConfig::try_from(t).unwrap()));
+        c.transport_config(transport());
+        let mut e = Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
+        e.set_default_client_config(c);
+        let c = e.connect(addr, "cover.example").unwrap().await.unwrap();
+        (e, c)
+    }
+
+    #[tokio::test]
+    async fn a_classical_key_exchange_never_becomes_a_tunnel() {
+        let (_, _, pin) = test_cert();
+        let key = [5; 32];
+        let (addr, wg, stats) = server(key).await;
+        let (_e1, old) = classical(addr, pin).await;
+        assert!(!quic_hybrid(&old));
+        send_proof(&old, proof(&old, &key).unwrap()).await;
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let _ = old.send_datagram(Bytes::from_static(b"let me in"));
+        assert!(nothing_arrives(&wg).await);
+        assert_eq!(stats.sessions.load(Ordering::Relaxed), 0);
+        // The cloak's own client negotiates the hybrid group and gets its tunnel.
+        let (_e2, pq) = raw(addr, pin).await.unwrap();
+        assert!(quic_hybrid(&pq));
+        send_proof(&pq, proof(&pq, &key).unwrap()).await;
         tokio::time::sleep(Duration::from_millis(300)).await;
         assert_eq!(stats.sessions.load(Ordering::Relaxed), 1);
     }

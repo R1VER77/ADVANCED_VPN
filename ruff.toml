@@ -26,7 +26,10 @@ ignore = [
 # Simulation and lab randomness (Poisson workloads, synthetic traffic) is not cryptographic.
 "tools/test_gpa.py" = ["S101", "S311", "D101", "D102", "D103"]
 "tools/mix_lab.py" = ["S108", "S311", "S607", "D103"]
+# The DC-net reference construction: a test oracle mirroring src/dcnet.rs line for line.
+"tools/dcnet_reference.py" = ["S101", "D101", "D102", "D103"]
 "tools/i2p_lab.py" = ["S108", "S607"]
+"tools/wf_real.py" = ["S108", "S311", "S607", "D103"]
 "tools/start_client.py" = ["D103"]
 # The binary path of systemd-ask-password is not a credential.
 "tools/keyguard.py" = ["S105"]

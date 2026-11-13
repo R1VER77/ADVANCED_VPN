@@ -10,13 +10,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import mix  # noqa: E402
 
-CLIENT = """PKISignatureScheme = "Ed25519"
+CLIENT = """PKISignatureScheme = "Ed25519 Sphincs+"
+WireKEMScheme = "xwing"
 [Listen]
   [Listen.Tcp]
     Address = "kpclientd:32000"
     Network = "tcp"
 [SphinxGeometry]
-  PacketLength = 9082
+  PacketLength = 22458
+  NIKEName = ""
+  KEMName = "XWING"
 [Logging]
   Disable = false
   File = "client.log"
@@ -28,6 +31,8 @@ CLIENT = """PKISignatureScheme = "Ed25519"
 [PinnedGateways]
   [[PinnedGateways.Gateways]]
     Name = "gateway1"
+    WireKEMScheme = "xwing"
+    PKISignatureScheme = "Ed25519 Sphincs+"
 [VotingAuthority]
   [[VotingAuthority.Peers]]
     Identifier = "auth1"
@@ -52,6 +57,16 @@ class ConfigTests(unittest.TestCase):
             CLIENT.replace('Type = "none"', 'Type = "socks5"'),
             CLIENT.replace("[PinnedGateways]", "[Other]"),
             CLIENT.replace("[VotingAuthority]", "[Other]"),
+            # Classical Sphinx (an X25519 NIKE, or no KEM at all) is refused.
+            CLIENT.replace('NIKEName = ""', 'NIKEName = "x25519"').replace('KEMName = "XWING"', 'KEMName = ""'),
+            CLIENT.replace('KEMName = "XWING"', 'KEMName = "MLKEM768"'),
+            # A classical directory signature anywhere (top level, or one gateway's).
+            CLIENT.replace('PKISignatureScheme = "Ed25519 Sphincs+"\nWire', 'PKISignatureScheme = "Ed25519"\nWire'),
+            CLIENT.replace('    PKISignatureScheme = "Ed25519 Sphincs+"', '    PKISignatureScheme = "ed25519"'),
+            CLIENT.replace("PKISignatureScheme", "Other"),
+            # A classical or missing link KEM.
+            CLIENT.replace('    WireKEMScheme = "xwing"', '    WireKEMScheme = "x25519"'),
+            CLIENT.replace("WireKEMScheme", "Other"),
             CLIENT.replace('[Listen.Tcp]\n    Address = "kpclientd:32000"', "[Listen.Unix]"),
         ]:
             with self.assertRaises(ValueError):

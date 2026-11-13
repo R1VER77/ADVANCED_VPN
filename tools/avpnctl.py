@@ -148,6 +148,44 @@ def replace_table(body, ns=None):
     nft(("delete table inet advanced_vpn\n" if exists else "") + body, ns)
 
 
+class TableWatch:
+    """Kill-switch drift watchdog. Remembers each managed nftables table exactly as the
+    supervisor built it and restores it whenever another process deletes or alters it
+    (`nft list` output is valid `nft -f` input). Storm guard: more than `limit` restores
+    in `window` seconds raises, and the supervisor then stops the data plane (fail
+    closed) rather than fight forever. The byte meter changes by design: not watched."""
+
+    def __init__(self, targets, limit=10, window=60):
+        self.expected = {}
+        for name, ns in targets:
+            listing = self.listing(name, ns)
+            if listing is not None:
+                self.expected[(name, ns)] = listing
+        self.limit, self.window, self.restores = limit, window, []
+
+    @staticmethod
+    def listing(name, ns=None):
+        """The table as `nft list` prints it (in namespace `ns`), or None if absent."""
+        prefix = ["ip", "netns", "exec", ns] if ns else []
+        r = cmd(*prefix, "/usr/sbin/nft", "list", "table", "inet", name, check=False)
+        return r.stdout if r.returncode == 0 else None
+
+    def check(self, now=None):
+        """Restore every drifted table; returns the (table, namespace) pairs restored."""
+        now = time.monotonic() if now is None else now
+        restored = []
+        for (name, ns), expected in self.expected.items():
+            current = self.listing(name, ns)
+            if current == expected:
+                continue
+            self.restores = [t for t in self.restores if now - t < self.window] + [now]
+            if len(self.restores) > self.limit:
+                raise RuntimeError("the kill switch keeps being altered by another process")
+            nft(("delete table inet %s\n" % name if current is not None else "") + expected, ns)
+            restored.append((name, ns))
+        return restored
+
+
 def app_firewall(ns):
     """Kill switch inside the protected namespace: only the tunnel and its DNS may leave."""
     replace_table(
@@ -636,17 +674,40 @@ def front_identity(lab):
     return user.pw_uid, user.pw_gid
 
 
+# Oldest i2pd the front is proven with. 2.49 (Ubuntu 24.04) rejected the private test
+# network's router records and never bootstrapped; nothing older is trusted unproven.
+I2PD_MINIMUM = (2, 56, 0)
+
+
+def i2pd_version(binary):
+    """The (major, minor, patch) i2pd reports, or None if it does not say."""
+    out = subprocess.run([str(binary), "--version"], capture_output=True, text=True, timeout=15).stdout
+    m = re.search(r"i2pd version (\d+)\.(\d+)\.(\d+)", out)
+    return tuple(int(x) for x in m.groups()) if m else None
+
+
 def front_binary(lab):
-    """i2pd: root-owned and not writable by others (in the lab: $AVPN_I2PD)."""
+    """i2pd, at least I2PD_MINIMUM: root-owned and not writable by others (lab: $AVPN_I2PD)."""
+    path = None
     if lab and os.environ.get("AVPN_I2PD"):
-        return Path(os.environ["AVPN_I2PD"])
-    for path in map(Path, I2PD_PATHS):
-        if path.exists():
-            st = path.stat()
-            if path.is_symlink() or st.st_uid != 0 or st.st_mode & 0o022:
-                raise RuntimeError("i2pd must be root-owned and not group/world writable")
-            return path
-    raise RuntimeError("the I2P front needs i2pd (apt install i2pd; avpn help front)")
+        path = Path(os.environ["AVPN_I2PD"])
+    else:
+        for candidate in map(Path, I2PD_PATHS):
+            if candidate.exists():
+                st = candidate.stat()
+                if candidate.is_symlink() or st.st_uid != 0 or st.st_mode & 0o022:
+                    raise RuntimeError("i2pd must be root-owned and not group/world writable")
+                path = candidate
+                break
+    if path is None:
+        raise RuntimeError("the I2P front needs i2pd (apt install i2pd; avpn help front)")
+    version = i2pd_version(path)
+    if version is None or version < I2PD_MINIMUM:
+        raise RuntimeError(
+            "the I2P front needs i2pd %s or newer (found %s); see avpn help front"
+            % (".".join(map(str, I2PD_MINIMUM)), ".".join(map(str, version)) if version else "unknown")
+        )
+    return path
 
 
 def prepare_front(profile, key_handles, uid, gid, lab=False):
@@ -774,6 +835,11 @@ def publish_runtime(cfg, directory, uid, gid):
         target = directory / source.name
         owned_public(target, read_private(source), uid, gid)
         published["dns"]["test_ca"] = str(target)
+    if published.get("dns", {}).get("allowlist"):
+        source = Path(published["dns"]["allowlist"])
+        target = directory / source.name
+        owned_public(target, read_private(source), uid, gid)
+        published["dns"]["allowlist"] = str(target)
     if published.get("dns", {}).get("blocklist"):
         source = Path(published["dns"]["blocklist"])
         target = directory / source.name
@@ -952,6 +1018,12 @@ def supervise(state, bin_dir, lab=False, whole=False):
         front_uid=front_uid,
     )
     cfg = runtime(profile, state)
+    # Watch every table this role just built: whole device or the app namespace for a
+    # client (plus its front and upstream guards), the host table on a server.
+    table_ns = APP if profile["role"] == "client" and not whole else None
+    tables = TableWatch([("advanced_vpn", table_ns), ("advanced_vpn_front", None), (UPSTREAM_TABLE, None)])
+    last_table_check = 0.0
+    firewall_tampered = False
     preferences = json.loads(read_private(state / "preferences.json")) if (state / "preferences.json").exists() else {}
     from keyguard import memory_fd
 
@@ -1037,6 +1109,20 @@ def supervise(state, bin_dir, lab=False, whole=False):
     watch = CarrierWatch()
     try:
         while not quit_requested:
+            if time.monotonic() - last_table_check >= 2:
+                last_table_check = time.monotonic()
+                try:
+                    for name, ns in tables.check():
+                        print("kill switch table %s restored%s" % (name, " in " + ns if ns else ""), flush=True)
+                except RuntimeError:
+                    # Fail closed: no data plane while the kill switch cannot be held.
+                    firewall_tampered = True
+                    for proc in children.values():
+                        stop(proc)
+            if firewall_tampered:
+                save(rt / "status.json", dict(schema=1, state="blocked", kill_switch=True, reason="firewall_tampering"))
+                time.sleep(1)
+                continue
             if (
                 profile["role"] == "client"
                 and "carrier" in children
@@ -1620,7 +1706,13 @@ def build_parser():
         "--dns-blocklist",
         type=Path,
         default=None,
-        help="optional domain blocklist file (one domain per line) signed into the exit bundle",
+        help="optional domain blocklist (plain, .domain, *.domain, hosts or ||domain^ lines) signed into the exit bundle",
+    )
+    init.add_argument(
+        "--dns-allowlist",
+        type=Path,
+        default=None,
+        help="optional allowlist file (same formats) signed into the exit bundle: never blocked, even by a CNAME check",
     )
     imp = s.add_parser("enroll", help="verify and install this device's signed bundle")
     imp.add_argument("bundle", type=Path, help="the .avpn bundle the operator produced for this device")
@@ -1792,8 +1884,13 @@ def main():
         rotate = tuple(int(x) for x in a.rotate_seconds.split(","))
         signer_impl = HardwareOperator(a.vault) if a.vault else SoftwareOperator(a.software_operator.resolve())
         dns_arg = (
-            dict(upstream="9.9.9.9:853", server_name="dns.quad9.net", blocklist=a.dns_blocklist.read_bytes())
-            if a.dns_blocklist
+            dict(
+                upstream="1.1.1.1:853",
+                server_name="one.one.one.one",
+                blocklist=a.dns_blocklist.read_bytes() if a.dns_blocklist else None,
+                allowlist=a.dns_allowlist.read_bytes() if a.dns_allowlist else None,
+            )
+            if a.dns_blocklist or a.dns_allowlist
             else None
         )
         operator = create(

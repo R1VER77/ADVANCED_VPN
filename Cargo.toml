@@ -17,6 +17,8 @@ rustls = { version = "=0.23.46", default-features = false, features = ["std", "a
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = "=1.0.154"
 sha2 = "=0.10.9"
+hmac = "=0.12.1"
+avpn-mix-lane = { path = "crates/avpn-mix-lane" }
 tokio = { version = "=1.54.1", features = ["rt", "macros", "net", "time", "signal", "sync", "io-util"] }
 x509-parser = "=0.18.1"
 zeroize = "=1.9.1"
@@ -45,4 +47,8 @@ undocumented_unsafe_blocks = "deny"
 
 # Own workspace root; the vendored gotatun fork is a plain path dependency, not a member,
 # so its tests and benches are never built here (see vendor/gotatun).
+# Members: the mix lane's PQ-Sphinx option E on audited crates, and its std-only reference
+# implementation, kept only as the byte-identity oracle for tests (crates/*/IMPLEMENTATION_NOTES.md).
 [workspace]
+members = ["crates/avpn-mix-lane", "crates/avpn-pq-sphinx"]
+resolver = "3"

@@ -351,6 +351,7 @@ def profile_validate(p):
             "server_name",
             "test_ca",
             "blocklist",
+            "allowlist",
             "blocked_domains",
         }:
             raise ValueError("unknown DNS field")
@@ -359,6 +360,7 @@ def profile_validate(p):
             or d["client_ip"] != "10.77.0.2"
             or d["test_ca"] not in [None, "dns-ca.der"]
             or d.get("blocklist") not in [None, "dns-blocklist.txt"]
+            or d.get("allowlist") not in [None, "dns-allowlist.txt"]
         ):
             raise ValueError("DNS binding rejected")
         for dom in d.get("blocked_domains") or []:
@@ -943,7 +945,7 @@ def create(
         else:
             cloak = None
         if role == "exit":
-            d = dict(upstream="9.9.9.9:853", server_name="dns.quad9.net", test_ca=None)
+            d = dict(upstream="1.1.1.1:853", server_name="one.one.one.one", test_ca=None)
             if dns:
                 d.update(upstream=dns["upstream"], server_name=dns["server_name"])
                 if dns.get("test_ca"):
@@ -952,6 +954,9 @@ def create(
                 if dns.get("blocklist"):
                     files["dns-blocklist.txt"] = dns["blocklist"]
                     d["blocklist"] = "dns-blocklist.txt"
+                if dns.get("allowlist"):
+                    files["dns-allowlist.txt"] = dns["allowlist"]
+                    d["allowlist"] = "dns-allowlist.txt"
                 if dns.get("blocked_domains"):
                     d["blocked_domains"] = list(dns["blocked_domains"])
             dns_cfg = dict(schema=1, listen="10.77.0.1:1053", client_ip="10.77.0.2", **d)
@@ -1363,7 +1368,7 @@ def mesh_bundles(root, mesh, signer, defense="strong", daily_mib=None, dns=None,
             )
         dns_cfg = None
         if role == "exit":
-            d = dict(upstream="9.9.9.9:853", server_name="dns.quad9.net", test_ca=None)
+            d = dict(upstream="1.1.1.1:853", server_name="one.one.one.one", test_ca=None)
             if dns:
                 d.update(upstream=dns["upstream"], server_name=dns["server_name"])
                 if dns.get("test_ca"):
@@ -1372,6 +1377,9 @@ def mesh_bundles(root, mesh, signer, defense="strong", daily_mib=None, dns=None,
                 if dns.get("blocklist"):
                     files["dns-blocklist.txt"] = dns["blocklist"]
                     d["blocklist"] = "dns-blocklist.txt"
+                if dns.get("allowlist"):
+                    files["dns-allowlist.txt"] = dns["allowlist"]
+                    d["allowlist"] = "dns-allowlist.txt"
                 if dns.get("blocked_domains"):
                     d["blocked_domains"] = list(dns["blocked_domains"])
             dns_cfg = dict(schema=1, listen="10.77.0.1:1053", client_ip="10.77.0.2", client_network="10.77.0.0/24", **d)
@@ -1563,6 +1571,7 @@ ENROLLMENT_FILES = [
     "wireguard-binding.json",
     "dns-ca.der",
     "dns-blocklist.txt",
+    "dns-allowlist.txt",
 ] + [l + "-ca.der" for l in ["outer", "middle", "inner"]]
 
 
@@ -1617,6 +1626,8 @@ def enroll(bundle, operator_public, state, replace=False):
         allowed.add("dns-ca.der")
     if profile["dns"] and profile["dns"].get("blocklist"):
         allowed.add("dns-blocklist.txt")
+    if profile["dns"] and profile["dns"].get("allowlist"):
+        allowed.add("dns-allowlist.txt")
     links = len(profile["core"].get("link_out", [])) + profile["core"].get("link_in", 0)
     if links:
         allowed.add("link.kem.json")
@@ -1727,6 +1738,8 @@ def runtime(profile, root):
             out["dns"]["test_ca"] = str(root / Path(out["dns"]["test_ca"]).name)
         if out["dns"].get("blocklist"):
             out["dns"]["blocklist"] = str(root / Path(out["dns"]["blocklist"]).name)
+        if out["dns"].get("allowlist"):
+            out["dns"]["allowlist"] = str(root / Path(out["dns"]["allowlist"]).name)
     return out
 
 

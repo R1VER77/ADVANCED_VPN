@@ -33,6 +33,13 @@ THIN = "127.0.0.1:41198"
 BINARIES = ("kpclientd", "http-proxy-client")
 INSTALLED = Path("/usr/lib/advanced-vpn/katzenpost")
 CONFIG_FILES = ("client.toml", "thinclient.toml")
+# Sphinx KEMs the mix lane accepts: hybrid post-quantum only.
+PQ_SPHINX = {"XWING"}
+# Directory (PKI) signatures: hybrid, so forging a consensus needs both the classical and the
+# post-quantum scheme broken (hash-based SPHINCS+ preferred; Dilithium3 also accepted).
+PQ_PKI = {"ED25519 SPHINCS+", "ED448-SPHINCS+", "ED448-DILITHIUM3"}
+# Link (wire) handshakes: hybrid KEMs only.
+PQ_WIRE = {"XWING", "MLKEM768-X25519", "MLKEM1024-X25519"}
 
 
 def binaries():
@@ -55,6 +62,20 @@ def check_config(client):
     for need in ["[PinnedGateways]", "[VotingAuthority]", "[SphinxGeometry]"]:
         if need not in client:
             raise ValueError("not a Katzenpost client configuration: no " + need)
+    # Post-quantum Sphinx only: X-Wing (ML-KEM-768 + X25519) per hop, never a classical
+    # NIKE, so a recorded mix-lane packet stays sealed against a future quantum computer.
+    kem = re.search(r'(?m)^\s*KEMName\s*=\s*"([^"]*)"', client)
+    nike = re.search(r'(?m)^\s*NIKEName\s*=\s*"([^"]*)"', client)
+    if not kem or kem.group(1).upper() not in PQ_SPHINX or (nike and nike.group(1)):
+        raise ValueError("this mixnet's Sphinx is not post-quantum (the mix lane requires X-Wing)")
+    # Every directory signature and every link handshake post-quantum too: a classical
+    # authority key lets a future forger hand clients a consensus of its own mixes.
+    pki = re.findall(r'(?m)^\s*PKISignatureScheme\s*=\s*"([^"]*)"', client)
+    if not pki or any(x.upper() not in PQ_PKI for x in pki):
+        raise ValueError("this mixnet's directory signatures are not hybrid post-quantum")
+    wire = re.findall(r'(?m)^\s*WireKEM(?:Scheme)?\s*=\s*"([^"]*)"', client)
+    if not wire or any(x.upper() not in PQ_WIRE for x in wire):
+        raise ValueError("this mixnet's link handshakes are not hybrid post-quantum")
     if re.search(r"(?m)^\s*DisableDecoyTraffic\s*=\s*true", client):
         raise ValueError("this configuration turns decoy traffic off; the mix lane requires it")
     if re.search(r'(?m)^\s*Type\s*=\s*"(?!none")', client):

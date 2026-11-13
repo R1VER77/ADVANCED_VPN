@@ -13,9 +13,17 @@ jobs:
       CARGO_BUILD_JOBS: 2
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
-        with:
-          python-version: '3.13'
+      # CPython with OpenSSL 3.5 linked in (the runner's OpenSSL 3.0 has no ML-KEM), so the
+      # labs' TLS servers and the post-quantum TLS checks run here instead of being skipped.
+      # A python-build-standalone release, pinned by the SHA-256 its release publishes.
+      - name: Python 3.13 with OpenSSL 3.5
+        run: |
+          curl -fsSL -o /tmp/cpython.tgz https://github.com/astral-sh/python-build-standalone/releases/download/20260602/cpython-3.13.13%2B20260602-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz
+          echo "c249d2b96af6912c3910f234b96aa8d20d30e8b0c46d0584fa956d7a77036ea9  /tmp/cpython.tgz" | sha256sum -c -
+          tar -xzf /tmp/cpython.tgz -C "$RUNNER_TEMP"
+          ln -s python3 "$RUNNER_TEMP/python/bin/python"
+          echo "$RUNNER_TEMP/python/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/python/bin/python" -c "import ssl; assert ssl.OPENSSL_VERSION_INFO >= (3, 5), ssl.OPENSSL_VERSION; print(ssl.OPENSSL_VERSION)"
       - name: Install namespace test dependencies
         run: |
           sudo apt-get update -qq
@@ -51,9 +59,29 @@ jobs:
           # would compile the vendored gotatun fork's maybenot as a second unit (a test-cfg
           # resolution quirk; the normal build above and `cargo build` below compile them
           # cleanly), so scope the test run to the targets that actually have tests.
-          cargo test --locked --lib --bin advanced-vpn
+          cargo test --locked --lib --bin advanced-vpn --bin advanced-vpn-dns
           cargo build --release --locked
           python -m unittest discover -s tools -p 'test_*.py' -v
+      - name: DC-net reference construction (Python mirror == committed vectors == Rust tests)
+        run: python tools/dcnet_reference.py --check
+      - name: Mix lane option E (audited-primitives crate, reference oracle, byte identity)
+        run: |
+          cargo clippy --locked -p avpn-mix-lane -p avpn-pq-sphinx --all-targets -- -D warnings
+          cargo test --locked --release -p avpn-mix-lane -p avpn-pq-sphinx
+          # The reference crate must regenerate the committed full-cell vectors exactly:
+          # any protocol drift in either crate fails here.
+          cargo run --locked --release -p avpn-pq-sphinx --example dump_cells > /tmp/cells.txt
+          cmp /tmp/cells.txt crates/avpn-pq-sphinx/cells.txt
+          cmp /tmp/cells.txt crates/avpn-mix-lane/cells.txt
+          # The primitive vectors come from independent Python implementations; regenerate
+          # them and check both crates against the fresh set (X25519 keys are random per run).
+          python -m venv /tmp/vecenv
+          /tmp/vecenv/bin/pip install -q kyber-py==1.2.0 blake3==1.0.11 cryptography==50.0.2
+          mkdir -p /tmp/vec && cp crates/avpn-pq-sphinx/gen_vectors.py /tmp/vec/
+          /tmp/vecenv/bin/python -I /tmp/vec/gen_vectors.py
+          for c in avpn-pq-sphinx avpn-mix-lane; do cp /tmp/vec/vectors.txt crates/$c/vectors.txt; done
+          cargo test --locked --release -p avpn-pq-sphinx -p avpn-mix-lane --test vectors
+          git checkout -- crates/avpn-pq-sphinx/vectors.txt crates/avpn-mix-lane/vectors.txt
       - name: Build and run isolated routed VPN
         run: |
           cargo build --release --locked
@@ -74,11 +102,17 @@ jobs:
           unshare --user --map-root-user --map-auto --net --mount python tools/ohttp_lab.py --state /tmp/avpn-ohttp
       - name: I2P front (private I2P network; the entry never sees the client, only I2P leaves)
         run: |
-          # i2pd's libraries only: installing the package itself would start a public I2P router.
-          sudo apt-get install -y --no-install-recommends $(apt-cache depends i2pd | awk '/Depends: lib/ {print $2}')
+          # i2pd 2.56 from Debian, pinned by hash: Ubuntu 24.04's 2.49 rejects the private
+          # network's router records, so it never bootstraps (docs/cli/front.md).
+          sudo apt-get install -y --no-install-recommends libboost-program-options1.83.0
           mkdir -p /tmp/i2pd-deb /tmp/i2pd-root && cd /tmp/i2pd-deb
-          apt-get download i2pd
-          dpkg -x i2pd_*.deb /tmp/i2pd-root
+          curl -sfLO http://deb.debian.org/debian/pool/main/i/i2pd/i2pd_2.56.0-1_amd64.deb
+          curl -sfLO "http://deb.debian.org/debian/pool/main/m/miniupnpc/libminiupnpc18_2.2.8-2+b2_amd64.deb"
+          printf '%s  %s\n' \
+            b80c54e1a11abeac62638f4a3e042654e34bf9b1e2ea83fe62cbb2906135a50f i2pd_2.56.0-1_amd64.deb \
+            40a88ddf25f4f0cab717c7cc56d32ba5a7c0f2ba0a465f3949284c6a3fab2450 libminiupnpc18_2.2.8-2+b2_amd64.deb \
+            | sha256sum -c
+          for d in *.deb; do dpkg -x "$d" /tmp/i2pd-root; done
           cd "$GITHUB_WORKSPACE"
           unshare --user --map-root-user --map-auto --net --mount python tools/i2p_lab.py --state /tmp/avpn-i2p --i2pd-root /tmp/i2pd-root --rate metered
       - name: Known dependency vulnerabilities

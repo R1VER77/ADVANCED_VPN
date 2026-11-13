@@ -1,0 +1,21 @@
+[package]
+name = "avpn-mix-lane"
+version = "0.1.0"
+edition = "2021"
+description = "ADVANCED_VPN mix lane: PQ-Sphinx option E on audited primitives (ml-kem, x25519-dalek, chacha20poly1305, blake3) + relay mix (Exp delays, Little's-law queue, replay cache, mailbox). Byte-identical to the cross-verified reference crate."
+license = "MIT OR Apache-2.0"
+
+publish = false
+
+[lib]
+name = "avpn_mix_lane"
+path = "src/lib.rs"
+
+[dependencies]
+ml-kem = { version = "=0.2.3", features = ["deterministic", "zeroize"] }
+x25519-dalek = "=2.0.1"
+chacha20poly1305 = "=0.10.1"
+chacha20 = "=0.9.1"
+blake3 = "=1.8.7"
+sha2 = "=0.10.9"
+hkdf = "=0.12.4"

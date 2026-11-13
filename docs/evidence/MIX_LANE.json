@@ -1,5 +1,5 @@
 {
- "schema": 1,
+ "schema": 2,
  "lab": "tools/mix_lab.py in a privileged container: 10 clients (own namespaces, kpclientd + http-proxy-client each) send HEAD requests at Poisson times (mean 30 s) to 30 live public websites (3 per client); phase 1 through a Katzenpost mixnet (3 voting authorities, 3 mix layers, 1 gateway, 1 service node with the HTTP proxy), phase 2 the same workload through a plain low-latency proxy (no mixing, no cover), as a multi-hop VPN's shared exit carries it",
  "katzenpost": "v0.0.110 (bd15cab2), unmodified, third_party/katzenpost/build.sh",
  "adversary": "global passive: every client's link (send times only) and the service's internet link (each site's DNS lookup time); given the delay distribution (empirical from ground truth, and the network's own law: 5 Poisson hops at Mu); tools/gpa.py scores every client per request",
@@ -35,8 +35,9 @@
   "letsencrypt.org",
   "www.fsf.org"
  ],
+ "sphinx_policy": "X-Wing (ML-KEM-768 + X25519) at every hop; avpn mix refuses classical Sphinx",
  "clients": 10,
- "started": "2026-11-12T20:18:18Z",
+ "started": "2026-11-13T02:31:58Z",
  "katzenpost_parameters": {
   "Mu": 0.005,
   "LambdaP": 0.001,
@@ -44,30 +45,121 @@
   "LambdaM": 0.2,
   "LambdaR": 0.0005
  },
- "mixnet_ready_seconds": 783.3,
+ "sphinx": {
+  "PacketLength": "22458",
+  "HeaderLength": "7164",
+  "NIKEName": "",
+  "KEMName": "XWING"
+ },
+ "mixnet_ready_seconds": 199.5,
  "clients_ready": 10,
  "mix": {
-  "requests": 299,
-  "live_fetches_answered": 286,
+  "requests": 285,
+  "live_fetches_answered": 262,
   "statuses": [
    200,
    301,
    302,
-   403,
-   502,
    504
   ],
   "latency_seconds": {
-   "p50": 2.91,
-   "p90": 4.82,
-   "p99": 7.8,
-   "max": 7.88,
-   "n": 286
+   "p50": 4.26,
+   "p90": 6.07,
+   "p99": 8.67,
+   "max": 9.61,
+   "n": 262
   },
-  "lookups_matched": 298,
-  "wire_send_events": 35197,
+  "lookups_matched": 284,
+  "wire_send_events": 33065,
   "attack_models": {
    "empirical": {
+    "arrivals": 284,
+    "clients": 10,
+    "top1_accuracy": 0.0915,
+    "chance": 0.1,
+    "mean_entropy_bits": 3.265,
+    "max_entropy_bits": 3.322,
+    "effective_anonymity_set": 9.61
+   },
+   "network_law": {
+    "arrivals": 284,
+    "clients": 10,
+    "top1_accuracy": 0.1162,
+    "chance": 0.1,
+    "mean_entropy_bits": 3.16,
+    "max_entropy_bits": 3.322,
+    "effective_anonymity_set": 8.94
+   }
+  },
+  "attacker": {
+   "arrivals": 284,
+   "clients": 10,
+   "top1_accuracy": 0.1162,
+   "chance": 0.1,
+   "mean_entropy_bits": 3.16,
+   "max_entropy_bits": 3.322,
+   "effective_anonymity_set": 8.94
+  },
+  "sends_per_second": {
+   "busy": 2.88,
+   "idle": 2.915
+  }
+ },
+ "baseline": {
+  "requests": 149,
+  "live_fetches_answered": 146,
+  "statuses": [
+   200,
+   301,
+   302,
+   502
+  ],
+  "latency_seconds": {
+   "p50": 1.58,
+   "p90": 2.09,
+   "p99": 2.38,
+   "max": 2.64,
+   "n": 146
+  },
+  "lookups_matched": 146,
+  "wire_send_events": 149,
+  "attack_models": {
+   "empirical": {
+    "arrivals": 146,
+    "clients": 10,
+    "top1_accuracy": 0.9555,
+    "chance": 0.1,
+    "mean_entropy_bits": 0.125,
+    "max_entropy_bits": 3.322,
+    "effective_anonymity_set": 1.09
+   }
+  },
+  "attacker": {
+   "arrivals": 146,
+   "clients": 10,
+   "top1_accuracy": 0.9555,
+   "chance": 0.1,
+   "mean_entropy_bits": 0.125,
+   "max_entropy_bits": 3.322,
+   "effective_anonymity_set": 1.09
+  },
+  "sends_per_second": {
+   "busy": 0.28,
+   "idle": 0.011
+  }
+ },
+ "chance": 0.1,
+ "max_entropy_bits": 3.322,
+ "notes": [
+  "Mix-lane accuracy within sampling noise of chance: 284 requests, 95% interval about +/-3.5 points around 10%.",
+  "The baseline attacker uses the same capture, grouping and scoring code, and identifies 95.6% of senders: the attack works where timing leaks.",
+  "Busy and idle send rates on the mix lane are equal (real-or-drop and loop cover); on the baseline a client's link is silent until it sends.",
+  "Failed live fetches: 502 (the reply exceeds one 8000-byte mixnet message, or the site refused) and 504 (no reply within 60 s)."
+ ],
+ "history_classical_sphinx": {
+  "note": "The same lab before the mix lane required post-quantum Sphinx (X25519 NIKE, 9,082-byte packets).",
+  "mix": {
+   "attacker": {
     "arrivals": 298,
     "clients": 10,
     "top1_accuracy": 0.0772,
@@ -76,51 +168,18 @@
     "max_entropy_bits": 3.322,
     "effective_anonymity_set": 9.68
    },
-   "network_law": {
-    "arrivals": 298,
-    "clients": 10,
-    "top1_accuracy": 0.0671,
-    "chance": 0.1,
-    "mean_entropy_bits": 3.177,
-    "max_entropy_bits": 3.322,
-    "effective_anonymity_set": 9.04
-   }
+   "latency_seconds": {
+    "p50": 2.91,
+    "p90": 4.82,
+    "p99": 7.8,
+    "max": 7.88,
+    "n": 286
+   },
+   "live_fetches_answered": 286,
+   "requests": 299
   },
-  "attacker": {
-   "arrivals": 298,
-   "clients": 10,
-   "top1_accuracy": 0.0772,
-   "chance": 0.1,
-   "mean_entropy_bits": 3.275,
-   "max_entropy_bits": 3.322,
-   "effective_anonymity_set": 9.68
-  },
-  "sends_per_second": {
-   "busy": 2.751,
-   "idle": 2.898
-  }
- },
- "baseline": {
-  "requests": 165,
-  "live_fetches_answered": 162,
-  "statuses": [
-   200,
-   301,
-   302,
-   403,
-   502
-  ],
-  "latency_seconds": {
-   "p50": 0.21,
-   "p90": 1.17,
-   "p99": 2.3,
-   "max": 20.59,
-   "n": 162
-  },
-  "lookups_matched": 158,
-  "wire_send_events": 165,
-  "attack_models": {
-   "empirical": {
+  "baseline": {
+   "attacker": {
     "arrivals": 158,
     "clients": 10,
     "top1_accuracy": 0.8608,
@@ -129,27 +188,6 @@
     "max_entropy_bits": 3.322,
     "effective_anonymity_set": 1.34
    }
-  },
-  "attacker": {
-   "arrivals": 158,
-   "clients": 10,
-   "top1_accuracy": 0.8608,
-   "chance": 0.1,
-   "mean_entropy_bits": 0.42,
-   "max_entropy_bits": 3.322,
-   "effective_anonymity_set": 1.34
-  },
-  "sends_per_second": {
-   "busy": 0.468,
-   "idle": 0.018
   }
- },
- "chance": 0.1,
- "max_entropy_bits": 3.322,
- "notes": [
-  "Mix-lane accuracy below chance is sampling noise: 298 requests, 95% interval about +/-3 points around 10%.",
-  "The baseline attacker uses the same capture, grouping and scoring code, and identifies 86% of senders: the attack works where timing leaks.",
-  "Busy and idle send rates on the mix lane are equal (real-or-drop and loop cover); on the baseline a client's link is silent until it sends.",
-  "Failed live fetches: 502 (the reply exceeds one 8000-byte mixnet message, or the site refused) and 504 (no reply within 60 s)."
- ]
+ }
 }

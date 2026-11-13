@@ -1,12 +1,19 @@
-//! Bounded owned-exit DNS-over-TLS forwarder with optional signed domain blocklist.
+//! Bounded owned-exit DNS-over-TLS forwarder with an optional signed domain filter.
 //! No DNS query logging or persistent cache.
+//!
+//! The filter (an anti-tracker, decided at the exit, inside the tunnel): a signed
+//! blocklist and allowlist in the common list formats (plain domains, `.domain`,
+//! `*.domain`, hosts-file `0.0.0.0 domain`, adblock `||domain^`). The allowlist wins.
+//! Answers are checked too: a permitted name whose CNAME chain leads into a blocked
+//! domain (CNAME cloaking, how first-party trackers evade query-name filters) is
+//! answered `NXDOMAIN` like the blocked name itself.
 use advanced_vpn::config::private_read;
 use anyhow::{Result, ensure};
 use clap::Parser;
 use rustls::pki_types::{CertificateDer, ServerName};
 use serde::Deserialize;
 use std::{
-    collections::BTreeSet,
+    collections::BTreeMap,
     net::{IpAddr, SocketAddr},
     path::PathBuf,
     sync::{
@@ -41,6 +48,9 @@ struct Config {
     /// Optional inline blocked domain suffixes from the profile.
     #[serde(default)]
     blocked_domains: Vec<String>,
+    /// Optional signed allowlist file (same formats): its entries are never blocked.
+    #[serde(default)]
+    allowlist: Option<PathBuf>,
 }
 #[derive(Parser)]
 struct Args {
@@ -50,49 +60,181 @@ struct Args {
     check: bool,
 }
 
-/// Suffix-aware domain blocklist: an entry `ads.example.com` blocks `ads.example.com`
-/// and `sub.ads.example.com`, never `badads.example.com`.
-#[derive(Default, Clone)]
-struct Blocklist {
-    domains: BTreeSet<String>,
+/// One filter rule's reach.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Reach {
+    /// `domain`, `.domain`, `0.0.0.0 domain`, `||domain^`: the domain and its subdomains.
+    WithSubdomains,
+    /// `*.domain`: subdomains only, not the domain itself.
+    SubdomainsOnly,
 }
 
-impl Blocklist {
+/// A domain rule set: an entry `ads.example.com` covers `ads.example.com` and
+/// `sub.ads.example.com`, never `badads.example.com`.
+#[derive(Default, Clone)]
+struct Rules {
+    domains: BTreeMap<String, Reach>,
+}
+
+impl Rules {
+    /// Parse list text in the common formats, plus inline entries.
     fn from_lines(text: &str, inline: &[String]) -> Result<Self> {
-        let mut domains = BTreeSet::new();
+        let mut domains = BTreeMap::new();
         for raw in text.lines().chain(inline.iter().map(String::as_str)) {
-            let line = raw
-                .split('#')
-                .next()
-                .unwrap_or("")
-                .trim()
-                .trim_end_matches('.');
-            if line.is_empty() {
+            let mut line = raw.split(['#', '!']).next().unwrap_or("").trim();
+            // hosts-file format: "0.0.0.0 domain" or "127.0.0.1 domain"
+            if let Some((addr, rest)) = line.split_once(char::is_whitespace)
+                && matches!(addr, "0.0.0.0" | "127.0.0.1" | "::" | "::1")
+            {
+                line = rest.trim();
+            }
+            // adblock format: "||domain^"
+            if let Some(inner) = line.strip_prefix("||") {
+                line = inner.strip_suffix('^').unwrap_or(inner);
+            }
+            let (reach, name) = if let Some(rest) = line.strip_prefix("*.") {
+                (Reach::SubdomainsOnly, rest)
+            } else if let Some(rest) = line.strip_prefix('.') {
+                (Reach::WithSubdomains, rest)
+            } else {
+                (Reach::WithSubdomains, line)
+            };
+            let name = name.trim_end_matches('.');
+            if name.is_empty() || matches!(name, "localhost" | "local" | "broadcasthost") {
                 continue;
             }
-            let lower = line.to_ascii_lowercase();
-            ensure!(valid_domain(&lower), "invalid domain in blocklist");
-            domains.insert(lower);
+            let lower = name.to_ascii_lowercase();
+            ensure!(valid_domain(&lower), "invalid domain in filter list");
+            // The wider rule wins if both forms appear.
+            let entry = domains.entry(lower).or_insert(reach);
+            if reach == Reach::WithSubdomains {
+                *entry = Reach::WithSubdomains;
+            }
         }
         Ok(Self { domains })
     }
 
-    fn is_blocked(&self, qname: &str) -> bool {
+    fn is_empty(&self) -> bool {
+        self.domains.is_empty()
+    }
+
+    fn matches(&self, qname: &str) -> bool {
         if self.domains.is_empty() {
             return false;
         }
         let clean = qname.trim_end_matches('.').to_ascii_lowercase();
         let mut cursor = clean.as_str();
+        let mut is_apex = true;
         loop {
-            if self.domains.contains(cursor) {
-                return true;
+            match self.domains.get(cursor) {
+                Some(Reach::WithSubdomains) => return true,
+                Some(Reach::SubdomainsOnly) if !is_apex => return true,
+                _ => {}
             }
             match cursor.split_once('.') {
-                Some((_, rest)) => cursor = rest,
+                Some((_, rest)) => {
+                    cursor = rest;
+                    is_apex = false;
+                }
                 None => return false,
             }
         }
     }
+}
+
+/// The exit's filter: blocked unless allowed.
+#[derive(Default, Clone)]
+struct Blocklist {
+    block: Rules,
+    allow: Rules,
+}
+
+impl Blocklist {
+    fn from_lines(text: &str, inline: &[String]) -> Result<Self> {
+        Ok(Self {
+            block: Rules::from_lines(text, inline)?,
+            allow: Rules::default(),
+        })
+    }
+
+    fn with_allowlist(mut self, text: &str) -> Result<Self> {
+        self.allow = Rules::from_lines(text, &[])?;
+        Ok(self)
+    }
+
+    fn is_blocked(&self, qname: &str) -> bool {
+        !self.block.is_empty() && self.block.matches(qname) && !self.allow.matches(qname)
+    }
+
+    /// True when an upstream answer's CNAME chain enters a blocked domain.
+    fn answer_is_cloaked(&self, answer: &[u8]) -> bool {
+        !self.block.is_empty()
+            && cname_targets(answer)
+                .map(|names| names.iter().any(|n| self.is_blocked(n)))
+                .unwrap_or(false)
+    }
+}
+
+/// Read a (possibly compressed) DNS name at `pos`; returns the name and the offset just
+/// past it in the original record. Bounded: at most 32 pointer jumps and 255 bytes.
+fn read_name(pkt: &[u8], mut pos: usize) -> Option<(String, usize)> {
+    let mut labels: Vec<String> = Vec::new();
+    let mut end = None;
+    let mut jumps = 0;
+    let mut total = 0usize;
+    loop {
+        let len = *pkt.get(pos)? as usize;
+        if len & 0xC0 == 0xC0 {
+            let target = ((len & 0x3F) << 8) | *pkt.get(pos + 1)? as usize;
+            end.get_or_insert(pos + 2);
+            jumps += 1;
+            if jumps > 32 || target >= pkt.len() {
+                return None;
+            }
+            pos = target;
+            continue;
+        }
+        if len & 0xC0 != 0 {
+            return None;
+        }
+        pos += 1;
+        if len == 0 {
+            break;
+        }
+        let label = pkt.get(pos..pos + len)?;
+        total += len + 1;
+        if total > 255 {
+            return None;
+        }
+        labels.push(String::from_utf8_lossy(label).to_ascii_lowercase());
+        pos += len;
+    }
+    Some((labels.join("."), end.unwrap_or(pos)))
+}
+
+/// Every name in an answer's CNAME chain (owners and targets of CNAME records), or
+/// None if the answer does not parse.
+fn cname_targets(pkt: &[u8]) -> Option<Vec<String>> {
+    let qd = u16::from_be_bytes([*pkt.get(4)?, *pkt.get(5)?]) as usize;
+    let an = u16::from_be_bytes([*pkt.get(6)?, *pkt.get(7)?]) as usize;
+    let mut pos = 12;
+    for _ in 0..qd {
+        pos = read_name(pkt, pos)?.1 + 4;
+    }
+    let mut names = Vec::new();
+    for _ in 0..an.min(64) {
+        let (owner, after) = read_name(pkt, pos)?;
+        let rtype = u16::from_be_bytes([*pkt.get(after)?, *pkt.get(after + 1)?]);
+        let rdlen = u16::from_be_bytes([*pkt.get(after + 8)?, *pkt.get(after + 9)?]) as usize;
+        let rdata = after + 10;
+        pkt.get(rdata..rdata + rdlen)?;
+        if rtype == 5 {
+            names.push(owner);
+            names.push(read_name(pkt, rdata)?.0);
+        }
+        pos = rdata + rdlen;
+    }
+    Some(names)
 }
 
 fn valid_domain(d: &str) -> bool {
@@ -156,6 +298,22 @@ fn nxdomain_response(query: &[u8], q_end: usize) -> Vec<u8> {
     out
 }
 
+/// TLS to the upstream resolver: TLS 1.3 with the hybrid post-quantum group
+/// X25519MLKEM768 as the only key exchange. An upstream that cannot do it gets no query
+/// (DNS fails closed), so no lookup ever crosses the exit's last leg under classical
+/// key exchange alone.
+fn upstream_tls(roots: rustls::RootCertStore) -> Result<rustls::ClientConfig> {
+    let mut provider = rustls::crypto::aws_lc_rs::default_provider();
+    provider.kx_groups = vec![rustls::crypto::aws_lc_rs::kx_group::X25519MLKEM768];
+    let mut crypto = rustls::ClientConfig::builder_with_provider(Arc::new(provider))
+        .with_protocol_versions(&[&rustls::version::TLS13])?
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+    crypto.enable_early_data = false;
+    crypto.resumption = rustls::client::Resumption::disabled();
+    Ok(crypto)
+}
+
 struct Resolver {
     tls: TlsConnector,
     addr: SocketAddr,
@@ -195,6 +353,13 @@ impl Resolver {
             "bad DNS response"
         );
         self.count.fetch_add(1, Ordering::Relaxed);
+        // CNAME cloaking: a permitted name that resolves through a blocked one.
+        if self.blocklist.answer_is_cloaked(&answer)
+            && let Ok((_, q_end)) = parse_question(b)
+        {
+            self.blocked.fetch_add(1, Ordering::Relaxed);
+            return Ok(nxdomain_response(b, q_end));
+        }
         Ok(answer)
     }
 }
@@ -223,22 +388,20 @@ async fn work() -> Result<()> {
         Some(path) => String::from_utf8(private_read(path, 1 << 20)?)?,
         None => String::new(),
     };
-    let blocklist = Blocklist::from_lines(&blocklist_text, &c.blocked_domains)?;
+    let allowlist_text = match &c.allowlist {
+        Some(path) => String::from_utf8(private_read(path, 1 << 20)?)?,
+        None => String::new(),
+    };
+    let blocklist = Blocklist::from_lines(&blocklist_text, &c.blocked_domains)?
+        .with_allowlist(&allowlist_text)?;
     let mut roots = rustls::RootCertStore::empty();
     if let Some(path) = c.test_ca {
         roots.add(CertificateDer::from(private_read(&path, 16384)?))?;
     } else {
         roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
     }
-    let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
-    let mut crypto = rustls::ClientConfig::builder_with_provider(provider)
-        .with_protocol_versions(&[&rustls::version::TLS13])?
-        .with_root_certificates(roots)
-        .with_no_client_auth();
-    crypto.enable_early_data = false;
-    crypto.resumption = rustls::client::Resumption::disabled();
     let resolver = Arc::new(Resolver {
-        tls: TlsConnector::from(Arc::new(crypto)),
+        tls: TlsConnector::from(Arc::new(upstream_tls(roots)?)),
         addr: c.upstream,
         name: ServerName::try_from(c.server_name)?,
         slots: Arc::new(Semaphore::new(16)),
@@ -355,5 +518,158 @@ mod tests {
         assert_eq!(resp[2] & 0x80, 0x80); // QR=1
         assert_eq!(resp[3] & 0x0f, 3); // RCODE=3 (NXDOMAIN)
         assert_eq!(&resp[12..], &q[12..]);
+    }
+
+    /// An upstream answer for `qname`: optional CNAME chain (compressed names), then an A record.
+    fn answer_with_chain(query: &[u8], chain: &[&str]) -> Vec<u8> {
+        let (_, q_end) = parse_question(query).unwrap();
+        let mut a = query[..2].to_vec();
+        a.extend_from_slice(&[0x81, 0x80, 0x00, 0x01]);
+        a.extend_from_slice(&((chain.len() + 1) as u16).to_be_bytes());
+        a.extend_from_slice(&[0, 0, 0, 0]);
+        a.extend_from_slice(&query[12..q_end]);
+        let mut owner_ptr = 12u16; // the question's name
+        for target in chain {
+            a.extend_from_slice(&(0xC000 | owner_ptr).to_be_bytes());
+            a.extend_from_slice(&[0, 5, 0, 1, 0, 0, 0, 30]);
+            let mut rdata = Vec::new();
+            for label in target.split('.') {
+                rdata.push(label.len() as u8);
+                rdata.extend_from_slice(label.as_bytes());
+            }
+            rdata.push(0);
+            a.extend_from_slice(&(rdata.len() as u16).to_be_bytes());
+            owner_ptr = a.len() as u16;
+            a.extend_from_slice(&rdata);
+        }
+        a.extend_from_slice(&(0xC000 | owner_ptr).to_be_bytes());
+        a.extend_from_slice(&[0, 1, 0, 1, 0, 0, 0, 30, 0, 4, 203, 0, 113, 9]);
+        a
+    }
+
+    #[test]
+    fn list_formats_and_reach() {
+        let list = "tracker.example\n.ads.example\n*.cdn.example\n0.0.0.0 hosts.example\n||abp.example^\n! adblock comment\n# comment\n";
+        let bl = Blocklist::from_lines(list, &[]).unwrap();
+        for blocked in [
+            "tracker.example",
+            "x.tracker.example",
+            "ads.example",
+            "a.b.ads.example",
+            "x.cdn.example",
+            "hosts.example",
+            "abp.example",
+            "sub.abp.example",
+        ] {
+            assert!(bl.is_blocked(blocked), "{blocked} should be blocked");
+        }
+        // `*.domain` is subdomains only; partial labels never match.
+        for allowed in ["cdn.example", "nottracker.example", "example", "other.test"] {
+            assert!(!bl.is_blocked(allowed), "{allowed} should pass");
+        }
+    }
+
+    #[test]
+    fn the_allowlist_overrides_the_blocklist() {
+        let bl = Blocklist::from_lines(".ads.example\n", &[])
+            .unwrap()
+            .with_allowlist("needed.ads.example\n")
+            .unwrap();
+        assert!(bl.is_blocked("ads.example"));
+        assert!(bl.is_blocked("other.ads.example"));
+        assert!(!bl.is_blocked("needed.ads.example"));
+        assert!(!bl.is_blocked("x.needed.ads.example"));
+    }
+
+    #[test]
+    fn a_cname_into_a_blocked_domain_is_refused() {
+        let bl = Blocklist::from_lines("tracker.example\n", &[]).unwrap();
+        let q = make_query([0x12, 0x34], "metrics.news.test");
+        // metrics.news.test -> edge.tracker.example -> A: cloaked.
+        assert!(bl.answer_is_cloaked(&answer_with_chain(&q, &["edge.tracker.example"])));
+        // A two-step chain whose second hop is blocked.
+        assert!(bl.answer_is_cloaked(&answer_with_chain(
+            &q,
+            &["cdn.news.test", "pixel.tracker.example"]
+        )));
+        // A clean chain and a plain answer pass.
+        assert!(!bl.answer_is_cloaked(&answer_with_chain(&q, &["cdn.news.test"])));
+        assert!(!bl.answer_is_cloaked(&answer_with_chain(&q, &[])));
+        // An allowlisted target passes.
+        let allowed = bl.clone().with_allowlist("edge.tracker.example\n").unwrap();
+        assert!(!allowed.answer_is_cloaked(&answer_with_chain(&q, &["edge.tracker.example"])));
+    }
+
+    /// A one-query DoT upstream on loopback whose TLS offers only `group`.
+    async fn upstream(group: &'static dyn rustls::crypto::SupportedKxGroup) -> SocketAddr {
+        let leaf = hex::decode("308201a93082014ea003020102021471f551994895b91cd0289bb0042ee254e36de3ba300a06082a8648ce3d04030230173115301306035504030c0c6176706e2d746573742d63613020170d3236313131333035353433395a180f32313236313032303035353433395a30133111300f06035504030c08646e732e746573743059301306072a8648ce3d020106082a8648ce3d03010703420004ba1bf9a7be9b7dd8fbb144a88f4beb11d65be11694a065daefe54ffbc253a6b2df818ad8bee3dfc91597d9da80feec3130d5066a42b2d1b38a69bd771d0a51fea37a307830130603551d11040c300a8208646e732e74657374300c0603551d130101ff0402300030130603551d25040c300a06082b06010505070301301d0603551d0e0416041457a0a83014e8cf81d3d60c53f5647a5b7405ee0b301f0603551d23041830168014139907b6deea232678b8088cb0b62ea0edd293a9300a06082a8648ce3d0403020349003046022100a4bd85e0f7da323809b0122f2fb0f3eb372cc2d77aa0df8bc2422999628f2479022100cbc246742740337ed5ca5c74b54ccf5ed7f65da31d2da771788bc749735c81a4").unwrap();
+        let key = hex::decode("308187020100301306072a8648ce3d020106082a8648ce3d030107046d306b0201010420feab05caade22b54dd100ed6fb00ba235e524a17672e582c7debf928f085c660a14403420004ba1bf9a7be9b7dd8fbb144a88f4beb11d65be11694a065daefe54ffbc253a6b2df818ad8bee3dfc91597d9da80feec3130d5066a42b2d1b38a69bd771d0a51fe").unwrap();
+        let mut p = rustls::crypto::aws_lc_rs::default_provider();
+        p.kx_groups = vec![group];
+        let server = rustls::ServerConfig::builder_with_provider(Arc::new(p))
+            .with_protocol_versions(&[&rustls::version::TLS13])
+            .unwrap()
+            .with_no_client_auth()
+            .with_single_cert(
+                vec![CertificateDer::from(leaf)],
+                rustls::pki_types::PrivatePkcs8KeyDer::from(key).into(),
+            )
+            .unwrap();
+        let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(server));
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (s, _) = listener.accept().await.unwrap();
+            if let Ok(mut tls) = acceptor.accept(s).await {
+                let n = tls.read_u16().await.unwrap() as usize;
+                let mut q = vec![0; n];
+                tls.read_exact(&mut q).await.unwrap();
+                q[2] |= 0x80; // the query, answered (no records)
+                tls.write_all(&(n as u16).to_be_bytes()).await.unwrap();
+                tls.write_all(&q).await.unwrap();
+            }
+        });
+        addr
+    }
+
+    #[tokio::test]
+    async fn the_upstream_must_offer_hybrid_post_quantum_tls() {
+        use rustls::crypto::aws_lc_rs::kx_group;
+        for (group, answered) in [(kx_group::X25519MLKEM768, true), (kx_group::X25519, false)] {
+            let mut roots = rustls::RootCertStore::empty();
+            roots
+                .add(CertificateDer::from(hex::decode("308201853082012ba00302010202147b7305c0759fb590e5a7ae9d8bb6d7ac097cfbea300a06082a8648ce3d04030230173115301306035504030c0c6176706e2d746573742d63613020170d3236313131333035353433395a180f32313236313032303035353433395a30173115301306035504030c0c6176706e2d746573742d63613059301306072a8648ce3d020106082a8648ce3d03010703420004c710ec326571976fcfd7d98d41efefbc1893c444207bd0e6bfecdbb63f26480bd5a16083e73c0bca5f672f290cb8b032f59b884b9963709c8065d85dc93893b7a3533051301d0603551d0e04160414139907b6deea232678b8088cb0b62ea0edd293a9301f0603551d23041830168014139907b6deea232678b8088cb0b62ea0edd293a9300f0603551d130101ff040530030101ff300a06082a8648ce3d0403020348003045022100f136aab056185d15cf4182274e9a71d474ae8b67b423df111ced447bbde84a3202200cc81300198159d03f9ef61b3c7d26eb3885d34804f1aa5368db78a395b5a06d").unwrap()))
+                .unwrap();
+            let resolver = Resolver {
+                tls: TlsConnector::from(Arc::new(upstream_tls(roots).unwrap())),
+                addr: upstream(group).await,
+                name: ServerName::try_from("dns.test").unwrap(),
+                slots: Arc::new(Semaphore::new(1)),
+                blocklist: Blocklist::from_lines("", &[]).unwrap(),
+                count: AtomicU64::new(0),
+                blocked: AtomicU64::new(0),
+            };
+            let r = resolver.query(&make_query([7, 9], "example.org")).await;
+            assert_eq!(r.is_ok(), answered, "{:?}: {r:?}", group.name());
+        }
+    }
+
+    #[test]
+    fn malformed_answers_never_panic() {
+        let q = make_query([0, 1], "a.test");
+        let good = answer_with_chain(&q, &["b.test"]);
+        for cut in 0..good.len() {
+            let _ = cname_targets(&good[..cut]);
+        }
+        // A compression pointer loop is refused, not followed forever.
+        let mut looped = good.clone();
+        let n = looped.len();
+        looped[n - 16] = 0xC0;
+        looped[n - 15] = (n - 16) as u8;
+        let _ = cname_targets(&looped);
+        let mut self_ptr = vec![0u8; 12];
+        self_ptr[5] = 1;
+        self_ptr.extend_from_slice(&[0xC0, 12, 0, 1, 0, 1]);
+        assert!(cname_targets(&self_ptr).is_none());
     }
 }
