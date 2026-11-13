@@ -5,7 +5,7 @@ operator. Private keys never leave the device.
 
 ## Usage
 
-    sudo avpn request --role ROLE --protect MODE [--vault DIR] --out FILE
+    sudo avpn request --role ROLE --protect MODE [--vault DIR] [--insecure-plaintext-keys] --out FILE
 
 ## Options
 
@@ -14,6 +14,7 @@ operator. Private keys never leave the device.
   - `nitrokey`: FIDO2 hmac-secret envelope. Needs the key present (PIN + touch) to start.
   - `systemd-creds`: sealed with the host key, and with the TPM2 when one is usable (`host+tpm2`). Use it on servers.
   - `none`: plaintext, root-only. Lab use only.
+- `--insecure-plaintext-keys`: required for `--protect none`, which stores the private keys as plain root-only files that anyone with root or the disk can read. Without it, `none` is refused before any key is made. Tests and throwaway devices only.
 - `--vault DIR`: the Nitrokey vault (with `--protect nitrokey`). The default is `/etc/advanced-vpn/vault`, created on first use (PIN + touch). The VPN service reads it as root, so a vault must be a private directory owned by root. One in your home directory is refused before anything is created.
 - `--out FILE`: the public request. Copy only this file to the operator.
 

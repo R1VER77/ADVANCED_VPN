@@ -25,9 +25,9 @@ succeeded.
 Runs inside a disposable privileged container (it builds namespaces, NAT and raw
 captures, and reaches the internet through Docker's bridge):
 
-    docker build -t avpn-mixlab:1 -f tools/mix_lab.Dockerfile tools
+    docker build -t avpn-mixlab:2 -f tools/mix_lab.Dockerfile tools
     docker run --rm --privileged -v KATZENPOST_BIN:/kp/bin:ro -v $PWD/tools:/lab/tools:ro \\
-        -v OUT:/out avpn-mixlab:1 python3 /lab/tools/mix_lab.py --bin /kp/bin --out /out
+        -v OUT:/out avpn-mixlab:2 python3 /lab/tools/mix_lab.py --bin /kp/bin --out /out
 
 KATZENPOST_BIN holds unmodified Katzenpost binaries (dirauth, server, genconfig,
 kpclientd, http-proxy-client, http-proxy-server; see third_party/katzenpost/build.sh).
@@ -62,6 +62,13 @@ SITES = [
     "gitlab.com", "www.cloudflare.com", "crates.io", "www.bbc.co.uk", "www.theguardian.com",
     "www.npr.org", "archive.org", "signal.org", "mullvad.net", "www.ivpn.net",
     "proton.me", "duckduckgo.com", "www.openstreetmap.org", "www.postgresql.org", "www.fedoraproject.org",
+]  # fmt: skip
+# Cover clients (--cover-clients): ordinary mixnet clients with the same workload, on
+# their own sites (hybrid-TLS too, none shared with the measured clients). They are never
+# scored; the question is how much they hide the measured clients.
+COVER_SITES = [
+    "developer.mozilla.org", "www.chromium.org", "go.dev", "www.php.net", "www.ruby-lang.org",
+    "www.haskell.org", "www.npmjs.com", "www.docker.com", "www.kali.org", "www.sqlite.org",
 ]  # fmt: skip
 MIX_IP = "10.200.0.1"
 BASELINE_PORT = 8888
@@ -111,6 +118,29 @@ while True:
     if time.time()>=end:break
     th=threading.Thread(target=one,args=(rng.choice(sites),));th.start();threads.append(th)
 for th in threads:th.join(150)
+"""
+# One GET through a client's proxy, with or without gzip (HTTP/1.0 to the proxy, so its
+# answer is never chunked): what arrives, and whether a compressed page decodes whole.
+GETZ = r"""
+import json,socket,sys,zlib
+c=socket.create_connection((sys.argv[1],int(sys.argv[2])),10);c.settimeout(150)
+ae='Accept-Encoding: gzip\r\n' if sys.argv[4]=='gzip' else ''
+c.sendall(('GET https://%s/ HTTP/1.0\r\nHost: %s\r\nUser-Agent: Mozilla/5.0\r\n%s\r\n'%(sys.argv[3],sys.argv[3],ae)).encode())
+raw=b''
+while True:
+    b=c.recv(65536)
+    if not b:break
+    raw+=b
+head,_,body=raw.partition(b'\r\n\r\n');h=head.decode('latin-1').lower().split('\r\n')
+enc=[x.split(':',1)[1].strip() for x in h[1:] if x.startswith('content-encoding:')]
+page,whole=body,None
+if enc==['gzip'] and body:
+    try:
+        d=zlib.decompressobj(16+zlib.MAX_WBITS);page=d.decompress(body);whole=d.eof
+    except zlib.error:whole=False
+low=page[:4096].lower()
+print(json.dumps(dict(site=sys.argv[3],asked=sys.argv[4],status=h[0],content_encoding=enc,wire_body_bytes=len(body),
+                      page_bytes=len(page),gzip_whole=whole,html=b'<html' in low or b'<!doctype html' in low)))
 """
 # The adversary's capture in the mixnet namespace: every packet a client sends towards the
 # gateway or the baseline proxy (time, client), and every DNS lookup leaving for the
@@ -184,6 +214,7 @@ def main():
     )
     p.add_argument("--mixnode", type=Path, help="option_e: the advanced-vpn-mixnode binary")
     # X-Wing (Katzenpost) tuning: the speed/bandwidth/anonymity frontier.
+    p.add_argument("--cover-clients", type=int, default=0, help="extra unscored clients (cover generators)")
     p.add_argument("--pki-scheme", default="Ed25519 Sphincs+", help="katzenpost: directory signature scheme")
     p.add_argument("--payload", type=int, default=8000, help="katzenpost: UserForwardPayloadLength (bytes)")
     p.add_argument("--lambda-p", type=float, default=1.0, help="katzenpost: real-or-drop cells per second")
@@ -208,9 +239,11 @@ def main():
         procs.append(x)
         return x
 
+    n_all = N_CLIENTS + a.cover_clients  # measured clients first (0..9), then cover
     result = dict(
         lane=a.lane,
         clients=N_CLIENTS,
+        cover_clients=a.cover_clients,
         live_sites=len(SITES),
         started=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     )
@@ -310,7 +343,7 @@ def main():
             "127.0.0.1 localhost\n" + "".join("%s %s\n" % (MIX_IP, n) for n in names)
         )
         Path("/etc/netns/mix/resolv.conf").write_text("nameserver 9.9.9.9\n")
-        for k in range(N_CLIENTS):
+        for k in range(n_all):
             ns = "c%d" % k
             sh("ip", "netns", "add", ns)
             sh("ip", "-n", ns, "link", "set", "lo", "up")
@@ -344,14 +377,14 @@ def main():
                 spawn("mix", [a.bin / "server", "-f", lab / n / "katzenpost.toml"], n + ".log", cwd=lab / n)
             spawn("mix", [sys.executable, "-c", DIRECT_PROXY, MIX_IP, BASELINE_PORT], "direct-proxy.log")
             # The clients: one kpclientd and one HTTP proxy client each.
-            for k in range(N_CLIENTS):
+            for k in range(n_all):
                 d = lab / ("client%d" % k)
                 d.mkdir()
                 shutil.copy(lab / "client/client.toml", d / "client.toml")
                 shutil.copy(lab / "client/thinclient.toml", d / "thinclient.toml")
                 spawn("c%d" % k, [a.bin / "kpclientd", "-c", d / "client.toml"], "kpclientd%d.log" % k, cwd=d)
             time.sleep(5)
-            for k in range(N_CLIENTS):
+            for k in range(n_all):
                 d = lab / ("client%d" % k)
                 spawn("c%d" % k, [a.bin / "http-proxy-client", "--cfg", d / "thinclient.toml", "--listen",
                                   "127.0.0.1:8080", "--retry", 60, "--delay", 10], "proxyclient%d.log" % k, cwd=d)  # fmt: skip
@@ -364,29 +397,30 @@ def main():
                 spawn("mix", args, "node%d.log" % i)
             spawn("mix", [sys.executable, "-c", DIRECT_PROXY, MIX_IP, BASELINE_PORT], "direct-proxy.log")
             time.sleep(3)
-            for k in range(N_CLIENTS):
+            for k in range(n_all):
                 spawn("c%d" % k, [a.mixnode, "--experimental", "client", "--directory", lab / "directory.json",
                                   "--provider", client_provider, "--pool", lab / "pool.json", "--listen",
                                   "127.0.0.1:8080"], "optione-client%d.log" % k)  # fmt: skip
         sites = {k: SITES[3 * k : 3 * k + 3] for k in range(N_CLIENTS)}
+        sites.update({k: COVER_SITES for k in range(N_CLIENTS, n_all)})
 
         # Wait until every client fetches a live site through the mixnet.
         t0 = time.time()
         ready = set()
         attempt = 0
-        while len(ready) < N_CLIENTS and time.time() - t0 < 1500:
+        while len(ready) < n_all and time.time() - t0 < 1500:
             attempt += 1
-            for k in sorted(set(range(N_CLIENTS)) - ready):
+            for k in sorted(set(range(n_all)) - ready):
                 probe = out / ("ready%d.jsonl" % k)
                 sh("ip", "netns", "exec", "c%d" % k, sys.executable, "-c", WORK, "127.0.0.1", 8080, 0.01, 0.02,
-                   probe, sites[k][attempt % 3], check=False, timeout=200)  # fmt: skip
+                   probe, sites[k][attempt % len(sites[k])], check=False, timeout=200)  # fmt: skip
                 rows = [json.loads(x) for x in probe.read_text().splitlines()] if probe.exists() else []
                 if any(r["status"] and r["status"] < 500 for r in rows):
                     ready.add(k)
             time.sleep(5)
         result["mixnet_ready_seconds"] = round(time.time() - t0, 1)
         result["clients_ready"] = len(ready)
-        if len(ready) < N_CLIENTS:
+        if len(ready) < n_all:
             raise RuntimeError("only %d clients reached the mixnet" % len(ready))
 
         # Phase 1: the mix lane. Phase 2: the same workload through the low-latency proxy.
@@ -398,15 +432,29 @@ def main():
             start = time.time()
             work = [spawn("c%d" % k, [sys.executable, "-c", WORK, host, port, a.mean_interval, seconds,
                                       out / ("%s%d.jsonl" % (phase, k)), ",".join(sites[k])], "work.log")
-                    for k in range(N_CLIENTS)]  # fmt: skip
+                    for k in range(n_all)]  # fmt: skip
             for w in work:
                 w.wait(timeout=seconds + 400)
             phases[phase] = (start, time.time(), port)
             time.sleep(10)
 
+        # After the measured phases: a compressed page through the real mixnet, end to end
+        # (client proxy -> mixnet -> fetch plugin -> site and back), against the same page plain.
+        if a.lane == "katzenpost":
+            checks = []
+            for site in ("www.kernel.org", "www.iana.org"):
+                for mode in ("gzip", "plain"):
+                    r = sh("ip", "netns", "exec", "c0", sys.executable, "-c", GETZ, "127.0.0.1", 8080, site, mode,
+                           check=False, timeout=200)  # fmt: skip
+                    try:
+                        checks.append(json.loads(r.stdout.strip().splitlines()[-1]))
+                    except (ValueError, IndexError):
+                        checks.append(dict(site=site, asked=mode, error=r.stderr.strip()[-200:]))
+            result["compressed_fetch"] = checks
+
         # The adversary's view.
-        sends = {ph: {k: [] for k in range(N_CLIENTS)} for ph in phases}
-        up_bytes = {ph: {k: 0 for k in range(N_CLIENTS)} for ph in phases}
+        sends = {ph: {k: [] for k in range(n_all)} for ph in phases}
+        up_bytes = {ph: {k: 0 for k in range(n_all)} for ph in phases}
         lookups = []
         for line in capture.read_text().splitlines():
             f = line.split()
@@ -419,7 +467,7 @@ def main():
                             up_bytes[ph][k] += int(f[4])
             elif f[0] == "d":
                 lookups.append((float(f[1]), f[2]))
-        owner = {site: k for k, ss in sites.items() for site in ss}
+        owner = {site: k for k, ss in sites.items() if k < N_CLIENTS for site in ss}
         sends = {ph: {k: events(v) for k, v in by.items()} for ph, by in sends.items()}
         for ph, (s, e, _) in phases.items():
             requests = []
@@ -447,7 +495,7 @@ def main():
                 latency_seconds=percentiles([r["done"] - r["sent"] for r in ok]),
                 lookups_matched=len(arrivals),
                 wire_send_events=sum(len(v) for v in sends[ph].values()),
-                client_up_kbit_per_s=round(sum(up_bytes[ph].values()) * 8 / 1000 / max(1, e - s) / N_CLIENTS, 1),
+                client_up_kbit_per_s=round(sum(up_bytes[ph].values()) * 8 / 1000 / max(1, e - s) / n_all, 1),
             )
             if arrivals:
                 models = {"empirical": gpa.DelayModel(delays)}
@@ -456,11 +504,15 @@ def main():
                     models["network_law"] = gamma_model(5, mu, max(min(delays), 0.0) * 0.5)
                 elif ph == "mix":
                     models["network_law"] = gamma_model(3, 1000 / 200, max(min(delays), 0.0) * 0.5)
-                attacks = {
-                    name: gpa.summary(gpa.attack(sends[ph], arrivals, m), N_CLIENTS) for name, m in models.items()
-                }
+                # Every client is a candidate sender: the attacker cannot tell cover from users.
+                attacks = {name: gpa.summary(gpa.attack(sends[ph], arrivals, m), n_all) for name, m in models.items()}
                 best = max(attacks.values(), key=lambda r: r["top1_accuracy"])
                 row.update(attack_models=attacks, attacker=best)
+                if a.cover_clients:
+                    # The attacker knows which clients are cover and ranks only the users.
+                    users = {k: v for k, v in sends[ph].items() if k < N_CLIENTS}
+                    known = {name: gpa.summary(gpa.attack(users, arrivals, m), N_CLIENTS) for name, m in models.items()}
+                    row["attacker_knowing_cover"] = max(known.values(), key=lambda r: r["top1_accuracy"])
             # Does a client's link rate change while it has a request in flight?
             busy, idle = [0, 0.0], [0, 0.0]
             for k in range(N_CLIENTS):
@@ -478,8 +530,10 @@ def main():
                 idle=round(idle[0] / idle[1], 3) if idle[1] else None,
             )
             result[ph] = row
-        result["chance"] = round(1 / N_CLIENTS, 4)
-        result["max_entropy_bits"] = round(math.log2(N_CLIENTS), 3)
+        result["chance"] = round(1 / n_all, 4)
+        if a.cover_clients:
+            result["chance_knowing_cover"] = round(1 / N_CLIENTS, 4)
+        result["max_entropy_bits"] = round(math.log2(n_all), 3)
         print(json.dumps(result, indent=1))
         (out / "MIX_LANE.json").write_text(json.dumps(result, indent=1) + "\n")
     finally:

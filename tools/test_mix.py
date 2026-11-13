@@ -39,6 +39,17 @@ WireKEMScheme = "xwing"
 """
 
 
+class DecodeTests(unittest.TestCase):
+    def test_gzip_replies_are_decoded_and_others_left_alone(self):
+        import gzip
+
+        page = b"<html>" + b"x" * 5000 + b"</html>"
+        self.assertEqual(mix.decoded(["Content-Encoding: gzip"], gzip.compress(page)), page)
+        self.assertEqual(mix.decoded(["Content-Type: text/html"], page), page)
+        self.assertEqual(mix.decoded(["Content-Encoding: br"], b"opaque"), b"opaque")
+        self.assertEqual(mix.decoded(["Content-Encoding: gzip"], b"not gzip"), b"not gzip")
+
+
 class ConfigTests(unittest.TestCase):
     def test_a_good_configuration_gets_our_fixed_addresses_and_no_log_file(self):
         client, thin = mix.check_config(CLIENT)

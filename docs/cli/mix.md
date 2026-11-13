@@ -39,6 +39,18 @@ difference is within sampling noise). Each client's link sent 2.82 packets a sec
 and 2.91 idle, about 555 kbit/s of upload. Live fetches took 4.4 s at the median, 8.3 s at
 the 99th percentile.
 
+Where the seconds go, measured on the same lab (`docs/evidence/MIX_LANE_SWEEP.json`):
+about a third is a request waiting for its client's next send slot (one per second on
+average), about a third is mixing on the way out (five hops), and the rest is the fetch
+and the reply. The send rate is bought with bandwidth, the mixing delay with anonymity.
+For operators of a mixnet: 100 ms mean delay per hop measured at chance over three runs
+(10.8%, against 10.6% at 200 ms) and cut the median fetch from 2.6 s to 1.7 s at the same
+bandwidth. Halving the cover rate as well halved the upload but leaked (12.8% over three
+runs, above chance), and 50 ms per hop is unresolved from one run. These figures are for
+ten clients. More traffic in the same delay window helps only if it is indistinguishable:
+with ten extra cover clients, 50 ms per hop held at chance against an adversary who could
+not tell cover from users, and leaked (15.2% against 10%) against one who could.
+
 The mix lane is opt-in. Everything goes through the fast lane unless you start the mix
 lane yourself; its latency and its idle cover traffic are a trade you choose.
 

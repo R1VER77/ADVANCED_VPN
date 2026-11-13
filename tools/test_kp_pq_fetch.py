@@ -21,7 +21,8 @@ s=socket.socket();s.bind(('127.0.0.1',0));s.listen(4);print(s.getsockname()[1],f
 while True:
     c,_=s.accept()
     try:
-        t=ctx.wrap_socket(c,server_side=True);t.recv(4096);t.sendall(b'HTTP/1.0 200 ok\r\n\r\n');t.close()
+        t=ctx.wrap_socket(c,server_side=True);req=t.recv(4096)
+        t.sendall(b'HTTP/1.0 200 ok\r\n\r\n'+req.lower());t.close()
     except (ssl.SSLError,OSError):
         c.close()
 """
@@ -30,9 +31,11 @@ import os,sys
 sys.path.insert(0, sys.argv[1])
 import kp_pq_fetch
 kp_pq_fetch.policy_env()  # re-executes this probe under the plugin's OpenSSL policy
-raw = kp_pq_fetch.fetch(b"GET https://localhost:%s/ HTTP/1.1\r\n\r\n" % sys.argv[2].encode(), 4000,
-                        allow_local=True, cafile=sys.argv[3])
-print(raw.split(b"\r\n", 1)[0].decode())
+raw = kp_pq_fetch.fetch(b"GET https://localhost:%s/ HTTP/1.1\r\n%s\r\n" % (sys.argv[2].encode(), sys.argv[4].encode()),
+                        4000, allow_local=True, cafile=sys.argv[3])
+head, _, body = raw.partition(b"\r\n\r\n")
+print(head.split(b"\r\n", 1)[0].decode())
+print(body.decode(errors="replace"))
 """
 
 
@@ -61,7 +64,7 @@ class PolicyTests(unittest.TestCase):
     def tearDownClass(cls):
         shutil.rmtree(cls.dir)
 
-    def first_line(self, groups, max_protocol=None):
+    def first_line(self, groups, max_protocol=None, headers=""):
         conf = self.dir / ("server-%s-%s.cnf" % (groups, max_protocol))
         conf.write_text(server_policy(groups, max_protocol))
         env = {k: v for k, v in os.environ.items() if k not in ("OPENSSL_CONF", "AVPN_PQ_FETCH_POLICY")}
@@ -72,10 +75,11 @@ class PolicyTests(unittest.TestCase):
         try:
             port = srv.stdout.readline().strip()
             r = subprocess.run(
-                [sys.executable, "-c", PROBE, TOOLS, port, self.dir / "cert.pem"],
+                [sys.executable, "-c", PROBE, TOOLS, port, self.dir / "cert.pem", headers],
                 capture_output=True, text=True, env=env, timeout=30,
             )  # fmt: skip
-            return r.stdout.strip() or r.stderr.strip()[-300:]
+            self.echo = r.stdout.split("\n", 1)[1] if "\n" in r.stdout else ""
+            return r.stdout.split("\n", 1)[0].strip() or r.stderr.strip()[-300:]
         finally:
             srv.kill()
             srv.wait(timeout=5)
@@ -91,8 +95,33 @@ class PolicyTests(unittest.TestCase):
     def test_classical_tls13_is_refused(self):
         self.assertEqual(self.first_line("X25519:P-256").split()[1], "526")
 
+    def test_the_site_sees_http_1_0_and_only_the_known_codings_the_client_accepts(self):
+        self.assertEqual(self.first_line("X25519MLKEM768", headers="Accept-Encoding: deflate, gzip;q=0.5, x-evil\r\n"),
+                         "HTTP/1.0 200 ok")  # fmt: skip
+        self.assertTrue(self.echo.startswith("get / http/1.0\n"), self.echo[:80])  # text mode: \r\n read as \n
+        self.assertIn("accept-encoding: gzip\n", self.echo)
+        self.assertNotIn("x-evil", self.echo)
+        self.first_line("X25519MLKEM768")
+        self.assertNotIn("accept-encoding", self.echo)
+
     def test_tls12_only_is_refused(self):
         self.assertEqual(self.first_line("X25519:P-256", "TLSv1.2").split()[1], "525")
+
+
+class EncodingTests(unittest.TestCase):
+    def test_only_known_codings_the_client_accepts(self):
+        sys.path.insert(0, str(TOOLS))
+        import kp_pq_fetch
+
+        def codings(value):
+            return kp_pq_fetch.accepted_encodings(
+                b"GET https://a.test/ HTTP/1.1\r\nAccept-Encoding: %s\r\n\r\n" % value
+            )
+
+        self.assertEqual(codings(b"gzip, deflate, br"), ["br", "gzip"])
+        self.assertEqual(codings(b"br;q=1.0, GZIP ;q=0"), ["br"])  # q=0 means "not acceptable"
+        self.assertEqual(codings(b"identity, compress, x-evil"), [])
+        self.assertEqual(kp_pq_fetch.accepted_encodings(b"GET https://a.test/ HTTP/1.1\r\n\r\n"), [])
 
 
 if __name__ == "__main__":

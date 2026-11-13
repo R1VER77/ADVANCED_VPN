@@ -47,6 +47,19 @@ def write_collection(root, sites=4, loads=10, unmonitored=0, shuffle_labels=Fals
 
 @unittest.skipUnless(HAVE["numpy"], "needs numpy")
 class LoaderTests(unittest.TestCase):
+    def test_a_load_the_browser_saw_fail_is_dropped(self):
+        with tempfile.TemporaryDirectory() as d:
+            write_collection(d, sites=2, loads=3)
+            lj = Path(d) / "w0" / "loads.jsonl"
+            rows = [json.loads(x) for x in lj.read_text().splitlines()]
+            for i, r in enumerate(rows):
+                r["resources"] = 3 if i == 0 else 40  # load 0: the browser got almost nothing
+            lj.write_text("".join(json.dumps(r) + "\n" for r in rows))
+            kept = wf_deep.load_run(d)
+            everything = wf_deep.load_run(d, min_resources=0)
+        self.assertEqual(len(everything), 6)
+        self.assertEqual(len(kept), 5)
+
     def test_windows_failed_loads_and_encoders(self):
         with tempfile.TemporaryDirectory() as d:
             write_collection(d, sites=2, loads=2)

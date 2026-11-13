@@ -18,7 +18,7 @@ each one exposes. The claim never says "post-quantum throughout" while one of th
 |---|---|---|---|---|
 | Inner and outer tunnels (QUIC, one per server) | X25519MLKEM768 only | ML-DSA-65 certificates and CertificateVerify only | `src/tls.rs` `provider`, `authenticated` | `crypto_tests.rs`: a classical client or ECDSA deployment is refused |
 | WireGuard carrier (GotaTun) | X25519 Noise IK, plus a 256-bit PSK sealed to each device by hybrid KEM | WireGuard keys + the PSK | `tools/keyguard.py` `kem_seal` (X25519 + ML-KEM-768) | a supplement: both QUIC layers inside carry the PQ claim on their own |
-| Links between servers | AES-256-GCM under a link PSK | the PSK | PSK sealed by `kem_seal` | `link.rs` tests |
+| Links between servers | an ephemeral X25519 + ML-KEM-768 exchange inside the cells every 120 s (forward secret: ephemerals erased); AES-256-GCM | the link PSK (sealed by `kem_seal`) authenticates the exchange | `src/link.rs` (`Initiator`, `respond`, `session_keys`); packets only under exchanged keys | `a_recorded_link_reveals_no_packet_to_a_later_stolen_psk`, `a_packet_under_a_psk_only_key_is_never_forwarded` |
 | Cloak front (HTTP/3 and TCP/TLS camouflage) | browser-like offer; **a tunnel only over X25519MLKEM768** | pinned server key; HMAC proof bound to the TLS exporter | `src/cloak.rs` `quic_hybrid`, `tls_hybrid` (server and client) | `a_classical_key_exchange_never_becomes_a_tunnel` |
 | Exit DNS upstream (DNS over TLS) | X25519MLKEM768 only; DNS fails closed otherwise | WebPKI | `advanced-vpn-dns` `upstream_tls` | `the_upstream_must_offer_hybrid_post_quantum_tls`; live: Cloudflare and Google answer, Quad9 does not |
 | Oblivious control plane | HPKE ML-KEM-768 + X25519 (`0x647A`) | gateway key | `tools/ohttp.py` | `test_ohttp.py` |

@@ -112,6 +112,49 @@ class LedgerTests(unittest.TestCase):
             _, spend = mt.issue_credit(self.key)
             self.assertTrue(ledger.redeem(spend, self.key.public_key())["ok"])
 
+    def test_two_holders_never_accept_one_credit_twice(self):
+        _, spend = mt.issue_credit(self.key)
+        a, b = mt.Ledger(self.path), mt.Ledger(self.path)  # both opened before any spend
+        a.redeem(spend, self.key.public_key())
+        with self.assertRaises(mt.DoubleSpend):
+            b.redeem(spend, self.key.public_key())
+
+    def test_holders_lose_none_of_each_other_s_records(self):
+        (_, s1), (_, s2) = mt.issue_credit(self.key), mt.issue_credit(self.key)
+        a, b = mt.Ledger(self.path), mt.Ledger(self.path)
+        a.redeem(s1, self.key.public_key())
+        b.redeem(s2, self.key.public_key())
+        fresh = mt.Ledger(self.path)
+        for s in (s1, s2):
+            with self.assertRaises(mt.DoubleSpend):
+                fresh.redeem(s, self.key.public_key())
+
+    def test_racing_processes_accept_exactly_one_redemption(self):
+        import multiprocessing
+
+        _, spend = mt.issue_credit(self.key)
+        ctx = multiprocessing.get_context("fork")
+        results = ctx.Queue()
+        go = ctx.Event()
+
+        def race():
+            ledger = mt.Ledger(self.path)
+            go.wait()
+            try:
+                ledger.redeem(spend, self.key.public_key())
+                results.put("ok")
+            except mt.DoubleSpend:
+                results.put("double")
+
+        procs = [ctx.Process(target=race) for _ in range(8)]
+        for p in procs:
+            p.start()
+        go.set()
+        for p in procs:
+            p.join(30)
+        outcomes = sorted(results.get(timeout=5) for _ in procs)
+        self.assertEqual(outcomes.count("ok"), 1, outcomes)
+
     def test_ledger_file_is_private(self):
         _, spend = mt.issue_credit(self.key)
         mt.Ledger(self.path).redeem(spend, self.key.public_key())

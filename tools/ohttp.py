@@ -109,9 +109,13 @@ def encapsulate(gateway_public, key_id, method, path, body=b""):
 class Gateway:
     """Gateway side: open requests sealed to this key, refusing stale or replayed ones."""
 
-    def __init__(self, private, key_id):
+    def __init__(self, private, key_id, started=None):
         self.private, self.key_id = private, key_id
         self.seen = {}
+        # The replay cache lives in memory. So that a restart cannot reopen the freshness
+        # window to replays, nothing sent before this gateway started is accepted (to the
+        # second: requests carry whole-second times); a client caught by a restart retries.
+        self.started = int(time.time() if started is None else started)
 
     def open(self, wire, now=None):
         """(method, path, body, reply public key) of one request; raises Refused."""
@@ -132,6 +136,8 @@ class Gateway:
             raise Refused("malformed request") from e
         if abs(now - t) > FRESH_SECONDS:
             raise Refused("stale request")
+        if t < self.started:
+            raise Refused("sent before this gateway started")
         self.seen = {n: s for n, s in self.seen.items() if now - s <= 2 * FRESH_SECONDS}
         if nonce in self.seen or len(nonce) != 32:
             raise Refused("replayed request")

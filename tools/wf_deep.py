@@ -42,10 +42,14 @@ SEQ = 5000  # DF / Tik-Tok input length (packets)
 RECORD = np.dtype([("t", "<f8"), ("n", "<i4")])
 
 
-def load_run(run, window=WINDOW):
+def load_run(run, window=WINDOW, min_resources=0.25):
     """[(label, site, trace)] for every successful load in a collection. trace rows are
-    (seconds since the load started, direction +1 out / -1 in, IP length)."""
-    out = []
+    (seconds since the load started, direction +1 out / -1 in, IP length).
+
+    A load the browser itself saw fail is dropped: fewer resources than `min_resources`
+    of its site's median in this collection (the browser's count, not the wire's, so the
+    rule is the same with or without a defence). Rows without the count are kept."""
+    out, rows = [], []
     for w in sorted(Path(run).glob("w*")):
         pk, lj = w / "packets.bin", w / "loads.jsonl"
         if not pk.exists() or not lj.exists():
@@ -53,15 +57,24 @@ def load_run(run, window=WINDOW):
         p = np.fromfile(pk, dtype=RECORD)
         p = p[np.argsort(p["t"], kind="stable")]
         for line in lj.read_text().splitlines():
-            r = json.loads(line)
-            if r.get("status") != "ok":
-                continue
-            lo, hi = np.searchsorted(p["t"], [r["start"], r["start"] + window])
-            seg = p[lo:hi]
-            if len(seg) < 2:
-                continue
-            tr = np.column_stack([seg["t"] - r["start"], np.sign(seg["n"]), np.abs(seg["n"])]).astype(float)
-            out.append((int(r["label"]), r["site"], tr))
+            rows.append((p, json.loads(line)))
+    usual = {}
+    for site in {r["site"] for _, r in rows}:
+        counts = [r["resources"] for _, r in rows if r["site"] == site and r.get("resources") is not None]
+        usual[site] = float(np.median(counts)) if counts else None
+    for p, r in rows:
+        # A load still in progress when the browser stopped waiting (30 s) captured its
+        # whole fixed window all the same; only browser failures carry no trace.
+        if r.get("status") not in ("ok", "TimeoutException"):
+            continue
+        if r.get("resources") is not None and usual[r["site"]] and r["resources"] < min_resources * usual[r["site"]]:
+            continue
+        lo, hi = np.searchsorted(p["t"], [r["start"], r["start"] + window])
+        seg = p[lo:hi]
+        if len(seg) < 2:
+            continue
+        tr = np.column_stack([seg["t"] - r["start"], np.sign(seg["n"]), np.abs(seg["n"])]).astype(float)
+        out.append((int(r["label"]), r["site"], tr))
     return out
 
 

@@ -35,6 +35,24 @@ OPENSSL_POLICY = (
     "Groups = %s\n" % PQ_GROUP
 )
 FETCH_TIMEOUT = 20
+# Content codings passed on to the site when the client's own request accepts them: a
+# compressed page fits about 3.7 times as much into one mixnet reply (measured on the
+# lab's 30 sites, 12 Nov 2026). Nothing else from the client's headers reaches the site.
+ENCODINGS = ("br", "gzip", "zstd")
+
+
+def accepted_encodings(raw_request):
+    """The client's Accept-Encoding, reduced to the codings in ENCODINGS (in that order)."""
+    head = raw_request.split(b"\r\n\r\n", 1)[0].decode("latin-1")
+    tokens = set()
+    for line in head.split("\r\n")[1:]:
+        name, _, value = line.partition(":")
+        if name.strip().lower() == "accept-encoding":
+            for t in value.split(","):
+                coding, _, params = t.partition(";")
+                if params.replace(" ", "").lower() not in ("q=0", "q=0.0", "q=0.00", "q=0.000"):
+                    tokens.add(coding.strip().lower())
+    return [e for e in ENCODINGS if e in tokens]
 
 
 def policy_env():
@@ -80,9 +98,11 @@ def fetch(raw_request, limit, allow_local=False, cafile=None):
     path = parts.path or "/"
     if parts.query:
         path += "?" + parts.query
+    # HTTP/1.0: the response then comes unchunked, so what is relayed is the body itself.
+    codings = accepted_encodings(raw_request)
     request = (
-        "%s %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: Mozilla/5.0\r\nAccept: */*\r\nConnection: close\r\n\r\n"
-        % (method, path, host)
+        "%s %s HTTP/1.0\r\nHost: %s\r\nUser-Agent: Mozilla/5.0\r\nAccept: */*\r\n%sConnection: close\r\n\r\n"
+        % (method, path, host, ("Accept-Encoding: %s\r\n" % ", ".join(codings)) if codings else "")
     ).encode()
     try:
         with socket.create_connection(addr, FETCH_TIMEOUT) as raw:

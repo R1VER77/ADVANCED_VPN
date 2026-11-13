@@ -27,6 +27,7 @@ import socket
 import subprocess
 import sys
 import time
+import zlib
 
 PROXY = ("127.0.0.1", 41199)
 THIN = "127.0.0.1:41198"
@@ -136,9 +137,22 @@ def serve(config):
     stop()
 
 
+def decoded(headers, body):
+    """The body with a gzip content coding removed (the mix lane asks for gzip: a
+    compressed page fits several times as much into one reply)."""
+    coding = [h.split(":", 1)[1].strip().lower() for h in headers if h.lower().startswith("content-encoding:")]
+    if coding == ["gzip"] and body:
+        try:
+            return zlib.decompressobj(16 + zlib.MAX_WBITS).decompress(body, 1 << 24)
+        except zlib.error:
+            return body
+    return body
+
+
 def request(url, method="GET", timeout=180):
-    """One request through the mix lane's proxy; returns (status, headers, body).
-    The proxy answers 502 until the client has the mixnet's directory: retried."""
+    """One request through the mix lane's proxy; returns (status, headers, body), the body
+    as sent (possibly gzip-coded; see decoded). The proxy answers 502 until the client
+    has the mixnet's directory: retried."""
     if not re.fullmatch(r"https?://[A-Za-z0-9.-]+(:\d+)?(/[^\s]*)?", url):
         raise ValueError("an absolute http(s) URL is required")
     if method not in ("GET", "HEAD"):
@@ -152,7 +166,8 @@ def request(url, method="GET", timeout=180):
             c.settimeout(max(5, end - time.monotonic()))
             c.sendall(
                 (
-                    "%s %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: Mozilla/5.0\r\nConnection: close\r\n\r\n"
+                    # HTTP/1.0: the proxy's answer is then never chunked.
+                    "%s %s HTTP/1.0\r\nHost: %s\r\nUser-Agent: Mozilla/5.0\r\nAccept-Encoding: gzip\r\n\r\n"
                     % (method, url, host)
                 ).encode()
             )
@@ -195,12 +210,14 @@ def main(argv=None):
         sys.exit(0 if proxy_ready() else 1)
     else:
         t = time.monotonic()
-        status, headers, body = request(a.url, a.method, a.timeout)
+        status, headers, wire = request(a.url, a.method, a.timeout)
+        body = decoded(headers, wire)
         print(
             json.dumps(
-                dict(status=status, seconds=round(time.monotonic() - t, 1), bytes=len(body), headers=headers[:20])
+                dict(status=status, seconds=round(time.monotonic() - t, 1), bytes=len(body), bytes_on_wire=len(wire),
+                     headers=headers[:20])
             )
-        )
+        )  # fmt: skip
         if a.method == "GET" and body:
             sys.stdout.buffer.write(body)
 

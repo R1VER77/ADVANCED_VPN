@@ -29,11 +29,18 @@ A model proves the design, not the code. Every model therefore ships with:
 
 ### 1. Paced links (`src/link.rs`)
 
-Fixed-size AES-256-GCM cells between servers. Key = HKDF-SHA256(link PSK, salt = random
-16-byte session id, info = direction), counter nonce, 128-cell replay window, and replies
-limited by credit so unauthenticated packets earn nothing.
+Fixed-size AES-256-GCM cells between servers. A sender session starts under
+HKDF-SHA256(link PSK, salt = random 16-byte session id, info = direction), which carries
+only a handshake: inside the cells the sender offers ephemeral X25519 and ML-KEM-768 keys,
+the next hop answers with its X25519 key and an ML-KEM ciphertext, and both derive the
+next session's keys as HKDF-SHA256(salt = PSK, ikm = both shared secrets, info =
+direction || SHA-256 of the exchange), every 120 s. Packets travel only under such keys.
+Counter nonce, 128-cell replay window, and replies limited by credit so unauthenticated
+packets earn nothing.
 
-- Secrecy and integrity of every cell under the link PSK (Tamarin).
+- **Forward secrecy against a later PSK compromise**, quantum adversary included: the keys of a completed session stay secret after the PSK leaks, provided either X25519 or ML-KEM held for that session's ephemerals (Tamarin; the mutation drops the shared secrets from the KDF, and the Rust test `a_recorded_link_reveals_no_packet_to_a_later_stolen_psk` already fails on it).
+- **Handshake authentication**: without the PSK no one can complete or steer a key exchange, and an answer is bound to its offer (Tamarin; transcript hash in the KDF).
+- Secrecy and integrity of every cell (Tamarin).
 - **No reflection**: a cell sent in one direction is never accepted in the other (Tamarin; the mutation drops the direction from `info`).
 - **No replay**: each counter is accepted at most once per session, and nothing older than the window is accepted, for every interleaving (Kani on the window code, exhaustive to a bound; Tamarin for cross-session replay through the session id).
 - **No amplification**: a sender without the PSK causes no packet in reply (Tamarin, plus a proptest on the credit counter).
@@ -65,7 +72,7 @@ That deviation is exactly what needs proving.
 
 - Request and response secrecy against the relay (Tamarin).
 - **Response binding**: a response cannot be swapped onto another request (Tamarin).
-- **Freshness**: the 60 s window and the nonce cache accept each request at most once (Tamarin, stateful).
+- **Freshness**: the 60 s window and the nonce cache accept each request at most once (Tamarin, stateful), across restarts too: the cache lives in memory, so a gateway refuses anything sent before it started (`test_a_restarted_gateway_refuses_replays_of_earlier_requests`).
 - **Unlinkability**: the gateway cannot tell whether two requests came from the same client, and the relay learns nothing but sizes and times (ProVerif, observational equivalence).
 - Operator separation (relay and gateway run by different operators) is an assumption of the property, and the code already enforces it (`mesh.beacon_entry`).
 
@@ -74,7 +81,7 @@ That deviation is exactly what needs proving.
 Chaum blind RSA with a full-domain hash, issued by the mesh and spent at relays.
 
 - **Unlinkability** of issuance and spending: a signer who sees every issuance cannot tell which one a spend came from (ProVerif, with the blind-signature equational theory).
-- **No double spending**: a token is accepted at most once across every relay sharing the spent set (Tamarin, with a persistent set).
+- **No double spending**: a token is accepted at most once across every relay sharing the spent set (Tamarin, with a persistent set). The code side: a redemption holds an exclusive lock while it re-reads, checks and records the spend; eight racing processes accept exactly one (`test_racing_processes_accept_exactly_one_redemption`). Relays that do not share a ledger file still need the mesh's gossiped spent set.
 - One-more unforgeability is a computational property that symbolic tools cannot prove. It rests on the RSA blind-signature literature, so the plan also replaces our FDH construction with RFC 9474's RSABSSA (SHA-384, PSS, deterministic) from a reviewed library. Then the computational argument is the published one and the model covers the protocol around it.
 - **Not post-quantum.** RSA blind signatures fall to a quantum adversary, and one who can forge credits never needs to break a tunnel. The credits move to a lattice-based blind signature (a reviewed implementation, once one exists) before the project describes itself as post-quantum throughout. The protocol model above carries over unchanged; only the signature's equational theory changes.
 

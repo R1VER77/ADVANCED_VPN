@@ -47,6 +47,16 @@ class EncapsulationTests(unittest.TestCase):
         with self.assertRaises(ohttp.Refused):
             self.gw.open(wire)  # replayed
 
+    def test_a_restarted_gateway_refuses_replays_of_earlier_requests(self):
+        wire, _ = ohttp.encapsulate(self.public, 7, "POST", "/v1/test", b"x")
+        self.gw.open(wire)
+        t = time.time()
+        restarted = ohttp.Gateway(self.private, 7, started=t + 1)  # its cache is empty
+        with self.assertRaises(ohttp.Refused):
+            restarted.open(wire, now=t + 2)
+        fresh, _ = ohttp.encapsulate(self.public, 7, "POST", "/v1/test", b"y")
+        self.assertEqual(ohttp.Gateway(self.private, 7, started=t).open(fresh, now=t + 2)[2], b"y")
+
     def test_a_response_opens_only_with_its_own_reply_key(self):
         wire, reply = ohttp.encapsulate(self.public, 7, "GET", "/health")
         _, _, _, reply_key = self.gw.open(wire)

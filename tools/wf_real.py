@@ -44,7 +44,7 @@ while True:
     out.write(rec.pack(t, n if a[2]==socket.PACKET_OUTGOING else -n))
 """
 BROWSE = r"""
-import json,sys,tempfile,time
+import json,shutil,sys,tempfile,time
 from selenium import webdriver
 from selenium.webdriver.firefox.options import Options
 from selenium.webdriver.firefox.service import Service
@@ -59,16 +59,22 @@ PREFS={"browser.cache.disk.enable":False,"browser.cache.memory.enable":False,"ne
 gecko,site,out=sys.argv[1],sys.argv[2],sys.argv[3]
 o=Options();o.add_argument("-headless")
 for k,v in PREFS.items():o.set_preference(k,v)
-o.add_argument("-profile");o.add_argument(tempfile.mkdtemp())
+profile=tempfile.mkdtemp();o.add_argument("-profile");o.add_argument(profile)
 d=webdriver.Firefox(options=o,service=Service(gecko));d.set_page_load_timeout(30)
 time.sleep(3)  # let the browser's own start-up settle before the window opens
 t=time.time();status="ok"
 try:d.get("https://"+site+"/")
 except Exception as e:status=type(e).__name__
 loaded=time.time();time.sleep(max(0,t+%(window)s-time.time()))
+# The browser's own account of the load (the same with or without a defence on the wire),
+# so failed loads can be dropped by one rule for every configuration.
+try:resources,doc_bytes=d.execute_script("return [performance.getEntriesByType('resource').length,"
+  "(performance.getEntriesByType('navigation')[0]||{}).transferSize||0]")
+except Exception:resources,doc_bytes=None,None
 try:d.quit()
 except Exception:pass
-print(json.dumps(dict(start=t,loaded=loaded,end=t+%(window)s,status=status)))
+shutil.rmtree(profile,ignore_errors=True)  # ~40 MB a load: never let them pile up in /tmp
+print(json.dumps(dict(start=t,loaded=loaded,end=t+%(window)s,status=status,resources=resources,doc_bytes=doc_bytes)))
 """ % {"window": WINDOW}
 
 
@@ -209,15 +215,17 @@ def worker(a):
         def in_browser_ns(*argv, timeout=60):
             """Run argv where the browser runs: the client namespace, or (chain) its
             protected application namespace through `avpnctl run`, as a user would."""
-            if a.config == "undefended":
-                return nsexec("cli", *argv, check=False, timeout=timeout)
-            run = [sys.executable, ROOT / "tools/avpnctl.py", "--state", out / "chain/client", "--lab", "run", "--"]
-            p = in_netns("cli", run + list(argv), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            run = [] if a.config == "undefended" else [
+                sys.executable, ROOT / "tools/avpnctl.py", "--state", out / "chain/client", "--lab", "run", "--"]  # fmt: skip
+            # Its own process group, so a hung browser is killed with every child it started.
+            p = in_netns("cli", run + list(argv), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                         start_new_session=True)  # fmt: skip
             try:
                 o, e = p.communicate(timeout=timeout)
             except subprocess.TimeoutExpired:
-                p.kill()
+                os.killpg(p.pid, signal.SIGKILL)
                 o, e = p.communicate()
+                o = (o or "") + "\n" + json.dumps(dict(status="browser_hung"))
             return subprocess.CompletedProcess(p.args, p.returncode, o, e)
 
         # Up when the browser's namespace reaches the internet through the tunnel.
@@ -270,7 +278,13 @@ def worker(a):
                     row = json.loads(r.stdout.strip().splitlines()[-1])
                 except (ValueError, IndexError):
                     row = dict(status="browser_failed")
-                log.write(json.dumps(dict(site=site, label=label, **row)) + "\n")
+                st, mem = (
+                    os.statvfs("/tmp"),
+                    dict(x.split(":", 1) for x in Path("/proc/meminfo").read_text().splitlines()),
+                )
+                health = dict(tmp_used_mb=round((st.f_blocks - st.f_bfree) * st.f_frsize / 2**20),
+                              mem_available_mb=int(mem["MemAvailable"].split()[0]) // 1024)  # fmt: skip
+                log.write(json.dumps(dict(site=site, label=label, **row, **health)) + "\n")
                 log.flush()
     finally:
         for p in reversed(procs):

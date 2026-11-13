@@ -207,7 +207,7 @@ def link_commands(target, bin_dir=Path("/usr/local/bin")):
     return ok
 
 
-def prepare_device(target, role, protect, vault=None):
+def prepare_device(target, role, protect, vault=None, insecure=False):
     """Generate this device's keys with the installed controller (the vault is created on
     first use) and leave the public request in the sudo user's home directory."""
     state = Path("/etc/advanced-vpn/enrolled")
@@ -220,6 +220,8 @@ def prepare_device(target, role, protect, vault=None):
     home = Path(pwd.getpwuid(int(uid)).pw_dir) if uid else Path("/root")
     out = home / ("advanced-vpn-%s.req" % role)
     argv = [str(target / "bin/avpnctl"), "request", "--role", role, "--protect", protect, "--out", str(out)]
+    if insecure:
+        argv.append("--insecure-plaintext-keys")
     if vault:
         argv += ["--vault", str(vault)]
     subprocess.run(argv, check=True)
@@ -244,6 +246,9 @@ def main():
         "--protect", choices=["nitrokey", "systemd-creds", "none"], help="with --role: how the keys are sealed"
     )
     p.add_argument("--vault", type=Path, help="with --protect nitrokey: vault (default /etc/advanced-vpn/vault)")
+    p.add_argument(
+        "--insecure-plaintext-keys", action="store_true", help="allow --protect none (keys as plain files; tests only)"
+    )
     a = p.parse_args()
     if not (a.out or a.user or a.pack or a.apply):
         p.error("choose --apply (system), --user (command line only), --out (stage) or --pack")
@@ -323,6 +328,8 @@ def main():
         raise RuntimeError("--apply requires root")
     if a.role and not a.protect:
         raise ValueError("--role needs --protect (nitrokey, systemd-creds or none)")
+    if a.protect == "none" and not a.insecure_plaintext_keys:
+        raise ValueError("--protect none stores private keys as plain files; it needs --insecure-plaintext-keys")
     target = Path("/opt/advanced-vpn")
     # An unprivileged-writable parent would permit replacing root-executed code.
     if Path("/opt").stat().st_uid != 0 or Path("/opt").stat().st_mode & 0o022:
@@ -362,7 +369,7 @@ def main():
         flush=True,
     )
     if a.role:
-        prepare_device(target, a.role, a.protect, a.vault)
+        prepare_device(target, a.role, a.protect, a.vault, a.insecure_plaintext_keys)
         return
     print("Next: sudo avpn request --role ROLE --protect MODE --out ROLE.req, or rerun with --role.")
 

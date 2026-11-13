@@ -216,7 +216,20 @@ about the risk of that consolidation: a handful of intermediaries become the obv
 target for correlation and for legal pressure. This design takes the opposite route —
 your own servers, on providers you choose — so you trade a large shared anonymity set
 for never trusting someone else's infrastructure with both ends. For a single owner
-who controls every hop, that is the better trade.
+who controls every hop, that is the better trade, with three limits stated plainly:
+
+- **Your providers know who you are.** Infrastructure control is not anonymity. The
+  cloud accounts that run your servers hold billing, account and control-plane records,
+  and their networks see your servers' traffic volumes. Two accounts you own are not two
+  independent trust domains: one investigation of you reaches both, whatever the
+  providers' jurisdictions.
+- **Your exit carries only you.** A self-hosted exit's traffic is yours alone: a website
+  or anyone watching the exit learns that this one exit's visitor is the same person each
+  time. A shared commercial exit hides you among its users; yours cannot. The mesh
+  (`docs/MESH_DESIGN.md`) is the route to a shared exit run by others.
+- **Legal spheres limit one order's reach, not linkage.** Putting the entry and the exit
+  in different jurisdictions means no single court order can compel both, but both remain
+  attributable to the account holder.
 
 ## Deliberately not used
 

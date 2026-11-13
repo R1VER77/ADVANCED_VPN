@@ -314,6 +314,30 @@ fn upstream_tls(roots: rustls::RootCertStore) -> Result<rustls::ClientConfig> {
     Ok(crypto)
 }
 
+/// One upstream DNS-over-TLS connection.
+type Upstream = tokio_rustls::client::TlsStream<TcpStream>;
+/// Idle upstream connections kept for reuse (RFC 7858 §3.4): a lookup then costs one
+/// round trip instead of TCP + a hybrid post-quantum TLS handshake + one.
+const POOL: usize = 4;
+/// An idle connection older than this is closed rather than reused.
+const IDLE: Duration = Duration::from_secs(20);
+
+/// One query and its answer on an upstream connection (2-byte length framing).
+async fn exchange(tls: &mut Upstream, b: &[u8]) -> Result<Vec<u8>> {
+    let mut msg = u16::try_from(b.len())?.to_be_bytes().to_vec();
+    msg.extend_from_slice(b);
+    tls.write_all(&msg).await?;
+    let n = tls.read_u16().await? as usize;
+    ensure!((12..=65535).contains(&n), "bad DNS length");
+    let mut answer = vec![0; n];
+    tls.read_exact(&mut answer).await?;
+    ensure!(
+        answer[..2] == b[..2] && answer[2] & 0x80 != 0,
+        "bad DNS response"
+    );
+    Ok(answer)
+}
+
 struct Resolver {
     tls: TlsConnector,
     addr: SocketAddr,
@@ -322,8 +346,49 @@ struct Resolver {
     blocklist: Blocklist,
     count: AtomicU64,
     blocked: AtomicU64,
+    /// Idle connections and when each went idle.
+    idle: std::sync::Mutex<Vec<(Upstream, std::time::Instant)>>,
+    /// Upstream TLS handshakes made (the pool's effect, for tests and stats).
+    connects: AtomicU64,
 }
 impl Resolver {
+    async fn connect(&self) -> Result<Upstream> {
+        let stream = timeout(Duration::from_secs(3), TcpStream::connect(self.addr)).await??;
+        let tls = timeout(
+            Duration::from_secs(3),
+            self.tls.connect(self.name.clone(), stream),
+        )
+        .await??;
+        self.connects.fetch_add(1, Ordering::Relaxed);
+        Ok(tls)
+    }
+    fn take_idle(&self) -> Option<Upstream> {
+        let mut idle = self.idle.lock().ok()?;
+        idle.retain(|(_, since)| since.elapsed() < IDLE);
+        idle.pop().map(|(c, _)| c)
+    }
+    fn put_idle(&self, c: Upstream) {
+        if let Ok(mut idle) = self.idle.lock()
+            && idle.len() < POOL
+        {
+            idle.push((c, std::time::Instant::now()));
+        }
+    }
+    /// The answer to `b` from the upstream: on an idle connection when one is left, else
+    /// (or when the upstream has closed it meanwhile) on a fresh one. Queries are
+    /// idempotent, so one retry on a new connection is safe.
+    async fn ask(&self, b: &[u8]) -> Result<Vec<u8>> {
+        if let Some(mut c) = self.take_idle()
+            && let Ok(Ok(answer)) = timeout(Duration::from_secs(3), exchange(&mut c, b)).await
+        {
+            self.put_idle(c);
+            return Ok(answer);
+        }
+        let mut c = self.connect().await?;
+        let answer = timeout(Duration::from_secs(3), exchange(&mut c, b)).await??;
+        self.put_idle(c);
+        Ok(answer)
+    }
     async fn query(&self, b: &[u8]) -> Result<Vec<u8>> {
         ensure!(
             b.len() >= 12 && b.len() <= 4096 && b[2] & 0x80 == 0,
@@ -335,23 +400,7 @@ impl Resolver {
             self.blocked.fetch_add(1, Ordering::Relaxed);
             return Ok(nxdomain_response(b, q_end));
         }
-        let stream = timeout(Duration::from_secs(3), TcpStream::connect(self.addr)).await??;
-        let mut tls = timeout(
-            Duration::from_secs(3),
-            self.tls.connect(self.name.clone(), stream),
-        )
-        .await??;
-        tls.write_all(&u16::try_from(b.len())?.to_be_bytes())
-            .await?;
-        tls.write_all(b).await?;
-        let n = tls.read_u16().await? as usize;
-        ensure!((12..=65535).contains(&n), "bad DNS length");
-        let mut answer = vec![0; n];
-        tls.read_exact(&mut answer).await?;
-        ensure!(
-            answer[..2] == b[..2] && answer[2] & 0x80 != 0,
-            "bad DNS response"
-        );
+        let answer = self.ask(b).await?;
         self.count.fetch_add(1, Ordering::Relaxed);
         // CNAME cloaking: a permitted name that resolves through a blocked one.
         if self.blocklist.answer_is_cloaked(&answer)
@@ -405,6 +454,8 @@ async fn work() -> Result<()> {
         addr: c.upstream,
         name: ServerName::try_from(c.server_name)?,
         slots: Arc::new(Semaphore::new(16)),
+        idle: std::sync::Mutex::new(Vec::new()),
+        connects: AtomicU64::new(0),
         blocklist,
         count: AtomicU64::new(0),
         blocked: AtomicU64::new(0),
@@ -600,8 +651,21 @@ mod tests {
         assert!(!allowed.answer_is_cloaked(&answer_with_chain(&q, &["edge.tracker.example"])));
     }
 
+    /// The test CA that signed the `dns.test` leaf below.
+    const TEST_CA: &str = "308201853082012ba00302010202147b7305c0759fb590e5a7ae9d8bb6d7ac097cfbea300a06082a8648ce3d04030230173115301306035504030c0c6176706e2d746573742d63613020170d3236313131333035353433395a180f32313236313032303035353433395a30173115301306035504030c0c6176706e2d746573742d63613059301306072a8648ce3d020106082a8648ce3d03010703420004c710ec326571976fcfd7d98d41efefbc1893c444207bd0e6bfecdbb63f26480bd5a16083e73c0bca5f672f290cb8b032f59b884b9963709c8065d85dc93893b7a3533051301d0603551d0e04160414139907b6deea232678b8088cb0b62ea0edd293a9301f0603551d23041830168014139907b6deea232678b8088cb0b62ea0edd293a9300f0603551d130101ff040530030101ff300a06082a8648ce3d0403020348003045022100f136aab056185d15cf4182274e9a71d474ae8b67b423df111ced447bbde84a3202200cc81300198159d03f9ef61b3c7d26eb3885d34804f1aa5368db78a395b5a06d";
+
     /// A one-query DoT upstream on loopback whose TLS offers only `group`.
     async fn upstream(group: &'static dyn rustls::crypto::SupportedKxGroup) -> SocketAddr {
+        upstream_serving(group, false).await.0
+    }
+
+    /// A DoT upstream on loopback whose TLS offers only `group`: it answers every query on
+    /// a connection (or, with `one_per_connection`, one and then hangs up) and counts the
+    /// connections it accepted.
+    async fn upstream_serving(
+        group: &'static dyn rustls::crypto::SupportedKxGroup,
+        one_per_connection: bool,
+    ) -> (SocketAddr, Arc<AtomicU64>) {
         let leaf = hex::decode("308201a93082014ea003020102021471f551994895b91cd0289bb0042ee254e36de3ba300a06082a8648ce3d04030230173115301306035504030c0c6176706e2d746573742d63613020170d3236313131333035353433395a180f32313236313032303035353433395a30133111300f06035504030c08646e732e746573743059301306072a8648ce3d020106082a8648ce3d03010703420004ba1bf9a7be9b7dd8fbb144a88f4beb11d65be11694a065daefe54ffbc253a6b2df818ad8bee3dfc91597d9da80feec3130d5066a42b2d1b38a69bd771d0a51fea37a307830130603551d11040c300a8208646e732e74657374300c0603551d130101ff0402300030130603551d25040c300a06082b06010505070301301d0603551d0e0416041457a0a83014e8cf81d3d60c53f5647a5b7405ee0b301f0603551d23041830168014139907b6deea232678b8088cb0b62ea0edd293a9300a06082a8648ce3d0403020349003046022100a4bd85e0f7da323809b0122f2fb0f3eb372cc2d77aa0df8bc2422999628f2479022100cbc246742740337ed5ca5c74b54ccf5ed7f65da31d2da771788bc749735c81a4").unwrap();
         let key = hex::decode("308187020100301306072a8648ce3d020106082a8648ce3d030107046d306b0201010420feab05caade22b54dd100ed6fb00ba235e524a17672e582c7debf928f085c660a14403420004ba1bf9a7be9b7dd8fbb144a88f4beb11d65be11694a065daefe54ffbc253a6b2df818ad8bee3dfc91597d9da80feec3130d5066a42b2d1b38a69bd771d0a51fe").unwrap();
         let mut p = rustls::crypto::aws_lc_rs::default_provider();
@@ -618,18 +682,74 @@ mod tests {
         let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(server));
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
+        let accepted = Arc::new(AtomicU64::new(0));
+        let count = accepted.clone();
         tokio::spawn(async move {
-            let (s, _) = listener.accept().await.unwrap();
-            if let Ok(mut tls) = acceptor.accept(s).await {
-                let n = tls.read_u16().await.unwrap() as usize;
-                let mut q = vec![0; n];
-                tls.read_exact(&mut q).await.unwrap();
-                q[2] |= 0x80; // the query, answered (no records)
-                tls.write_all(&(n as u16).to_be_bytes()).await.unwrap();
-                tls.write_all(&q).await.unwrap();
+            while let Ok((s, _)) = listener.accept().await {
+                count.fetch_add(1, Ordering::Relaxed);
+                let acceptor = acceptor.clone();
+                tokio::spawn(async move {
+                    let Ok(mut tls) = acceptor.accept(s).await else {
+                        return;
+                    };
+                    while let Ok(n) = tls.read_u16().await {
+                        let mut q = vec![0; n as usize];
+                        if tls.read_exact(&mut q).await.is_err() {
+                            return;
+                        }
+                        q[2] |= 0x80; // the query, answered (no records)
+                        let _ = tls.write_all(&n.to_be_bytes()).await;
+                        let _ = tls.write_all(&q).await;
+                        if one_per_connection {
+                            let _ = tls.shutdown().await;
+                            return;
+                        }
+                    }
+                });
             }
         });
-        addr
+        (addr, accepted)
+    }
+
+    fn resolver_to(addr: SocketAddr) -> Resolver {
+        let mut roots = rustls::RootCertStore::empty();
+        roots
+            .add(CertificateDer::from(hex::decode(TEST_CA).unwrap()))
+            .unwrap();
+        Resolver {
+            tls: TlsConnector::from(Arc::new(upstream_tls(roots).unwrap())),
+            addr,
+            name: ServerName::try_from("dns.test").unwrap(),
+            slots: Arc::new(Semaphore::new(1)),
+            blocklist: Blocklist::from_lines("", &[]).unwrap(),
+            count: AtomicU64::new(0),
+            blocked: AtomicU64::new(0),
+            idle: std::sync::Mutex::new(Vec::new()),
+            connects: AtomicU64::new(0),
+        }
+    }
+
+    #[tokio::test]
+    async fn lookups_reuse_one_upstream_connection() {
+        let (addr, accepted) =
+            upstream_serving(rustls::crypto::aws_lc_rs::kx_group::X25519MLKEM768, false).await;
+        let r = resolver_to(addr);
+        for i in 0..3u8 {
+            r.query(&make_query([i, 1], "example.org")).await.unwrap();
+        }
+        assert_eq!(r.connects.load(Ordering::Relaxed), 1);
+        assert_eq!(accepted.load(Ordering::Relaxed), 1);
+    }
+
+    #[tokio::test]
+    async fn an_upstream_that_hangs_up_still_gets_every_lookup_answered() {
+        let (addr, accepted) =
+            upstream_serving(rustls::crypto::aws_lc_rs::kx_group::X25519MLKEM768, true).await;
+        let r = resolver_to(addr);
+        for i in 0..3u8 {
+            r.query(&make_query([i, 2], "example.org")).await.unwrap();
+        }
+        assert_eq!(accepted.load(Ordering::Relaxed), 3);
     }
 
     #[tokio::test]
@@ -638,13 +758,15 @@ mod tests {
         for (group, answered) in [(kx_group::X25519MLKEM768, true), (kx_group::X25519, false)] {
             let mut roots = rustls::RootCertStore::empty();
             roots
-                .add(CertificateDer::from(hex::decode("308201853082012ba00302010202147b7305c0759fb590e5a7ae9d8bb6d7ac097cfbea300a06082a8648ce3d04030230173115301306035504030c0c6176706e2d746573742d63613020170d3236313131333035353433395a180f32313236313032303035353433395a30173115301306035504030c0c6176706e2d746573742d63613059301306072a8648ce3d020106082a8648ce3d03010703420004c710ec326571976fcfd7d98d41efefbc1893c444207bd0e6bfecdbb63f26480bd5a16083e73c0bca5f672f290cb8b032f59b884b9963709c8065d85dc93893b7a3533051301d0603551d0e04160414139907b6deea232678b8088cb0b62ea0edd293a9301f0603551d23041830168014139907b6deea232678b8088cb0b62ea0edd293a9300f0603551d130101ff040530030101ff300a06082a8648ce3d0403020348003045022100f136aab056185d15cf4182274e9a71d474ae8b67b423df111ced447bbde84a3202200cc81300198159d03f9ef61b3c7d26eb3885d34804f1aa5368db78a395b5a06d").unwrap()))
+                .add(CertificateDer::from(hex::decode(TEST_CA).unwrap()))
                 .unwrap();
             let resolver = Resolver {
                 tls: TlsConnector::from(Arc::new(upstream_tls(roots).unwrap())),
                 addr: upstream(group).await,
                 name: ServerName::try_from("dns.test").unwrap(),
                 slots: Arc::new(Semaphore::new(1)),
+                idle: std::sync::Mutex::new(Vec::new()),
+                connects: AtomicU64::new(0),
                 blocklist: Blocklist::from_lines("", &[]).unwrap(),
                 count: AtomicU64::new(0),
                 blocked: AtomicU64::new(0),

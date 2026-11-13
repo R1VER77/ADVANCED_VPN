@@ -190,12 +190,17 @@ def token_digest(token: bytes) -> str:
 class Ledger:
     """A JSON double-spend ledger at PATH: {schema, spent: {issuer: [digests]}}.
 
-    Mode 0600, written atomically. Anyone may hold a ledger; consensus between
+    Mode 0600, written atomically. A redemption holds an exclusive lock on PATH.lock while
+    it re-reads the file, checks and records the spend, so processes sharing one ledger
+    never accept the same credit twice nor lose each other's records. Anyone may hold a ledger; consensus between
     issuers' ledgers is a mesh-gossip concern, and a descriptor's beacons carry
     digests with the same TTL discipline as descriptors themselves."""
 
     def __init__(self, path: Path):
         self.path = Path(path)
+        self._load()
+
+    def _load(self):
         if self.path.exists():
             doc = json.loads(self.path.read_text())
             if doc.get("schema") != SCHEMA:
@@ -220,10 +225,18 @@ class Ledger:
         if not verify(token, signature, public_key):
             raise InvalidSignature("redemption does not verify")
         digest = token_digest(token)
-        if self.seen(grant["issuer"], digest):
-            raise DoubleSpend("this credit was already spent")
-        self._spent.setdefault(grant["issuer"], set()).add(digest)
-        self._flush()
+        import fcntl
+
+        fd = os.open(self.path.with_name(self.path.name + ".lock"), os.O_RDWR | os.O_CREAT, 0o600)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            self._load()  # what every other holder has recorded meanwhile
+            if self.seen(grant["issuer"], digest):
+                raise DoubleSpend("this credit was already spent")
+            self._spent.setdefault(grant["issuer"], set()).add(digest)
+            self._flush()
+        finally:
+            os.close(fd)  # releases the lock
         return {"ok": True, "issuer": grant["issuer"], "digest": digest}
 
     def _flush(self):

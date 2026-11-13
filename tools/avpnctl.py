@@ -1641,6 +1641,11 @@ def build_parser():
         help="how the private keys are sealed at rest",
     )
     rq.add_argument(
+        "--insecure-plaintext-keys",
+        action="store_true",
+        help="allow --protect none outside --lab: private keys stored as plain files (tests and throwaway devices only)",
+    )
+    rq.add_argument(
         "--vault",
         type=Path,
         help="Nitrokey vault (nitrokey protection; default /etc/advanced-vpn/vault, created if missing)",
@@ -1856,6 +1861,11 @@ def main():
     harden_process()
     a = build_parser().parse_args()
     if a.action == "request":
+        if a.protect == "none" and not (a.lab or a.insecure_plaintext_keys):
+            raise SystemExit(
+                "refusing --protect none: the private keys would be plain files anyone with root or the disk can "
+                "read. Use --protect nitrokey or systemd-creds; for a test device add --insecure-plaintext-keys."
+            )
         vault = device_vault(a.vault) if a.protect == "nitrokey" else a.vault
         req = request(a.role, a.state.resolve(), a.protect, vault)
         a.out.write_bytes(canonical(req))
@@ -1869,6 +1879,17 @@ def main():
         )
         return
     if a.action == "init":
+        # The constant-rate stream costs bandwidth around the clock it runs: sign a chain
+        # only against a stated allowance, or with the cost explicitly accepted.
+        if a.allowance_gib is None and not a.accept_cost:
+            links = 2 if a.hops > 1 else 1
+            cls = "metered" if a.rate == "auto" else a.rate
+            raise SystemExit(
+                "no --allowance-gib: the %s stream costs each relay about %d GiB/month of outbound traffic at "
+                "%g h/day connected, %d GiB/month around the clock. Give the smallest hop's monthly allowance "
+                "(--allowance-gib N; avpn cloud does this for you) or pass --accept-cost."
+                % (cls, rate_cost_gib(cls, a.hours_per_day, links), a.hours_per_day, rate_cost_gib(cls, 24, links))
+            )
         requests = {}
         for item in a.request:
             role, path = item.split("=", 1)

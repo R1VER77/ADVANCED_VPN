@@ -1,0 +1,268 @@
+{
+ "schema": 1,
+ "date": "2026-11-13",
+ "lab": "tools/mix_lab.py on a GCP n2-standard-8 (two runs at a time): the full-PQ X-Wing Katzenpost network (Ed25519+SPHINCS+ directory, PQ-only fetch plugin), 10 clients, 30 live hybrid-TLS sites, the same global passive adversary as docs/evidence/MIX_LANE.json; chance 10%",
+ "settings": [
+  {
+   "setting": "base",
+   "mean_delay_ms_per_hop": 200,
+   "lambda_p_per_s": 1.0,
+   "lambda_l_per_s": 0.5,
+   "runs": 3,
+   "attributed_arrivals": 915,
+   "gpa_top1": 0.106,
+   "gpa_ci95": [
+    0.0861,
+    0.126
+   ],
+   "at_chance": true,
+   "latency_p50_s": [
+    2.58,
+    2.64,
+    2.58
+   ],
+   "client_up_kbit_s": [
+    553.7,
+    560.3,
+    557.4
+   ],
+   "answered": "922/922",
+   "forward_mean_s": 2.04,
+   "reply_mean_s": 0.77
+  },
+  {
+   "setting": "d100",
+   "mean_delay_ms_per_hop": 100,
+   "lambda_p_per_s": 1.0,
+   "lambda_l_per_s": 0.5,
+   "runs": 3,
+   "attributed_arrivals": 825,
+   "gpa_top1": 0.1079,
+   "gpa_ci95": [
+    0.0867,
+    0.129
+   ],
+   "at_chance": true,
+   "latency_p50_s": [
+    1.78,
+    1.71,
+    1.77
+   ],
+   "client_up_kbit_s": [
+    561.3,
+    556.5,
+    554.7
+   ],
+   "answered": "830/830",
+   "forward_mean_s": 1.55,
+   "reply_mean_s": 0.49
+  },
+  {
+   "setting": "d50",
+   "mean_delay_ms_per_hop": 50,
+   "lambda_p_per_s": 1.0,
+   "lambda_l_per_s": 0.5,
+   "runs": 1,
+   "attributed_arrivals": 318,
+   "gpa_top1": 0.1352,
+   "gpa_ci95": [
+    0.0976,
+    0.1728
+   ],
+   "at_chance": true,
+   "latency_p50_s": [
+    1.29
+   ],
+   "client_up_kbit_s": [
+    560.6
+   ],
+   "answered": "322/322",
+   "forward_mean_s": 1.23,
+   "reply_mean_s": 0.33
+  },
+  {
+   "setting": "p2",
+   "mean_delay_ms_per_hop": 200,
+   "lambda_p_per_s": 2.0,
+   "lambda_l_per_s": 0.5,
+   "runs": 1,
+   "attributed_arrivals": 298,
+   "gpa_top1": 0.0906,
+   "gpa_ci95": [
+    0.058,
+    0.1232
+   ],
+   "at_chance": true,
+   "latency_p50_s": [
+    2.23
+   ],
+   "client_up_kbit_s": [
+    916.6
+   ],
+   "answered": "299/299",
+   "forward_mean_s": 1.51,
+   "reply_mean_s": 0.79
+  },
+  {
+   "setting": "half",
+   "mean_delay_ms_per_hop": 200,
+   "lambda_p_per_s": 0.5,
+   "lambda_l_per_s": 0.25,
+   "runs": 1,
+   "attributed_arrivals": 303,
+   "gpa_top1": 0.1155,
+   "gpa_ci95": [
+    0.0795,
+    0.1515
+   ],
+   "at_chance": true,
+   "latency_p50_s": [
+    3.34
+   ],
+   "client_up_kbit_s": [
+    286.9
+   ],
+   "answered": "304/304",
+   "forward_mean_s": 3.02,
+   "reply_mean_s": 0.83
+  },
+  {
+   "setting": "d100half",
+   "mean_delay_ms_per_hop": 100,
+   "lambda_p_per_s": 0.5,
+   "lambda_l_per_s": 0.25,
+   "runs": 3,
+   "attributed_arrivals": 815,
+   "gpa_top1": 0.1276,
+   "gpa_ci95": [
+    0.1047,
+    0.1505
+   ],
+   "at_chance": false,
+   "latency_p50_s": [
+    2.53,
+    2.47,
+    2.48
+   ],
+   "client_up_kbit_s": [
+    289.7,
+    287.7,
+    293.6
+   ],
+   "answered": "819/820",
+   "forward_mean_s": 2.63,
+   "reply_mean_s": 0.47
+  }
+ ],
+ "latency_model": "fetch latency ~= 1/lambda_P (waiting for a send slot) + ~5 x mean delay (forward) + ~3 delays and the fetch (reply): at production, ~1.0 s + ~1.0 s + ~0.8 s",
+ "compressed_fetch_end_to_end": [
+  {
+   "site": "www.kernel.org",
+   "asked": "gzip",
+   "status": "http/1.0 200 ok",
+   "content_encoding": [
+    "gzip"
+   ],
+   "wire_body_bytes": 3609,
+   "page_bytes": 20436,
+   "gzip_whole": true,
+   "html": true
+  },
+  {
+   "site": "www.kernel.org",
+   "asked": "plain",
+   "status": "http/1.0 502 bad gateway",
+   "content_encoding": [],
+   "wire_body_bytes": 0,
+   "page_bytes": 0,
+   "gzip_whole": null,
+   "html": false
+  },
+  {
+   "site": "www.iana.org",
+   "asked": "gzip",
+   "status": "http/1.0 200 ok",
+   "content_encoding": [
+    "gzip"
+   ],
+   "wire_body_bytes": 1740,
+   "page_bytes": 6253,
+   "gzip_whole": true,
+   "html": true
+  },
+  {
+   "site": "www.iana.org",
+   "asked": "plain",
+   "status": "http/1.0 200 ok",
+   "content_encoding": [],
+   "wire_body_bytes": 6253,
+   "page_bytes": 6253,
+   "gzip_whole": null,
+   "html": true
+  }
+ ],
+ "findings": [
+  "100 ms per hop (d100) is at chance over 3 runs (10.8%, 95% interval 8.7-12.9%) and 32% faster than 200 ms (median 1.71-1.78 s vs 2.58-2.64 s), at the same bandwidth.",
+  "50 ms per hop scored 13.5% in its one run; its 95% interval (9.8-17.3%) still includes chance, so one run cannot tell. It is not recommended without repeats.",
+  "Halving the cover rate with 100 ms delays (d100half) halves the upload (~290 kbit/s) but leaks: 12.8% over 3 runs, its 95% interval above 10%. Its first run alone (11.0%) looked safe.",
+  "Doubling the send rate (p2) buys 14% latency for 66% more bandwidth.",
+  "Compression end to end: kernel.org arrives whole with gzip (20,436-byte page) and does not fit one reply without it (502).",
+  "Ten cover clients (same software and workload, unscored): an attacker who cannot tell them from users is at chance even at 50 ms (6.4% against 5%); one who can (enumerable generators) is not at 50 ms (15.2%, interval 11.0-19.4% against 10%) and is at 100 ms (12.3%, interval 8.4-16.2%). Cover lets the delay shrink only if it is indistinguishable from users where the adversary watches. One run each."
+ ],
+ "cover_clients": [
+  {
+   "setting": "g100",
+   "users": 10,
+   "cover_clients": 10,
+   "mean_delay_ms_per_hop": 100,
+   "runs": 1,
+   "attacker_blind_to_cover": {
+    "top1": 0.056,
+    "ci95": [
+     0.0285,
+     0.0835
+    ],
+    "chance": 0.05,
+    "arrivals": 268
+   },
+   "attacker_knowing_cover": {
+    "top1": 0.1231,
+    "ci95": [
+     0.0838,
+     0.1624
+    ],
+    "chance": 0.1,
+    "arrivals": 268
+   },
+   "latency_p50_s": 1.74,
+   "client_up_kbit_s": 557.3
+  },
+  {
+   "setting": "g50",
+   "users": 10,
+   "cover_clients": 10,
+   "mean_delay_ms_per_hop": 50,
+   "runs": 1,
+   "attacker_blind_to_cover": {
+    "top1": 0.0636,
+    "ci95": [
+     0.0352,
+     0.092
+    ],
+    "chance": 0.05,
+    "arrivals": 283
+   },
+   "attacker_knowing_cover": {
+    "top1": 0.1519,
+    "ci95": [
+     0.1101,
+     0.1937
+    ],
+    "chance": 0.1,
+    "arrivals": 283
+   },
+   "latency_p50_s": 1.31,
+   "client_up_kbit_s": 564.8
+  }
+ ]
+}
