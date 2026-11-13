@@ -413,11 +413,17 @@ def ensure_network(profile, state, whole=False, service_uid=0, upstream=None, up
         mtu_rows = json.loads(cmd("ip", "-j", "link", "show", "dev", r["dev"]).stdout) if r else None
         # The carrier rides inside the HTTP/3 cloak's QUIC: a full WireGuard datagram becomes a
         # 1420-byte QUIC UDP payload (cloak::OUTER_MTU), i.e. a 1448-byte IPv4 packet (+8 UDP +20 IP).
-        # Below that the cloak cannot send full packets, so refuse rather than black-hole them; the
-        # kill switch stays up (fail closed), as the caller's cleanup leaves it in place.
+        # On a smaller path those packets cannot pass, and the cloak falls back to TLS 1.3 over
+        # TCP 443 on its own (cloak::QUIC_FALLBACK_TIMEOUT), whose fixed cells TCP segments to
+        # the path: the tunnel runs, never a direct path. Only below IPv4's 576-byte minimum
+        # is nothing usable; refuse there, with the kill switch left up (fail closed).
         if mtu_rows and mtu_rows[0]["mtu"] < UNDERLAY_MIN_MTU:
-            raise RuntimeError(
-                "underlay MTU below the camouflage minimum (%d); the first hop is unreachable here" % UNDERLAY_MIN_MTU
+            if mtu_rows[0]["mtu"] < 576:
+                raise RuntimeError("underlay MTU %d below IPv4's 576-byte minimum" % mtu_rows[0]["mtu"])
+            print(
+                "underlay MTU %d is below %d: the camouflage carries the tunnel over TLS/TCP"
+                % (mtu_rows[0]["mtu"], UNDERLAY_MIN_MTU),
+                file=sys.stderr,
             )
         if r:
             args = ["ip", "route", "replace", relay_ip + "/32"]

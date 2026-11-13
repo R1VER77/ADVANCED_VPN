@@ -155,6 +155,39 @@ class LedgerTests(unittest.TestCase):
         outcomes = sorted(results.get(timeout=5) for _ in procs)
         self.assertEqual(outcomes.count("ok"), 1, outcomes)
 
+    def test_a_credit_dies_with_its_epoch_key_whatever_its_label_says(self):
+        keys = {10: fresh_key(), 11: fresh_key(), 12: fresh_key()}
+        published = {e: k.public_key() for e, k in keys.items()}
+        ledger = mt.Ledger(self.path)
+        _, old = mt.issue_credit(keys[10], epoch=10)
+        with self.assertRaises(mt.Expired):
+            ledger.redeem_live(old, published, now_epoch=12)
+        old["grant"]["epoch"] = 12  # relabelled: the key still decides
+        with self.assertRaises(mt.Expired):
+            ledger.redeem_live(old, published, now_epoch=12)
+        for e in (11, 12):
+            _, live = mt.issue_credit(keys[e], epoch=e)
+            self.assertTrue(ledger.redeem_live(live, published, now_epoch=12)["ok"])
+        _, stranger = mt.issue_credit(fresh_key())
+        with self.assertRaises(mt.UntrustedIssuer):
+            ledger.redeem_live(stranger, published, now_epoch=12)
+
+    def test_forged_credits_trip_the_inflation_alarm_and_the_key_is_revoked(self):
+        issuer = mt.issuer_id(self.key.public_key())
+        ledger = mt.Ledger(self.path)
+        for _ in range(3):  # what the issuer issued and published
+            ledger.redeem(mt.issue_credit(self.key)[1], self.key.public_key())
+        self.assertEqual(ledger.audit_supply(issuer, issued=3), 3)  # honest: no alarm
+        # A forger (a broken or stolen key) mints more: each one verifies.
+        for _ in range(2):
+            ledger.redeem(mt.issue_credit(self.key)[1], self.key.public_key())
+        with self.assertRaises(mt.Inflation):
+            ledger.audit_supply(issuer, issued=3)
+        # Revoked for good, here and for every holder of this ledger.
+        for holder in (ledger, mt.Ledger(self.path)):
+            with self.assertRaises(mt.Inflation):
+                holder.redeem(mt.issue_credit(self.key)[1], self.key.public_key())
+
     def test_ledger_file_is_private(self):
         _, spend = mt.issue_credit(self.key)
         mt.Ledger(self.path).redeem(spend, self.key.public_key())

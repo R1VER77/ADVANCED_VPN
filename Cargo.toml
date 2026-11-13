@@ -51,4 +51,6 @@ undocumented_unsafe_blocks = "deny"
 # implementation, kept only as the byte-identity oracle for tests (crates/*/IMPLEMENTATION_NOTES.md).
 [workspace]
 members = ["crates/avpn-mix-lane", "crates/avpn-pq-sphinx"]
+# research/zk-membership is its own RISC Zero workspace (rzup toolchain), never built here.
+exclude = ["research"]
 resolver = "3"

@@ -675,7 +675,7 @@ class HardwareOperator:
             raise ValueError("operator ML-DSA key not created yet; run init once")
         return dict(
             schema=2,
-            classical=dict(kind="fido2", credential=credential_public(self.vault)),
+            classical=dict(kind="fido2", public_key=credential_public(self.vault)),
             mldsa65=base64.b64encode(read_private(pq)).decode(),
         )
 
@@ -708,7 +708,8 @@ def verify_operator(operator, message, classical, pq_signature):
     if c["kind"] == "fido2" and classical.get("kind") == "fido2":
         from keyguard import verify_assertion
 
-        verify_assertion(c["credential"], message, classical)
+        # `public_key` (the bare COSE key); `credential` in operator files from before v0.10.
+        verify_assertion(c.get("public_key") or c["credential"], message, classical)
     elif c["kind"] == "ed25519" and classical.get("kind") == "ed25519":
         ed25519.Ed25519PublicKey.from_public_bytes(base64.b64decode(c["public"])).verify(
             base64.b64decode(classical["signature"]), message

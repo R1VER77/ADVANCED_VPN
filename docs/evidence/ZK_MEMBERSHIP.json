@@ -1,0 +1,30 @@
+{
+ "schema": 1,
+ "date": "2026-11-13",
+ "prototype": "research/zk-membership",
+ "statement": "Merkle membership of SHA-256('avpn/member/v1'||s) in a tree of 2^20 commitments, and nullifier SHA-256('avpn/nullifier/v1'||s||epoch||scope); public: root, epoch, scope, nullifier",
+ "machine": "Intel Core i7-8565U (2018 laptop, 4 cores / 8 threads), 15 GiB RAM, CPU proving only (no GPU)",
+ "proofs_in_run": 6,
+ "run_seconds": 695,
+ "checks": [
+  "stable nullifier within an epoch",
+  "fresh nullifier next epoch",
+  "distinct members: distinct nullifiers, same root",
+  "outsider cannot produce the members' root",
+  "tampered journal fails verification",
+  "journal carries neither the secret nor the leaf"
+ ],
+ "journal_bytes": 392,
+ "members": 1048576,
+ "prove_seconds": 120.0,
+ "receipt_bytes": 224010,
+ "tree_build_seconds": 1.05,
+ "tree_depth": 20,
+ "verify_seconds": 0.023,
+ "zkvm": "risc0-zkvm 3.1 (STARK over BabyBear, FRI; succinct receipt, no SNARK wrapper)",
+ "notes": [
+  "Real proofs: the host refuses RISC0_DEV_MODE (which fakes them) and asserts a succinct receipt.",
+  "prove_seconds is the first of six proofs; the run's six took 695 s in all, about 2 minutes each.",
+  "The succinct receipt is one STARK (hash-based, post-quantum). RISC Zero's Groth16 wrapper would shrink it to a few hundred bytes but rests on elliptic curves, so it is not used."
+ ]
+}

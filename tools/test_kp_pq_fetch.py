@@ -108,6 +108,16 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(self.first_line("X25519:P-256", "TLSv1.2").split()[1], "525")
 
 
+class OpenSSLTests(unittest.TestCase):
+    def test_an_openssl_without_ml_kem_is_refused_at_start(self):
+        sys.path.insert(0, str(TOOLS))
+        import kp_pq_fetch
+
+        with self.assertRaises(SystemExit):
+            kp_pq_fetch.require_pq_openssl((3, 0, 13, 0, 15), "OpenSSL 3.0.13")
+        kp_pq_fetch.require_pq_openssl((3, 5, 6, 0, 15), "OpenSSL 3.5.6")  # accepted
+
+
 class EncodingTests(unittest.TestCase):
     def test_only_known_codings_the_client_accepts(self):
         sys.path.insert(0, str(TOOLS))

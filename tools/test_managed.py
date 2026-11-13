@@ -670,6 +670,35 @@ class HardwareVerificationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             verify_assertion(cred, b"another-set", a)
 
+    def test_the_published_key_has_no_room_for_device_identity(self):
+        import base64
+        import json
+        import tempfile
+        from fido2 import cbor
+        from fido2.webauthn import AttestedCredentialData, Aaguid
+        from keyguard import RP, credential_public, public_key_of, verify_assertion
+
+        m = b"enrollment-set"
+        cred, a = self.assertion(m)
+        model, cred_id = os.urandom(16), os.urandom(16)  # what a real key would carry
+        real = AttestedCredentialData.create(
+            Aaguid(model), cred_id, AttestedCredentialData(base64.b64decode(cred)).public_key
+        )
+        full = base64.b64encode(bytes(real)).decode()
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "credential.json").write_text(json.dumps(dict(schema=1, rp=RP, credential=full)))
+            os.chmod(Path(d) / "credential.json", 0o600)
+            via_vault = credential_public(Path(d))  # as operator.pub gets it
+        for public in (public_key_of(full), via_vault):
+            raw = base64.b64decode(public)
+            key = cbor.decode(raw)
+            # COSE key fields only: kty, alg, and the curve / key parameters.
+            self.assertTrue(set(key) <= {1, 3, -1, -2, -3}, sorted(key))
+            self.assertNotIn(model, raw)
+            self.assertNotIn(cred_id, raw)
+            verify_assertion(public, m, a)  # and it verifies a real assertion
+        verify_assertion(full, m, a)  # operator files from before v0.10 still verify
+
     def test_hybrid_kem_roundtrip_and_context_binding(self):
         from keyguard import kem_keypair, kem_seal, kem_open
 

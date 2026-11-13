@@ -28,6 +28,16 @@ each one exposes. The claim never says "post-quantum throughout" while one of th
 | Mix lane: directory | | Ed25519 + SPHINCS+ (hybrid, hash-based) | `check_config` (`PKISignatureScheme`) | `test_mix.py`; the live lab runs the shipping check on its network |
 | Mix lane: fetches to websites | TLS 1.3 with X25519MLKEM768 only; other sites refused (525 / 526) | WebPKI | `tools/kp_pq_fetch.py` (OpenSSL policy) | `test_kp_pq_fetch.py` |
 
+## Which failures may wait
+
+A broken classical primitive fails in one of two ways. A **silent** failure gives an
+adversary something without anyone noticing: a recording decrypted later, a sender
+linked. Those must be post-quantum today, because harvest-now-decrypt-later cannot be
+undone; every row above is such a layer. A **loud** failure costs money or availability
+and shows itself: forged credits make more spends than were issued. Those may stay
+classical for now if they are contained: detected, bounded in time, and revocable. The
+credits below are the one loud exception; the other two are outside this project's code.
+
 ## Exceptions (stated wherever the claim is made)
 
 1. **Mesh contribution credits** (`tools/mesh_tokens.py`): Chaum blind RSA. Blindness is
@@ -37,6 +47,17 @@ each one exposes. The claim never says "post-quantum throughout" while one of th
    blind signature exists yet: lattice constructions are academic, at about 20 KB and 100 ms
    per token, with no IETF draft and no audited implementation (checked November 2026). The
    credits move to one when it does (`docs/VERIFICATION_PLAN.md` §5).
+   Meanwhile a forgery is contained rather than silent. Each daily epoch has its own issuer
+   key, and a credit is spendable only under the current or previous epoch's key (the key
+   decides, so a stale credit cannot be relabelled), so a broken key mints for two days at
+   most. And a ledger compares the redemptions under each epoch key with the count its
+   issuer published: more spent than issued revokes that key for good (`Ledger.redeem_live`,
+   `Ledger.audit_supply`; `test_forged_credits_trip_the_inflation_alarm_and_the_key_is_revoked`).
+   The alarm is as complete as the redemptions a ledger sees: across relays it needs the
+   mesh's gossiped spent set.
+   The replacement is designed and measured: anonymous membership credits proved as a
+   STARK (hash-based, post-quantum), which need no blinding and no RSA
+   (`docs/ZK_MEMBERSHIP_DESIGN.md`; a relay verifies a spend in 23 ms). Planned for v1.0.
 2. **The I2P front's routing.** I2P builds tunnels and links routers with X25519 and
    Ed25519. What the front carries is post-quantum twice over (the cloak's enforced hybrid
    TLS, then the tunnel), but its hiding of *which client reached the entry* rests on I2P's

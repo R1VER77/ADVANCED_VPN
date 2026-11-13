@@ -1336,6 +1336,25 @@ def chain_plan(a):
                 ),
             )
         )
+    # Providers: each one sees its own servers' traffic (flow logs, hypervisor counters).
+    # One that hosts both ends sees your address and your destinations: refused unless
+    # explicitly allowed. One that hosts two other hops shortens the path against it.
+    if len(hops) > 1:
+        if keys[0] == keys[-1] and keys[0] != "own" and not getattr(a, "allow_same_provider", False):
+            raise CloudError(
+                "the entry and the exit are both on %s, which would then see your address and your destinations; "
+                "add a server with another provider, or pass --allow-same-provider" % keys[0]
+            )
+        for k in sorted(set(keys)):
+            n = keys.count(k)
+            if n > 1:
+                rows.append(
+                    dict(
+                        label="provider",
+                        value="%s hosts %d of %d hops: against %s the path is %d hop%s shorter"
+                        % (k if k != "own" else "an unnamed host (own)", n, len(keys), k, n - 1, "" if n == 2 else "s"),
+                    )
+                )
     if cap:
         rows.append(rate_row(cap, a.hours_per_day, a.accept_cost, 2 if len(hops) > 1 else 1))
     rows.append(dict(label="sign", value="one Nitrokey PIN + touch (vault %s)" % a.vault))
@@ -1725,6 +1744,11 @@ def build_parser():
     ch.add_argument("--client-request", type=Path, required=True, help="the client device's public request")
     ch.add_argument("--vault", type=Path, required=True, help="the operator's Nitrokey vault directory")
     ch.add_argument("--order", help="hop order, client side first: NAME,NAME[,NAME] (default: automatic)")
+    ch.add_argument(
+        "--allow-same-provider",
+        action="store_true",
+        help="allow the entry and the exit on one provider (which then sees your address and your destinations)",
+    )
     ch.add_argument(
         "--source", default=str(Path(__file__).resolve().parents[1]), help="built package or checkout to install"
     )

@@ -55,6 +55,14 @@ def accepted_encodings(raw_request):
     return [e for e in ENCODINGS if e in tokens]
 
 
+def require_pq_openssl(version=ssl.OPENSSL_VERSION_INFO, name=ssl.OPENSSL_VERSION):
+    """Refuse to run without ML-KEM in the linked OpenSSL (3.5+): with an older one every
+    fetch would be refused one by one, silently. The service node needs 3.5 (Debian 13
+    ships it; Ubuntu 24.04's 3.0 does not)."""
+    if tuple(version[:2]) < (3, 5):
+        raise SystemExit("kp_pq_fetch.py needs OpenSSL 3.5 or later for X25519MLKEM768; this Python has %s" % name)
+
+
 def policy_env():
     """Re-exec under the post-quantum OpenSSL policy unless already running under it."""
     if os.environ.get("AVPN_PQ_FETCH_POLICY") == "1":
@@ -185,6 +193,7 @@ def serve(path, limit):
 
 def main():
     """Entry point: the host hands us a socket path (protocol 2) and the payload length."""
+    require_pq_openssl()
     policy_env()
     if os.environ.get("KATZENPOST_PLUGIN_PROTOCOL") != "2" or not os.environ.get("KATZENPOST_PLUGIN_SOCKET"):
         raise SystemExit("kp_pq_fetch.py runs as a Katzenpost service-node plugin (protocol 2)")

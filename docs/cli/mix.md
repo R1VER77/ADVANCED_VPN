@@ -60,7 +60,7 @@ lane yourself; its latency and its idle cover traffic are a trade you choose.
 - A reply must fit one mixnet message (8000 bytes on the lab network; the mixnet's operators choose). Larger replies are refused (`502`).
 - Anonymity grows with the mixnet's traffic: the more clients send cover in the same delay window, the less any one stands out.
 - X-Wing's 7,164-byte Sphinx headers cost bandwidth. A smaller design (option E, 1,396 bytes) stays research: its inner hops are classical X25519, so it cannot carry the post-quantum claim (`docs/DESIGN_PACK_ASSESSMENT.md`).
-- Operators: run `tools/kp_pq_fetch.py` as the service node's fetch plugin in place of Katzenpost's `http-proxy-server` (it needs Python with OpenSSL 3.5 or later and `python3-cbor2`); clients are unchanged.
+- Operators: run `tools/kp_pq_fetch.py` as the service node's fetch plugin in place of Katzenpost's `http-proxy-server` (it needs Python with OpenSSL 3.5 or later and `python3-cbor2`, and refuses to start on an older OpenSSL, such as Ubuntu 24.04's 3.0; Debian 13's 3.5 works); clients are unchanged.
 - Cover traffic runs only while the client runs. Keep it started rather than starting it for each request: when it runs says something on its own.
 - The mixnet's programs are Katzenpost's, unmodified and run as separate processes (AGPL-3.0); build them with `third_party/katzenpost/build.sh` and place `kpclientd` and `http-proxy-client` in `/usr/lib/advanced-vpn/katzenpost`. Katzenpost describes itself as pre-alpha.
 

@@ -27,6 +27,7 @@ the token hex-encoded; a spend is {grant, redemption} with the redemption the
 hex-encoded unblinded signature.
 """
 
+import contextlib
 import hashlib
 import json
 import os
@@ -40,6 +41,11 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 SCHEMA = 1
 TOKEN_BYTES = 32  # 256-bit tokens: guessing one is out of reach
 KEY_BITS = 3072  # RSA-3072 ~ 128-bit classical security
+# Each epoch has its own issuer key, and a credit is spendable only under the key of the
+# current epoch or the one before. The key, not the grant's (unsigned) epoch label, decides:
+# a stale credit cannot be relabelled, and a broken or stolen key mints for two days at most.
+EPOCH_SECONDS = 86400
+LIVE_EPOCHS = 2
 PUBLIC_EXPONENT = 65537
 
 
@@ -53,6 +59,16 @@ class InvalidSignature(CreditError):
 
 class DoubleSpend(CreditError):
     """This token hash was already redeemed."""
+
+
+class Expired(CreditError):
+    """A credit under an epoch key that is no longer live."""
+
+
+class Inflation(CreditError):
+    """More credits redeemed under an epoch key than its issuer issued: the key is broken
+    or stolen. Unforgeability is the property a quantum adversary breaks (unlinkability
+    survives): such a break is loud, and this is where it is heard."""
 
 
 class UntrustedIssuer(CreditError):
@@ -164,6 +180,11 @@ def _gcd(a: int, b: int) -> int:
 # ------------------------------------------------------- grants and spends
 
 
+def current_epoch(now: float | None = None) -> int:
+    """The credit epoch at `now` (default: the current time)."""
+    return int((time.time() if now is None else now) // EPOCH_SECONDS)
+
+
 def make_grant(token: bytes, public_key, epoch: int | None = None) -> dict:
     """The spendable half of a credit: mirrors TokenGrant in src/mesh/tokens.rs."""
     return {
@@ -206,8 +227,47 @@ class Ledger:
             if doc.get("schema") != SCHEMA:
                 raise CreditError("unsupported ledger schema")
             self._spent = {k: set(v) for k, v in doc.get("spent", {}).items()}
+            self._revoked = set(doc.get("revoked", []))
         else:
             self._spent = {}
+            self._revoked = set()
+
+    @contextlib.contextmanager
+    def _locked(self):
+        """An exclusive lock on PATH.lock, with the file re-read inside it."""
+        import fcntl
+
+        fd = os.open(self.path.with_name(self.path.name + ".lock"), os.O_RDWR | os.O_CREAT, 0o600)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            self._load()  # what every other holder has recorded meanwhile
+            yield
+        finally:
+            os.close(fd)  # releases the lock
+
+    def redeem_live(self, spend: dict, epoch_keys: dict, now_epoch: int | None = None) -> dict:
+        """Redeem under the published epoch keys ({epoch: public key}): only a credit signed
+        by the key of the current or the previous epoch is accepted."""
+        now = current_epoch() if now_epoch is None else now_epoch
+        issuer = spend.get("grant", {}).get("issuer")
+        for epoch, key in epoch_keys.items():
+            if issuer_id(key) == issuer:
+                if not now - LIVE_EPOCHS < epoch <= now:
+                    raise Expired("this credit's epoch key is no longer live")
+                return self.redeem(spend, key)
+        raise UntrustedIssuer("no published epoch key matches this credit")
+
+    def audit_supply(self, issuer: str, issued: int) -> int:
+        """Compare the redemptions recorded under one epoch key with the count its issuer
+        published. More redeemed than issued means forged credits: the key is revoked for
+        good (Inflation), and this ledger refuses every later spend under it."""
+        with self._locked():
+            redeemed = len(self._spent.get(issuer, ()))
+            if redeemed > issued:
+                self._revoked.add(issuer)
+                self._flush()
+                raise Inflation("%d credits redeemed under a key that issued %d" % (redeemed, issued))
+        return redeemed
 
     def seen(self, issuer: str, digest: str) -> bool:
         """Whether this spend digest was already redeemed with `issuer`."""
@@ -225,23 +285,22 @@ class Ledger:
         if not verify(token, signature, public_key):
             raise InvalidSignature("redemption does not verify")
         digest = token_digest(token)
-        import fcntl
-
-        fd = os.open(self.path.with_name(self.path.name + ".lock"), os.O_RDWR | os.O_CREAT, 0o600)
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX)
-            self._load()  # what every other holder has recorded meanwhile
+        with self._locked():
+            if grant["issuer"] in self._revoked:
+                raise Inflation("this epoch key was revoked: it issued fewer credits than were spent")
             if self.seen(grant["issuer"], digest):
                 raise DoubleSpend("this credit was already spent")
             self._spent.setdefault(grant["issuer"], set()).add(digest)
             self._flush()
-        finally:
-            os.close(fd)  # releases the lock
         return {"ok": True, "issuer": grant["issuer"], "digest": digest}
 
     def _flush(self):
         tmp = self.path.with_name(self.path.name + ".tmp")
-        doc = {"schema": SCHEMA, "spent": {k: sorted(v) for k, v in self._spent.items()}}
+        doc = {
+            "schema": SCHEMA,
+            "spent": {k: sorted(v) for k, v in self._spent.items()},
+            "revoked": sorted(self._revoked),
+        }
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "w") as f:
             f.write(json.dumps(doc, indent=1) + "\n")

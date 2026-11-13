@@ -56,7 +56,7 @@
  },
  "http3_and_tcp_camouflage": {
   "what": "advanced-vpn-cloak carries each WireGuard datagram as a 1420-byte QUIC DATAGRAM frame on UDP 443 (or a 1420-byte TCP/TLS 1.3 cell on TCP 443 when UDP is blocked), authenticated by a 32-byte TLS 1.3 exporter HMAC (EXPORTER-advanced-vpn-cloak)",
-  "fails_closed": "the cloak requires an underlay IPv4 MTU >= 1448; below that the client refuses to connect and keeps the kill switch",
+  "fails_closed": "below a 1448-byte underlay MTU the cloak's QUIC cannot pass and it carries the tunnel over TLS/TCP (proved by throughput_bench.py --underlay-mtu 1400, run in CI); below 576 bytes the client refuses to connect and keeps the kill switch; never a direct path",
   "roaming": "changing the client's address mid-transfer is survived: the cloak reconnects and the carrier keepalive re-learns the address",
   "liveness_guard": "vendor/gotatun flushes the strict-blocking delay queue if real packets sit behind active blocking with no decoy drain for 3 s, preventing start-outage stalls"
  },

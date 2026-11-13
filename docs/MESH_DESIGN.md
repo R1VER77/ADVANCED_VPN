@@ -56,6 +56,41 @@ to regenerate and the mesh keeps nothing to recover, same as enrollment today.
 Software fallback key custody (`systemd-creds`/`none`) is possible for nodes
 but ranks below hardware-backed members in the directory.
 
+### What the network learns about your key
+
+Enough for its functions, and nothing it has to be trusted to forget. Like a browser that
+answers a site's attestation request with "none", nothing in this system asks about the
+device itself:
+
+- **Learned:** the credential's public key (it checks signatures and derives your member
+  ID), and that each signature was made with PIN and touch (the user-verified and
+  user-present flags).
+- **Never requested:** attestation. No protocol message has a field for it, and the
+  credential is created with attestation "none".
+- **Never carried:** what `operator.pub` and every membership proof contain is the bare
+  COSE public key, built from the key itself. It has no field for an AAGUID (which names
+  the make and model), a credential ID or a certificate, so nothing is filled in and then
+  zeroed (`keyguard.public_key_of`;
+  `test_the_published_key_has_no_room_for_device_identity`). Operator files from before
+  v0.10, which carried the full credential record, still verify; only their key is read.
+- **On the USB cable, not avoidable yet:** when a credential is created, the authenticator
+  still sends its own attestation (batch certificate, AAGUID) to the local program, and the
+  FIDO library reads the key's capabilities (`getInfo`) on connect. Asking the key not to
+  produce attestation needs CTAP 2.2's attestation-format preference, which the pinned
+  python-fido2 (2.2.1) cannot send. None of it is stored or sent anywhere: the vault keeps
+  only the credential ID (the key needs it back to sign) and the public key. When the
+  library supports the preference, the request will ask for none.
+- **Still visible, and why:** the signature counter. It is inside the data the key signs,
+  so it cannot be left out without breaking the signature. On a key that keeps one counter
+  for all sites, its value grows with every use anywhere, which tells an observer roughly
+  how often the key is used and can help link the same key across services. Keys that
+  keep a counter per credential, or report zero, reveal nothing this way.
+- **The cost of asking nothing:** without attestation, "hardware-backed" is the member's
+  own claim, which software can make too. Proving it would mean showing at least the
+  key's model (vendors' batch certificates cover large batches, so not the individual
+  key). If the mesh ever needs that proof, it should be checked once, through the
+  oblivious control plane, with only "yes" kept and published, never the model.
+
 ## 3. Gap analysis vs Mullvad and IVPN (2025–2026)
 
 | Gap in commercial VPNs | AVPN/Mesh answer |

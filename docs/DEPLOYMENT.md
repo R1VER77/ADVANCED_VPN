@@ -109,6 +109,11 @@ dropped and then removed. See `avpn help privacy`.
 everything below. With `--role`, it also generates this device's keys. It links `avpn`
 and `avpnctl` into `/usr/local/bin`, because `sudo` searches only system directories.
 
+There is no automatic updater, by design: a program that fetches and runs new code on its
+own is the first thing a supply-chain attacker takes over. You update by running this
+command on a release you chose, checked against its published SHA-256 sums (`sha256sum -c
+SHA256SUMS`) and built from a signed commit.
+
 - `/opt/advanced-vpn/bin/avpn`: the command line (Rust). It renders results only.
 - `/opt/advanced-vpn/bin/avpnctl`: the privileged controller, running in the hash-locked venv with `python -E -s`. The systemd units run it directly.
 - `/opt/advanced-vpn/bin/avpn-cloud`: cloud setup, using the system `python3`. It runs as the user, never as root.

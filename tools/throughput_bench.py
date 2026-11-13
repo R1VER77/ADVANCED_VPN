@@ -231,6 +231,11 @@ def main():
     p.add_argument("--rate-packets", type=int)
     p.add_argument("--mode", choices=["tunnel", "carrier"], default="tunnel")
     p.add_argument("--min-mbit", type=float, help="fail below this throughput (regression gate)")
+    p.add_argument(
+        "--underlay-mtu",
+        type=int,
+        help="MTU of the client's link to the first hop; below 1448 the cloak must carry the tunnel over TCP",
+    )
     a = p.parse_args()
     os.umask(0o077)
     lab_guard()
@@ -346,6 +351,9 @@ def main():
                 run("ip", "-n", ns, "link", "set", dev, "up")
             if n2 != "destination":
                 ingress[n2] = d2  # server's link from its predecessor
+            if k == 0 and a.underlay_mtu:
+                for ns, dev in [("av-" + n1, d1), ("av-" + n2, d2)]:
+                    run("ip", "-n", ns, "link", "set", dev, "mtu", str(a.underlay_mtu))
         for node, net, via in routes(nodes, links):
             run("ip", "-n", "av-" + node, "route", "add", net, "via", via)
         for ns in namespaces[1:-1]:
@@ -501,6 +509,9 @@ def main():
                 first_hop_sees_client=CLIENT_IP in audit.get(first, {}).get("sources", []),
                 ingress_sources={s: v["sources"] for s, v in audit.items()},
             )
+            if a.underlay_mtu:
+                cloak = json.loads((runtime_dir(state / first, create=False) / "cloak-status.json").read_text())
+                r["underlay"] = dict(mtu=a.underlay_mtu, first_hop_cloak=cloak)
             r.update(
                 hops=hops,
                 mode=a.mode,
@@ -515,6 +526,8 @@ def main():
             print(json.dumps(r), flush=True)
             if not r["sha256_verified"]:
                 raise SystemExit("transfer corrupted")
+            if a.underlay_mtu and a.underlay_mtu < 1448 and not r["underlay"]["first_hop_cloak"].get("tcp_sessions"):
+                raise SystemExit("a path below 1448 bytes was crossed without the TCP carrier")
             if a.mode == "tunnel" and (
                 onion["marker_seen_by_any_server"]
                 or onion["client_ip_seen_beyond_first_hop"]

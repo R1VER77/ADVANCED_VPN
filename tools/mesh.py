@@ -494,7 +494,7 @@ def cmd_publish(args) -> dict:
                 {
                     "schema": SCHEMA,
                     "member": d["node_id"],
-                    "credential": out.get("credential"),
+                    "public_key": out.get("public_key"),
                     "assertion": out["assertion"],
                     "challenge_sha256": out.get("challenge_sha256"),
                 }
@@ -640,6 +640,35 @@ def cmd_identity(_args) -> dict:
     }
 
 
+# A provider (or legal sphere) hosting more than this share of the mesh could watch a large
+# part of every path's traffic, whatever the per-path diversity rule picks.
+CONCENTRATION_LIMIT = 1 / 3
+
+
+def concentration(nodes: list[dict]) -> list[dict]:
+    """The largest provider's and legal sphere's share of the mesh's nodes, as rows; a
+    share over CONCENTRATION_LIMIT is marked."""
+    rows = []
+    if not nodes:
+        return rows
+    for label, key in (
+        ("provider", lambda d: d["provider"]),
+        ("legal sphere", lambda d: legal_parent(d["provider"], d["country"])),
+    ):
+        counts: dict[str, int] = {}
+        for d in nodes:
+            counts[key(d)] = counts.get(key(d), 0) + 1
+        top, n = max(counts.items(), key=lambda kv: (kv[1], kv[0]))
+        share = n / len(nodes)
+        note = (
+            " - over %d%%: it sees much of every path" % round(100 * CONCENTRATION_LIMIT)
+            if share > CONCENTRATION_LIMIT
+            else ""
+        )
+        rows.append({"label": "largest " + label, "value": f"{top}: {n} of {len(nodes)} nodes ({share:.0%}){note}"})
+    return rows
+
+
 def cmd_nodes(args) -> dict:
     """`avpn mesh nodes`: the directory (optionally fetched from beacons first)."""
     if args.fetch:
@@ -656,7 +685,7 @@ def cmd_nodes(args) -> dict:
     ]
     return {
         "ok": True,
-        "rows": rows
+        "rows": (rows + concentration(nodes))
         or [{"label": "empty", "value": "no descriptors yet; avpn mesh nodes --fetch, or offer your first node"}],
     }
 

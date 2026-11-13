@@ -69,6 +69,21 @@ class TestChainSelection(unittest.TestCase):
             node("x1", ["exit"], "host", "CH", "carol"),
         ]
 
+    def test_concentration_names_the_largest_provider_and_sphere(self):
+        nodes = [
+            node("a", ["entry"], "aws", "SE", "!op1"),
+            node("b", ["relay"], "aws", "DE", "!op2"),
+            node("c", ["exit"], "aws", "FR", "!op3"),
+            node("d", ["exit"], "oci", "NL", "!op4"),
+        ]
+        rows = {r["label"]: r["value"] for r in mesh.concentration(nodes)}
+        self.assertIn("aws: 3 of 4 nodes (75%)", rows["largest provider"])
+        self.assertIn("sees much of every path", rows["largest provider"])
+        balanced = {
+            r["label"]: r["value"] for r in mesh.concentration(nodes[2:] + [node("e", ["relay"], "gcp", "IS", "!op5")])
+        }
+        self.assertNotIn("sees much of every path", balanced["largest provider"])
+
     def test_three_hop_diversity(self):
         chain = mesh.select_chain(self.nodes, 3)
         self.assertEqual(len(chain), 3)

@@ -95,11 +95,15 @@ because changing it often only raises the odds of eventually picking a hostile o
 
 ## Fails closed, not open
 
-The cloak needs the path to the first hop to carry a full-size packet (an IPv4 MTU of at
-least 1448 bytes). On a smaller path the client refuses to bring the tunnel up rather than
-send anything in the clear, and the kill switch stays in place: in whole-device mode every
-packet is dropped; in applications mode a protected program simply has no route. There is
-no automatic fallback to a direct or smaller-MTU path. If the first hop is briefly
+The cloak's HTTP/3 carrier needs the path to the first hop to carry a full-size packet (an
+IPv4 MTU of at least 1448 bytes). On a smaller path its QUIC packets cannot pass, and the
+cloak carries the tunnel over TLS 1.3 on TCP 443 instead, with the same fixed cells, whose
+segments TCP fits to the path (measured: a 1400-byte path, the transfer verified, the first
+hop's session on TCP; `throughput_bench.py --underlay-mtu`). Nothing is ever sent outside
+the tunnel: below IPv4's 576-byte minimum the client refuses to connect, and the kill
+switch stays in place either way: in whole-device mode every packet is dropped; in
+applications mode a protected program simply has no route. There is no fallback to a
+direct path. If the first hop is briefly
 unreachable, the carrier's strict-blocking shaper flushes and recovers on its own (a
 liveness guard carried in the vendored `gotatun`), and the supervisor restarts the
 carrier as a backstop if it ever stays stuck.
@@ -161,9 +165,16 @@ What a capable observer can still tell:
   TCP fallback), but its handshake fingerprint (the Rustls/Quinn transport parameters and
   ClientHello) is not a mainstream browser's; an adversary that fingerprints TLS/QUIC stacks
   (JA4) can see it is not Chrome, and the certificate is self-signed.
-- **The constant rate of the outer stream.** An observer can see Which rate class (`metered`,
+- **The constant rate of the outer stream.** An observer can see which rate class (`metered`,
   `standard`, `fast`, or `line`) is active from the fixed packet rate, even though that rate
   does not change when you start or stop browsing.
+- **That you run a privacy tool at all.** The same constancy that hides *what* you do makes
+  the stream unlike ordinary web traffic, which is bursty: a perfectly even flow to one
+  address for as long as you are connected stands out to anyone who looks at flow shapes.
+  The design hides content and activity, not presence. Where running such a tool is
+  itself the danger, connect only when needed and consider the I2P front (whose own traffic
+  is recognisable as I2P). Shaping the outer flow to imitate an ordinary application,
+  while keeping the cells constant inside, is on the roadmap, not built.
 
 ## With an I2P front
 
@@ -199,11 +210,32 @@ the content); with `--front-hops 1` that one router also sees the entry's.
   entry and the exit on different providers and in different legal spheres, so
   collusion needs two companies and two legal orders to agree. Every free tier is a
   US company, and the US CLOUD Act reaches US providers wherever their servers stand,
-  so OCI and AWS ends are one sphere: `avpn cloud chain` warns about that, and mesh
+  so OCI and AWS ends are one sphere: `avpn cloud chain` warns about that (and refuses one provider at both ends), and mesh
   chains refuse it unless told otherwise. A non-US middle between two US ends does not
   help — the legal attack goes to the ends. The servers keep
   nothing to hand over (`avpn help retention`), but a provider can still watch its own
   hop in real time.
+- **Your hosting providers as observers.** A cloud provider sees the traffic of the
+  servers it hosts, through flow logs, hypervisor counters and its own network:
+  addresses, sizes and timing, never contents (post-quantum encryption is beside the
+  point here; nothing is decrypted, it was only ever metadata). Per hop that is the
+  observer the constant-rate links are built against: one provider watching one hop
+  sees an even stream in and an even stream out. The danger is one provider holding
+  several hops of your path, because it then watches both sides of what it holds:
+  - the entry and the exit on one provider would let it see your address and your
+    destinations together. `avpn cloud chain` refuses that unless you pass
+    `--allow-same-provider`;
+  - two other hops on one provider shorten the path against it by one hop; the chain
+    plan names it;
+  - mesh chains put every hop with a different operator, provider and country
+    (`avpn mesh chain`), and `avpn mesh nodes` reports the largest provider's and legal
+    sphere's share of the whole mesh, marked above a third.
+
+  Providers are compared by name. Two small hosts reselling one network would look
+  different; comparing their networks (ASN) is on the roadmap. Your exit's provider sees
+  your destinations, as every VPN exit's does: pick it for that. A single-hop VPN puts
+  your address and your destinations on one server by design, so its host holds both
+  sides of the only hop there is.
 - **Who calls the cloud API.** Creating or changing a server records your address in
   the provider's audit log. Run `avpn cloud` while connected through the chain so the
   exit is the caller instead (`avpn help cloud`).

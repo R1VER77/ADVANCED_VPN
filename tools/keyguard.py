@@ -167,7 +167,8 @@ def enroll(vault):
     vault.mkdir(mode=0o700, parents=False, exist_ok=False)
     device, c = client()
     try:
-        s = Fido2Server({"id": RP, "name": "ADVANCED VPN"})
+        # No attestation: nothing about the make, model or batch of the key is asked for.
+        s = Fido2Server({"id": RP, "name": "ADVANCED VPN"}, attestation="none")
         options, state = s.register_begin(
             {"id": os.urandom(32), "name": "operator", "displayName": "VPN operator"},
             resident_key_requirement="discouraged",
@@ -178,9 +179,14 @@ def enroll(vault):
         auth = s.register_complete(state, response)
         if response.client_extension_results.hmac_create_secret is not True:
             raise RuntimeError("extension unavailable")
-        value = dict(
-            schema=1, rp=RP, credential=b64(bytes(auth.credential_data)), salt=b64(os.urandom(32)), counter=auth.counter
+        # The credential ID must stay (the key needs it back to sign); the AAGUID (the model)
+        # is not needed even here, so it is not kept.
+        from fido2.webauthn import Aaguid, AttestedCredentialData
+
+        kept = AttestedCredentialData.create(
+            Aaguid(bytes(16)), auth.credential_data.credential_id, auth.credential_data.public_key
         )
+        value = dict(schema=1, rp=RP, credential=b64(bytes(kept)), salt=b64(os.urandom(32)), counter=auth.counter)
         atomic(vault / "credential.json", json.dumps(value).encode())
     finally:
         device.close()
@@ -231,20 +237,47 @@ def hardware_assertion(vault, message=None):
         device.close()
 
 
+def public_key_of(credential_b64):
+    """The one thing a verifier needs of a credential: its COSE public key (CBOR), alone.
+    Nothing about the device has a place in it: no AAGUID (the make and model), no
+    credential ID, no attestation. It is built from the key, not scrubbed from a record."""
+    from fido2 import cbor
+    from fido2.webauthn import AttestedCredentialData
+
+    return b64(cbor.encode(dict(AttestedCredentialData(unb64(credential_b64)).public_key)))
+
+
 def credential_public(vault):
-    """Public part of the vault credential (contains the COSE public key)."""
+    """What this device publishes about its credential: the COSE public key only."""
     meta = json.loads(read_private(vault / "credential.json"))
     if meta["schema"] != 1 or meta["rp"] != RP:
         raise ValueError("credential policy mismatch")
-    return meta["credential"]
+    return public_key_of(meta["credential"])
 
 
-def verify_assertion(credential_b64, message, assertion):
+def _verifying_key(public_b64):
+    """The COSE key from a published public key, or (bundles signed before v0.10) from a
+    full credential record, of which only the key is read."""
+    from fido2 import cbor
+    from fido2.cose import CoseKey
+    from fido2.webauthn import AttestedCredentialData
+
+    raw = unb64(public_b64)
+    try:
+        key = cbor.decode(raw)
+    except Exception:  # not a CBOR map: the older full credential record
+        key = None
+    if isinstance(key, dict):
+        return CoseKey.parse(key)
+    return AttestedCredentialData(raw).public_key
+
+
+def verify_assertion(public_b64, message, assertion):
     """Offline WebAuthn assertion check: RP, user presence AND verification (PIN),
     challenge == SHA-256(message), signature by the credential's public key."""
-    from fido2.webauthn import AttestedCredentialData, AuthenticatorData, CollectedClientData
+    from fido2.webauthn import AuthenticatorData, CollectedClientData
 
-    public = AttestedCredentialData(unb64(credential_b64)).public_key
+    public = _verifying_key(public_b64)
     auth = AuthenticatorData(unb64(assertion["authenticator_data"]))
     client_data = CollectedClientData(unb64(assertion["client_data"]))
     if auth.rp_id_hash != hashlib.sha256(RP.encode()).digest():
@@ -490,7 +523,7 @@ def mesh_sign(vault, envelope_path, cert_path, descriptor_path):
         json.dumps(
             {
                 "descriptor": descriptor,
-                "credential": meta["credential"],
+                "public_key": public_key_of(meta["credential"]),
                 "assertion": assertion,
                 "challenge_sha256": hashlib.sha256(message).hexdigest(),
             }

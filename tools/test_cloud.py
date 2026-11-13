@@ -964,6 +964,20 @@ class ChainTests(Stubbed):
         self.assertEqual(layout[2]["sources"], ["16.40.0.3/32"])
         self.assertEqual([h["ssh"] for h in layout], [["16.40.0.2/32"], ["16.40.0.2/32"], []])
 
+    def test_one_provider_at_both_ends_is_refused_unless_allowed(self):
+        self.add_exit("avpn-exit", "aws", "16.40.0.2")  # the relay is on AWS too
+        with self.assertRaisesRegex(cloud.CloudError, "entry and the exit are both on aws"):
+            self.chain()
+        self.chain("--allow-same-provider")  # an explicit choice goes through
+
+    def test_a_provider_with_two_inner_hops_is_named_in_the_plan(self):
+        self.add_exit("avpn-exit", "oci", "16.40.0.2")
+        self.add_exit("avpn-oci2", "oci", "16.40.0.3")
+        d = Path(self.tmp.name)
+        a = cloud.build_parser().parse_args(["chain", "--apply", "--client-request", str(d / "client.req"),
+                                             "--vault", str(d / "vault"), "--source", str(self.src)])  # fmt: skip
+        self.assertIn("oci hosts 2 of 3 hops", json.dumps(cloud.chain_plan(a)["rows"]))
+
     def test_order_must_name_recorded_servers(self):
         with self.assertRaisesRegex(cloud.CloudError, "not recorded as servers: avpn-nope"):
             self.chain("--order", "avpn-relay,avpn-nope")

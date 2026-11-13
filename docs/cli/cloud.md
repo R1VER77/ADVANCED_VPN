@@ -19,7 +19,7 @@ and `oci` command-line tools, and plain SSH for everything else.
     avpn cloud host add --name avpn-NAME --ssh USER@HOST --key FILE [--provider P] [--shared]
     avpn cloud host setup --name avpn-NAME --out FILE [--role ROLE] [--replace]
     avpn cloud host forget --name avpn-NAME
-    avpn cloud chain --apply --client-request FILE --vault DIR [--order A,B,C] \
+    avpn cloud chain --apply --client-request FILE --vault DIR [--order A,B,C] [--allow-same-provider] \
         [--hours-per-day H] [--accept-cost]
 
 Every `--apply` and `--teardown` first shows its plan and asks before changing
@@ -236,6 +236,7 @@ Join the recorded servers into one chain and start it.
 - `--client-request FILE`: the client device's public request (from its installer, or `sudo avpn request --role client`).
 - `--vault DIR`: the operator's Nitrokey vault; the chain is signed once (PIN + touch).
 - `--order A,B,C`: the hop order from the client side, overriding the automatic one.
+- `--allow-same-provider`: allow the entry and the exit on one provider. Without it, `chain` refuses such a chain, because that provider would see your address and your destinations together. Other hops sharing a provider are allowed, and the plan names the provider and how many hops it holds.
 - `--source DIR`: the package to install on the servers, as for `host setup`.
 - `--hours-per-day H`: hours you are connected per day (default 8). The rate class is the fastest whose constant stream fits the smallest hop allowance at this many hours (`avpn help init`); a relay pays for two paced links.
 - `--accept-cost`: sign the class even when it exceeds a hop's free allowance. Without it, a chain whose slowest class still does not fit is refused, with the numbers.

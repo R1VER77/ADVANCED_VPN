@@ -92,6 +92,8 @@ jobs:
         run: unshare --user --map-root-user --map-auto --net --mount python tools/budget_test.py --state /tmp/advanced-vpn-budget-ci
       - name: Tunnel throughput floor (default per-session limits)
         run: unshare --user --map-root-user --map-auto --net --mount python tools/throughput_bench.py --state /tmp/advanced-vpn-bench-ci --rate line --mib 32 --min-mbit 50 --shape-idle 5 --max-rate-change 0.15
+      - name: A path below the cloak's 1448-byte minimum runs the tunnel over TLS/TCP
+        run: unshare --user --map-root-user --map-auto --net --mount python tools/throughput_bench.py --state /tmp/avpn-lowmtu --rate standard --mib 8 --underlay-mtu 1400
       - name: Multi-hop chains, switching, onion and no-retained-data audits
         run: |
           unshare --user --map-root-user --map-auto --net --mount python tools/throughput_bench.py --state /tmp/avpn-hops-3-1 --hops 3 --switch-to 1 --rate line --mib 16 --min-mbit 20 --shape-idle 5 --max-rate-change 0.15
