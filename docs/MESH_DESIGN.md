@@ -80,7 +80,7 @@ but ranks below hardware-backed members in the directory.
   chaff. Honestly bounded: a global passive adversary with unlimited
   retraining remains catastrophic for any low-latency system; per-hop defense
   raises cost, it does not yield mixnet-grade unlinkability. For async traffic,
-  the mix lane (`avpn mix`) does: measured 11.6% vs 95.6% sender
+  the mix lane (`avpn mix`) does: measured 10.7% vs 88.2% sender
   identification (chance 10%, post-quantum Sphinx, `MIX_LANE.json`).
 - **A4 active attacker**: timing watermarks (RAINBOW/SWIRL) destroyed only by
   re-shaping at an intermediate hop — a per-hop defense exists precisely
@@ -295,7 +295,7 @@ see §11). Stated in
 | Ephemeral defense database (DAITA-v2-style) | `tools/defense_db.py`, `src/daita.rs` (`DefenseDb`), carrier `defense_db` | landed: rotating randomized strong-posture parameterizations, fail-closed validation mirrored in Rust and Python; no profile in force refuses the run |
 | Per-hop shaping (server↔server links) | `src/link.rs`, `src/run.rs`, `tools/managed_profile.py` (`link.kem.json`) | landed in v0.8.0: paced, encrypted constant-rate links between every pair of consecutive servers, per-link PSK sealed to each device's hybrid KEM key; measured 0.0–0.1% idle-vs-busy change on the link into the exit (`RATE_CLASSES.json`, `inner_link`). (v0.7.0 listed "inter-relay chaff" here: the carrier only ever ran client↔entry, so that row was wrong.) |
 | I2P front | `tools/i2p.py`, `src/cloak.rs` (front mode), `tools/avpnctl.py` (front table, `advanced-vpn-i2p` user) | landed in v0.9.0: the client reaches the entry only through I2P; the entry never exchanged a packet with the client in a private I2P network, and only the I2P router left the client (`I2P_FRONT.json`). |
-| Mix lane | `tools/mix.py`, `avpn mix`, Katzenpost v0.0.110 (separate, unmodified) | landed in v0.9.0: a mixnet client inside the protected namespace; against a global passive adversary with live websites, 11.6% sender identification vs 95.6% on a low-latency path, chance 10%, with X-Wing (post-quantum) Sphinx (`MIX_LANE.json`). Mesh nodes running mixnet nodes is future work. |
+| Mix lane | `tools/mix.py`, `avpn mix`, Katzenpost v0.0.110 (separate, unmodified) | landed in v0.9.0: a mixnet client inside the protected namespace; against a global passive adversary with live websites, 10.7% sender identification vs 88.2% on a low-latency path, chance 10%, with X-Wing (post-quantum) Sphinx (`MIX_LANE.json`). Mesh nodes running mixnet nodes is future work. |
 | Self-healing chains: standby exits, failover, rotation | `src/run.rs` (`NextHops`), `tools/managed_profile.py`, `avpn init --standby-exit` | landed for single-operator chains: failover 4.2 s in the lab with no leak, rotation within a signed window, entry fixed as the guard (`FAILOVER.json`); mesh relays do not fail over between members' exits yet |
 | Own node as entry + legal spheres | `src/mesh/directory.rs`, `tools/mesh.py`, `tools/providers.py` | landed: the member's own node is its entry; the exit must answer to another legal sphere than the entry (US clouds = one sphere); Rust and Python run one shared fixture (`tools/testdata/chain_selection.json`) |
 | Oblivious control plane | `tools/ohttp.py`, `tools/ohttp_relay.py`, beacon `/ohttp` | landed: beacon queries through a relay of another operator, sealed with PQ HPKE (ML-KEM-768 + X25519); RFC 9458 design, not wire-compatible (`OHTTP_LAB.json`) |

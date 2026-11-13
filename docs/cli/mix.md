@@ -27,13 +27,17 @@ A VPN, ours included, carries packets with low latency: an adversary who can wat
 link and the far end of the path at once can match the timing of what goes in with what
 comes out. A mixnet holds every packet a random time at every hop, and its clients send
 real-or-decoy packets and loops at a constant Poisson rate whether or not they have
-anything to say. Every hop's Sphinx layer is post-quantum: X-Wing (ML-KEM-768 + X25519);
-`avpn mix setup` refuses a mixnet configured with classical Sphinx. In the lab
+anything to say. Every layer is post-quantum: X-Wing (ML-KEM-768 + X25519) Sphinx and
+links, and hybrid Ed25519 + SPHINCS+ directory signatures; `avpn mix setup` refuses a mixnet
+configured with anything classical. The service that fetches websites for you speaks only
+TLS 1.3 with X25519MLKEM768 (`tools/kp_pq_fetch.py`) and refuses sites that cannot (`525`,
+`526`), so no fetch leaves the mixnet under classical key exchange. In the lab
 (`docs/evidence/MIX_LANE.json`: 10 clients, 30 live public websites) an adversary watching
-every link, and given the network's delay distribution, named the sender of 95.6% of
-requests through a low-latency proxy and 11.6% through the mix lane (chance: 10%; the
-difference is within sampling noise). Each client's link sent 2.88 packets a second busy
-and 2.92 idle. Live fetches took 4.3 s at the median, 8.7 s at the 99th percentile.
+every link, and given the network's delay distribution, named the sender of 88.2% of
+requests through a low-latency proxy and 10.7% through the mix lane (chance: 10%; the
+difference is within sampling noise). Each client's link sent 2.82 packets a second busy
+and 2.91 idle, about 555 kbit/s of upload. Live fetches took 4.4 s at the median, 8.3 s at
+the 99th percentile.
 
 The mix lane is opt-in. Everything goes through the fast lane unless you start the mix
 lane yourself; its latency and its idle cover traffic are a trade you choose.
@@ -43,7 +47,8 @@ lane yourself; its latency and its idle cover traffic are a trade you choose.
 - Latency is seconds, not milliseconds: mail, chat, small fetches and status checks, not browsing or calls.
 - A reply must fit one mixnet message (8000 bytes on the lab network; the mixnet's operators choose). Larger replies are refused (`502`).
 - Anonymity grows with the mixnet's traffic: the more clients send cover in the same delay window, the less any one stands out.
-- A smaller post-quantum Sphinx (option E: 1,396-byte headers instead of X-Wing's 7,164) is built and under evaluation (`crates/avpn-mix-lane`, `docs/DESIGN_PACK_ASSESSMENT.md`); it replaces Katzenpost only after its cutover gates pass, including an external review.
+- X-Wing's 7,164-byte Sphinx headers cost bandwidth. A smaller design (option E, 1,396 bytes) stays research: its inner hops are classical X25519, so it cannot carry the post-quantum claim (`docs/DESIGN_PACK_ASSESSMENT.md`).
+- Operators: run `tools/kp_pq_fetch.py` as the service node's fetch plugin in place of Katzenpost's `http-proxy-server` (it needs Python with OpenSSL 3.5 or later and `python3-cbor2`); clients are unchanged.
 - Cover traffic runs only while the client runs. Keep it started rather than starting it for each request: when it runs says something on its own.
 - The mixnet's programs are Katzenpost's, unmodified and run as separate processes (AGPL-3.0); build them with `third_party/katzenpost/build.sh` and place `kpclientd` and `http-proxy-client` in `/usr/lib/advanced-vpn/katzenpost`. Katzenpost describes itself as pre-alpha.
 

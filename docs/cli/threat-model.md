@@ -193,7 +193,7 @@ the content); with `--front-hops 1` that one router also sees the entry's.
   (Loopix-style mixnets) defeats it, at a latency of seconds. If that is your
   adversary, carry that traffic over the mix lane (`avpn help mix`). Measured with live
   websites (`docs/evidence/MIX_LANE.json`, 10 clients, post-quantum Sphinx): such an
-  adversary named the sender of 95.6% of requests through a low-latency proxy and 11.6%
+  adversary named the sender of 88.2% of requests through a low-latency proxy and 10.7%
   through the mix lane (chance 10%).
 - **Collusion.** The whole guarantee rests on the hops not pooling their logs. Put the
   entry and the exit on different providers and in different legal spheres, so
