@@ -121,20 +121,20 @@ random guess is right **3.3%** of the time (`1/30`).
 |---|---|---|
 | Inner link before per-hop shaping (v0.7.0, same loads) | 27.0–74.7% | 42.7–81.3% |
 | Inner link with per-hop shaping (v0.8.0) — `metered` / `fast` | **2.3% / 2.7%** (chance 3.3%) | — |
-| Carrier — `metered` (50 pps / direction) | **3.3%** (= 1/30 random chance) | 21.3% |
-| Carrier — `fast` (4,000 pps / direction) | **1.7%** (≤ 1/30 random chance) | 20.0% |
+| Carrier — `metered` (50 pps / direction, v0.7.0) | **3.3%** (= 1/30 random chance) | 21.3% |
+| Carrier — `fast` (4,000 pps / direction, v0.7.0) | **1.7%** (≤ 1/30 random chance) | 20.0% |
 
 - With per-hop shaping (v0.8.0) the link into the exit is at chance too; the carrier read 3.7% / 4.3% in that run, within sampling noise of the 3.3% floor.
 - In a continuous constant-rate stream, there is no on-wire start or end marker: under the fixed 6 s observation window, the classifier on both `metered` (**3.3%**) and `fast` (**1.7%**) is at or below the **3.3%** random-chance floor.
 - Even when an external oracle tells the attacker the exact instant each page finished loading (`true end + 3 s`), accuracy drops from `42.7–81.3%` on the unshaped inner link to `20.0–21.3%` on the carrier.
 - All four rate classes keep the outer wire rate constant between idle and full-load transfers (`tools/throughput_bench.py --shape-idle 5`):
 
-| Rate class | Grid pacing | Wire rate / direction | 2-hop app throughput | Cover volume / direction |
+| Rate class | Grid pacing | Wire rate / direction | 2-hop app throughput (measured on v0.7.0) | Cover volume / direction |
 |---|---|---|---|---|
-| `metered` (default) | 20 ms × 1 slot (50 pps) | ~0.55 Mbit/s | ~0.27–0.34 Mbit/s | ~5.7 GiB/day (~171 GiB/mo) |
-| `standard` | 2 ms × 1 slot (500 pps) | ~5.5 Mbit/s | ~3.1–4.5 Mbit/s | ~57 GiB/day |
-| `fast` | 2 ms × 8 staggered slots (4,000 pps) | ~44 Mbit/s | ~24.7–32.8 Mbit/s | ~455 GiB/day |
-| `line` | 2 ms × 32 staggered slots (16,000 pps) | ~177 Mbit/s | ~115.3–131.5 Mbit/s | ~1.8 TiB/day |
+| `metered` (default) | 20 ms × 1 slot (50 pps) | ~0.55 Mbit/s | 0.25 Mbit/s | ~5.7 GiB/day (~171 GiB/mo) |
+| `standard` | 2 ms × 1 slot (500 pps) | ~5.5 Mbit/s | 3.1 Mbit/s | ~57 GiB/day |
+| `fast` | 2 ms × 8 staggered slots (4,000 pps) | ~44 Mbit/s | 24.7 Mbit/s | ~455 GiB/day |
+| `line` | 2 ms × 32 staggered slots (16,000 pps) | ~177 Mbit/s | 115.3 Mbit/s | ~1.8 TiB/day |
 
 A relay sends the stream on two links (back to you, and on to its next hop), so in a 2-
 or 3-hop chain its outbound cost is about twice the per-direction figure above;

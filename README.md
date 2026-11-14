@@ -28,14 +28,20 @@ WireGuard is the outer carrier, implemented by **GotaTun 0.10.2**, with its actu
 
 There is one defense posture: **strong**. Your link to the first hop runs a **bidirectional constant-rate packet stream** (`src/daita.rs`: `stream_grid` + self-sustaining `cover` under GotaTun's strict-blocking scheduler, `strict: true`, `Replace: true`), and since v0.8.0 every link between two servers runs the same invariant as paced, AES-256-GCM-encrypted fixed-size cells (`src/link.rs`), each hop on its own clock, keyed by an ephemeral X25519 + ML-KEM-768 exchange every two minutes, so a recording of a link stays sealed even against someone who later steals its pre-shared key. Every data packet is padded to constant size (1380 bytes inside WireGuard, 1420 bytes on the outer cloak), and every clock tick sends either a queued real packet or an indistinguishable decoy packet — so the outer packet rate and packet size stay flat: between idle and full-speed transfers the wire packet rate changed by 0–3.7% in every measured class and hop count (`docs/evidence/RATE_CLASSES.json`; CI fails above 15%). Four rate classes, signed into the chain (`avpn init --rate auto|metered|standard|fast|line`), trade cover bandwidth for application throughput without weakening the constant-rate invariant:
 
-| Rate class | Grid pacing | Wire rate / direction | 2-hop app throughput | Cover volume / direction |
+| Rate class | Grid pacing | Wire rate / direction | 2-hop app throughput (measured on v0.7.0) | Cover volume / direction |
 |---|---|---|---|---|
-| `metered` (default) | 20 ms × 1 slot (50 pps) | ~0.55 Mbit/s | ~0.27–0.34 Mbit/s | ~5.7 GiB/day (~171 GiB/mo) |
-| `standard` | 2 ms × 1 slot (500 pps) | ~5.5 Mbit/s | ~3.1–4.5 Mbit/s | ~57 GiB/day |
-| `fast` | 2 ms × 8 staggered slots (4,000 pps) | ~44 Mbit/s | ~24.7–32.8 Mbit/s | ~455 GiB/day |
-| `line` | 2 ms × 32 staggered slots (16,000 pps) | ~177 Mbit/s | ~115.3–131.5 Mbit/s | ~1.8 TiB/day |
+| `metered` (default) | 20 ms × 1 slot (50 pps) | ~0.55 Mbit/s | 0.25 Mbit/s | ~5.7 GiB/day (~171 GiB/mo) |
+| `standard` | 2 ms × 1 slot (500 pps) | ~5.5 Mbit/s | 3.1 Mbit/s | ~57 GiB/day |
+| `fast` | 2 ms × 8 staggered slots (4,000 pps) | ~44 Mbit/s | 24.7 Mbit/s | ~455 GiB/day |
+| `line` | 2 ms × 32 staggered slots (16,000 pps) | ~177 Mbit/s | 115.3 Mbit/s | ~1.8 TiB/day |
 
-Against a 500-tree random-forest website-fingerprinting classifier across 30 sites (`tools/daita_lab.py`, `tools/wf_attack.py`, chance = **3.3%**), the camouflaged carrier at the fixed 6 s observation window scores **3.3%** on `metered` and **1.7%** on `fast` (both at or below random chance), versus **27.0–74.7%** on the unshaped inner link (`docs/evidence/DAITA_LAB.json`, `docs/evidence/RATE_CLASSES.json`, `avpn help threat-model`). The 100-site exit-vantage simulation is in `tools/mesh_wf_sim.py` (`docs/evidence/MESH_WF_SIM.json`), the mesh design is in [docs/MESH_DESIGN.md](docs/MESH_DESIGN.md), and a side-by-side comparison with Mullvad and IVPN is in [docs/COMPARISON.md](docs/COMPARISON.md).
+Wire rate and cover volume follow from the grid. Throughput was measured on v0.7.0 in the namespace benchmark (`tools/throughput_bench.py`, `docs/evidence/RATE_CLASSES.json`, 11 Nov 2026). With v0.8.0's paced server links, 2 hops measured 0.29 Mbit/s (`metered`) and 28.2 Mbit/s (`fast`) (same file, `inner_link`). v0.10.0 moved the camouflage's QUIC to BBR congestion control after these runs; re-measuring is pending.
+
+Website fingerprinting, against a 500-tree random-forest classifier across 30 synthetic sites (`tools/daita_lab.py`, `tools/wf_attack.py`, chance = **3.3%**, fixed 6 s observation window):
+- **v0.7.0** (11 Nov 2026): the camouflaged carrier scored **3.3%** on `metered` and **1.7%** on `fast`, while the link between servers, then unshaped, scored **27.0–74.7%**.
+- **v0.8.0** (12 Nov 2026), with every link between servers paced: that link scored **2.3%** (`metered`) and **2.7%** (`fast`), and the carrier 3.7% and 4.3%, all at or near chance.
+
+Sources: `docs/evidence/DAITA_LAB.json`, `avpn help threat-model`. The 100-site exit-vantage simulation is in `tools/mesh_wf_sim.py` (`docs/evidence/MESH_WF_SIM.json`), the mesh design is in [docs/MESH_DESIGN.md](docs/MESH_DESIGN.md), and a side-by-side comparison with Mullvad and IVPN is in [docs/COMPARISON.md](docs/COMPARISON.md).
 
 ## Command line
 
@@ -272,7 +278,7 @@ How the layers work:
 - There is one post-quantum QUIC layer per server, wrapped inside each other like an onion. Each layer uses X25519 + ML-KEM-768 key exchange and ML-DSA-65 authentication.
 - WireGuard + DAITA runs between the client and the first hop; every link between two servers is a paced, encrypted constant-rate link (per-hop shaping, `src/link.rs`), keyed by a link key the operator seals to both servers.
 - Each server removes exactly one layer and forwards the rest to the next hop it was enrolled with. The client knows only the first hop's address.
-- **Standby exits** (`init --standby-exit NAME=IP:PORT`): the server before the exit fails over to a live standby within seconds when the exit goes silent, and rotates sessions among live exits in a signed window; your entry, the guard, never changes. Lab: 4.2 s outage, no leak ([FAILOVER.json](docs/evidence/FAILOVER.json)).
+- **Standby exits** (`init --standby-exit NAME=IP:PORT`): the server before the exit fails over to a live standby within seconds when the exit goes silent, and rotates sessions among live exits in a signed window; your entry, the guard, never changes. Lab (v0.8.0, 12 Nov 2026): 4.2 s outage, no leak ([FAILOVER.json](docs/evidence/FAILOVER.json)).
 - QUIC needs at least 1200 bytes of UDP payload per layer, so the layers are budgeted from the inside out: 1312, 1256 and 1200 bytes, all inside the 1340-byte WireGuard MTU. Apps see the same inner MTU of 1100 bytes in every mode.
 
 ```sh
@@ -297,7 +303,7 @@ Traffic stays blocked while you switch. In single-hop mode, give `--exit` the ex
   --request client=client.req --request relay=relay.req --request exit=exit.req --request exit2=exit2.req
 ```
 
-Measured in the namespace benchmark (`tools/throughput_bench.py --rate line --mib 32`, SHA-checked):
+Measured on v0.7.0 in the namespace benchmark (`tools/throughput_bench.py --rate line --mib 32`, SHA-checked; `docs/evidence/RATE_CLASSES.json`, 11 Nov 2026):
 
 | Hops | Throughput (`line` class) |
 |---|---|
