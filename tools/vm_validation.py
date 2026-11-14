@@ -270,7 +270,35 @@ def start(work, base, name):
                 "-object",
                 "filter-dump,id=dump-%s,netdev=%s,file=%s,maxlen=256" % (net, net, work / ("client-%s.pcap" % net)),
             ]
+    if name == "relay":
+        # The second hop, so a failure past the first hop can be located.
+        args += ["-object", "filter-dump,id=dump-linkb,netdev=linkb,file=%s,maxlen=128" % (work / "relay-linkb.pcap")]
     subprocess.run(args, check=True)
+
+
+SNAPSHOT = r"""
+date -u +%FT%TZ
+echo '## processes (pid, seconds alive, command)'
+ps -eo pid,etimes,args | grep -E 'advanced-vpn|avpn' | grep -v grep
+echo '## status files'
+for f in /run/advanced-vpn*/status.json /run/advanced-vpn*/*/status.json; do [ -f "$f" ] && { echo "$f"; cat "$f"; echo; }; done
+echo '## udp sockets'
+ss -uanp
+echo '## kernel udp counters'
+grep '^Udp:' /proc/net/snmp
+echo '## interfaces'
+ip -s link show
+"""
+
+
+def snapshot(work, agents, tag):
+    """Live state of every VM at a failure (the VPN units log nothing by design)."""
+    for name, agent in agents.items():
+        try:
+            out = agent.sh(SNAPSHOT, check=False, timeout=30)[1]
+        except (OSError, ConnectionError, RuntimeError, TimeoutError) as e:
+            out = "snapshot failed: %r\n" % (e,)
+        (work / ("diag-%s-%s.txt" % (tag, name))).write_text(out)
 
 
 def wait_agent(agent, seconds, what):
@@ -606,7 +634,9 @@ def main():
                 "alive"
             ],
         )
-        # MTU boundary: 1420 is the documented minimum underlay; 1419 must be refused (fail closed).
+        # Small underlays (design, avpnctl ensure_network): the cloak's 1448-byte QUIC packets
+        # cannot pass, so the cloak falls back on its own to TLS 1.3 over TCP 443; avpnctl only
+        # warns below 1448 and refuses below IPv4's 576. So 1419 and 1420 must both connect.
         mtu = {}
         for value in [] if a.only_whole_device else [1419, 1420]:
             client.run(["systemctl", "stop", "advanced-vpn.service"])
@@ -647,6 +677,17 @@ def main():
                 soak["recovered"] += 1
             except TimeoutError:
                 soak["failures"].append("no_recovery@%d" % soak["cycles"])
+                # The units log nothing by design, so record live state from every VM
+                # now, then find out whether the tunnel comes back late or never.
+                snapshot(work, agents, "soak%d" % soak["cycles"])
+                t0 = time.monotonic()
+                try:
+                    wait_tunnel(180)
+                    soak.setdefault("late_recovery_s", []).append(round(90 + time.monotonic() - t0))
+                except TimeoutError:
+                    soak.setdefault("late_recovery_s", []).append(None)
+                    snapshot(work, agents, "soak%d-after270s" % soak["cycles"])
+                log("soak cycle", soak["cycles"], "failed; late recovery", soak["late_recovery_s"][-1])
             time.sleep(20)
         result["soak"] = dict(soak, seconds=a.soak_seconds)
         save()

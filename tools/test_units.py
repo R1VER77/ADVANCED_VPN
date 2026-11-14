@@ -38,19 +38,29 @@ SUPERVISOR_SANDBOX = [
 
 def exposure(unit):
     """systemd's overall exposure score for one unit file, read without installing it."""
-    out = subprocess.run(
+    r = subprocess.run(
         ["systemd-analyze", "security", "--offline=yes", str(unit)],
         capture_output=True,
         text=True,
         check=False,
-    ).stdout
-    m = re.search(r"exposure level for \S+: ([0-9.]+)", out)
+    )
+    m = re.search(r"exposure level for \S+: ([0-9.]+)", r.stdout)
     if not m:
-        raise AssertionError("no exposure score for %s:\n%s" % (unit.name, out[-2000:]))
+        raise AssertionError("no exposure score for %s:\n%s\n%s" % (unit.name, r.stdout[-2000:], r.stderr[-2000:]))
     return float(m.group(1))
 
 
-@unittest.skipUnless(shutil.which("systemd-analyze"), "needs systemd-analyze")
+def scores_offline():
+    """Whether this systemd-analyze can score a unit file offline (`--offline` is systemd
+    250+; Ubuntu 22.04 ships 249, which still runs the units unchanged)."""
+    if not shutil.which("systemd-analyze"):
+        return False
+    out = subprocess.run(["systemd-analyze", "--version"], capture_output=True, text=True, check=False).stdout
+    m = re.match(r"systemd (\d+)", out)
+    return bool(m) and int(m.group(1)) >= 250
+
+
+@unittest.skipUnless(scores_offline(), "needs systemd-analyze 250+ (security --offline)")
 class UnitSandboxTests(unittest.TestCase):
     def test_every_installed_unit_stays_under_its_exposure_ceiling(self):
         for name, ceiling in CEILINGS.items():
