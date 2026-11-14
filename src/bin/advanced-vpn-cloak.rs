@@ -133,6 +133,15 @@ async fn work() -> Result<()> {
         .chunks_exact(cloak::TOKEN_LEN)
         .map(|t| t.try_into().expect("chunk length"))
         .collect();
+    // Confine before any socket is opened: the configuration and certificate stay
+    // readable, only the statistics directory writable (src/sandbox.rs).
+    let mut files = vec![a.config.as_path()];
+    files.extend(c.cert.as_deref());
+    advanced_vpn::sandbox::confine(&advanced_vpn::sandbox::Policy::daemon(
+        files,
+        [advanced_vpn::sandbox::Policy::parent_of(&c.statistics)],
+        false,
+    ))?;
     let stats = Arc::new(cloak::Stats::default());
     let task = if c.role == "server" {
         let cert = private_read(c.cert.as_ref().unwrap(), 16384)?;

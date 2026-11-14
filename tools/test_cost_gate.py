@@ -1,6 +1,7 @@
 """`avpn init` signs a chain only against a stated bandwidth allowance or an accepted cost."""
 
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -40,3 +41,19 @@ class CostGateTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EveryInitCallerTests(unittest.TestCase):
+    def test_every_tool_that_signs_a_chain_states_its_cost(self):
+        # A tool that runs `avpnctl init` without an allowance or an accepted cost is
+        # refused at run time; tools outside CI (vm_validation) would only find out then.
+        tools = Path(__file__).resolve().parent
+        callers = []
+        for f in sorted(tools.glob("*.py")):
+            if f.name.startswith("test_") or f.name == "avpnctl.py":
+                continue
+            text = f.read_text()
+            if re.search(r'"init",\s*(\n\s*)*"--out"', text):
+                callers.append(f.name)
+                self.assertRegex(text, r"--accept-cost|--allowance-gib", f.name + " signs a chain without a cost flag")
+        self.assertIn("vm_validation.py", callers)

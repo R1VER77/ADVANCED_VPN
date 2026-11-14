@@ -958,11 +958,11 @@ def launch_client(binary, config, ns, log=None, key_fds=None, uid=0, gid=0):
 
     current = os.open("/proc/self/ns/net", os.O_RDONLY | os.O_CLOEXEC)
     app = os.open("/run/netns/" + ns, os.O_RDONLY | os.O_CLOEXEC)
-    os.setns(app, 0)
+    os.setns(app, os.CLONE_NEWNET)
     os.close(app)
     fd = os.open("/dev/net/tun", os.O_RDWR | os.O_NONBLOCK)
     fcntl.ioctl(fd, 0x400454CA, struct.pack("16sH", TUN.encode(), 0x1001))
-    os.setns(current, 0)
+    os.setns(current, os.CLONE_NEWNET)
     os.close(current)
     parent = os.getpid()
     extra = []
@@ -1321,7 +1321,7 @@ def run_app(state, argv, uid, gid, lab=False):
     # Guard is recreated before every launch, even when the controller is stopped.
     app_firewall(APP)
     ns = os.open("/run/netns/" + APP, os.O_RDONLY | os.O_CLOEXEC)
-    os.setns(ns, 0)
+    os.setns(ns, os.CLONE_NEWNET)
     os.close(ns)
     if {name for _, name in socket.if_nameindex()} != {"lo", TUN}:
         raise RuntimeError("application namespace has an escape interface")

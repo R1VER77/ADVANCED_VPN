@@ -143,5 +143,35 @@
  "dates": {
   "pilot": "2026-11-12/13",
   "contention": "2026-11-13/14"
+ },
+ "cpu_isolation": {
+  "question": "does keeping the client data plane off the browser's CPU bring fast back to the no-contention level (9.9%)?",
+  "setup": "GCP n2-standard-8 (4 physical cores, SMT pairs 0/4 1/5 2/6 3/7, read from thread_siblings_list), same harness, 20 sites x 10 loads, k-FP closed world; relay and exit on the other two cores",
+  "results": [
+   {
+    "variant": "a': browser and data plane share one physical core (control)",
+    "usable_loads": 189,
+    "kfp_closed_world": 0.746
+   },
+   {
+    "variant": "d: data plane alone on its own physical core (sibling idle)",
+    "usable_loads": 194,
+    "kfp_closed_world": 0.418
+   },
+   {
+    "variant": "e: shared core, data plane SCHED_FIFO 10",
+    "usable_loads": 194,
+    "kfp_closed_world": 0.268
+   },
+   {
+    "variant": "f: data plane on its own thread, browser on its SMT sibling",
+    "usable_loads": 198,
+    "kfp_closed_world": 0.354
+   }
+  ],
+  "chance": 0.05,
+  "reading": "isolation lowers the leak (74.6% to 27-42%) but none reaches 9.9%, and a dedicated core (d) leaks more than real-time scheduling on a shared core (e): CPU contention is not the only source of the timing signal. Not shipped; next suspect is load-dependent behaviour on the wire (the cloak's QUIC congestion control), to be measured with the same run",
+  "archive_sha256": "93dc6b569c3c4d03788fcadf4be36b94290cc9a8a30a64d9b9195c2142119b46",
+  "date": "2026-11-14"
  }
 }

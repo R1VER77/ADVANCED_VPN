@@ -25,7 +25,7 @@ def main():
         fcntl.ioctl(fd, 0x400454CA, struct.pack("16sH", b"avpn0", 0x1001))
         os.set_inheritable(fd, True)
         ns = os.open("/run/netns/av-client", os.O_RDONLY)
-        os.setns(ns, 0)
+        os.setns(ns, os.CLONE_NEWNET)
         os.close(ns)
         os.execv(a.binary, [a.binary, "--config", a.config, "--tun-fd", str(fd)])
     elif a.role == "stream":

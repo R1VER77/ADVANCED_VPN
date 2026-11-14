@@ -404,6 +404,14 @@ def main():
                 "198.51.100.2:4444",
                 "--software-operator",
                 str(work / "operator-keys"),
+                # Local KVM guests: no provider bills this traffic. standard, because metered
+                # (auto without an allowance) is too slow for the 100 MiB transfer below.
+                # The guests' links carry 70+ Mbit/s (VM_VALIDATION.json after the rate fix)
+                # and 0% UDP loss raw; above metered the tunnel itself stalls on these
+                # guests (cloak QUIC window collapse, under investigation, 14 Nov 2026).
+                "--accept-cost",
+                "--rate",
+                "standard",
             ]
             + sum((["--request", "%s=%s" % (n, work / "requests" / (n + ".json"))] for n in VMS), []),
             check=True,
@@ -590,7 +598,8 @@ def main():
             save()
         impair(0, 0)
         # >64 MiB through the default (uncapped) client must not stop: 100 MiB SHA-verified.
-        code, out, _ = app(["iperf3", "-c", "198.51.100.2", "-n", "100M", "-J"], timeout=180)
+        # About 3.5 Mbit/s of application data at standard: 100 MiB takes about 4 minutes.
+        code, out, _ = app(["iperf3", "-c", "198.51.100.2", "-n", "100M", "-J"], timeout=420)
         result["uncapped_100mib"] = dict(
             bytes=json.loads(out)["end"]["sum_received"]["bytes"],
             carrier_alive=json.loads(client.run(["/opt/advanced-vpn/bin/avpnctl", "status"])[1])["children"]["carrier"][

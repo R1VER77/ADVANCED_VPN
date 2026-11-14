@@ -22,6 +22,8 @@ avpn-mix-lane = { path = "crates/avpn-mix-lane" }
 tokio = { version = "=1.54.1", features = ["rt", "macros", "net", "time", "signal", "sync", "io-util"] }
 x509-parser = "=0.18.1"
 zeroize = "=1.9.1"
+seccompiler = "=0.5.0"
+landlock = "=0.4.7"
 gotatun = { path = "vendor/gotatun", default-features = false, features = ["aws-lc-rs", "device", "tun", "daita"] }
 maybenot-machines = "=1.0.1"
 maybenot = "=2.2.2"

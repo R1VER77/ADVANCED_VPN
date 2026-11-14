@@ -464,6 +464,13 @@ async fn work() -> Result<()> {
         println!("{{\"configuration_valid\":true,\"upstream_tls\":true}}");
         return Ok(());
     }
+    // Every list and certificate is loaded: confine before the sockets open. The
+    // forwarder never writes a file (src/sandbox.rs).
+    advanced_vpn::sandbox::confine(&advanced_vpn::sandbox::Policy::daemon(
+        [a.config.as_path()],
+        [],
+        false,
+    ))?;
     let udp = Arc::new(UdpSocket::bind(c.listen).await?);
     let tcp = TcpListener::bind(c.listen).await?;
     let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;

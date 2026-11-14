@@ -91,7 +91,7 @@ def in_netns(ns, args, **k):
     (so a namespace the child creates, such as the client's avpn-app, stays visible)."""
     fd = os.open("/run/netns/" + ns, os.O_RDONLY)
     try:
-        return subprocess.Popen(list(map(str, args)), preexec_fn=lambda: os.setns(fd, 0), **k)
+        return subprocess.Popen(list(map(str, args)), preexec_fn=lambda: os.setns(fd, os.CLONE_NEWNET), **k)
     finally:
         os.close(fd)
 

@@ -277,7 +277,10 @@ def main():
         fd = os.open("/run/netns/" + ns, os.O_RDONLY)
         try:
             x = subprocess.Popen(
-                list(map(str, args)), preexec_fn=lambda: os.setns(fd, 0), stdout=f, stderr=subprocess.STDOUT
+                list(map(str, args)),
+                preexec_fn=lambda: os.setns(fd, os.CLONE_NEWNET),
+                stdout=f,
+                stderr=subprocess.STDOUT,
             )
         finally:
             os.close(fd)

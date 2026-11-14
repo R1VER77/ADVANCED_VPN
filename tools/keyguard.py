@@ -120,8 +120,17 @@ def desktop_pinentry():
     return values[0].decode()
 
 
+def eligible(info):
+    """Whether a FIDO2 key can hold a vault: `hmac-secret`, and user verification by a
+    PIN typed on this computer (`clientPin`) or on the key itself (`uv`, as on a Trezor,
+    whose PIN is entered on its own screen). A key with neither is refused."""
+    options = info.options or {}
+    return "hmac-secret" in (info.extensions or []) and (options.get("clientPin") is True or options.get("uv") is True)
+
+
 def client():
-    """Open the one PIN-configured hmac-secret FIDO2 device; PIN via `pinentry`, never retried."""
+    """Open the one eligible hmac-secret FIDO2 device. A PIN typed on this computer comes
+    from `pinentry` and is never retried; a key that verifies on the device asks there."""
     from fido2.hid import CtapHidDevice
     from fido2.ctap2 import Ctap2
     from fido2.client import Fido2Client, DefaultClientDataCollector, UserInteraction
@@ -130,14 +139,14 @@ def client():
     found = []
     for d in CtapHidDevice.list_devices():
         info = Ctap2(d).info
-        if "hmac-secret" in info.extensions and info.options.get("clientPin") is True:
+        if eligible(info):
             found.append(d)
         else:
             d.close()
     if len(found) != 1:
         for d in found:
             d.close()
-        raise RuntimeError("exactly one PIN-configured hmac-secret device required")
+        raise RuntimeError("exactly one hmac-secret key with a PIN (or on-device verification) required")
 
     class Interaction(UserInteraction):
         attempted = False
@@ -150,6 +159,11 @@ def client():
 
         def prompt_up(self):
             print("Touch your hardware key when it flashes.", flush=True)
+
+        def request_uv(self, permissions, rp_id):
+            # The key verifies the user itself (its own PIN pad or screen).
+            print("Verify on your hardware key (enter its PIN there if it asks).", flush=True)
+            return True
 
     device = found[0]
     return device, Fido2Client(

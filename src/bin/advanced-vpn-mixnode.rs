@@ -391,6 +391,19 @@ async fn run_mix(
     let secret: SecretFile = serde_json::from_slice(&std::fs::read(dir.join("secret.json"))?)?;
     let me: PublicEntry = serde_json::from_slice(&std::fs::read(dir.join("public.json"))?)?;
     let nodes = Arc::new(load_directory(directory)?);
+    // Keys and directory are loaded: confine before any socket opens. The node writes
+    // only its own directory (statistics) and its service pool (src/sandbox.rs).
+    let mut writable = vec![dir.to_path_buf()];
+    writable.extend(
+        service_pool
+            .as_deref()
+            .map(advanced_vpn::sandbox::Policy::parent_of),
+    );
+    advanced_vpn::sandbox::confine(&advanced_vpn::sandbox::Policy::daemon(
+        [directory, dir.join("secret.json").as_path()],
+        writable,
+        false,
+    ))?;
     let id = id16(&secret.id)?;
     let sk = MixSecret {
         mlkem_dk: hex::decode(&secret.mlkem_dk)?,
@@ -567,6 +580,13 @@ async fn run_client(
     pull_ms: u64,
 ) -> Result<()> {
     let nodes = Arc::new(load_directory(directory)?);
+    // Directory loaded: confine before any socket opens; the client reads and writes
+    // only its pool file's directory (src/sandbox.rs).
+    advanced_vpn::sandbox::confine(&advanced_vpn::sandbox::Policy::daemon(
+        [directory],
+        [advanced_vpn::sandbox::Policy::parent_of(pool_path)],
+        false,
+    ))?;
     let provider_id = id16(provider)?;
     let prov = nodes
         .iter()
@@ -800,6 +820,17 @@ fn exp_wait(rate: f64) -> Duration {
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
+    // SAFETY: prctl and setrlimit are called with valid scalar/rlimit values. Like every
+    // other daemon: no core files, not debuggable by same-UID processes, private files.
+    unsafe {
+        libc::umask(0o077);
+        libc::prctl(libc::PR_SET_DUMPABLE, 0, 0, 0, 0);
+        let lim = libc::rlimit {
+            rlim_cur: 0,
+            rlim_max: 0,
+        };
+        libc::setrlimit(libc::RLIMIT_CORE, &lim);
+    }
     let a = Args::parse();
     if !a.experimental {
         bail!("the option E daemon is experimental (lab only); pass --experimental");

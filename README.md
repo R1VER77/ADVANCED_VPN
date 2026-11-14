@@ -126,7 +126,7 @@ tag matches the version and that commit's `verify` run passed.
 
 ## Build and verify
 
-Requires Linux, Rust 1.95.0, a C compiler/CMake, Python 3.12+, iproute2, nftables, ping and `/dev/net/tun`. Hardware operations additionally require a PIN-configured FIDO2 hmac-secret device and local pinentry.
+Requires Linux, Rust 1.95.0, a C compiler/CMake, Python 3.12+, iproute2, nftables, ping and `/dev/net/tun`. Hardware operations additionally require a PIN-configured FIDO2 hmac-secret device and local pinentry (see [Hardware keys](#hardware-keys)).
 
 ```sh
 cargo build --release --locked
@@ -150,6 +150,34 @@ python3 tools/vm_validation.py --base debian-13-genericcloud-amd64.qcow2 --work 
 ```
 
 The managed test exercises actual WireGuard/DAITA, both PQ layers, system DNS over an isolated TLS upstream, NAT, leak blocking, certificate rotation, the defense profile, crashes, recovery, and explicit unlock. It first demonstrates a working unencrypted fallback route, then verifies that the whole-device guard blocks it. All network/DNS changes are confined to disposable namespaces. See [current validation](docs/MANAGED_VALIDATION.md).
+
+## Hardware keys
+
+The Nitrokey is an example, not a requirement. `--protect nitrokey` works with **any FIDO2 (CTAP2) security key that supports the `hmac-secret` extension and verifies you**, with a PIN typed on the computer or on the key's own screen (as on a Trezor): the key releases a secret only after that and a touch, and the secret seals the device's VPN keys. Only one such key may be plugged in while you unlock. ADVANCED_VPN asks the key for nothing about itself (no attestation, so no make, model or batch) and keeps only its credential's public key.
+
+Fully open source first: firmware and hardware designs you can read, build and check.
+
+| Key | Open source | `hmac-secret` | Notes |
+|---|---|---|---|
+| **Nitrokey 3** | firmware and hardware | ✅ tested by us | The key this project is developed with. Also creates Ed25519 credentials (tested). |
+| **Trezor** (Safe 3, Safe 5, Safe 7, Model T) | firmware and hardware | ✅ tested by us (Safe 3, firmware 2.12.1; older versions untested) | A hardware wallet with a FIDO2 app; you confirm and enter its PIN on the Trezor's own screen, never on the computer. Creates Ed25519 credentials (tested). Its FIDO2 secrets are derived from the wallet's recovery phrase, so restoring the phrase on a new Trezor restores your vault, and anyone holding the phrase holds it too. Safe models add a closed secure element. |
+| **SoloKeys Solo 2** | firmware and hardware | not confirmed (it shares the Nitrokey 3's FIDO2 code) | No longer receives firmware updates. |
+
+Closed firmware, and still usable:
+
+| Key | `hmac-secret` | Notes |
+|---|---|---|
+| **YubiKey 5** series | ✅ tested by us (5C NFC, firmware 5.2.7); needs firmware 5.2.3 or later (Yubico) | Creates Ed25519 credentials (tested). Firmware cannot be inspected or updated; below 5.7 it is affected by EUCLEAK (CVE-2024-45678), a physical side channel against P-256 signing, so prefer an Ed25519 credential. |
+| **Ledger** (Security Key app) | ✅ tested by us (Nano S Plus, app 1.7.8) | Unlock the Ledger and keep the Security Key app open: a locked Ledger answers as a U2F-only key and is refused. You confirm on its own screen. Creates Ed25519 credentials (tested). The app is open source; the device firmware is not. |
+| **OnlyKey**, **Google Titan** (v2, FIDO2), **Feitian**, **Token2** | not confirmed | FIDO2 keys; most FIDO2 keys support `hmac-secret`, but check yours. |
+
+**Curve.** In this release the key chooses its credential's curve, and most choose P-256. Choosing the curve at enrollment, with Ed25519 (which passes [SafeCurves](https://safecurves.cr.yp.to/)) as the default, comes in the next release.
+
+**Not usable:** U2F-only keys (the first Google Titan, YubiKey 4 and NEO, many older keys), and any key that verifies no one (no PIN, no on-device check).
+
+**Check any key** before relying on it (libfido2's tools): `fido2-token -I /dev/hidrawN` must list `hmac-secret` under extensions, and either `clientPin` as set or `uv` (on-device verification). `avpn request --protect nitrokey` refuses a key that lacks them.
+
+**Without a hardware key**, `--protect systemd-creds` seals keys with the machine's TPM2 when it has one (the default for servers), and `--protect none` keeps them in plaintext only with `--insecure-plaintext-keys`.
 
 ## One-time enrollment, then connect
 
@@ -182,7 +210,7 @@ sudo /opt/advanced-vpn/bin/avpn request --role exit  --protect systemd-creds --o
 ```
 
 Replace the documentation IP addresses with your own.
-- The classical half of the signature is made by the Nitrokey's FIDO2 credential, an Ed25519 key that can't be exported.
+- The classical half of the signature is made by the hardware key's FIDO2 credential (P-256 or Ed25519, whichever the key creates), whose private key can't be exported.
 - The ML-DSA-65 half is an operator key that stays sealed under that same credential, created on the first `init`. It is in plaintext only in memory, during that one touch.
 - Bundles contain public data only, plus the WireGuard PSK, which is encrypted separately to the client and the relay with hybrid X25519 + ML-KEM-768.
 

@@ -120,7 +120,10 @@ def main():
         fd = os.open("/run/netns/" + ns, os.O_RDONLY)
         try:
             x = subprocess.Popen(
-                list(map(str, args)), preexec_fn=lambda: os.setns(fd, 0), stdout=f, stderr=subprocess.STDOUT
+                list(map(str, args)),
+                preexec_fn=lambda: os.setns(fd, os.CLONE_NEWNET),
+                stdout=f,
+                stderr=subprocess.STDOUT,
             )
         finally:
             os.close(fd)
@@ -142,7 +145,7 @@ def main():
             x = subprocess.Popen(
                 [sys.executable, str(ROOT / "tools/avpnctl.py"), "--state", str(state / "client"), "--lab", "run",
                  "--", *argv],
-                preexec_fn=lambda: os.setns(fd, 0), stdout=f, stderr=subprocess.DEVNULL,
+                preexec_fn=lambda: os.setns(fd, os.CLONE_NEWNET), stdout=f, stderr=subprocess.DEVNULL,
             )  # fmt: skip
         finally:
             os.close(fd)

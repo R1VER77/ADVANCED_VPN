@@ -252,6 +252,19 @@ async fn work() -> Result<()> {
         );
         return Ok(());
     }
+    // Everything this process reads is read; confine it before it opens the TUN device
+    // and sockets, so the whole data plane runs confined (src/sandbox.rs).
+    let mut files = vec![
+        a.config.as_path(),
+        c.identity.cert.as_path(),
+        c.identity.key.as_path(),
+    ];
+    files.extend(c.defense_db.as_deref());
+    advanced_vpn::sandbox::confine(&advanced_vpn::sandbox::Policy::daemon(
+        files,
+        [advanced_vpn::sandbox::Policy::parent_of(&c.statistics)],
+        true,
+    ))?;
     let first_public = peers[0].public_key;
     let peer_count = peers.len();
     let mut device = DeviceBuilder::new()

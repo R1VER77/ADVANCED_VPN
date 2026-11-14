@@ -24,6 +24,14 @@ RestrictSUIDSGID=yes
 RestrictRealtime=yes
 LockPersonality=yes
 SystemCallArchitectures=native
+# Limits that need no private mount namespace (see above): no debugging, kernel
+# modules, clock or swap changes, reboots or raw I/O; only the network and mount
+# namespaces its netns handling uses; its own hostname and keyring.
+SystemCallFilter=~@clock @cpu-emulation @debug @module @obsolete @raw-io @reboot @swap
+SystemCallErrorNumber=EPERM
+RestrictNamespaces=net mnt
+ProtectHostname=yes
+KeyringMode=private
 MemoryMax=512M
 MemorySwapMax=0
 CPUQuota=100%

@@ -53,7 +53,7 @@ def as_installed_unit(fd):
     no_new_privs, so lab supervisors run with the same privilege as systemd gives them."""
     import ctypes
 
-    os.setns(fd, 0)
+    os.setns(fd, os.CLONE_NEWNET)
     lib = ctypes.CDLL(None)
     keep = unit_capabilities()
     for cap in range(64):
@@ -134,6 +134,27 @@ def probe_first_hop(state, run):
     return dict(probes=probe["sent"], replies=silent, control_replies=answered())
 
 
+# Set by main(): where every process's log is written, for the failure report below.
+LOG_DIR = [None]
+
+
+def failure_report(lines=25):
+    """The tail of every process log, so a CI failure explains itself (long hex redacted:
+    CI logs are public)."""
+    import re
+
+    if LOG_DIR[0] is None:
+        return
+    for log in sorted(Path(LOG_DIR[0]).glob("*.log")):
+        try:
+            tail = log.read_text(errors="replace").splitlines()[-lines:]
+        except OSError:
+            continue
+        print("---- %s (last %d lines)" % (log.name, len(tail)), file=sys.stderr)
+        for line in tail:
+            print("  " + re.sub(r"[0-9a-fA-F]{32,}", "<hex>", line), file=sys.stderr)
+
+
 def main():
     import argparse
 
@@ -156,6 +177,7 @@ def main():
     if {r["ifname"] for r in json.loads(run("ip", "-j", "link").stdout)} != {"lo"}:
         raise RuntimeError("fresh network namespace required")
     state = a.state.resolve()
+    LOG_DIR[0] = state
     state.mkdir(mode=0o700, exist_ok=False)
     ops = state / "operator"
     # An isolated TLS DNS upstream avoids contacting any real resolver.
@@ -235,7 +257,7 @@ def main():
             # deliberately shares its administrative mount namespace.
             x = subprocess.Popen(
                 list(map(str, args)),
-                preexec_fn=(lambda: as_installed_unit(fd)) if unit else (lambda: os.setns(fd, 0)),
+                preexec_fn=(lambda: as_installed_unit(fd)) if unit else (lambda: os.setns(fd, os.CLONE_NEWNET)),
                 stdout=f,
                 stderr=subprocess.STDOUT,
             )
@@ -535,6 +557,20 @@ def main():
             pid = str(child["pid"])
             uid = int(Path("/proc/" + pid + "/status").read_text().split("Uid:")[1].split()[1])
             assert uid != 0 and Path("/proc/" + pid + "/mem").stat().st_uid == 0, "data-plane process is dumpable"
+        # Every data-plane process, on the client and on both servers, runs under its
+        # seccomp filter (src/sandbox.rs): mode 2 with a filter installed.
+        confined = 0
+        for role in ["client", "relay", "exit"]:
+            status_file = runtime_dir(state / role) / "status.json"
+            if not status_file.exists():
+                continue
+            for name, child in json.loads(status_file.read_text())["children"].items():
+                lines = Path("/proc/%d/status" % child["pid"]).read_text().splitlines()
+                mode = next(v for v in lines if v.startswith("Seccomp:")).split()[1]
+                filters = int(next(v for v in lines if v.startswith("Seccomp_filters:")).split()[1])
+                assert mode == "2" and filters >= 1, "%s %s is not confined" % (role, name)
+                confined += 1
+        assert confined >= len(children), confined
         stats = json.loads((runtime_dir(state / "client") / "carrier-status.json").read_text())
         assert stats["handshake"] and stats["tx_padding_bytes"] > 0 and stats["tx_decoy_bytes"] > 0
         physical = json.loads((state / "physical.json").read_text())
@@ -800,4 +836,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except BaseException:
+        failure_report()
+        raise

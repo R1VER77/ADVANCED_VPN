@@ -161,7 +161,7 @@ def main():
         try:
             x = subprocess.Popen(
                 list(map(str, args)),
-                preexec_fn=lambda: os.setns(fd, 0),
+                preexec_fn=lambda: os.setns(fd, os.CLONE_NEWNET),
                 stdout=f,
                 stderr=subprocess.STDOUT,
                 env=dict(env, **(extra_env or {})),

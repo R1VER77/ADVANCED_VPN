@@ -38,11 +38,11 @@ def main():
         raise ValueError("client TUN required")
     current = os.open("/proc/self/ns/net", os.O_RDONLY | os.O_CLOEXEC)
     app = os.open(a.application_ns, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
-    os.setns(app, 0)
+    os.setns(app, os.CLONE_NEWNET)
     os.close(app)
     tun = os.open("/dev/net/tun", os.O_RDWR | os.O_NONBLOCK)
     fcntl.ioctl(tun, 0x400454CA, struct.pack("16sH", c["tun"].encode(), 0x1001))
-    os.setns(current, 0)
+    os.setns(current, os.CLONE_NEWNET)
     os.close(current)
     # The service cannot enter a different network namespace after privilege drop.
     os.setgroups([])

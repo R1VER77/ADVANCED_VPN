@@ -17,6 +17,8 @@ pub mod link;
 pub mod mesh;
 /// Relay, exit and client session loops.
 pub mod run;
+/// Post-startup confinement of the daemons (seccomp and Landlock).
+pub mod sandbox;
 /// QUIC/TLS settings: hybrid-PQ key exchange, ML-DSA-65 only, pinning, layer sizes.
 pub mod tls;
 /// TUN devices and packet admission checks.
