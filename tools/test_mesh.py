@@ -208,6 +208,17 @@ class SharedSelectionTests(unittest.TestCase):
         self.assertEqual({mesh.legal_parent(p, "DE") for p in ["oci", "aws", "gcp", "azure"]}, {"US"})
         self.assertEqual(mesh.legal_parent("host", "is"), "IS")
 
+    def test_the_rust_legal_spheres_match_the_catalog(self):
+        import re
+
+        rust = (Path(__file__).resolve().parents[1] / "src/mesh/directory.rs").read_text()
+        body = rust[rust.index("pub fn legal_parent") :].split("_ =>", 1)[0]
+        table = {}
+        for keys, parent in re.findall(r'((?:"[a-z0-9]+"\s*\|?\s*)+)=>\s*"([A-Z]{2})"', body):
+            for k in re.findall(r'"([a-z0-9]+)"', keys):
+                table[k] = parent
+        self.assertEqual(table, mesh.PROVIDER_PARENT)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -314,7 +314,7 @@ see §11). Stated in
 
 | Component | Where | Status |
 |---|---|---|
-| Constant-rate bidirectional stream (`stream_grid` + `cover`) + 4 rate classes (`metered`/`standard`/`fast`/`line`) with staggered multi-slot timers | `src/daita.rs`, `vendor/gotatun/src/device/daita/`, `src/bin/advanced-vpn-wireguard.rs` | landed; `balanced` bundles refused; `<1%` idle-vs-busy wire rate delta |
+| Constant-rate bidirectional stream (`stream_grid` + `cover`) + 4 rate classes (`metered`/`standard`/`fast`/`line`) with staggered multi-slot timers | `src/daita.rs`, `vendor/gotatun/src/device/daita/`, `src/bin/advanced-vpn-wireguard.rs` | landed; `balanced` bundles refused; 0–3.7% idle-vs-busy wire rate change (`docs/evidence/RATE_CLASSES.json`) |
 | Multi-member data-plane fan-in (`members[]` peer tables across cloak, WG, inner QUIC, and DNS) | `src/config.rs`, `src/tls.rs`, `src/run.rs`, `src/cloak.rs`, `src/bin/advanced-vpn-cloak.rs`, `src/bin/advanced-vpn-wireguard.rs`, `tools/managed_profile.py` | landed (`mesh_bundles` issues N independent client bundles sharing one relay/exit peer table) |
 | Censorship ladder: QUIC/HTTP/3 cloak + automatic TCP/TLS 1.3 fallback + realistic HTML5 decoy origin | `src/cloak.rs`, `src/bin/advanced-vpn-cloak.rs`, `tools/avpnctl.py`, `tools/cloud.py` | landed (UDP 443 primary, automatic TCP 443 fallback in 2 s when UDP is blocked, 10 s QUIC recovery probe, `200 OK` HTML5 decoy page) |
 | Signed local DNS blocklist (`NXDOMAIN` before upstream DoT) | `src/bin/advanced-vpn-dns.rs`, `tools/managed_profile.py`, `tools/avpnctl.py` | landed (`avpn init --dns-blocklist FILE`) |

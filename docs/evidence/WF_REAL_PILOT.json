@@ -1,0 +1,147 @@
+{
+ "name": "Website fingerprinting on real websites (pilot)",
+ "status": "pilot: 20 monitored sites, closed and open world; not literature scale",
+ "setup": {
+  "where": "GCP n2-standard-4, europe-west4-a, user-namespace lab with live internet (pasta)",
+  "browser": "headless Firefox ESR via Selenium, fresh profile per load",
+  "capture": "the client's carrier (what an ISP or Wi-Fi sees), AF_PACKET, GSO super-frames split into wire packets",
+  "sites": "20 monitored Tranco sites x ~30 loads, plus 300 unmonitored sites once each (open world)",
+  "window_seconds": 12.0,
+  "attacks": {
+   "kfp": "random forest, k-FP features",
+   "df": "Deep Fingerprinting (Sirinam CCS'18)",
+   "tiktok": "Tik-Tok (Rahman PETS'20)"
+  },
+  "validity_gate": "an attack's result on a defence is reported only if it reaches 80% closed-world on the undefended baseline"
+ },
+ "results": {
+  "undefended": {
+   "attempted": 900,
+   "completed_ok": 891,
+   "kfp": {
+    "sites": 20,
+    "loads": 594,
+    "folds": 5,
+    "chance": 0.05,
+    "closed_world_accuracy": 0.9916,
+    "open_world": {
+     "unmonitored_loads": 300,
+     "tpr": 0.9697,
+     "fpr": 0.05,
+     "precision": 0.9746
+    },
+    "seconds": 14.5
+   },
+   "df": {
+    "closed_world_accuracy": 0.9461,
+    "open_world": {
+     "tpr": 0.9394,
+     "fpr": 0.3267,
+     "precision": 0.817
+    }
+   },
+   "tiktok": {
+    "closed_world_accuracy": 0.968,
+    "open_world": {
+     "tpr": 0.9562,
+     "fpr": 0.2267,
+     "precision": 0.8725
+    }
+   },
+   "reading": "every attack passes the validity gate: the lab can recognise real websites"
+  },
+  "fast": {
+   "attempted": 900,
+   "completed_ok": 816,
+   "kfp": {
+    "sites": 20,
+    "loads": 567,
+    "folds": 5,
+    "chance": 0.05,
+    "closed_world_accuracy": 0.1481,
+    "open_world": {
+     "unmonitored_loads": 285,
+     "tpr": 0.0018,
+     "fpr": 0.0175,
+     "precision": 0.1111
+    },
+    "seconds": 27.5
+   },
+   "reading": "k-FP 14.8% closed world (chance 5%) and an open-world true-positive rate near zero: far from the baseline, but above chance; see cpu_contention"
+  },
+  "metered": {
+   "attempted": 900,
+   "completed_ok": 31,
+   "statuses": {
+    "ok": 31,
+    "WebDriverException": 560,
+    "TimeoutException": 309
+   },
+   "kfp": {
+    "sites": 20,
+    "loads": 233,
+    "folds": 5,
+    "chance": 0.05,
+    "closed_world_accuracy": 0.0687,
+    "open_world": {
+     "unmonitored_loads": 107,
+     "tpr": 0.0043,
+     "fpr": 0.1215,
+     "precision": 0.0222
+    },
+    "seconds": 10.9
+   },
+   "reading": "at chance, but only 31 of 900 loads completed normally: metered (~0.3 Mbit/s of application throughput) is too slow for browsing today's websites and is not a browsing class"
+  },
+  "not_run": "DF and Tik-Tok on fast and metered (k-FP only)"
+ },
+ "cpu_contention": {
+  "question": "does fast stay near chance when the browser competes with the client's data plane for CPU, as on a laptop?",
+  "setup": "same lab and shape; browser and client data plane pinned to the same 2 cores (relay and exit on the other 2); 20 monitored sites x 10 loads; compared with the pilot runs cut to the same 20 sites x 10 loads (mean of 5 random draws)",
+  "mechanism": "the shaper's grid skips ticks it misses ('skipped, never burst'), so under CPU load the pattern of missed ticks follows the page's own work",
+  "results": [
+   {
+    "variant": "undefended (pilot, same sites, 10 loads)",
+    "kfp_closed_world": 0.984
+   },
+   {
+    "variant": "fast, browser not pinned with the data plane (pilot)",
+    "kfp_closed_world": 0.099
+   },
+   {
+    "variant": "a: fast, shared cores, today's code",
+    "usable_loads": 198,
+    "kfp_closed_world": 0.8131
+   },
+   {
+    "variant": "b: a + data plane at nice -10",
+    "usable_loads": 195,
+    "kfp_closed_world": 0.7487
+   },
+   {
+    "variant": "c: b + 50 ms bounded catch-up (AVPN_CATCH_UP_MS=50)",
+    "replicas": [
+     {
+      "usable_loads": 199,
+      "kfp_closed_world": 0.4925
+     },
+     {
+      "usable_loads": 200,
+      "kfp_closed_world": 0.505
+     }
+    ]
+   }
+  ],
+  "chance": 0.05,
+  "reading": "under CPU contention fast leaks strongly (81%); priority barely helps; catch-up halves the leak but leaves it ten times chance. The catch-up stays an off-by-default experiment (AVPN_CATCH_UP_MS, default 0), and fast is not claimed to resist website fingerprinting on a busy CPU",
+  "archives_sha256": {
+   "vm1": "eed25d816ae49c018e02ff6387f3b1feec2e729e82842f4797277468b16f5ca4",
+   "vm2": "4d2f671b2213cbca605d5bfeb79a096484bb6dc4d291096bc9e52e111e5f98e6"
+  }
+ },
+ "open": "the leak needs a fix that removes the timing signal itself (for example a shaper whose sends do not depend on the host keeping up), proved by this same contention run",
+ "dates": {
+  "pilot": "2026-11-12/13",
+  "contention": "2026-11-13/14"
+ }
+}

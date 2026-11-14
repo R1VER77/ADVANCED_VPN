@@ -220,7 +220,19 @@ pub(crate) struct MachineTimers(
     /// after its predecessor fired is scheduled from that deadline, not from when the
     /// late timer was serviced, so a slot clock stays on a fixed grid whatever the load.
     Option<Vec<Option<Instant>>>,
+    /// ADVANCED_VPN: how far behind the grid a machine may fall and still send every
+    /// missed decoy (late, one per tick) instead of skipping it. Zero: skip, never burst.
+    std::time::Duration,
 );
+
+/// The catch-up window for grid machines, from `AVPN_CATCH_UP_MS` (milliseconds, default 0).
+fn catch_up_window() -> std::time::Duration {
+    std::env::var("AVPN_CATCH_UP_MS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .map(std::time::Duration::from_millis)
+        .unwrap_or_default()
+}
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum Action {
@@ -249,19 +261,31 @@ pub(crate) enum MachineTimer {
 
 impl MachineTimers {
     pub(crate) fn new(cap: usize) -> Self {
-        Self(VecDeque::with_capacity(cap), None)
+        Self(
+            VecDeque::with_capacity(cap),
+            None,
+            std::time::Duration::ZERO,
+        )
     }
 
     /// Timers whose decoys keep a fixed grid per machine (strict shaping).
     pub(crate) fn with_grid(cap: usize, machines: usize) -> Self {
-        Self(VecDeque::with_capacity(cap), Some(vec![None; machines]))
+        Self(
+            VecDeque::with_capacity(cap),
+            Some(vec![None; machines]),
+            catch_up_window(),
+        )
     }
 
     /// When a decoy re-armed now with `timeout` is due. Off-grid (or the first decoy):
     /// `now + timeout`. On the grid: the previous deadline plus `timeout`, or, when one or
-    /// more ticks were missed, the next grid point after now (skipped, never burst).
+    /// more ticks were missed, the next grid point after now (skipped, never burst) unless
+    /// the machine is no more than the catch-up window behind: then the very next grid
+    /// point, already due, so each missed decoy still goes out (late) and the count per
+    /// interval stays the clock's.
     fn decoy_expiry(&mut self, machine: MachineId, timeout: std::time::Duration) -> Instant {
         let now = Instant::now();
+        let catch_up = self.2;
         let Some(grid) = self.1.as_mut() else {
             return now + timeout;
         };
@@ -274,8 +298,12 @@ impl MachineTimers {
         let expiry = match *slot {
             // Far behind (a suspended host, say): restart the grid rather than count ticks.
             Some(prev) if prev <= now && !timeout.is_zero() && now - prev < timeout * 1000 => {
-                let missed = (now - prev).as_nanos() / timeout.as_nanos();
-                prev + timeout * (missed as u32 + 1)
+                if !catch_up.is_zero() && now - prev <= catch_up {
+                    prev + timeout
+                } else {
+                    let missed = (now - prev).as_nanos() / timeout.as_nanos();
+                    prev + timeout * (missed as u32 + 1)
+                }
             }
             _ => now + timeout + phase,
         };

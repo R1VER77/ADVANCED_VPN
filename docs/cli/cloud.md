@@ -155,6 +155,7 @@ configured once with `oci setup config`.
 - `--shape micro|arm`: `micro` is VM.Standard.E2.1.Micro (AMD, 1 GB, up to 2 per tenancy); `arm` is VM.Standard.A1.Flex.
 - `--ocpus N`, `--memory-gib N`: A1 only (Always Free: 2 OCPU and 12 GB in total; defaults 1 and 6).
 - `--compartment OCID`: where to create it (default: the tenancy's root compartment).
+- `--vcn VCN`: put the server in an existing VCN instead of creating one (a free tenancy has only two). The server gets its own subnet (the next free /24 in the VCN), route table and security list, all tagged as its own; the VCN and its internet gateway are used and never changed, and a teardown removes only the server's own parts.
 - `--oci-profile NAME`: the profile in `~/.oci/config` (default `DEFAULT`). Its region must be the tenancy's home region.
 - `--port N`, `--allow-from IP`, `--admin-ip IP`: as for `aws relay`.
 - `--dry-run`, `--yes`: as above.
@@ -195,7 +196,7 @@ passwordless sudo.
 - `--key FILE`: its SSH private key (mode 600; SSH never asks for a password).
 - `--ssh-config FILE`: an SSH config file, for bastions, jump hosts or other ports.
 - `--address IP`: its public IPv4, if HOST is not it (for example behind a bastion).
-- `--provider KEY`: where it runs (default `own`): `oci`, `aws`, `azure`, `gcp` or `own`, or a non-US host (`hetzner`, `netcup`, `ovh`, `1984`, `infomaniak`, `exoscale`). It sets the allowance used to order a chain and the legal sphere shown in its plan.
+- `--provider KEY`: where it runs (default `own`): `oci`, `aws`, `azure`, `gcp` or `own`, or a paid host listed by `avpn cloud suggest` and `avpn help endpoints` (`racknerd`, `ionos`, `ovh`, `netcup`, `hetzner`, `1984`, `infomaniak`, `exoscale`). It sets the allowance used to order a chain and the legal sphere shown in its plan.
 - `--shared`: the host also runs other things: setup leaves its system journal alone.
 
 This tool does not manage the firewall of an added server. The chain plan says which
@@ -208,6 +209,7 @@ request. `chain` does this for every hop; use it on its own to prepare one serve
 
 - `--name avpn-NAME`: the recorded server.
 - `--source DIR`: a built checkout or unpacked release to install from (default: this one). It must contain `target/release/` with every binary.
+- `--source-arm DIR`: a built ARM (aarch64) checkout, for ARM servers such as OCI's Ampere A1. Each server reports its processor (`uname -m`); an ARM server gets this build, the others `--source`, and an ARM server without `--source-arm` is refused rather than given binaries it cannot run.
 - `--out FILE`: where to save the public request. Give it to `avpn init`.
 - `--role relay|middle|exit`: the role to make keys for (default: its recorded role).
 - `--replace`: replace keys made for another role. Without it, a role change is refused.

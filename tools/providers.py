@@ -27,7 +27,9 @@ PROVIDERS = [
         egress_gib=10240,
         servers="2 x VM.Standard.E2.1.Micro (1 GB, 50 Mbps), or Ampere A1 with 2 OCPU / 12 GB in total",
         caveats="home region only; idle instances (CPU, network and memory all under 20% for 7 days) may be "
-        "reclaimed; a payment card is needed to sign up",
+        "reclaimed, and Oracle does not say how network use is measured, so a VPN's steady trickle cannot be "
+        "counted on to look busy; a payment card is needed to sign up; free servers can vanish (reclaimed or "
+        "the account closed): keep standby exits",
         automation="create",
         cli="oci",
         next="avpn cloud oci server --apply --name avpn-exit --role exit",
@@ -102,12 +104,93 @@ NON_US = [
     dict(key="1984", name="1984 Hosting", parent="IS", source="https://1984.hosting"),
     dict(key="infomaniak", name="Infomaniak", parent="CH", source="https://www.infomaniak.com"),
     dict(key="exoscale", name="Exoscale", parent="CH", source="https://www.exoscale.com"),
+    dict(key="ionos", name="IONOS", parent="DE", source="https://www.ionos.com/servers/vps"),
+]
+
+# Low-cost paid hosts, cheapest first, for when free allowances run out or a chain needs
+# more providers. Prices are as listed when checked (they changed often in 2026: check the
+# order page). A server here carries far more than one person uses, which is what lets a
+# member's server cover others; whose traffic may exit is each host's own rule.
+LOW_COST_CHECKED = "2026-11-13"
+# A planning figure, not a measurement: a member's monthly traffic, in GB.
+MEMBER_GB = 300
+LOW_COST = [
+    dict(
+        key="racknerd",
+        name="RackNerd",
+        parent="US",
+        usd_month=1.83,
+        price="$21.99/year (annual promotions; stock varies)",
+        egress_tb=3,
+        port_mbps=1000,
+        note="mostly US locations",
+        source="https://www.racknerd.com/kvm-vps",
+    ),
+    dict(
+        key="ionos",
+        name="IONOS VPS XS",
+        parent="DE",
+        usd_month=2.0,
+        price="about $2/month (the lowest EU price needs a 24-month term)",
+        egress_tb=None,
+        port_mbps=1000,
+        note="no traffic cap",
+        source="https://www.ionos.com/servers/vps",
+    ),
+    dict(
+        key="ovh",
+        name="OVHcloud VPS-1",
+        parent="FR",
+        usd_month=4.54,
+        price="about $4.54 / EUR 4.49 a month (2 vCPU, 4 GB)",
+        egress_tb=None,
+        port_mbps=500,
+        note="its rules forbid Tor exits",
+        source="https://www.ovhcloud.com/en/vps/",
+    ),
+    dict(
+        key="netcup",
+        name="netcup VPS 500",
+        parent="DE",
+        usd_month=4.6,
+        price="about EUR 4 a month",
+        egress_tb=None,
+        port_mbps=None,
+        note="its fair-use rule is reported as 2 TB a day; listings disagree",
+        source="https://www.netcup.com/en/server/vps",
+    ),
+    dict(
+        key="hetzner",
+        name="Hetzner CX22 / CAX11 (ARM)",
+        parent="DE",
+        usd_month=5.3,
+        price="about EUR 4.59 / EUR 5.99 a month after the June 2026 increase",
+        egress_tb=20,
+        port_mbps=None,
+        note="20 TB in EU locations, but 1 TB in the US and 0.5 TB in Singapore",
+        source="https://www.hetzner.com/cloud",
+    ),
+]
+
+# Considered, not yet usable: what is unproven before one can carry a hop.
+UNTESTED = [
+    dict(
+        key="flux",
+        name="Flux (RunOnFlux)",
+        source="https://docs.runonflux.com/fluxcloud/introduction",
+        blockers="its apps are unprivileged containers copied onto several operators' machines and moved "
+        "between them: UDP ports, a tunnel device and a fixed address (which a signed chain pins) are all "
+        "unconfirmed; operators are unknown and can read the container's memory; many rent from the same "
+        "hosts, so diversity must count the real host, not Flux",
+    ),
 ]
 # The legal sphere each provider's company answers to (tools/mesh.py and
 # src/mesh/directory.rs use the same table). "own" is your own host: its country's law.
 LEGAL_PARENT = {"oci": "US", "aws": "US", "azure": "US", "gcp": "US", **{p["key"]: p["parent"] for p in NON_US}}
 
-ALL_KEYS = {p["key"] for p in PROVIDERS} | {p["key"] for p in NON_US}
+LEGAL_PARENT.update({p["key"]: p["parent"] for p in LOW_COST})
+
+ALL_KEYS = {p["key"] for p in PROVIDERS} | {p["key"] for p in NON_US} | {p["key"] for p in LOW_COST}
 
 
 def sphere(key):
@@ -142,8 +225,23 @@ def by_key(key):
     for p in PROVIDERS:
         if p["key"] == key:
             return p
-    q = next(p for p in NON_US if p["key"] == key)
+    q = next((p for p in NON_US if p["key"] == key), None) or next(p for p in LOW_COST if p["key"] == key)
     return dict(q, egress_gib=None, terms="paid", servers="a VPS you create", automation="ssh")
+
+
+def low_cost_rows():
+    """The low-cost hosts, cheapest first: price, traffic, and members one server covers."""
+    rows = []
+    for p in sorted(LOW_COST, key=lambda p: p["usd_month"]):
+        if p["egress_tb"]:
+            traffic = "%d TB/month out, about $%.2f per TB" % (p["egress_tb"], p["usd_month"] / p["egress_tb"])
+            members = p["egress_tb"] * 1000 // MEMBER_GB
+            covers = "covers about %d members at %d GB each (half on a 2-hop chain)" % (members, MEMBER_GB)
+        else:
+            traffic = "unmetered" + (" at %d Mbit/s" % p["port_mbps"] if p["port_mbps"] else "")
+            covers = "covers members until its fair-use limit"
+        rows.append(dict(p, traffic=traffic, covers=covers))
+    return rows
 
 
 def quick(argv, timeout=20):
@@ -252,6 +350,21 @@ def endpoints_page():
         out.append("- Next: `%s` (%s).\n" % (p["next"], how) if usable(p) else "- Not recommended as a hop.\n")
         if p["source"]:
             out.append("- Source: %s\n" % p["source"])
+    out.append(
+        "\n## Low-cost paid hosts\n\nCheapest first, as listed on %s (prices change: check the order page). "
+        "One of these carries far more than one person uses; at %d GB a member each month, the covered "
+        "counts below halve on a 2-hop chain. Running your own VPN is fine on all of them; letting other "
+        "people's traffic exit makes their abuse complaints yours, so read the host's rules first. Record "
+        "one with `avpn cloud host add --provider KEY`.\n\n" % (LOW_COST_CHECKED, MEMBER_GB)
+    )
+    for p in low_cost_rows():
+        out.append(
+            "- **%s** (`%s`, %s): %s; %s; %s; %s. Source: %s\n"
+            % (p["name"], p["key"], p["parent"], p["price"], p["traffic"], p["covers"], p["note"], p["source"])
+        )
+    out.append("\n## Considered, not yet usable\n\n")
+    for p in UNTESTED:
+        out.append("- **%s**: %s. Source: %s\n" % (p["name"], p["blockers"], p["source"]))
     out.append(PAGE_TAIL)
     return "".join(out)
 

@@ -40,6 +40,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 WINDOW = 12.0  # tools/wf_real.py keeps each load's first 12 s
 SEQ = 5000  # DF / Tik-Tok input length (packets)
 RECORD = np.dtype([("t", "<f8"), ("n", "<i4")])
+# The cloak sends QUIC datagrams of 1420 bytes (1448 on the wire) and may hand the kernel
+# several in one GSO buffer; a capture on a virtual link sees that buffer whole
+# (28 + k * 1420 bytes), where a real network card sends k packets of 1448.
+CELL_PAYLOAD, IP_UDP = 1420, 28
+
+
+def wire_packets(tr):
+    """The trace as the wire carries it: each GSO super-frame of k cloak datagrams becomes
+    k packets of IP_UDP + CELL_PAYLOAD bytes at its timestamp; other packets unchanged."""
+    n = tr[:, 2].astype(int)
+    k = np.where((n > 1500) & ((n - IP_UDP) % CELL_PAYLOAD == 0), (n - IP_UDP) // CELL_PAYLOAD, 1)
+    out = np.repeat(tr, k, axis=0)
+    out[:, 2] = np.where(np.repeat(k, k) > 1, IP_UDP + CELL_PAYLOAD, out[:, 2])
+    return out
 
 
 def load_run(run, window=WINDOW, min_resources=0.25):
@@ -74,7 +88,7 @@ def load_run(run, window=WINDOW, min_resources=0.25):
         if len(seg) < 2:
             continue
         tr = np.column_stack([seg["t"] - r["start"], np.sign(seg["n"]), np.abs(seg["n"])]).astype(float)
-        out.append((int(r["label"]), r["site"], tr))
+        out.append((int(r["label"]), r["site"], wire_packets(tr)))
     return out
 
 

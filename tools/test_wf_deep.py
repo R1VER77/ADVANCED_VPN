@@ -47,6 +47,13 @@ def write_collection(root, sites=4, loads=10, unmonitored=0, shuffle_labels=Fals
 
 @unittest.skipUnless(HAVE["numpy"], "needs numpy")
 class LoaderTests(unittest.TestCase):
+    def test_gso_super_frames_become_wire_packets(self):
+        tr = np.array([[0.1, 1, 5708], [0.2, -1, 1448], [0.3, -1, 2868], [0.4, 1, 100]], dtype=float)
+        w = wf_deep.wire_packets(tr)
+        self.assertEqual(w[:, 2].tolist(), [1448] * 4 + [1448] + [1448] * 2 + [100])
+        self.assertEqual(w[:, 1].tolist(), [1] * 4 + [-1] * 3 + [1])
+        self.assertEqual(w[:, 0].tolist(), [0.1] * 4 + [0.2, 0.3, 0.3, 0.4])
+
     def test_a_load_the_browser_saw_fail_is_dropped(self):
         with tempfile.TemporaryDirectory() as d:
             write_collection(d, sites=2, loads=3)

@@ -65,6 +65,12 @@ def call(argv, parse=True, stdin=None):
     r = subprocess.run(argv, capture_output=True, text=True, timeout=900, check=False, input=stdin)
     if r.returncode != 0:
         detail = (r.stderr.strip().splitlines() or ["exit %d" % r.returncode])[-1]
+        if "{" in r.stderr:  # OCI prints a JSON service error; its last line is just "}"
+            try:
+                err = json.loads(r.stderr[r.stderr.index("{") :])
+                detail = "%s: %s" % (err.get("code", "error"), err.get("message", detail))
+            except ValueError:
+                pass
         if "ExpiredToken" in r.stderr or "Token has expired" in r.stderr or "aws login" in r.stderr:
             detail += " (sign in again: aws login --profile <profile>)"
         raise CloudError("%s %s: %s" % (Path(argv[0]).name, " ".join(argv[1:3]), detail))
@@ -745,6 +751,12 @@ def oci_ingress(port, sources, admin):
 
 def oci_server_plan(a, oc):
     """What `oci server --apply` will create, after checking the home region and shape."""
+    # Always Free covers 2 OCPU / 12 GB of A1 in total; anything larger is billed, or
+    # removed when a trial's credits run out. Refuse rather than create it.
+    if a.shape == "arm" and not (1 <= a.ocpus <= 2 and 1 <= a.memory_gib <= 12):
+        raise CloudError(
+            "Always Free A1 is at most 2 OCPU and 12 GB in total; asked for %d OCPU / %d GB" % (a.ocpus, a.memory_gib)
+        )
     home = oc.home_region()
     if oc.region != home:
         raise CloudError(
@@ -778,18 +790,41 @@ def oci_server_plan(a, oc):
     image = next((i for i in images if "Minimal" not in i["display-name"]), images[0])
     port = a.port or ROLES[a.role]
     size = "1 OCPU / 1 GB" if a.shape == "micro" else "%d OCPU / %d GB" % (a.ocpus, a.memory_gib)
+    network = "own VCN %s with an internet gateway, all tagged %s" % (OCI_CIDR, a.name)
+    shared = None
+    if a.vcn:
+        # A free tenancy has two VCNs. Inside an existing one, this server gets its own subnet,
+        # route table and security list (tagged, and all a teardown removes); the VCN and its
+        # internet gateway are used, never changed.
+        import ipaddress
+
+        vcn = oc("network", "vcn", "get", "--vcn-id", a.vcn)["data"]
+        taken = [ipaddress.ip_network(x["cidr-block"]) for x in oc("network", "subnet", "list", "--compartment-id",
+                                                                    oc.compartment, "--vcn-id", a.vcn, "--all")["data"]]  # fmt: skip
+        gateways = [g for g in oc("network", "internet-gateway", "list", "--compartment-id", oc.compartment, "--vcn-id",
+                                  a.vcn)["data"] if g.get("is-enabled")]  # fmt: skip
+        if not gateways:
+            raise CloudError("VCN %s has no enabled internet gateway" % vcn.get("display-name", a.vcn[-12:]))
+        free = [n for block in vcn.get("cidr-blocks") or [vcn["cidr-block"]]
+                for n in reversed(list(ipaddress.ip_network(block).subnets(new_prefix=24)))
+                if not any(n.overlaps(t) for t in taken)]  # fmt: skip
+        if not free:
+            raise CloudError("no free /24 left in VCN %s" % vcn.get("display-name", a.vcn[-12:]))
+        shared = dict(vcn=a.vcn, cidr=str(free[0]), gateway=gateways[0]["id"])
+        network = "subnet %s in the existing VCN %s, with its own route table and security list, all tagged %s; " \
+                  "the VCN and its internet gateway are not changed" % (free[0], vcn.get("display-name", ""), a.name)  # fmt: skip
     rows = [
         dict(label="tenancy", value="home region %s, compartment %s" % (home, oc.compartment[-12:])),
         dict(label="instance", value="%s %s (%s), %s" % (a.name, shape, size, ad)),
         dict(label="image", value=image["display-name"]),
-        dict(label="network", value="own VCN %s with an internet gateway, all tagged %s" % (OCI_CIDR, a.name)),
+        dict(label="network", value=network),
         dict(label="firewall", value="udp %d from %s; SSH 22 from %s" % (port, ", ".join(a.allow_from), a.admin_ip)),
         dict(label="cost", value="Always Free: $0 within 2 micro instances or 2 OCPU / 12 GB of A1 per tenancy"),
     ]
     if load_inventory()["resources"].get(a.name):
         rows.append(dict(label="exists", value="%s is already recorded (apply refuses)" % a.name))
     rows.append(caller_note("oci"))
-    return dict(rows=rows, ad=ad, image=image["id"], shape=shape, port=port)
+    return dict(rows=rows, ad=ad, image=image["id"], shape=shape, port=port, shared=shared)
 
 
 def oci_server_apply(a, oc, plan):
@@ -809,23 +844,34 @@ def oci_server_apply(a, oc, plan):
         rec.update(ids)
         save_inventory(inv)
 
-    vcn = oc("network", "vcn", "create", *c, "--cidr-blocks", json.dumps([OCI_CIDR]), "--display-name", a.name,
-             "--freeform-tags", tags, *wait_ok)["data"]  # fmt: skip
-    record(vcn=vcn["id"], route_table=vcn["default-route-table-id"])
-    igw = oc("network", "internet-gateway", "create", *c, "--vcn-id", vcn["id"], "--is-enabled", "true",
-             "--display-name", a.name, "--freeform-tags", tags, *wait_ok)["data"]  # fmt: skip
-    record(internet_gateway=igw["id"])
-    route = [dict(destination="0.0.0.0/0", destinationType="CIDR_BLOCK", networkEntityId=igw["id"])]
-    oc("network", "route-table", "update", "--rt-id", vcn["default-route-table-id"], "--route-rules", json.dumps(route),
-       "--force", *wait_ok)  # fmt: skip
+    shared = plan.get("shared")
+    if shared:
+        # Not recorded as `vcn`/`internet_gateway`: a teardown never reaches them.
+        record(vcn_shared=shared["vcn"])
+        route = [dict(destination="0.0.0.0/0", destinationType="CIDR_BLOCK", networkEntityId=shared["gateway"])]
+        rt = oc("network", "route-table", "create", *c, "--vcn-id", shared["vcn"], "--display-name", a.name,
+                "--route-rules", json.dumps(route), "--freeform-tags", tags, *wait_ok)["data"]  # fmt: skip
+        record(own_route_table=rt["id"])
+        vcn, route_table, cidr = {"id": shared["vcn"]}, rt["id"], shared["cidr"]
+    else:
+        vcn = oc("network", "vcn", "create", *c, "--cidr-blocks", json.dumps([OCI_CIDR]), "--display-name", a.name,
+                 "--freeform-tags", tags, *wait_ok)["data"]  # fmt: skip
+        record(vcn=vcn["id"], route_table=vcn["default-route-table-id"])
+        igw = oc("network", "internet-gateway", "create", *c, "--vcn-id", vcn["id"], "--is-enabled", "true",
+                 "--display-name", a.name, "--freeform-tags", tags, *wait_ok)["data"]  # fmt: skip
+        record(internet_gateway=igw["id"])
+        route = [dict(destination="0.0.0.0/0", destinationType="CIDR_BLOCK", networkEntityId=igw["id"])]
+        oc("network", "route-table", "update", "--rt-id", vcn["default-route-table-id"], "--route-rules",
+           json.dumps(route), "--force", *wait_ok)  # fmt: skip
+        route_table, cidr = vcn["default-route-table-id"], OCI_CIDR
     egress = [dict(destination="0.0.0.0/0", protocol="all", isStateless=False)]
     ingress = oci_ingress(plan["port"], a.allow_from, [a.admin_ip])
     sl = oc("network", "security-list", "create", *c, "--vcn-id", vcn["id"], "--display-name", a.name,
             "--egress-security-rules", json.dumps(egress), "--ingress-security-rules", json.dumps(ingress),
             "--freeform-tags", tags, *wait_ok)["data"]  # fmt: skip
     record(security_list=sl["id"], managed_list=True)
-    subnet = oc("network", "subnet", "create", *c, "--vcn-id", vcn["id"], "--cidr-block", OCI_CIDR,
-                "--display-name", a.name, "--route-table-id", vcn["default-route-table-id"],
+    subnet = oc("network", "subnet", "create", *c, "--vcn-id", vcn["id"], "--cidr-block", cidr,
+                "--display-name", a.name, "--route-table-id", route_table,
                 "--security-list-ids", json.dumps([sl["id"]]), "--prohibit-public-ip-on-vnic", "false",
                 "--freeform-tags", tags, *wait_ok)["data"]  # fmt: skip
     record(subnet=subnet["id"])
@@ -878,6 +924,7 @@ def oci_server_apply(a, oc, plan):
 OCI_PARTS = [
     ("instance", ("compute", "instance"), "--instance-id", ["--preserve-boot-volume", "false"], "TERMINATED"),
     ("subnet", ("network", "subnet"), "--subnet-id", [], "TERMINATED"),
+    ("own_route_table", ("network", "route-table"), "--rt-id", [], "TERMINATED"),
     ("security_list", ("network", "security-list"), "--security-list-id", [], "TERMINATED"),
     ("internet_gateway", ("network", "internet-gateway"), "--ig-id", [], "TERMINATED"),
     ("vcn", ("network", "vcn"), "--vcn-id", [], "TERMINATED"),
@@ -1048,7 +1095,7 @@ def remote(name, record):
     return tool("ssh"), tool("scp"), ssh_base(name, record), ssh_target(record)
 
 
-def setup_server(name, record, role, port, out, source, replace=False):
+def setup_server(name, record, role, port, out, source, replace=False, source_arm=None):
     """Install or upgrade the package on a recorded server and fetch its public request
     for `role`, with the tunnel `port` accepted by the host firewall. Returns
     (kept|new, TPM report)."""
@@ -1062,6 +1109,13 @@ def setup_server(name, record, role, port, out, source, replace=False):
             return False
 
     wait("SSH on " + name, reachable, timeout=300, every=10)
+    # The binaries must match the server's processor: an ARM server (Ampere A1) gets the
+    # ARM build, built on (or for) that architecture.
+    machine = call([ssh, *base, host, "uname -m"], parse=False).strip()
+    if machine == "aarch64":
+        if not source_arm:
+            raise CloudError("%s is an ARM (aarch64) server: give an ARM build with --source-arm" % name)
+        source = source_arm
     try:
         need = glibc_needed(source)
     except FileNotFoundError as e:
@@ -1092,7 +1146,8 @@ def host_setup(a):
     if role not in ROLES:
         raise CloudError("give --role relay|middle|exit for %s" % a.name)
     port = record["port"] if record.get("role") == role and record.get("port") else ROLES[role]
-    keys, tpm = setup_server(a.name, record, role, port, a.out, a.source, replace=a.replace)
+    keys, tpm = setup_server(a.name, record, role, port, a.out, a.source, replace=a.replace,
+                             source_arm=getattr(a, "source_arm", None))  # fmt: skip
     record.update(role=role, port=port, request=str(a.out))
     save_inventory(inv)
     return [
@@ -1117,7 +1172,7 @@ def host_add(a):
         if key.stat().st_mode & 0o077:
             raise CloudError("%s is readable by others; chmod 600 it first" % key)
     if a.catalog not in providers.ALL_KEYS:
-        raise CloudError("--provider must be one of " + ", ".join(p["key"] for p in providers.PROVIDERS))
+        raise CloudError("--provider must be one of " + ", ".join(sorted(providers.ALL_KEYS)))
     host = a.ssh.rsplit("@", 1)[-1]
     address = a.address or host
     try:
@@ -1385,7 +1440,8 @@ def chain_apply(a, plan):
     requests = {}
     for h in hops:
         out = work / "requests" / (h["role"] + ".req")
-        keys, tpm = setup_server(h["name"], h["record"], h["role"], h["port"], out, a.source, replace=True)
+        keys, tpm = setup_server(h["name"], h["record"], h["role"], h["port"], out, a.source, replace=True,
+                                 source_arm=getattr(a, "source_arm", None))  # fmt: skip
         requests[h["role"]] = out
         done.append(dict(label=h["name"], value="%s, keys %s, %s" % (h["role"], keys, tpm)))
     # 3. One signature over the whole chain.
@@ -1471,6 +1527,12 @@ def suggest(a):
             + "; paid, check terms; record one with avpn cloud host add --provider KEY",
         )
     )
+    for p in providers.low_cost_rows():
+        rows.append(dict(label=p["key"], value="%s (%s, paid): %s; %s" % (p["name"], p["parent"], p["price"],
+                                                                         p["traffic"])))  # fmt: skip
+        rows.append(dict(label="", value="note: %s; %s" % (p["covers"], p["note"])))
+    for p in providers.UNTESTED:
+        rows.append(dict(label=p["key"], value="%s: not yet usable: %s" % (p["name"], p["blockers"])))
     rows.append(dict(label="next", value=providers.recommendation(servers())))
     return rows
 
@@ -1721,6 +1783,7 @@ def build_parser():
     setup.add_argument(
         "--source", default=str(Path(__file__).resolve().parents[1]), help="built checkout to install from"
     )
+    setup.add_argument("--source-arm", help="built ARM (aarch64) checkout, for ARM servers such as OCI Ampere A1")
     setup.add_argument("--out", type=Path, required=True, help="where to save the server's public request")
     setup.add_argument("--role", choices=sorted(ROLES), help="the server's role (default: its recorded role)")
     setup.add_argument("--replace", action="store_true", help="replace keys made for another role")
@@ -1734,7 +1797,7 @@ def build_parser():
         "--provider",
         dest="catalog",
         default="own",
-        help="where it runs: oci, aws, azure, gcp or own (sets its allowance)",
+        help="where it runs: a free tier (oci, aws, azure, gcp), own, or a paid host key from avpn cloud suggest",
     )
     add.add_argument("--shared", action="store_true", help="it also runs other things: leave its journal alone")
     forget = h_s.add_parser("forget", help="drop a recorded server from the inventory (it is not changed)")
@@ -1752,6 +1815,7 @@ def build_parser():
     ch.add_argument(
         "--source", default=str(Path(__file__).resolve().parents[1]), help="built package or checkout to install"
     )
+    ch.add_argument("--source-arm", help="built ARM (aarch64) checkout, for ARM servers such as OCI Ampere A1")
     ch.add_argument(
         "--hours-per-day", type=float, default=8, help="hours connected per day, for the rate class (default 8)"
     )
@@ -1772,6 +1836,11 @@ def build_parser():
     srv.add_argument("--ocpus", type=int, default=1, help="A1 only: OCPUs (Always Free: 2 in total)")
     srv.add_argument("--memory-gib", type=int, default=6, help="A1 only: memory (Always Free: 12 GB in total)")
     srv.add_argument("--compartment", help="compartment OCID (default: the tenancy's root)")
+    srv.add_argument(
+        "--vcn",
+        help="put the server in this existing VCN (own subnet, route table and security list; the VCN and its "
+        "gateway are not changed): a free tenancy has only two VCNs",
+    )
     srv.add_argument("--oci-profile", default="DEFAULT", help="profile in ~/.oci/config")
     srv.add_argument("--port", type=int, help="tunnel port (default: 41194 relay, 4445 middle, 4444 exit)")
     srv.add_argument(

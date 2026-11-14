@@ -45,8 +45,8 @@ This design's carrier runs a **constant-rate DAITA stream** (Maybenot `stream_gr
 `cover` with strict blocking): every data packet is padded to one size (1380 bytes inside
 WireGuard, 1420 bytes on the outer cloak), and every clock tick sends either a queued
 real packet or an indistinguishable decoy packet. Whether your applications are idle or
-downloading at full speed, the outer packet rate and packet size stay flat (`< 1%` wire
-rate change between idle and busy). Four rate classes (`metered`, `standard`, `fast`,
+downloading at full speed, the outer packet rate and packet size stay flat (0–3.7% wire
+rate change between idle and busy in every measured class, `docs/evidence/RATE_CLASSES.json`). Four rate classes (`metered`, `standard`, `fast`,
 `line`) trade cover bandwidth for application throughput without weakening the
 constant-rate invariant (`avpn help init`). On top of that,
 every chain pads **every** hop's datagrams to one size per layer (constant cells), so
@@ -141,6 +141,28 @@ or 3-hop chain its outbound cost is about twice the per-direction figure above;
 `avpn init --rate auto` counts both.
 
 Details are in `docs/evidence/DAITA_LAB.json` and `docs/evidence/RATE_CLASSES.json`.
+
+
+### On real websites (pilot, `docs/evidence/WF_REAL_PILOT.json`)
+
+The synthetic lab above is not the last word. A pilot loaded **real websites** in headless
+Firefox through a 2-hop chain (20 monitored sites about 30 times each, plus 300 others
+once), and attacked the carrier with k-FP and two deep-learning attacks (DF, Tik-Tok).
+Chance is 5%.
+
+| Carrier | Right (k-FP, closed world) | Notes |
+|---|---|---|
+| No defence (kernel WireGuard) | **99.2%** (DF 94.6%, Tik-Tok 96.8%) | the attacks are valid |
+| `fast` | **14.8%** | open-world detection near zero, but above chance |
+| `metered` | at chance | only 31 of 900 loads completed: too slow for today's websites |
+
+**On a busy CPU, `fast` leaks.** When the browser shares CPU cores with the client's data
+plane, as on most laptops, k-FP recognises **81%** of sites (same 20 sites, 10 loads; 9.9%
+without that contention). The shaper skips ticks it misses, and under load the missed ticks
+follow the page's own work. Running the data plane at high priority barely helps (75%); a
+bounded catch-up (`AVPN_CATCH_UP_MS`, off by default) halves it (about 50%), still ten
+times chance. Until a fix removes the signal and passes this same run, do not count on
+`fast` against website fingerprinting while the device is busy.
 
 ## What it does show
 

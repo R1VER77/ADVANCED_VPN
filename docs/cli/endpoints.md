@@ -12,7 +12,7 @@ smallest outbound allowance.
 
 - No expiry; 10 TiB/month out.
 - Servers: 2 x VM.Standard.E2.1.Micro (1 GB, 50 Mbps), or Ampere A1 with 2 OCPU / 12 GB in total.
-- Caveats: home region only; idle instances (CPU, network and memory all under 20% for 7 days) may be reclaimed; a payment card is needed to sign up.
+- Caveats: home region only; idle instances (CPU, network and memory all under 20% for 7 days) may be reclaimed, and Oracle does not say how network use is measured, so a VPN's steady trickle cannot be counted on to look busy; a payment card is needed to sign up; free servers can vanish (reclaimed or the account closed): keep standby exits.
 - Next: `avpn cloud oci server --apply --name avpn-exit --role exit` (created by this tool).
 - Source: https://docs.oracle.com/en-us/iaas/Content/FreeTier/freetier_topic-Always_Free_Resources.htm
 
@@ -46,6 +46,20 @@ smallest outbound allowance.
 - Caveats: 1 GB/month out is about 30 MB a day: too little for any hop.
 - Not recommended as a hop.
 - Source: https://docs.cloud.google.com/free/docs/free-cloud-features
+
+## Low-cost paid hosts
+
+Cheapest first, as listed on 2026-11-13 (prices change: check the order page). One of these carries far more than one person uses; at 300 GB a member each month, the covered counts below halve on a 2-hop chain. Running your own VPN is fine on all of them; letting other people's traffic exit makes their abuse complaints yours, so read the host's rules first. Record one with `avpn cloud host add --provider KEY`.
+
+- **RackNerd** (`racknerd`, US): $21.99/year (annual promotions; stock varies); 3 TB/month out, about $0.61 per TB; covers about 10 members at 300 GB each (half on a 2-hop chain); mostly US locations. Source: https://www.racknerd.com/kvm-vps
+- **IONOS VPS XS** (`ionos`, DE): about $2/month (the lowest EU price needs a 24-month term); unmetered at 1000 Mbit/s; covers members until its fair-use limit; no traffic cap. Source: https://www.ionos.com/servers/vps
+- **OVHcloud VPS-1** (`ovh`, FR): about $4.54 / EUR 4.49 a month (2 vCPU, 4 GB); unmetered at 500 Mbit/s; covers members until its fair-use limit; its rules forbid Tor exits. Source: https://www.ovhcloud.com/en/vps/
+- **netcup VPS 500** (`netcup`, DE): about EUR 4 a month; unmetered; covers members until its fair-use limit; its fair-use rule is reported as 2 TB a day; listings disagree. Source: https://www.netcup.com/en/server/vps
+- **Hetzner CX22 / CAX11 (ARM)** (`hetzner`, DE): about EUR 4.59 / EUR 5.99 a month after the June 2026 increase; 20 TB/month out, about $0.27 per TB; covers about 66 members at 300 GB each (half on a 2-hop chain); 20 TB in EU locations, but 1 TB in the US and 0.5 TB in Singapore. Source: https://www.hetzner.com/cloud
+
+## Considered, not yet usable
+
+- **Flux (RunOnFlux)**: its apps are unprivileged containers copied onto several operators' machines and moved between them: UDP ports, a tunnel device and a fixed address (which a signed chain pins) are all unconfirmed; operators are unknown and can read the container's memory; many rent from the same hosts, so diversity must count the real host, not Flux. Source: https://docs.runonflux.com/fluxcloud/introduction
 
 ## Choosing
 

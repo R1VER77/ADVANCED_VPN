@@ -55,6 +55,7 @@ if name == "oci":
             ("network", "internet-gateway", "create"): {"id": "ocid1.igw.1"},
             ("network", "security-list", "create"): {"id": "ocid1.sl.1"},
             ("network", "subnet", "create"): {"id": "ocid1.subnet.1"},
+            ("network", "route-table", "create"): {"id": "ocid1.rt.own"},
             ("compute", "instance", "launch"): {"id": "ocid1.instance.1"}}
     if argv[:3] == ["compute", "instance", "launch"] and "--user-data-file" in argv:
         state["oci_user_data"] = open(oflag("--user-data-file")).read()
@@ -72,6 +73,12 @@ if name == "oci":
     if argv[:3] == ["bastion", "bastion", "get"]:
         every = [b for group in state.get("oci_bastions", {}).values() for b in group]
         out({"data": next(b for b in every if b["id"] == oflag("--bastion-id"))})
+    if argv[:3] == ["network", "vcn", "get"] and oflag("--vcn-id") == "ocid1.vcn.shared":
+        out({"data": {"display-name": "shared-vcn", "cidr-block": "10.0.0.0/16", "cidr-blocks": ["10.0.0.0/16"]}})
+    if argv[:3] == ["network", "subnet", "list"]:
+        out({"data": [{"cidr-block": "10.0.255.0/24"}, {"cidr-block": "10.0.0.0/24"}]})
+    if argv[:3] == ["network", "internet-gateway", "list"]:
+        out({"data": [{"id": "ocid1.igw.shared", "is-enabled": True}]})
     if tuple(argv[:3]) in made:
         out({"data": made[tuple(argv[:3])]})
     if argv[:3] == ["compute", "instance", "list-vnics"]:
@@ -640,6 +647,14 @@ class OciServerTests(Stubbed):
         with self.assertRaisesRegex(cloud.CloudError, "only in the home region eu-stockholm-1"):
             self.run_cli("oci", "server", "--apply", "--dry-run", "--allow-from", "16.0.0.9")
 
+    def test_an_a1_server_beyond_always_free_is_refused(self):
+        with self.assertRaisesRegex(cloud.CloudError, "at most 2 OCPU and 12 GB"):
+            self.run_cli("oci", "server", "--apply", "--dry-run", "--allow-from", "16.0.0.9", "--admin-ip", "18.0.0.4",
+                         "--shape", "arm", "--ocpus", "4", "--memory-gib", "24")  # fmt: skip
+        r = self.run_cli("oci", "server", "--apply", "--dry-run", "--allow-from", "16.0.0.9", "--admin-ip", "18.0.0.4",
+                         "--shape", "arm", "--ocpus", "2", "--memory-gib", "12")  # fmt: skip
+        self.assertIn("2 OCPU / 12 GB", json.dumps(r))
+
     def test_new_oci_server_is_hardened_at_first_boot(self):
         import retention
 
@@ -675,6 +690,28 @@ class OciServerTests(Stubbed):
         )
         self.assertTrue(rec["managed_list"] and rec["first_hop"])
         self.assertNotIn("PRIVATE", cloud.INVENTORY.read_text())
+
+    def test_a_server_in_a_shared_vcn_creates_and_removes_only_its_own_parts(self):
+        self.run_cli("oci", "server", "--apply", "--yes", "--allow-from", "16.0.0.9", "--admin-ip", "18.0.0.4",
+                     "--vcn", "ocid1.vcn.shared")  # fmt: skip
+        made = [c[:3] for c in self.oci_calls() if c[2] == "create"]
+        self.assertNotIn(["network", "vcn", "create"], made)
+        self.assertNotIn(["network", "internet-gateway", "create"], made)
+        subnet = self.oci_call("network", "subnet", "create")
+        self.assertEqual(subnet[subnet.index("--cidr-block") + 1], "10.0.254.0/24")  # free, inside, no overlap
+        self.assertEqual(subnet[subnet.index("--route-table-id") + 1], "ocid1.rt.own")
+        rt = self.oci_call("network", "route-table", "create")
+        self.assertEqual(json.loads(rt[rt.index("--route-rules") + 1])[0]["networkEntityId"], "ocid1.igw.shared")
+        state = json.loads(self.state.read_text())
+        state["oci_ops"] = []
+        self.state.write_text(json.dumps(state))
+        self.run_cli("oci", "server", "--teardown", "--yes")
+        deleting = [c[:3] for c in self.oci_calls() if c[2] in ("delete", "terminate")]
+        self.assertEqual(
+            deleting,
+            [["compute", "instance", "terminate"], ["network", "subnet", "delete"], ["network", "route-table", "delete"],
+             ["network", "security-list", "delete"]],
+        )  # fmt: skip
 
     def test_teardown_deletes_recorded_parts_in_order_and_checks_tags(self):
         self.run_cli("oci", "server", "--apply", "--yes", "--allow-from", "16.0.0.9", "--admin-ip", "18.0.0.4")
