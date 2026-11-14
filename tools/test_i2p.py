@@ -272,7 +272,11 @@ class TableWatchTests(unittest.TestCase):
         def nft(text, ns=None):
             loaded.append((text, ns))
             name = text.split("table inet ")[-1].split(" ")[0]
-            tables[name] = text.split("\n", 1)[1] if text.startswith("delete") else text
+            # Every load must first reset the table in the same transaction (add, delete),
+            # never append to whatever is there.
+            reset = avpnctl.reset_table(name)
+            assert text.startswith(reset), text
+            tables[name] = text[len(reset) :]
 
         return mock.patch.multiple(avpnctl, cmd=cmd, nft=nft), loaded
 
@@ -291,7 +295,7 @@ class TableWatchTests(unittest.TestCase):
             tables["advanced_vpn"] = "table inet advanced_vpn { policy accept }\n"
             watch.check()
             self.assertTrue(watch.reasons[("advanced_vpn", None)].startswith("altered (1 lines differ"))
-            self.assertTrue(loaded[-1][0].startswith("delete table inet advanced_vpn\n"))
+            self.assertTrue(loaded[-1][0].startswith(avpnctl.reset_table("advanced_vpn")))
             self.assertEqual(tables["advanced_vpn"], "table inet advanced_vpn { policy drop }\n")
 
     def test_a_restore_storm_fails_closed(self):

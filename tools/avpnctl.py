@@ -141,11 +141,17 @@ def nft(text, ns=None):
     cmd(*prefix, "/usr/sbin/nft", "-f", "-", input=text)
 
 
+def reset_table(name):
+    """nft text that empties table `inet name` whether or not it exists, inside the same
+    transaction as whatever follows. Never "list, then delete if present": two writers
+    (the supervisor and an app launch) could both see it absent and both add, and nft
+    appends, which doubled every kill-switch rule."""
+    return "add table inet %s\ndelete table inet %s\n" % (name, name)
+
+
 def replace_table(body, ns=None):
     """Atomically replace the `inet advanced_vpn` table with `body`."""
-    prefix = ["ip", "netns", "exec", ns] if ns else []
-    exists = cmd(*prefix, "/usr/sbin/nft", "list", "table", "inet", "advanced_vpn", check=False).returncode == 0
-    nft(("delete table inet advanced_vpn\n" if exists else "") + body, ns)
+    nft(reset_table("advanced_vpn") + body, ns)
 
 
 class TableWatch:
@@ -198,7 +204,8 @@ class TableWatch:
             self.restores = [t for t in self.restores if now - t < self.window] + [now]
             if len(self.restores) > self.limit:
                 raise RuntimeError("the kill switch keeps being altered by another process")
-            nft(("delete table inet %s\n" % name if current is not None else "") + expected, ns)
+            # Never conditional on the listing: a failed `nft list` would otherwise append a copy.
+            nft(reset_table(name) + expected, ns)
             restored.append((name, ns))
         return restored
 
@@ -310,8 +317,7 @@ def upstream_firewall(endpoint, iface):
     existing VPN), so if it drops the first hop is unreachable rather than reached
     directly. A separate table, so its drop is final whatever other tables accept.
     `iface=None` removes it."""
-    exists = cmd("/usr/sbin/nft", "list", "table", "inet", UPSTREAM_TABLE, check=False).returncode == 0
-    text = "delete table inet %s\n" % UPSTREAM_TABLE if exists else ""
+    text = reset_table(UPSTREAM_TABLE)
     if iface:
         host, port = endpoint.rsplit(":", 1)
         addr, pnum, dev = ipaddress.IPv4Address(host), int(port), valid_interface(iface)
@@ -320,8 +326,7 @@ def upstream_firewall(endpoint, iface):
             '  ip daddr %s udp dport %d oifname != "%s" drop\n'
             '  ip daddr %s tcp dport %d oifname != "%s" drop\n }\n}\n'
         ) % (UPSTREAM_TABLE, addr, pnum, dev, addr, pnum, dev)
-    if text:
-        nft(text)
+    nft(text)
 
 
 def upstream_route(iface, gateway=None):
@@ -376,14 +381,12 @@ def front_routes(snapshot_default, uid):
 def front_guard(profile):
     """A client behind an I2P front: install (or, without a front, remove) the table that
     keeps every packet of this host away from the entry's own address."""
-    exists = cmd("/usr/sbin/nft", "list", "table", "inet", FRONT_TABLE, check=False).returncode == 0
-    text = "delete table inet %s\n" % FRONT_TABLE if exists else ""
+    text = reset_table(FRONT_TABLE)
     if profile.get("front"):
         from i2p import front_firewall
 
         text += front_firewall(profile["network"]["relay_endpoint"].rsplit(":", 1)[0])
-    if text:
-        nft(text)
+    nft(text)
 
 
 def ensure_network(profile, state, whole=False, service_uid=0, upstream=None, upstream_gateway=None, front_uid=None):
@@ -913,9 +916,8 @@ def prepare_runtime(cfg, bin_dir, state, uid, gid, lab=False):
 def carrier_meter(profile, grant):
     """Install the nftables quota that meters carrier bytes against today's grant."""
     port = profile["carrier"]["listen_port"]
-    exists = cmd("/usr/sbin/nft", "list", "table", "inet", "advanced_vpn_meter", check=False).returncode == 0
     text = (
-        ("delete table inet advanced_vpn_meter\n" if exists else "")
+        reset_table("advanced_vpn_meter")
         + """table inet advanced_vpn_meter {
  quota carrier { over """
         + str(grant)
