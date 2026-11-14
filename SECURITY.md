@@ -19,11 +19,21 @@ inspection remains outside this boundary. Hardware sealing protects keys at
 rest. Private keys are generated on the device that uses them and never
 transferred; see the key-exposure table in README.md.
 
-Public defense machines have not undergone a project-specific traffic-analysis
-classifier evaluation. Review README.md, docs/DEPLOYMENT.md and the current
-docs/MANAGED_VALIDATION.md before use. The old docs/VALIDATION.md records v0.1.
+The traffic-analysis defenses are measured against published website-fingerprinting
+attacks (k-FP, Deep Fingerprinting, Tik-Tok) on real websites and in labs; the results,
+including where a rate class still leaks, are in docs/evidence/ (WF_REAL_PILOT.json,
+DAITA_LAB.json, MIX_LANE.json); README.md summarises the 30-site lab. These are this project's
+own measurements, not an independent evaluation. Review README.md, docs/DEPLOYMENT.md
+and the current docs/MANAGED_VALIDATION.md before use. The old docs/VALIDATION.md
+records v0.1.
 
 Do not publish private keys, credential handles, recovery identities, provider
-tokens, production packet captures or raw operational logs in issues. Use GitHub
-private vulnerability reporting if enabled; otherwise contact the repository
-owner privately. No external security audit is claimed.
+tokens, production packet captures or raw operational logs in issues.
+
+## Reporting a vulnerability
+
+Report privately through GitHub: the repository's Security tab, "Report a
+vulnerability". Please don't open a public issue for anything that could weaken
+users' privacy before a fix ships. Fixes are disclosed in the release notes of the
+release that carries them, with what was affected and what was not (for example the
+kill-switch race note in v0.10.1). No external security audit is claimed.
