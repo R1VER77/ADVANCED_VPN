@@ -92,11 +92,12 @@ what each can see.
 ## Install
 
 Each version tag publishes a release built by GitHub Actions: the binaries, tools and
-reference pages in one package, with SHA256 checksums. The repository is private, so
-download while signed in to GitHub:
+reference pages in one package, with SHA256 checksums. The repository is public, so no
+GitHub account is needed:
 
 ```bash
-gh release download v0.10.1 -R R1VER77/ADVANCED_VPN
+curl -fsSLO https://github.com/R1VER77/ADVANCED_VPN/releases/download/v0.10.1/SHA256SUMS
+curl -fsSLO https://github.com/R1VER77/ADVANCED_VPN/releases/download/v0.10.1/advanced-vpn-v0.10.1-x86_64-linux-gnu.tar.gz
 sha256sum -c SHA256SUMS
 mkdir advanced-vpn && tar -C advanced-vpn -xzf advanced-vpn-v0.10.1-x86_64-linux-gnu.tar.gz && cd advanced-vpn
 ```
