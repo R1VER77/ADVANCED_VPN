@@ -264,8 +264,8 @@ direction, ~342 GiB/month bidirectional), a continuous 24/7 stream fits well
 inside Oracle Cloud Always Free (~10 TiB/month egress) with ample relay
 headroom. On tighter monthly caps (such as the AWS 100 GiB/month free tier),
 operators pair `metered` with `--daily-limit-mib` or connect on demand. On
-unmetered VPS or fiber links, `standard` (3.1 Mbit/s), `fast` (24.7 Mbit/s),
-and `line` (115.3 Mbit/s; 2-hop app throughput measured on v0.7.0) raise application throughput by increasing the
+unmetered VPS or fiber links, `standard` (3.0 Mbit/s), `fast` (27.9 Mbit/s),
+and `line` (115.3 Mbit/s; 2-hop app throughput measured on v0.10.1) raise application throughput by increasing the
 constant wire rate rather than weakening the constant-rate invariant.
 
 ## 8. WF test program (acceptance gates)

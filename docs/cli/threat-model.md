@@ -129,11 +129,11 @@ random guess is right **3.3%** of the time (`1/30`).
 - Even when an external oracle tells the attacker the exact instant each page finished loading (`true end + 3 s`), accuracy drops from `42.7–81.3%` on the unshaped inner link to `20.0–21.3%` on the carrier.
 - All four rate classes keep the outer wire rate constant between idle and full-load transfers (`tools/throughput_bench.py --shape-idle 5`):
 
-| Rate class | Grid pacing | Wire rate / direction | 2-hop app throughput (measured on v0.7.0) | Cover volume / direction |
+| Rate class | Grid pacing | Wire rate / direction | 2-hop app throughput (v0.10.1, median of 3) | Cover volume / direction |
 |---|---|---|---|---|
-| `metered` (default) | 20 ms × 1 slot (50 pps) | ~0.55 Mbit/s | 0.25 Mbit/s | ~5.7 GiB/day (~171 GiB/mo) |
-| `standard` | 2 ms × 1 slot (500 pps) | ~5.5 Mbit/s | 3.1 Mbit/s | ~57 GiB/day |
-| `fast` | 2 ms × 8 staggered slots (4,000 pps) | ~44 Mbit/s | 24.7 Mbit/s | ~455 GiB/day |
+| `metered` (default) | 20 ms × 1 slot (50 pps) | ~0.55 Mbit/s | 0.30 Mbit/s | ~5.7 GiB/day (~171 GiB/mo) |
+| `standard` | 2 ms × 1 slot (500 pps) | ~5.5 Mbit/s | 3.0 Mbit/s | ~57 GiB/day |
+| `fast` | 2 ms × 8 staggered slots (4,000 pps) | ~44 Mbit/s | 27.9 Mbit/s | ~455 GiB/day |
 | `line` | 2 ms × 32 staggered slots (16,000 pps) | ~177 Mbit/s | 115.3 Mbit/s | ~1.8 TiB/day |
 
 A relay sends the stream on two links (back to you, and on to its next hop), so in a 2-

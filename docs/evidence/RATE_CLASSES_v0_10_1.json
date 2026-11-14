@@ -1,0 +1,297 @@
+{
+ "what": "Re-measurement of RATE_CLASSES.json on v0.10.1 (the first release with the HTTP/3 cloak on BBR), with an interleaved A/B against v0.9.1 (paced links, NewReno cloak) to isolate the congestion-controller change.",
+ "date": "2026-11-14",
+ "version": "0.10.1",
+ "binary": "advanced-vpn 0.10.1 (commit 1d88a80 code; later commits change tools/docs only)",
+ "tool": "tools/throughput_bench.py in disposable namespaces (unshare --user --map-root-user --map-auto --net --mount), SHA-checked transfers, same sizes as RATE_CLASSES.json",
+ "host": "one laptop, 8 CPUs; other load present (browser, three idle KVM guests); load average up to ~4 during part of the matrix",
+ "classes_2hop": {
+  "metered": {
+   "mbit_s_median": 0.3,
+   "mbit_s_runs": [
+    0.3,
+    0.3,
+    0.3
+   ],
+   "n": 3,
+   "sha256_verified": true,
+   "no_server_saw_payload": true,
+   "client_ip_only_at_first_hop": true,
+   "no_server_files_written": true,
+   "worst_idle_to_transfer_rate_change": 0
+  },
+  "standard": {
+   "mbit_s_median": 3.04,
+   "mbit_s_runs": [
+    3.03,
+    3.04,
+    3.09
+   ],
+   "n": 3,
+   "sha256_verified": true,
+   "no_server_saw_payload": true,
+   "client_ip_only_at_first_hop": true,
+   "no_server_files_written": true,
+   "worst_idle_to_transfer_rate_change": 0.0082
+  },
+  "fast": {
+   "mbit_s_median": 27.94,
+   "mbit_s_runs": [
+    27.74,
+    28.17,
+    27.94
+   ],
+   "n": 3,
+   "sha256_verified": true,
+   "no_server_saw_payload": true,
+   "client_ip_only_at_first_hop": true,
+   "no_server_files_written": true,
+   "worst_idle_to_transfer_rate_change": 0.0107
+  },
+  "line": {
+   "mbit_s_median": 115.29,
+   "mbit_s_runs": [
+    115.29,
+    117.24,
+    114.9
+   ],
+   "n": 3,
+   "sha256_verified": true,
+   "no_server_saw_payload": true,
+   "client_ip_only_at_first_hop": true,
+   "no_server_files_written": true,
+   "worst_idle_to_transfer_rate_change": 0.0149
+  }
+ },
+ "paced_link_into_exit": {
+  "metered_2hop": {
+   "mbit_s_median": 0.29,
+   "mbit_s_runs": [
+    0.27,
+    0.31,
+    0.29
+   ],
+   "n": 3,
+   "sha256_verified": true,
+   "no_server_saw_payload": true,
+   "client_ip_only_at_first_hop": true,
+   "no_server_files_written": true,
+   "worst_idle_to_transfer_rate_change": 0
+  },
+  "fast_2hop": {
+   "mbit_s_median": 27.97,
+   "mbit_s_runs": [
+    27.6,
+    27.97,
+    28.24
+   ],
+   "n": 3,
+   "sha256_verified": true,
+   "no_server_saw_payload": true,
+   "client_ip_only_at_first_hop": true,
+   "no_server_files_written": true,
+   "worst_idle_to_transfer_rate_change": 0.0004
+  },
+  "fast_3hop": {
+   "mbit_s_median": 24.46,
+   "mbit_s_runs": [
+    24.52,
+    23.4,
+    24.46
+   ],
+   "n": 3,
+   "sha256_verified": true,
+   "no_server_saw_payload": true,
+   "client_ip_only_at_first_hop": true,
+   "no_server_files_written": true,
+   "worst_idle_to_transfer_rate_change": 0.0005
+  }
+ },
+ "line_by_hops_warm": {
+  "1_hop": {
+   "mbit_s_median": 123.52,
+   "mbit_s_runs": [
+    123.68,
+    122.75,
+    126.51,
+    122.93,
+    123.52
+   ],
+   "n": 5,
+   "sha256_verified": true,
+   "no_server_saw_payload": true,
+   "client_ip_only_at_first_hop": true,
+   "no_server_files_written": true
+  },
+  "2_hop": {
+   "mbit_s_median": 115.29,
+   "mbit_s_runs": [
+    115.29,
+    117.24,
+    114.9
+   ],
+   "n": 3,
+   "sha256_verified": true,
+   "no_server_saw_payload": true,
+   "client_ip_only_at_first_hop": true,
+   "no_server_files_written": true
+  },
+  "3_hop": {
+   "mbit_s_median": 115.03,
+   "mbit_s_runs": [
+    106.12,
+    115.03,
+    116.62,
+    113.45,
+    123.1
+   ],
+   "n": 5,
+   "sha256_verified": true,
+   "no_server_saw_payload": true,
+   "client_ip_only_at_first_hop": true,
+   "no_server_files_written": true
+  }
+ },
+ "ab_bbr_vs_newreno": {
+  "method": "line class, 32 MiB, runs alternating v0.9.1 / v0.10.1 on the same host; 'warm' = --shape-idle 5 (5 s idle before the transfer), 'cold' = transfer right after the tunnel is up",
+  "warm_3hop": {
+   "v0.9.1": {
+    "mbit_s_median": 106.8,
+    "mbit_s_runs": [
+     111.17,
+     102.76,
+     110.63,
+     106.8,
+     105.94
+    ],
+    "n": 5,
+    "sha256_verified": true,
+    "no_server_saw_payload": true,
+    "client_ip_only_at_first_hop": true,
+    "no_server_files_written": true
+   },
+   "v0.10.1": {
+    "mbit_s_median": 115.03,
+    "mbit_s_runs": [
+     106.12,
+     115.03,
+     116.62,
+     113.45,
+     123.1
+    ],
+    "n": 5,
+    "sha256_verified": true,
+    "no_server_saw_payload": true,
+    "client_ip_only_at_first_hop": true,
+    "no_server_files_written": true
+   }
+  },
+  "cold_3hop": {
+   "v0.9.1": {
+    "mbit_s_median": 87.75,
+    "mbit_s_runs": [
+     112.73,
+     88.97,
+     77.09,
+     86.53
+    ],
+    "n": 4,
+    "sha256_verified": true,
+    "no_server_saw_payload": true,
+    "client_ip_only_at_first_hop": true,
+    "no_server_files_written": true
+   },
+   "v0.10.1": {
+    "mbit_s_median": 116.81,
+    "mbit_s_runs": [
+     115.3,
+     116.73,
+     116.88,
+     118.5
+    ],
+    "n": 4,
+    "sha256_verified": true,
+    "no_server_saw_payload": true,
+    "client_ip_only_at_first_hop": true,
+    "no_server_files_written": true
+   }
+  },
+  "warm_1hop": {
+   "v0.9.1": {
+    "mbit_s_median": 123.37,
+    "mbit_s_runs": [
+     124.04,
+     122.93,
+     123.13,
+     123.78,
+     123.37
+    ],
+    "n": 5,
+    "sha256_verified": true,
+    "no_server_saw_payload": true,
+    "client_ip_only_at_first_hop": true,
+    "no_server_files_written": true
+   },
+   "v0.10.1": {
+    "mbit_s_median": 123.52,
+    "mbit_s_runs": [
+     123.68,
+     122.75,
+     126.51,
+     122.93,
+     123.52
+    ],
+    "n": 5,
+    "sha256_verified": true,
+    "no_server_saw_payload": true,
+    "client_ip_only_at_first_hop": true,
+    "no_server_files_written": true
+   }
+  },
+  "reading": "BBR is not a regression. On 3 hops it is faster warm (median 115.0 vs 106.8 Mbit/s, 4 of 5 pairs) and much steadier cold (115.3-118.5 vs 77.1-112.7). On 1 hop the two are equal (123.5 vs 123.4)."
+ },
+ "matrix_cold_runs_discarded": {
+  "runs": {
+   "line_1hop": {
+    "mbit_s_median": 105.94,
+    "mbit_s_runs": [
+     105.94,
+     124.71,
+     104.0
+    ],
+    "n": 3,
+    "sha256_verified": true,
+    "no_server_saw_payload": true,
+    "client_ip_only_at_first_hop": true,
+    "no_server_files_written": true
+   },
+   "line_2hop": {
+    "mbit_s_median": 120.09,
+    "mbit_s_runs": [
+     96.77,
+     120.09,
+     122.47
+    ],
+    "n": 3,
+    "sha256_verified": true,
+    "no_server_saw_payload": true,
+    "client_ip_only_at_first_hop": true,
+    "no_server_files_written": true
+   },
+   "line_3hop": {
+    "mbit_s_median": 73.06,
+    "mbit_s_runs": [
+     84.15,
+     73.06,
+     67.65
+    ],
+    "n": 3,
+    "sha256_verified": true,
+    "no_server_saw_payload": true,
+    "client_ip_only_at_first_hop": true,
+    "no_server_files_written": true
+   }
+  },
+  "why": "Run earlier without a warm-up while the host was loaded; 3-hop results fell run after run (84, 73, 68). The interleaved cold A/B under the same settings gave v0.10.1 115.3-118.5, so these are host contention, not the code. Kept here for completeness, not used in the docs."
+ }
+}

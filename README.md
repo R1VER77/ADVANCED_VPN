@@ -28,14 +28,14 @@ WireGuard is the outer carrier, implemented by **GotaTun 0.10.2**, with its actu
 
 There is one defense posture: **strong**. Your link to the first hop runs a **bidirectional constant-rate packet stream** (`src/daita.rs`: `stream_grid` + self-sustaining `cover` under GotaTun's strict-blocking scheduler, `strict: true`, `Replace: true`), and since v0.8.0 every link between two servers runs the same invariant as paced, AES-256-GCM-encrypted fixed-size cells (`src/link.rs`), each hop on its own clock, keyed by an ephemeral X25519 + ML-KEM-768 exchange every two minutes, so a recording of a link stays sealed even against someone who later steals its pre-shared key. Every data packet is padded to constant size (1380 bytes inside WireGuard, 1420 bytes on the outer cloak), and every clock tick sends either a queued real packet or an indistinguishable decoy packet — so the outer packet rate and packet size stay flat: between idle and full-speed transfers the wire packet rate changed by 0–3.7% in every measured class and hop count (`docs/evidence/RATE_CLASSES.json`; CI fails above 15%). Four rate classes, signed into the chain (`avpn init --rate auto|metered|standard|fast|line`), trade cover bandwidth for application throughput without weakening the constant-rate invariant:
 
-| Rate class | Grid pacing | Wire rate / direction | 2-hop app throughput (measured on v0.7.0) | Cover volume / direction |
+| Rate class | Grid pacing | Wire rate / direction | 2-hop app throughput (v0.10.1, median of 3) | Cover volume / direction |
 |---|---|---|---|---|
-| `metered` (default) | 20 ms × 1 slot (50 pps) | ~0.55 Mbit/s | 0.25 Mbit/s | ~5.7 GiB/day (~171 GiB/mo) |
-| `standard` | 2 ms × 1 slot (500 pps) | ~5.5 Mbit/s | 3.1 Mbit/s | ~57 GiB/day |
-| `fast` | 2 ms × 8 staggered slots (4,000 pps) | ~44 Mbit/s | 24.7 Mbit/s | ~455 GiB/day |
+| `metered` (default) | 20 ms × 1 slot (50 pps) | ~0.55 Mbit/s | 0.30 Mbit/s | ~5.7 GiB/day (~171 GiB/mo) |
+| `standard` | 2 ms × 1 slot (500 pps) | ~5.5 Mbit/s | 3.0 Mbit/s | ~57 GiB/day |
+| `fast` | 2 ms × 8 staggered slots (4,000 pps) | ~44 Mbit/s | 27.9 Mbit/s | ~455 GiB/day |
 | `line` | 2 ms × 32 staggered slots (16,000 pps) | ~177 Mbit/s | 115.3 Mbit/s | ~1.8 TiB/day |
 
-Wire rate and cover volume follow from the grid. Throughput was measured on v0.7.0 in the namespace benchmark (`tools/throughput_bench.py`, `docs/evidence/RATE_CLASSES.json`, 11 Nov 2026). With v0.8.0's paced server links, 2 hops measured 0.29 Mbit/s (`metered`) and 28.2 Mbit/s (`fast`) (same file, `inner_link`). v0.10.0 moved the camouflage's QUIC to BBR congestion control after these runs; re-measuring is pending.
+Wire rate and cover volume follow from the grid. Throughput was measured on v0.10.1 (14 Nov 2026) in the namespace benchmark (`tools/throughput_bench.py`, SHA-checked, `docs/evidence/RATE_CLASSES_v0_10_1.json`); every run kept the wire rate within 1.5% between idle and transfer. The paced link into the exit carries 0.29 Mbit/s (`metered`) and 28.0 Mbit/s (`fast`) on 2 hops, and 24.5 Mbit/s (`fast`) on 3. An interleaved A/B against v0.9.1 shows the move to BBR congestion control (v0.10.0) cost nothing: at `line` on 3 hops it is faster (median 115.0 vs 106.8 Mbit/s) and much steadier from a cold start (115–119 vs 77–113). Earlier figures: v0.7.0 in `docs/evidence/RATE_CLASSES.json`.
 
 Website fingerprinting, against a 500-tree random-forest classifier across 30 synthetic sites (`tools/daita_lab.py`, `tools/wf_attack.py`, chance = **3.3%**, fixed 6 s observation window):
 - **v0.7.0** (11 Nov 2026): the camouflaged carrier scored **3.3%** on `metered` and **1.7%** on `fast`, while the link between servers, then unshaped, scored **27.0–74.7%**.
@@ -303,13 +303,13 @@ Traffic stays blocked while you switch. In single-hop mode, give `--exit` the ex
   --request client=client.req --request relay=relay.req --request exit=exit.req --request exit2=exit2.req
 ```
 
-Measured on v0.7.0 in the namespace benchmark (`tools/throughput_bench.py --rate line --mib 32`, SHA-checked; `docs/evidence/RATE_CLASSES.json`, 11 Nov 2026):
+Measured on v0.10.1 in the namespace benchmark (`tools/throughput_bench.py --rate line --mib 32 --shape-idle 5`, SHA-checked, medians of 3–5 runs; `docs/evidence/RATE_CLASSES_v0_10_1.json`, 14 Nov 2026):
 
 | Hops | Throughput (`line` class) |
 |---|---|
-| 1 | about 122 Mbit/s |
+| 1 | about 124 Mbit/s |
 | 2 | about 115 Mbit/s |
-| 3 | about 112 Mbit/s |
+| 3 | about 115 Mbit/s |
 
 Every run also proves two things on the wire. Raw packet observers on each server's ingress never see the payload, and only the first hop ever sees the client's address. The same runs check that no server writes anything persistent while carrying traffic. CI enforces all three.
 
