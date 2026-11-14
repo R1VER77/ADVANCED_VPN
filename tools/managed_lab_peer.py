@@ -2,9 +2,19 @@
 
 import argparse
 import json
+import os
 import socket
 import ssl
 from pathlib import Path
+
+
+def publish(path, value):
+    """Replace `path` with `value` as JSON in one step. These files are rewritten while
+    the test reads them; a plain write_text truncates first, and a read in that gap got
+    an empty file (seen in CI as a JSONDecodeError on physical.json)."""
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(value))
+    os.replace(tmp, path)
 
 
 def read_exact(s, n):
@@ -61,7 +71,7 @@ def quic_sizes(iface, out):
         try:
             b = s.recv(65536)
         except socket.timeout:
-            out.write_text(json.dumps(sizes))
+            publish(out, sizes)
             continue
         if len(b) < 42 or b[12:14] != b"\x08\x00" or b[23] != 17:
             continue
@@ -98,7 +108,7 @@ def main():
                     b = answer(q)
                     tls.sendall(len(b).to_bytes(2, "big") + b)
                     count += 1
-                    (a.state / "dot.json").write_text(json.dumps(dict(queries=count, tls=True)))
+                    publish(a.state / "dot.json", dict(queries=count, tls=True))
             except (OSError, ValueError):
                 c.close()
     elif a.role == "echo":
@@ -140,15 +150,14 @@ def main():
                 if f.tell() < 16 * 1024 * 1024:
                     f.write(b)
                     f.flush()
-                (a.state / "physical.json").write_text(
-                    json.dumps(
-                        dict(
-                            packets=n,
-                            wireguard_messages=wireguard,
-                            quic_packets=quic,
-                            outer_sizes={str(k): sizes.count(k) for k in sorted(set(sizes))},
-                        )
-                    )
+                publish(
+                    a.state / "physical.json",
+                    dict(
+                        packets=n,
+                        wireguard_messages=wireguard,
+                        quic_packets=quic,
+                        outer_sizes={str(k): sizes.count(k) for k in sorted(set(sizes))},
+                    ),
                 )
 
 
