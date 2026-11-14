@@ -4,6 +4,7 @@
 Requires unshare -Urnm. Refuses host root or any inherited network interface.
 """
 
+import difflib
 import json
 import os
 from pathlib import Path
@@ -493,11 +494,15 @@ def main():
 
         def restored_within(expected, limit=8):
             t0 = time.monotonic()
+            seen = None
             while time.monotonic() - t0 < limit:
-                if app_table() == expected:
+                seen = app_table()
+                if seen == expected:
                     return round(time.monotonic() - t0, 2)
                 time.sleep(0.2)
-            raise RuntimeError("the kill switch was not restored")
+            diff = "\n".join(difflib.unified_diff((expected or "").splitlines(), (seen or "<absent>").splitlines(),
+                                                  "expected", "last seen", lineterm=""))  # fmt: skip
+            raise RuntimeError("the kill switch was not restored\n" + diff)
 
         expected_table = app_table()
         assert expected_table and "policy drop" in expected_table, expected_table

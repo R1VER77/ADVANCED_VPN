@@ -286,9 +286,11 @@ class TableWatchTests(unittest.TestCase):
             self.assertEqual(watch.check(), [])  # untouched, and an absent table is not watched
             del tables["advanced_vpn"]
             self.assertEqual(watch.check(), [("advanced_vpn", None)])
+            self.assertTrue(watch.reasons[("advanced_vpn", None)].startswith("absent"))
             self.assertEqual(tables["advanced_vpn"], "table inet advanced_vpn { policy drop }\n")
             tables["advanced_vpn"] = "table inet advanced_vpn { policy accept }\n"
             watch.check()
+            self.assertTrue(watch.reasons[("advanced_vpn", None)].startswith("altered (1 lines differ"))
             self.assertTrue(loaded[-1][0].startswith("delete table inet advanced_vpn\n"))
             self.assertEqual(tables["advanced_vpn"], "table inet advanced_vpn { policy drop }\n")
 

@@ -162,12 +162,17 @@ class TableWatch:
             if listing is not None:
                 self.expected[(name, ns)] = listing
         self.limit, self.window, self.restores = limit, window, []
+        # Why each table was last restored (absent, altered, or what `nft list` said), so
+        # a log line can tell a real deletion from a failed listing.
+        self.reasons = {}
+        self._stderr = ""
 
-    @staticmethod
-    def listing(name, ns=None):
+    def listing(self, name, ns=None):
         """The table as `nft list` prints it (in namespace `ns`), or None if absent."""
         prefix = ["ip", "netns", "exec", ns] if ns else []
         r = cmd(*prefix, "/usr/sbin/nft", "list", "table", "inet", name, check=False)
+        err = getattr(r, "stderr", "")
+        self._stderr = "" if r.returncode == 0 or not isinstance(err, str) else err.strip()
         return r.stdout if r.returncode == 0 else None
 
     def check(self, now=None):
@@ -178,6 +183,18 @@ class TableWatch:
             current = self.listing(name, ns)
             if current == expected:
                 continue
+            if current is None:
+                # nft prints "Error: ..." then the command and a ^^^ marker: keep the error.
+                lines = [x.strip() for x in self._stderr.splitlines() if x.strip()]
+                first = next((x for x in lines if x.startswith("Error")), lines[0] if lines else "no output")
+                self.reasons[(name, ns)] = "absent (%s)" % first[:160]
+            else:
+                changed = sum(1 for a, b in zip(current.splitlines(), expected.splitlines(), strict=False) if a != b)
+                self.reasons[(name, ns)] = "altered (%d lines differ, %d vs %d lines)" % (
+                    changed + abs(len(current.splitlines()) - len(expected.splitlines())),
+                    len(current.splitlines()),
+                    len(expected.splitlines()),
+                )
             self.restores = [t for t in self.restores if now - t < self.window] + [now]
             if len(self.restores) > self.limit:
                 raise RuntimeError("the kill switch keeps being altered by another process")
@@ -1119,7 +1136,11 @@ def supervise(state, bin_dir, lab=False, whole=False):
                 last_table_check = time.monotonic()
                 try:
                     for name, ns in tables.check():
-                        print("kill switch table %s restored%s" % (name, " in " + ns if ns else ""), flush=True)
+                        print(
+                            "kill switch table %s restored%s: was %s"
+                            % (name, " in " + ns if ns else "", tables.reasons.get((name, ns), "?")),
+                            flush=True,
+                        )
                 except RuntimeError:
                     # Fail closed: no data plane while the kill switch cannot be held.
                     firewall_tampered = True

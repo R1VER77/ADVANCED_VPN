@@ -180,7 +180,11 @@ pub fn tls_hybrid<D>(c: &rustls::ConnectionCommon<D>) -> bool {
 /// full WireGuard datagram, a 4 MiB initial window so high-rate streams (`fast` / `line`)
 /// do not self-drop during slow-start, keep-alives through NAT, and one packet size for all data.
 pub fn transport() -> Arc<TransportConfig> {
-    let mut cc = quinn::congestion::NewRenoConfig::default();
+    // BBR, not loss-based NewReno: on real-systemd KVM guests a few early losses
+    // collapsed NewReno's window to ~3 packets and datagram sends stalled (about one
+    // per second), which the client's carrier watch then turned into a restart loop.
+    // Measured 2026-11-14, 3 runs x 3 fetches: NewReno 4/9 fetches, BBR 9/9.
+    let mut cc = quinn::congestion::BbrConfig::default();
     cc.initial_window(4 << 20);
     let mut ack = quinn::AckFrequencyConfig::default();
     ack.ack_eliciting_threshold(VarInt::from_u32(64))
@@ -1347,6 +1351,97 @@ mod tests {
                 .await
                 .is_err(),
             "a front client never tries QUIC"
+        );
+    }
+
+    /// A UDP path between `client` and `server`: `delay` one way, and server->client
+    /// packets dropped while `lossy` says so (by packet index). Returns the address the
+    /// client should dial.
+    async fn lossy_path(server: SocketAddr, delay: Duration, lossy: fn(u64) -> bool) -> SocketAddr {
+        let outside = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
+        let inside = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
+        let at = outside.local_addr().unwrap();
+        let client = Arc::new(std::sync::Mutex::new(None::<SocketAddr>));
+        let (o, i, c) = (outside.clone(), inside.clone(), client.clone());
+        tokio::spawn(async move {
+            let mut buf = vec![0u8; 65536];
+            while let Ok((n, from)) = o.recv_from(&mut buf).await {
+                *c.lock().unwrap() = Some(from);
+                let (i, b) = (i.clone(), buf[..n].to_vec());
+                tokio::spawn(async move {
+                    tokio::time::sleep(delay).await;
+                    let _ = i.send_to(&b, server).await;
+                });
+            }
+        });
+        tokio::spawn(async move {
+            let mut buf = vec![0u8; 65536];
+            let mut index = 0u64;
+            while let Ok((n, _)) = inside.recv_from(&mut buf).await {
+                index += 1;
+                let Some(to) = *client.lock().unwrap() else {
+                    continue;
+                };
+                if lossy(index) {
+                    continue;
+                }
+                let (o, b) = (outside.clone(), buf[..n].to_vec());
+                tokio::spawn(async move {
+                    tokio::time::sleep(delay).await;
+                    let _ = o.send_to(&b, to).await;
+                });
+            }
+        });
+        at
+    }
+
+    /// Regression (KVM stall, 14 Nov 2026): after a burst of early losses the sender's
+    /// window must recover, so a steady datagram stream keeps flowing. With loss-based
+    /// NewReno the window collapsed and datagram sends stalled.
+    #[tokio::test]
+    async fn datagram_flow_recovers_after_early_losses() {
+        let (cert, k, pin) = test_cert();
+        let server = Endpoint::server(
+            server_config(cert, k).unwrap(),
+            "127.0.0.1:0".parse().unwrap(),
+        )
+        .unwrap();
+        // 20 ms each way; every 3rd server->client packet among the first 300 is lost.
+        let path = lossy_path(
+            server.local_addr().unwrap(),
+            Duration::from_millis(20),
+            |i| i <= 300 && i % 3 == 0,
+        )
+        .await;
+        let accept = tokio::spawn(async move {
+            let conn = server.accept().await.unwrap().await.unwrap();
+            (server, conn)
+        });
+        let (_ce, client) = raw(path, pin).await.unwrap();
+        let (_se, conn) = accept.await.unwrap();
+        // The server streams carrier-sized datagrams at 500/s (about 4.6 Mbit/s) for 4 s.
+        let sender = tokio::spawn(async move {
+            let mut tick = tokio::time::interval(Duration::from_millis(2));
+            for _ in 0..2000 {
+                tick.tick().await;
+                let _ = conn.send_datagram(Bytes::from(vec![0x33; CARRIER_DATAGRAM]));
+            }
+            conn
+        });
+        let start = tokio::time::Instant::now();
+        let mut late = 0u32;
+        while start.elapsed() < Duration::from_secs(4) {
+            let got =
+                tokio::time::timeout(Duration::from_millis(200), client.read_datagram()).await;
+            if matches!(got, Ok(Ok(_))) && start.elapsed() >= Duration::from_secs(2) {
+                late += 1;
+            }
+        }
+        let _conn = sender.await.unwrap();
+        // The last 2 s offered about 1000 datagrams on a clean path.
+        assert!(
+            late >= 800,
+            "only {late} of ~1000 datagrams arrived once the losses had stopped"
         );
     }
 }
