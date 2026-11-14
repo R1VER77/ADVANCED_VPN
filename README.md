@@ -122,7 +122,9 @@ built on Ubuntu 22.04, so they run on Ubuntu 22.04+ and Debian 12/13 (x86-64).
 
 To cut a release: bump `version` in `Cargo.toml`, commit, and push a matching tag
 (`git tag -s v0.10.1 && git push origin v0.10.1`). The release workflow builds only if the
-tag matches the version and that commit's `verify` run passed.
+tag matches the version and every `verify` run on that commit passed: the tag's own run
+and the branch's. A cancelled run doesn't block, and a re-run that passes counts.
+A public tag is never moved; a failed release is followed by the next patch version.
 
 ## Build and verify
 

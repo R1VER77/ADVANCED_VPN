@@ -1,6 +1,6 @@
 name: release
 # A version tag (vX.Y.Z) that matches Cargo.toml builds the release package on GitHub,
-# but only for a commit whose `verify` run passed. The package is smoke-tested by its
+# but only for a commit on which every `verify` run passed. The package is smoke-tested by its
 # own user installation, then published with SHA256 checksums. Build-provenance
 # attestations need GitHub Enterprise Cloud for private repositories, so the release
 # notes record the exact commit and verify run instead.
@@ -27,20 +27,10 @@ jobs:
         run: |
           version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)
           test "$TAG" = "v$version" || { echo "tag $TAG does not match Cargo.toml version $version"; exit 1; }
-      - name: Only release a commit whose verify run passed
-        run: |
-          for _ in $(seq 1 90); do
-            result=$(gh run list -R "$GITHUB_REPOSITORY" --workflow verify.yml --commit "$GITHUB_SHA" \
-              --json status,conclusion,url --jq '[.[] | select(.status == "completed")] | map(select(.conclusion == "success")) | .[0].url // ""')
-            if [ -n "$result" ]; then echo "verify passed: $result"; echo "VERIFY_URL=$result" >> "$GITHUB_ENV"; exit 0; fi
-            failed=$(gh run list -R "$GITHUB_REPOSITORY" --workflow verify.yml --commit "$GITHUB_SHA" \
-              --json status,conclusion --jq '[.[] | select(.status == "completed" and .conclusion != "success")] | length')
-            pending=$(gh run list -R "$GITHUB_REPOSITORY" --workflow verify.yml --commit "$GITHUB_SHA" \
-              --json status --jq '[.[] | select(.status != "completed")] | length')
-            if [ "$pending" = "0" ] && [ "$failed" != "0" ]; then echo "verify failed for $GITHUB_SHA"; exit 1; fi
-            sleep 30
-          done
-          echo "verify did not finish for $GITHUB_SHA"; exit 1
+      - name: Only release a commit on which every verify run passed
+        # The tag's own run must pass and no other verify run on the commit may fail
+        # (a cancelled one does not block). See tools/release_gate.py.
+        run: python3 tools/release_gate.py "$GITHUB_REPOSITORY" "$GITHUB_SHA" "$TAG"
       - name: Build
         run: |
           rustup toolchain install 1.95.0 --profile minimal
