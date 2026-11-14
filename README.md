@@ -102,6 +102,12 @@ sha256sum -c SHA256SUMS
 mkdir advanced-vpn && tar -C advanced-vpn -xzf advanced-vpn-v0.10.1-x86_64-linux-gnu.tar.gz && cd advanced-vpn
 ```
 
+Releases are built from signed tags. Releases after v0.10.1 also carry a signed
+build-provenance attestation (Sigstore) that names this repository, its release
+workflow and the exact commit. The release workflow checks it before publishing; check
+it yourself with
+`gh attestation verify FILE -R R1VER77/ADVANCED_VPN --signer-workflow R1VER77/ADVANCED_VPN/.github/workflows/release.yml`.
+
 There are two ways to install from there:
 - **Command line only, for you (an operator machine):** `python3 tools/install.py --user`. It needs no root and starts no services. `avpn` goes in `~/.local/bin`, with its own hash-locked Python environment. It covers `avpn help`, `init` (with the Nitrokey), `cloud`, `mesh` and the read-only commands. Run it again to upgrade; `--user --uninstall` removes it.
 - **The VPN itself (a client or a server), in one step:**

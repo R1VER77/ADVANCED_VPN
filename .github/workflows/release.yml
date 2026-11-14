@@ -1,9 +1,9 @@
 name: release
 # A version tag (vX.Y.Z) that matches Cargo.toml builds the release package on GitHub,
 # but only for a commit on which every `verify` run passed. The package is smoke-tested by its
-# own user installation, then published with SHA256 checksums. Build-provenance
-# attestations need GitHub Enterprise Cloud for private repositories, so the release
-# notes record the exact commit and verify run instead.
+# own user installation, attested (signed SLSA build provenance, checked before
+# publishing), then published with SHA256 checksums. The notes also record the exact
+# commit and verify run.
 on:
   push:
     tags: ['v*']
@@ -18,6 +18,9 @@ jobs:
     permissions:
       contents: write
       actions: read
+      # Signed build provenance (Sigstore public-good instance; the repository is public).
+      id-token: write
+      attestations: write
     env:
       GH_TOKEN: ${{ github.token }}
       TAG: ${{ github.ref_name }}
@@ -68,12 +71,29 @@ jobs:
           sudo avpn --json info | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["info"]["role"] == "client", d'
           test "$(systemctl is-enabled advanced-vpn.service || true)" = disabled
           sudo python3 tools/install.py --apply --role client --protect none --insecure-plaintext-keys | grep -q "already has keys"
+      - name: Attest build provenance
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with:
+          subject-path: dist/*.tar.gz
+          # Storage records exist only for organisation-owned repositories and are not
+          # needed to verify; skipping them keeps the job off artifact-metadata: write.
+          create-storage-record: false
+      - name: The attestation verifies before anything is published
+        run: |
+          gh attestation verify dist/*.tar.gz -R "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml"
       - name: Publish
         run: |
           cat > notes.md <<NOTES
           Built by GitHub Actions on Ubuntu 22.04 from commit \`$GITHUB_SHA\` (verify passed: $VERIFY_URL).
 
-          Download it with, for example, \`gh release download $TAG -R $GITHUB_REPOSITORY\`.
+          Download it with \`curl -fsSLO\` from this page's asset links (no GitHub account
+          needed), or \`gh release download $TAG -R $GITHUB_REPOSITORY\`.
+
+          Check where it came from: the package carries a signed build-provenance
+          attestation (Sigstore) naming this repository, its release workflow and commit
+          \`$GITHUB_SHA\`. Verify it with
+          \`gh attestation verify advanced-vpn-$TAG-x86_64-linux-gnu.tar.gz -R $GITHUB_REPOSITORY --signer-workflow $GITHUB_REPOSITORY/.github/workflows/release.yml\`.
 
           Upgrading: every chain now pads every hop to constant cells, and a chain signed
           by an earlier release is refused at connect. Re-sign it (\`avpn cloud chain --apply\`,
