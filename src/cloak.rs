@@ -350,6 +350,92 @@ pub struct Stats {
     pub received: AtomicU64,
     /// WireGuard datagrams dropped (no session, or the session refused them).
     pub dropped: AtomicU64,
+    /// The wire clock's timing, when it is on (client only, RAM only).
+    pub clock: ClockTrace,
+}
+
+/// How the wire clock kept time: totals, and the same per 100 ms for the last two minutes,
+/// so a measurement can line them up with its own windows (see `throughput_bench.py
+/// --cpu-probe`). Recorded only while the experimental clock runs.
+#[derive(Debug, Default)]
+pub struct ClockTrace {
+    buckets: Mutex<std::collections::VecDeque<ClockBucket>>,
+    total: Mutex<ClockBucket>,
+    queue_max: AtomicU64,
+}
+
+/// One 100 ms of the wire clock (CLOCK_MONOTONIC), or the totals.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct ClockBucket {
+    /// CLOCK_MONOTONIC / 100 ms (0 in the totals).
+    pub at: u64,
+    /// Slots given a datagram.
+    pub fed: u64,
+    /// Of those, decoys.
+    pub decoys: u64,
+    /// Slots skipped: the feeder was more than a step behind them.
+    pub skipped: u64,
+    /// Packets that reached the socket after their slot (sent at once).
+    pub late: u64,
+    /// The latest of those, in microseconds after its slot.
+    pub late_max_us: u64,
+    /// Full-size packets that found no slot waiting (sent at once).
+    pub unslotted: u64,
+}
+
+/// Two minutes of 100 ms buckets.
+const CLOCK_BUCKETS: usize = 1200;
+
+impl ClockTrace {
+    fn record(&self, now_ns: u64, f: impl Fn(&mut ClockBucket)) {
+        let at = now_ns / 100_000_000;
+        f(&mut self.total.lock().unwrap());
+        let mut b = self.buckets.lock().unwrap();
+        if b.back().is_none_or(|x| x.at != at) {
+            if b.len() >= CLOCK_BUCKETS {
+                b.pop_front();
+            }
+            b.push_back(ClockBucket {
+                at,
+                ..Default::default()
+            });
+        }
+        f(b.back_mut().unwrap());
+    }
+
+    fn queue(&self, len: usize) {
+        self.queue_max.fetch_max(len as u64, Ordering::Relaxed);
+    }
+
+    /// The totals and the trace, or `None` when the clock never ran.
+    pub fn json(&self) -> Option<serde_json::Value> {
+        let t = *self.total.lock().unwrap();
+        if t == ClockBucket::default() {
+            return None;
+        }
+        let row = |b: &ClockBucket| {
+            [
+                b.at,
+                b.fed,
+                b.decoys,
+                b.skipped,
+                b.late,
+                b.late_max_us,
+                b.unslotted,
+            ]
+        };
+        Some(serde_json::json!({
+            "fed": t.fed,
+            "decoys": t.decoys,
+            "skipped": t.skipped,
+            "late": t.late,
+            "late_max_us": t.late_max_us,
+            "unslotted": t.unslotted,
+            "slot_queue_max": self.queue_max.load(Ordering::Relaxed),
+            "trace_columns": ["at_100ms", "fed", "decoys", "skipped", "late", "late_max_us", "unslotted"],
+            "trace": self.buckets.lock().unwrap().iter().map(row).collect::<Vec<_>>(),
+        }))
+    }
 }
 
 impl Stats {
@@ -366,6 +452,7 @@ impl Stats {
             "sent": n(&self.sent),
             "received": n(&self.received),
             "dropped": n(&self.dropped),
+            "clock": self.clock.json(),
         })
     }
 }
@@ -740,7 +827,7 @@ async fn connect_clocked(
     let slots: Arc<Mutex<std::collections::VecDeque<u64>>> = Arc::default();
     let queue: Arc<Mutex<std::collections::VecDeque<Bytes>>> = Arc::default();
     let mut endpoint = match clock {
-        Some(_) => paced_endpoint(slots.clone())?,
+        Some(_) => paced_endpoint(slots.clone(), stats.clone())?,
         None => Endpoint::client("0.0.0.0:0".parse()?)?,
     };
     endpoint.set_default_client_config(client_config(spki_sha256, cover_name.is_some())?);
@@ -938,6 +1025,7 @@ struct PacedSocket {
     inner: Arc<dyn quinn::AsyncUdpSocket>,
     fd: std::os::fd::OwnedFd,
     slots: Arc<Mutex<std::collections::VecDeque<u64>>>,
+    stats: Arc<Stats>,
 }
 
 impl PacedSocket {
@@ -994,8 +1082,19 @@ impl quinn::AsyncUdpSocket for PacedSocket {
     fn try_send(&self, t: &quinn::udp::Transmit) -> std::io::Result<()> {
         if t.contents.len() >= OUTER_MTU as usize {
             let slot = self.slots.lock().unwrap().pop_front();
-            if let Some(at) = slot {
-                return self.send_at(t, at);
+            let now = monotonic_ns();
+            match slot {
+                Some(at) => {
+                    if at < now {
+                        let us = (now - at) / 1_000;
+                        self.stats.clock.record(now, |b| {
+                            b.late += 1;
+                            b.late_max_us = b.late_max_us.max(us);
+                        });
+                    }
+                    return self.send_at(t, at);
+                }
+                None => self.stats.clock.record(now, |b| b.unslotted += 1),
             }
         }
         self.inner.try_send(t)
@@ -1028,7 +1127,10 @@ impl quinn::AsyncUdpSocket for PacedSocket {
 }
 
 /// A client endpoint whose full-size packets leave at the slots in `slots`.
-fn paced_endpoint(slots: Arc<Mutex<std::collections::VecDeque<u64>>>) -> Result<Endpoint> {
+fn paced_endpoint(
+    slots: Arc<Mutex<std::collections::VecDeque<u64>>>,
+    stats: Arc<Stats>,
+) -> Result<Endpoint> {
     use std::os::fd::{AsRawFd, OwnedFd};
     let socket = std::net::UdpSocket::bind("0.0.0.0:0")?;
     let txtime = libc::sock_txtime {
@@ -1052,7 +1154,12 @@ fn paced_endpoint(slots: Arc<Mutex<std::collections::VecDeque<u64>>>) -> Result<
     Ok(Endpoint::new_with_abstract_socket(
         quinn::EndpointConfig::default(),
         None,
-        Arc::new(PacedSocket { inner, fd, slots }),
+        Arc::new(PacedSocket {
+            inner,
+            fd,
+            slots,
+            stats,
+        }),
         runtime,
     )?)
 }
@@ -1077,10 +1184,19 @@ async fn feed(
                 let now = monotonic_ns();
                 let (t0, k) = *grid.get_or_insert((now + ahead, 0));
                 let (due, next) = due_slots(t0, step, k, now, now + ahead);
+                let skipped = (next - k).saturating_sub(due.len() as u64);
+                if skipped > 0 {
+                    stats.clock.record(now, |b| b.skipped += skipped);
+                }
                 grid = Some((t0, next));
+                stats.clock.queue(queue.lock().unwrap().len());
                 for at in due {
                     let d = queue.lock().unwrap().pop_front();
                     let real = d.is_some();
+                    stats.clock.record(now, |b| {
+                        b.fed += 1;
+                        b.decoys += u64::from(!real);
+                    });
                     slots.lock().unwrap().push_back(at);
                     if c.send_datagram(d.unwrap_or_else(decoy)).is_ok() {
                         if real {
@@ -1578,6 +1694,41 @@ mod tests {
         }
         assert!(found, "WireGuard's datagram was carried among the decoys");
         assert_eq!(cs.sent.load(Ordering::Relaxed), 1);
+        // The clock reports what it did: every slot fed, all but one a decoy.
+        let c = cs.clock.json().expect("the clock ran");
+        let (fed, decoys) = (c["fed"].as_u64().unwrap(), c["decoys"].as_u64().unwrap());
+        assert!(
+            fed >= 500 && decoys == fed - 1,
+            "fed {fed}, decoys {decoys}"
+        );
+        assert!(!c["trace"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn the_clock_trace_keeps_100_ms_buckets_for_two_minutes() {
+        let t = ClockTrace::default();
+        assert!(
+            t.json().is_none(),
+            "nothing to report before the clock runs"
+        );
+        t.record(1_000_000_000, |b| b.fed += 1);
+        t.record(1_050_000_000, |b| b.late += 1);
+        t.record(1_150_000_000, |b| b.skipped += 3);
+        let j = t.json().unwrap();
+        assert_eq!(
+            (j["fed"].as_u64(), j["late"].as_u64(), j["skipped"].as_u64()),
+            (Some(1), Some(1), Some(3))
+        );
+        let trace = j["trace"].as_array().unwrap();
+        assert_eq!(trace.len(), 2, "two 100 ms buckets");
+        assert_eq!(trace[0][0].as_u64(), Some(10));
+        for k in 0..2_000u64 {
+            t.record(2_000_000_000 + k * 100_000_000, |b| b.fed += 1);
+        }
+        assert_eq!(
+            t.json().unwrap()["trace"].as_array().unwrap().len(),
+            CLOCK_BUCKETS
+        );
     }
 
     #[tokio::test]

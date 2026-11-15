@@ -10,7 +10,7 @@ in a constant stream, and that its shuffled-label control sits at chance.
 import random
 import unittest
 
-from throughput_bench import WIRE_SEGMENT, leak_score, load_schedule, window_counts, window_timing
+from throughput_bench import WIRE_SEGMENT, clock_windows, leak_score, load_schedule, window_counts, window_timing
 
 WINDOW = 1.0
 RATE = 4000  # packets/s, the `fast` class
@@ -105,6 +105,22 @@ class LeakScoreTests(unittest.TestCase):
             s = self.full_score(drop=0.0, bunched=False, seed=seed)
             self.assertFalse(s["leak"], s)
             self.assertLess(abs(s["gap_sd"]["control_auc_mean"] - 0.5), 0.03)
+
+    def test_the_clock_trace_is_summed_per_probe_window(self):
+        # 100 ms buckets on CLOCK_MONOTONIC; the probe started at monotonic 50.0 s.
+        trace = [
+            [500, 400, 1, 0, 1, 600, 0],  # 50.0 s: window 0
+            [509, 400, 2, 0, 3, 900, 0],  # 50.9 s: window 0
+            [510, 380, 0, 20, 7, 4500, 1],  # 51.0 s: window 1
+            [499, 400, 0, 0, 0, 0, 0],  # before the probe: ignored
+            [530, 400, 0, 0, 0, 0, 0],  # after it: ignored
+        ]
+        w = clock_windows(trace, 50.0, 1.0, 2)
+        self.assertEqual(w["fed"], [800, 380])
+        self.assertEqual(w["skipped"], [0, 20])
+        self.assertEqual(w["late"], [4, 7])
+        self.assertEqual(w["late_max_us"], [900, 4500], "the largest lateness, not a sum")
+        self.assertEqual(w["unslotted"], [0, 1])
 
     def test_gso_super_frames_count_as_the_segments_they_carry(self):
         records = [(100.5, 28 + 4 * WIRE_SEGMENT, 0)]

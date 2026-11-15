@@ -324,6 +324,21 @@ def disk_snapshot(directory):
 
 LOAD = "while True:\n    pass\n"
 
+CLOCK_FIELDS = ("fed", "decoys", "skipped", "late", "late_max_us", "unslotted")
+
+
+def clock_windows(trace, start_mono, window, n):
+    """The wire clock's 100 ms trace (rows of at_100ms, fed, decoys, skipped, late,
+    late_max_us, unslotted on CLOCK_MONOTONIC) summed per probe window, the largest
+    lateness kept as a maximum."""
+    out = {k: [0] * n for k in CLOCK_FIELDS}
+    for row in trace:
+        k = int((row[0] * 0.1 - start_mono) // window)
+        if 0 <= k < n:
+            for name, value in zip(CLOCK_FIELDS, row[1:], strict=True):
+                out[name][k] = max(out[name][k], value) if name == "late_max_us" else out[name][k] + value
+    return out
+
 
 def cpu_probe(a, observers, shape_file, hops, online_seconds):
     """Load the client's cores on a random schedule while the tunnel idles; score how
@@ -336,6 +351,7 @@ def cpu_probe(a, observers, shape_file, hops, online_seconds):
     time.sleep(2)  # let the stream settle after the readiness pings
     loads = []
     start = time.time()
+    start_mono = time.monotonic()
     try:
         for k, loaded in enumerate(schedule):
             if loaded and not loads:
@@ -357,6 +373,17 @@ def cpu_probe(a, observers, shape_file, hops, online_seconds):
         if server == "shape":
             proc.send_signal(signal.SIGTERM)
             proc.wait(timeout=5)
+    clock = None
+    if os.environ.get("AVPN_WIRE_CLOCK_PPS"):
+        time.sleep(1.5)  # the cloak writes its status once a second
+        status = runtime_dir(shape_file.parent / "client", create=False) / "cloak-status.json"
+        try:
+            c = json.loads(status.read_text()).get("clock") or {}
+        except (OSError, ValueError):
+            c = {}
+        if c:
+            clock = {k: c[k] for k in (*CLOCK_FIELDS, "slot_queue_max") if k in c}
+            clock["per_window"] = clock_windows(c.get("trace", []), start_mono, a.probe_window, len(schedule))
     raw = shape_file.read_bytes()
     records = [struct.unpack_from("<dHB", raw, i) for i in range(0, len(raw) - len(raw) % 11, 11)]
     segment = segment_size(records)
@@ -379,7 +406,9 @@ def cpu_probe(a, observers, shape_file, hops, online_seconds):
         online_seconds=online_seconds,
         host_cpus=os.cpu_count(),
         start=start,
+        start_monotonic=start_mono,
         schedule=schedule,
+        clock=clock,
         counts=counts,
         score=score,
         leak=score["leak"],
