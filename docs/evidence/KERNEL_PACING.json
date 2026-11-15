@@ -501,7 +501,8 @@
     "The residue sits at load transitions: windows that continue a state carry the clock's exact count (3,264), windows right after the load stops come up short and right after it starts run over. Next: cloak counters for skipped slots and late sends, to tell stalls longer than the look-ahead from slot/packet desynchronisation.",
     "Counters (fa4d554): the residue does not come from the feeder (0 skipped slots) but from packets reaching the socket after their slot, up to 0.3 s late, inside quinn's send path.",
     "With a fixed congestion window, lateness all but disappears (39-68 packets per run); the next cause, slots lost on failed sends while fq holds packets, was reproduced on loopback and fixed (unslotted 2,453 -> 14-17 per 4 s).",
-    "With both fixes (34004ba), the probe finds no leak in 3 of 3 runs on the real carrier, against perfect separation (p = 0.0005) with today's default; a consistent, non-significant lean in the timing features remains, consistent with the power-state effect."
+    "With both fixes (34004ba), the probe finds no leak in 3 of 3 runs on the real carrier, against perfect separation (p = 0.0005) with today's default; a consistent, non-significant lean in the timing features remains, consistent with the power-state effect.",
+    "Power-state test: the remaining lean mixes power-management jitter (idle windows rougher) and contention jitter (loaded windows rougher); fixing the frequency comes closest, no single setting removes both. Next: the real-website run decides whether microsecond residues matter after a real network path."
   ],
   "status": "The first configuration that passes the probe, but not yet a fix to claim: the wire clock stays off by default until the real-website fingerprinting run (wf_real.py) confirms it and the power-state lean is settled; the first hop still sees which slots were decoys.",
   "counters": {
@@ -846,5 +847,214 @@
       }
     ],
     "reading": "No leak in 3 of 3 runs: count p 0.18-0.83, gap spread p 0.07-0.16, largest gap p 0.09-0.36; packets per window 3,256-3,270 (one window 3,312) whether loaded or idle, and the transition effect is gone. The clock kept time: 0 slots skipped, 0 late sends, 33-39 unslotted of about 260,000. Caveat: the timing features lean the same way in all three runs (gap spread AUC 0.61-0.64, largest gap 0.37-0.43) without reaching significance, as the CPU power-state effect seen in isolation would; it is not shown gone."
+  },
+  "power_state": {
+    "setup": "34004ba wire clock on the real carrier (fast, 2 hops, catch-up 50), 3 interleaved rounds of 4 variants: base (powersave governor, all idle states down to C10), freq (every core fixed at 1.8 GHz, no turbo), qos (/dev/cpu_dma_latency 0 us), both. i7-8565U, intel_pstate; settings restored afterwards.",
+    "runs": [
+      {
+        "round": 1,
+        "variant": "base",
+        "leak": true,
+        "count_p": 0.2459,
+        "gap_sd": {
+          "auc": 0.8533,
+          "p_value": 0.0005,
+          "control_auc_mean": 0.4986
+        },
+        "max_gap": {
+          "auc": 0.53,
+          "p_value": 0.6877,
+          "control_auc_mean": 0.499
+        },
+        "late": 0,
+        "unslotted": 20
+      },
+      {
+        "round": 1,
+        "variant": "freq",
+        "leak": false,
+        "count_p": 0.3018,
+        "gap_sd": {
+          "auc": 0.5111,
+          "p_value": 0.8786,
+          "control_auc_mean": 0.4966
+        },
+        "max_gap": {
+          "auc": 0.3733,
+          "p_value": 0.1004,
+          "control_auc_mean": 0.5006
+        },
+        "late": 0,
+        "unslotted": 38
+      },
+      {
+        "round": 1,
+        "variant": "qos",
+        "leak": true,
+        "count_p": 1.0,
+        "gap_sd": {
+          "auc": 0.4289,
+          "p_value": 0.3533,
+          "control_auc_mean": 0.4996
+        },
+        "max_gap": {
+          "auc": 0.2722,
+          "p_value": 0.003,
+          "control_auc_mean": 0.5019
+        },
+        "late": 0,
+        "unslotted": 15
+      },
+      {
+        "round": 1,
+        "variant": "both",
+        "result": "did not run: the tunnel did not come up within 90 s (the chain's core kept reconnecting)"
+      },
+      {
+        "round": 2,
+        "variant": "base",
+        "leak": false,
+        "count_p": 0.5087,
+        "gap_sd": {
+          "auc": 0.7122,
+          "p_value": 0.005,
+          "control_auc_mean": 0.5003
+        },
+        "max_gap": {
+          "auc": 0.3556,
+          "p_value": 0.064,
+          "control_auc_mean": 0.5031
+        },
+        "late": 0,
+        "unslotted": 19
+      },
+      {
+        "round": 2,
+        "variant": "freq",
+        "leak": false,
+        "count_p": 0.7761,
+        "gap_sd": {
+          "auc": 0.5933,
+          "p_value": 0.2194,
+          "control_auc_mean": 0.5013
+        },
+        "max_gap": {
+          "auc": 0.34,
+          "p_value": 0.032,
+          "control_auc_mean": 0.5027
+        },
+        "late": 0,
+        "unslotted": 18
+      },
+      {
+        "round": 2,
+        "variant": "qos",
+        "leak": true,
+        "count_p": 0.9365,
+        "gap_sd": {
+          "auc": 0.4711,
+          "p_value": 0.7091,
+          "control_auc_mean": 0.4966
+        },
+        "max_gap": {
+          "auc": 0.2689,
+          "p_value": 0.003,
+          "control_auc_mean": 0.4998
+        },
+        "late": 0,
+        "unslotted": 21
+      },
+      {
+        "round": 2,
+        "variant": "both",
+        "leak": false,
+        "count_p": 0.4878,
+        "gap_sd": {
+          "auc": 0.3333,
+          "p_value": 0.0265,
+          "control_auc_mean": 0.5003
+        },
+        "max_gap": {
+          "auc": 0.38,
+          "p_value": 0.1164,
+          "control_auc_mean": 0.503
+        },
+        "late": 0,
+        "unslotted": 23
+      },
+      {
+        "round": 3,
+        "variant": "base",
+        "leak": true,
+        "count_p": 0.7511,
+        "gap_sd": {
+          "auc": 0.8944,
+          "p_value": 0.0005,
+          "control_auc_mean": 0.4983
+        },
+        "max_gap": {
+          "auc": 0.5178,
+          "p_value": 0.8091,
+          "control_auc_mean": 0.5001
+        },
+        "late": 0,
+        "unslotted": 16
+      },
+      {
+        "round": 3,
+        "variant": "freq",
+        "leak": true,
+        "count_p": 1.0,
+        "gap_sd": {
+          "auc": 0.7633,
+          "p_value": 0.0005,
+          "control_auc_mean": 0.5004
+        },
+        "max_gap": {
+          "auc": 0.3056,
+          "p_value": 0.01,
+          "control_auc_mean": 0.4984
+        },
+        "late": 0,
+        "unslotted": 17
+      },
+      {
+        "round": 3,
+        "variant": "qos",
+        "leak": false,
+        "count_p": 0.6102,
+        "gap_sd": {
+          "auc": 0.3244,
+          "p_value": 0.0245,
+          "control_auc_mean": 0.5019
+        },
+        "max_gap": {
+          "auc": 0.33,
+          "p_value": 0.0215,
+          "control_auc_mean": 0.4986
+        },
+        "late": 0,
+        "unslotted": 15
+      },
+      {
+        "round": 3,
+        "variant": "both",
+        "leak": false,
+        "count_p": 0.0375,
+        "gap_sd": {
+          "auc": 0.3033,
+          "p_value": 0.012,
+          "control_auc_mean": 0.5007
+        },
+        "max_gap": {
+          "auc": 0.3444,
+          "p_value": 0.0355,
+          "control_auc_mean": 0.5053
+        },
+        "late": 0,
+        "unslotted": 18
+      }
+    ],
+    "reading": "Two effects of opposite sign mix. With normal power management, loaded windows are smoother (gap spread AUC 0.71-0.89; leak 2 of 3): an idle CPU in deep sleep or at low frequency releases packets less evenly. With shallow sleep, loaded windows are rougher (AUC 0.27-0.33 on the largest gap or gap spread; leak 2 of 3 for qos): contention shows through, probably because the kernel's release of paced packets competes with the load on the same cores. Fixed frequency comes closest (2 of 3 clean); both together gave no significant leak in 2 valid runs but still lean. No setting removes the signal entirely. The effects are microseconds on a quiet virtual link timestamped at the first hop: a strong lab adversary. Whether they survive a real path's millisecond jitter is the question for the real-website run. Base runs leaned harder here than in the earlier wire-clock runs (0.61-0.64), so conditions move this signal."
   }
 }
