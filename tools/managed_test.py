@@ -156,6 +156,11 @@ def failure_report(lines=25):
             print("  " + re.sub(r"[0-9a-fA-F]{32,}", "<hex>", line), file=sys.stderr)
 
 
+# What the lab internet sees: the exit's outward address, and the client's own address.
+EXIT_PUBLIC = "203.0.113.1"
+CLIENT_PUBLIC = "192.0.2.2"
+
+
 def main():
     import argparse
 
@@ -302,6 +307,24 @@ def main():
             raise RuntimeError("application traffic escaped")
         return r
 
+    def stun_code(expect):
+        """A WebRTC-style STUN Binding request to the lab's STUN server; the reflected
+        address must be `expect`. With None it succeeds only if no answer arrives."""
+        ask = (
+            "import os,socket\n"
+            "s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.settimeout(3)\n"
+            "def ask():\n"
+            " s.sendto(b'\\0\\1\\0\\0\\x21\\x12\\xa4\\x42'+os.urandom(12),('203.0.113.2',3478))\n"
+            " return s.recv(2048)\n"
+        )
+        if expect is None:
+            return ask + "try:\n ask()\nexcept OSError:\n raise SystemExit(0)\nraise SystemExit('STUN answered')\n"
+        return ask + (
+            "r=ask();assert r[:2]==b'\\1\\1' and r[20:22]==b'\\0\\x20',r\n"
+            "ip=socket.inet_ntoa(bytes(x^y for x,y in zip(r[28:32],b'\\x21\\x12\\xa4\\x42')))\n"
+            "assert ip==%r,('STUN reflected',ip)\n" % expect
+        )
+
     ping_code = 'import subprocess;raise SystemExit(subprocess.run(["ping","-n","-c","1","-W","1","10.77.0.1"],stdout=subprocess.DEVNULL).returncode)'
 
     def wait_online(proc, seconds=25):
@@ -402,6 +425,7 @@ def main():
             "av-destination", [sys.executable, ROOT / "tools/managed_lab_peer.py", "dot", "--state", state], "dns"
         )
         spawn("av-destination", [sys.executable, ROOT / "tools/managed_lab_peer.py", "echo", "--state", state], "echo")
+        spawn("av-destination", [sys.executable, ROOT / "tools/managed_lab_peer.py", "stun", "--state", state], "stun")
         spawn(
             "av-relay", [sys.executable, ROOT / "tools/managed_lab_peer.py", "observer", "--state", state], "observer"
         )
@@ -520,6 +544,8 @@ def main():
             + repr(marker.encode())
             + ';s.sendto(b,("203.0.113.2",45991));assert s.recv(4096)==b'
         )
+        # WebRTC leak: a page's STUN request must reflect the exit's address.
+        app(stun_code(EXIT_PUBLIC))
         app(
             'import socket;s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.settimeout(.5);s.sendto(b"x",("203.0.113.2",53));s.recv(4096)',
             ok=False,
@@ -737,12 +763,18 @@ def main():
                 raise RuntimeError("whole-device supervisor exited")
         else:
             raise RuntimeError("whole-device handshake deadline")
+        stun_host = [sys.executable, "-c"]
+        run("ip", "netns", "exec", "av-client", *stun_host, stun_code(EXIT_PUBLIC))
         stop(whole)
         run("ip", "-n", "av-client", "route", "replace", "default", "via", "192.0.2.1")
         escaped = run(
             "ip", "netns", "exec", "av-client", "ping", "-n", "-c", "1", "-W", "1", "203.0.113.2", check=False
         )
         assert escaped.returncode != 0, "whole-device fallback route leaked"
+        stun_blocked = run("ip", "netns", "exec", "av-client", *stun_host, stun_code(None), check=False)
+        assert stun_blocked.returncode == 0, ("STUN left the disconnected device", stun_blocked.stderr[-300:])
+        stun_sources = json.loads((state / "stun.json").read_text())
+        assert stun_sources == [EXIT_PUBLIC], ("the STUN server saw another address", stun_sources)
         # Only an explicit request may leave the protected state.
         run(
             "ip",
@@ -758,6 +790,9 @@ def main():
             "--allow-cleartext",
         )
         run("ip", "netns", "exec", "av-client", "ping", "-n", "-c", "1", "-W", "1", "203.0.113.2")
+        # Positive control: with the protection explicitly off, the STUN server does see
+        # the client's own address, so the checks above could have failed.
+        run("ip", "netns", "exec", "av-client", *stun_host, stun_code(CLIENT_PUBLIC))
         # Wire capture on the relay->exit link, kept for the record (QUIC header jitter
         # and receive offload mean it is not byte-uniform; the datagram audit below is
         # the exact proof).
@@ -788,6 +823,7 @@ def main():
             system_resolver_inside_namespace=True,
             dns_bypass_rejected=True,
             ipv6_leak_rejected=True,
+            webrtc_stun_reflects_exit_only=True,
             carrier_padding_and_decoys_verified=True,
             wireguard_messages_on_the_wire=physical["wireguard_messages"],
             outer_quic_sizes=physical["outer_sizes"],

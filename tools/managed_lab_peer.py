@@ -58,6 +58,21 @@ def answer(query):
 
 STRANGER = bytes([192, 0, 2, 4])
 
+STUN_COOKIE = 0x2112A442
+
+
+def stun_reply(request, peer):
+    """RFC 5389 Binding success response carrying XOR-MAPPED-ADDRESS for `peer`, or
+    None if `request` is not a Binding request. This is what a WebRTC page's STUN server
+    tells the browser: the address the internet sees."""
+    if len(request) < 20 or request[:2] != b"\0\1" or int.from_bytes(request[4:8], "big") != STUN_COOKIE:
+        return None
+    ip, port = peer
+    xport = (port ^ (STUN_COOKIE >> 16)).to_bytes(2, "big")
+    xaddr = (int.from_bytes(socket.inet_aton(ip), "big") ^ STUN_COOKIE).to_bytes(4, "big")
+    attr = b"\0\x20\0\x08\0\x01" + xport + xaddr
+    return b"\x01\x01" + len(attr).to_bytes(2, "big") + request[4:20] + attr
+
 
 def quic_sizes(iface, out):
     """Record UDP payload sizes on `iface` to `out` (inter-server QUIC links carry raw
@@ -81,7 +96,7 @@ def quic_sizes(iface, out):
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("role", choices=["dot", "observer", "echo", "quicsizes"])
+    p.add_argument("role", choices=["dot", "observer", "echo", "stun", "quicsizes"])
     p.add_argument("--state", type=Path, required=True)
     p.add_argument("--iface")
     p.add_argument("--out", type=Path)
@@ -111,6 +126,20 @@ def main():
                     publish(a.state / "dot.json", dict(queries=count, tls=True))
             except (OSError, ValueError):
                 c.close()
+    elif a.role == "stun":
+        # Records every source address that ever asked, so the test can prove the
+        # client's own address never reached it.
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.bind(("203.0.113.2", 3478))
+        sources = set()
+        while True:
+            b, peer = s.recvfrom(2048)
+            reply = stun_reply(b, peer)
+            if reply is None:
+                continue
+            sources.add(peer[0])
+            publish(a.state / "stun.json", sorted(sources))
+            s.sendto(reply, peer)
     elif a.role == "echo":
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.bind(("203.0.113.2", 45991))
