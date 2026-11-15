@@ -105,7 +105,7 @@ One chain server on EC2.
 What `--apply` creates:
 1. A copy of the newest official Debian 13 amd64 image (encrypted), re-registered with UEFI boot, NitroTPM 2.0 and IMDSv2. The intermediate copy is deregistered.
 2. A throwaway ed25519 SSH key, kept in `~/.config/advanced-vpn/ssh/NAME`, and its key pair.
-3. A security group: UDP on the tunnel port from `--allow-from`, and TCP 22 from `--admin-ip`.
+3. A security group: UDP on the tunnel port from `--allow-from`, and TCP 22 from `--admin-ip`. A relay's port (443) is also opened on TCP for the same sources: the camouflage's TLS fallback, used where the path is too small for its QUIC.
 4. The instance:
    - IMDSv2 required, hop limit 1;
    - `standard` CPU credits, so no surplus charges;
@@ -162,7 +162,7 @@ configured once with `oci setup config`.
 
 What `--apply` creates, all tagged with the name:
 1. A VCN (`10.77.100.0/24`), an internet gateway and a default route to it.
-2. A security list of its own: UDP on the tunnel port from `--allow-from`, TCP 22 from `--admin-ip`, and all egress. The subnet uses only this list, not the VCN's default one (which allows SSH from anywhere).
+2. A security list of its own: UDP on the tunnel port from `--allow-from` (a relay's 443 also on TCP, for the camouflage's TLS fallback), TCP 22 from `--admin-ip`, and all egress. The subnet uses only this list, not the VCN's default one (which allows SSH from anywhere).
 3. A throwaway ed25519 SSH key in `~/.config/advanced-vpn/ssh/NAME`.
 4. The instance: the newest full Canonical Ubuntu 24.04 image for the shape, a public address, and legacy (unauthenticated) metadata endpoints disabled. Its first-boot user data keeps every log in RAM before `sshd` accepts the first login (`avpn help retention`).
 
@@ -256,7 +256,7 @@ put one end on a non-US host (`avpn cloud suggest` lists some) for ends in diffe
 spheres.
 
 What `--apply` does:
-1. Firewalls of managed servers (`aws relay`, `oci server`): the first hop's UDP 443 (the HTTP/3 camouflage in front of WireGuard) open to any address, and any older WireGuard port rule removed; each later hop's port (4445 middle, 4444 exit) only from the previous server; SSH from here for setup.
+1. Firewalls of managed servers (`aws relay`, `oci server`): the first hop's UDP 443 (the HTTP/3 camouflage in front of WireGuard) and TCP 443 (its TLS fallback, for paths below 1448 bytes) open to any address, and any older WireGuard port rule removed; each later hop's port (4445 middle, 4444 exit) only from the previous server; SSH from here for setup.
 2. Installs or upgrades every server and fetches its request for its role. A server whose role changes gets new keys.
 3. Signs the whole chain once: `avpnctl init` with your client request and every server's.
 4. Enrolls and restarts each server, exit first, and checks it is running.

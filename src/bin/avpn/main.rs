@@ -183,6 +183,14 @@ fn help(topic: Option<&str>, theme: Theme) -> i32 {
 }
 
 /// Replace this process with the controller, for commands that own the terminal.
+/// Whether `action` should run the controller directly on this terminal. Actions that
+/// can unseal a Nitrokey vault ask for its PIN (and say when to touch the key) on the
+/// terminal; run through the captured `--json` path they see no terminal, fall back to
+/// the desktop dialog, and under sudo that dialog cannot open ("PIN dialog stopped").
+fn takes_terminal(action: &str, json: bool, stdin_is_terminal: bool) -> bool {
+    matches!(action, "request" | "init" | "enroll") && !json && stdin_is_terminal
+}
+
 fn exec(ctrl: &Controller, action: &str, args: &[String]) -> i32 {
     let err = ctrl.command(false, action, args).exec();
     eprintln!("avpn: cannot run the controller: {err}");
@@ -241,6 +249,9 @@ fn run(cli: Cli, theme: Theme) -> i32 {
     };
     match action {
         "run" | "unlock" | "mix" => return exec(&ctrl, action, &args),
+        _ if takes_terminal(action, cli.json, std::io::stdin().is_terminal()) => {
+            return exec(&ctrl, action, &args);
+        }
         "connect" if args.iter().any(|a| a == "--foreground") => {
             args.retain(|a| a != "--foreground");
             return exec(&ctrl, "connect", &args);
@@ -264,4 +275,29 @@ fn run(cli: Cli, theme: Theme) -> i32 {
         print(&cells::render(&done.cells, theme), theme);
     }
     done.code
+}
+
+#[cfg(test)]
+mod tests {
+    use super::takes_terminal;
+
+    #[test]
+    fn pin_actions_get_the_terminal_only_when_typed_at_one() {
+        // Live regression (14 Nov 2026): `sudo avpn enroll` ran the controller with no
+        // terminal, so the Nitrokey PIN went to a desktop dialog that root cannot open.
+        for action in ["request", "init", "enroll"] {
+            assert!(takes_terminal(action, false, true), "{action}");
+            assert!(
+                !takes_terminal(action, true, true),
+                "--json keeps one parseable object: {action}"
+            );
+            assert!(
+                !takes_terminal(action, false, false),
+                "no terminal to give: {action}"
+            );
+        }
+        for action in ["status", "info", "doctor", "disconnect", "hops"] {
+            assert!(!takes_terminal(action, false, true), "{action}");
+        }
+    }
 }

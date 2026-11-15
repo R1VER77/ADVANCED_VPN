@@ -7,7 +7,7 @@
 
 use std::io::{BufRead, IsTerminal, Write};
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use serde_json::Value;
 
@@ -24,9 +24,24 @@ fn program() -> PathBuf {
 
 /// Run the cloud tool with `--json` and parse its object.
 pub fn call(args: &[String]) -> Outcome {
+    call_with(args, false)
+}
+
+/// As `call`; with `live`, the terminal is passed through: the tool's progress lines
+/// (stderr, `AVPN_PROGRESS=1`) appear as each step starts, and the Nitrokey PIN for
+/// signing is asked on this terminal. stdout still carries the one JSON object.
+fn call_with(args: &[String], live: bool) -> Outcome {
     let mut argv = vec!["--json".to_string()];
     argv.extend(args.iter().cloned());
-    match Command::new(program()).args(&argv).output() {
+    let mut command = Command::new(program());
+    command.args(&argv);
+    if live {
+        command
+            .env("AVPN_PROGRESS", "1")
+            .stdin(Stdio::inherit())
+            .stderr(Stdio::inherit());
+    }
+    match command.output() {
         Ok(out) => {
             let value = String::from_utf8_lossy(&out.stdout)
                 .lines()
@@ -113,7 +128,8 @@ pub fn main(args: &[String], json: bool, theme: Theme) -> i32 {
         }
         let mut go = args.to_vec();
         go.push("--yes".into());
-        let done = call(&go);
+        // A chain apply runs for minutes: show each step as it starts.
+        let done = call_with(&go, std::io::stderr().is_terminal());
         println!();
         show(&crate::cells::from_outcome("cloud", &done), theme);
         return if done.ok() { 0 } else { 1 };

@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 from pathlib import Path
 import stat
 import sys
@@ -238,6 +239,19 @@ class Stubbed(unittest.TestCase):
 
 
 class CloudTests(Stubbed):
+    def test_status_lists_oci_servers_and_rules_alike(self):
+        # Live regression (14 Nov 2026): an OCI server entry (no `source`; this one never
+        # got an instance) made `avpn cloud status` fail with KeyError: 'source'.
+        inv = cloud.load_inventory()
+        inv["resources"]["avpn-a1exit"] = dict(provider="oci", role="exit", port=4444, region="r", subnet="s")
+        inv["resources"]["avpn-exit"] = dict(
+            provider="oci", rule="advanced-vpn:avpn-exit", source="9.9.9.9/32", port=4444
+        )
+        cloud.save_inventory(inv)
+        rows = {r["label"]: r["value"] for r in self.run_cli("status")["rows"]}
+        self.assertEqual(rows["avpn-exit"], "oci advanced-vpn:avpn-exit 9.9.9.9/32:4444")
+        self.assertEqual(rows["avpn-a1exit"], "oci exit (no instance):4444")
+
     def test_dry_run_plans_without_creating_anything(self):
         r = self.run_cli("aws", "relay", "--apply", "--dry-run", "--profile", "p", "--allow-from", "16.170.0.7")
         text = json.dumps(r["rows"])
@@ -287,7 +301,11 @@ class CloudTests(Stubbed):
         )
         perms = json.loads(self.value(self.call_with("authorize-security-group-ingress"), "--ip-permissions"))
         opened = sorted((p["IpProtocol"], p["FromPort"], [r["CidrIp"] for r in p["IpRanges"]]) for p in perms)
-        self.assertEqual(opened, [("tcp", 22, ["18.0.0.4/32"]), ("udp", 443, ["16.170.0.7/32"])])
+        # A relay can be the first hop: the camouflage's TLS/TCP fallback needs TCP on the
+        # same port (a path below 1448 bytes cannot carry its QUIC).
+        self.assertEqual(
+            opened, [("tcp", 22, ["18.0.0.4/32"]), ("tcp", 443, ["16.170.0.7/32"]), ("udp", 443, ["16.170.0.7/32"])]
+        )
         run = self.call_with("run-instances")
         self.assertIn("HttpTokens=required", self.value(run, "--metadata-options"))
         self.assertEqual(self.value(run, "--credit-specification"), "CpuCredits=standard")
@@ -676,7 +694,9 @@ class OciServerTests(Stubbed):
         sl = self.oci_call("network", "security-list", "create")
         ingress = json.loads(sl[sl.index("--ingress-security-rules") + 1])
         self.assertEqual(
-            sorted((x["protocol"], x["source"]) for x in ingress), [("17", "0.0.0.0/0"), ("6", "18.0.0.4/32")]
+            # A relay is a first hop: its port also on TCP (the camouflage's TLS fallback).
+            sorted((x["protocol"], x["source"]) for x in ingress),
+            [("17", "0.0.0.0/0"), ("6", "0.0.0.0/0"), ("6", "18.0.0.4/32")],
         )
         launch = self.oci_call("compute", "instance", "launch")
         self.assertEqual(launch[launch.index("--image-id") + 1], "ocid1.image.full")
@@ -933,7 +953,10 @@ class ChainTests(Stubbed):
         self.assertEqual(sorted(x.split("=")[0] for x in reqs), ["client", "exit", "relay"])
         # Final firewall: the first hop open to any address, SSH only from the exit.
         # The old WireGuard port is closed; only the camouflage's 443 stays open.
-        self.assertEqual(self.final_sg(), {("udp", 443): ["0.0.0.0/0"], ("tcp", 22): ["16.40.0.2/32"]})
+        self.assertEqual(
+            self.final_sg(),
+            {("udp", 443): ["0.0.0.0/0"], ("tcp", 443): ["0.0.0.0/0"], ("tcp", 22): ["16.40.0.2/32"]},
+        )
         self.assertNotIn("16.9.9.9/32", sum(self.final_sg().values(), []))
         # Servers are enrolled exit first.
         log = (Path(self.tmp.name) / "log.ssh").read_text().splitlines()
@@ -958,6 +981,72 @@ class ChainTests(Stubbed):
         opened = {r["CidrIp"] for perms in auth for p in perms for r in p["IpRanges"] if p["FromPort"] == 22}
         self.assertIn("16.40.0.2/32", opened)
         self.assertNotIn("16.9.9.9/32", self.final_sg()[("tcp", 22)])
+
+    def test_the_first_hop_admits_the_tls_fallback_on_tcp_and_later_hops_do_not(self):
+        # Live-chain regression (14 Nov 2026): a client behind a 1420-byte path falls back
+        # to TLS over TCP 443, which the security group dropped (only UDP 443 was open).
+        self.add_exit()
+        self.chain()
+        sg = self.final_sg()
+        self.assertEqual(sg[("udp", 443)], ["0.0.0.0/0"])
+        self.assertEqual(sg[("tcp", 443)], ["0.0.0.0/0"])
+        # Each apply works in its own per-second chains/ directory (sleep is stubbed here).
+        chains = cloud.INVENTORY.parent / "chains"
+        chains.rename(chains.with_name("chains.first"))
+        self.chain()  # re-applying keeps the rule exact, never duplicated
+        sg = self.final_sg()
+        self.assertEqual(sg[("tcp", 443)], ["0.0.0.0/0"])
+        self.assertEqual(sorted(k for k in sg if k[0] == "tcp"), [("tcp", 22), ("tcp", 443)])
+
+    def test_an_apply_reports_each_step_as_it_starts(self):
+        # Live regression (14 Nov 2026): a chain apply printed nothing for ~6 minutes, which
+        # looked like a hang. With progress on, every step says it has started.
+        import contextlib
+        import io
+
+        self.add_exit()
+        err = io.StringIO()
+        with mock.patch.dict(os.environ, {"AVPN_PROGRESS": "1"}), contextlib.redirect_stderr(err):
+            self.chain()
+        lines = err.getvalue().splitlines()
+        for step in [
+            "firewall avpn-relay",
+            "install avpn-relay",
+            "install avpn-exit",
+            "sign the chain",
+            "enroll avpn-exit",
+            "enroll avpn-relay",
+            "close SSH from here",
+        ]:
+            self.assertTrue(any(step in line for line in lines), (step, lines))
+        self.assertTrue(all(re.search(r"\[\s*\d+s\]", line) for line in lines), lines)
+        # Off by default (scripts, tests, --json consumers): nothing on stderr.
+        err = io.StringIO()
+        chains = cloud.INVENTORY.parent / "chains"
+        chains.rename(chains.with_name("chains.progress"))
+        with mock.patch.dict(os.environ, {}, clear=False), contextlib.redirect_stderr(err):
+            os.environ.pop("AVPN_PROGRESS", None)
+            self.chain()
+        self.assertEqual(err.getvalue(), "")
+
+    def test_the_plan_names_tcp_for_the_first_hop_only(self):
+        self.add_exit()
+        d = Path(self.tmp.name)
+        r = self.run_cli(
+            "chain", "--apply", "--dry-run", "--client-request", str(d / "client.req"), "--vault", str(d / "v")
+        )
+        values = [row["value"] for row in r["rows"]]
+        self.assertIn("udp+tcp 443 from 0.0.0.0/0; firewall managed", values)
+        self.assertTrue(any(v.startswith("udp 4444 from ") for v in values), values)
+
+    def test_oci_ingress_adds_tcp_only_for_the_first_hop_port(self):
+        rules = cloud.oci_ingress(443, ["0.0.0.0/0"], ["1.2.3.4/32"], tcp=True)
+        tunnel_tcp = [
+            r for r in rules if r["protocol"] == "6" and r["tcpOptions"]["destinationPortRange"]["min"] == 443
+        ]
+        self.assertEqual([r["source"] for r in tunnel_tcp], ["0.0.0.0/0"])
+        plain = cloud.oci_ingress(4444, ["9.9.9.9/32"], [])
+        self.assertEqual([r["protocol"] for r in plain], ["17"])
 
     def test_plan_changes_nothing_and_flags_unmanaged_firewalls(self):
         self.add_exit()
@@ -1183,7 +1272,12 @@ open(root + "/log", "a").write("avpnctl " + " ".join(a) + "\n")
 role = a[a.index("--role") + 1]
 e = root + "/etc/advanced-vpn/enrolled"
 os.makedirs(e, exist_ok=True)
-json.dump({"schema": 1, "role": role}, open(e + "/request.json", "w"))
+req = {"schema": 1, "role": role, "certificates": {}, "kem_public": "k"}
+if role in ("client", "relay", "exit"):
+    req["wireguard_public_hex"] = "00"
+if role in ("relay", "exit"):
+    req.update(cloak_spki_sha256="00", i2p_destination="d")
+json.dump(req, open(e + "/request.json", "w"))
 json.dump({"creds_key": "host"}, open(e + "/protection.json", "w"))
 """
 
@@ -1283,6 +1377,24 @@ class HostScriptTests(unittest.TestCase):
         self.assertIn("systemctl stop advanced-vpn.service", self.log())
         self.assertEqual(json.loads((self.root / "tmp/avpn-request.json").read_text())["role"], "exit")
 
+    def test_same_role_keys_older_than_this_release_are_renewed(self):
+        # Live-chain regression (14 Nov 2026): a relay's keys from before the HTTP/3
+        # camouflage were kept because the role matched; signing then refused them.
+        self.assertEqual(self.setup("relay").returncode, 0)
+        req = self.root / "etc/advanced-vpn/enrolled/request.json"
+        old = json.loads(req.read_text())
+        del old["cloak_spki_sha256"]
+        req.write_text(json.dumps(old))
+        r = self.setup("relay")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("keys=renewed", r.stdout)
+        self.assertEqual(self.requested(), 2)
+        self.assertIn("systemctl stop advanced-vpn.service", self.log())
+        self.assertIn("cloak_spki_sha256", json.loads((self.root / "tmp/avpn-request.json").read_text()))
+        # Current keys are still kept.
+        self.assertIn("keys=kept", self.setup("relay").stdout)
+        self.assertEqual(self.requested(), 2)
+
     def test_shared_host_is_marked_not_hardened(self):
         self.setup("exit", shared="yes")
         self.assertNotIn("harden", self.log())
@@ -1337,3 +1449,25 @@ class SystemPythonTests(unittest.TestCase):
         r = subprocess.run([sys.executable, "-I", "-c", code, tools], capture_output=True, text=True, timeout=60)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(r.stdout.strip(), "fast")
+
+    def test_signing_uses_the_installed_controller_not_the_system_python(self):
+        # Live-chain regression (14 Nov 2026): signing ran avpnctl under the system
+        # Python that avpn-cloud uses, whose cryptography had no ML-DSA. An installed
+        # copy has bin/avpnctl beside tools/ (the hash-locked venv): signing must use it.
+        with tempfile.TemporaryDirectory() as d:
+            app = Path(d)
+            (app / "tools").mkdir()
+            (app / "bin").mkdir()
+            launcher = app / "bin/avpnctl"
+            launcher.write_text("#!/bin/sh\n")
+            launcher.chmod(0o755)
+            env = {k: v for k, v in os.environ.items() if k != "AVPN_CTL"}
+            with (
+                mock.patch.object(cloud, "__file__", str(app / "tools/cloud.py")),
+                mock.patch.dict(os.environ, env, clear=True),
+            ):
+                self.assertEqual(cloud.controller(), [str(launcher)])
+                launcher.unlink()  # a source checkout has no bin/: the interpreter running it
+                self.assertEqual(cloud.controller(), [sys.executable, str(app / "tools/avpnctl.py")])
+            with mock.patch.dict(os.environ, {"AVPN_CTL": "/x/ctl"}):
+                self.assertEqual(cloud.controller(), ["/x/ctl"])

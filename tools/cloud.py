@@ -413,6 +413,16 @@ def aws_relay_apply(a, aws, plan):
         ),
         dict(IpProtocol="tcp", FromPort=22, ToPort=22, IpRanges=[dict(CidrIp=a.admin_ip, Description="admin SSH")]),
     ]
+    if plan["port"] == FIRST_HOP_PORT:
+        # A first hop also takes the camouflage's TLS/TCP fallback on the same port.
+        perms.append(
+            dict(
+                IpProtocol="tcp",
+                FromPort=plan["port"],
+                ToPort=plan["port"],
+                IpRanges=[dict(CidrIp=c, Description="ADVANCED_VPN camouflage TLS fallback") for c in a.allow_from],
+            )
+        )
     aws.ec2("authorize-security-group-ingress", "--group-id", sg, "--ip-permissions", json.dumps(perms))
     # First-boot hardening: every log in RAM before sshd accepts its first login.
     user_data = first_boot_file()
@@ -722,8 +732,9 @@ class Oci:
         return json.dumps({"avpn-managed": "true", "avpn-name": name})
 
 
-def oci_ingress(port, sources, admin):
-    """Security-list ingress: the tunnel port from `sources`, SSH from `admin`."""
+def oci_ingress(port, sources, admin, tcp=False):
+    """Security-list ingress: the tunnel port from `sources`, SSH from `admin`. With
+    `tcp` (a first hop), the same port on TCP too, for the camouflage's TLS fallback."""
     rules = [
         dict(
             protocol="17",
@@ -735,6 +746,18 @@ def oci_ingress(port, sources, admin):
         )
         for c in sources
     ]
+    if tcp:
+        rules += [
+            dict(
+                protocol="6",
+                source=c,
+                sourceType="CIDR_BLOCK",
+                isStateless=False,
+                description="ADVANCED_VPN camouflage TLS fallback",
+                tcpOptions=dict(destinationPortRange=dict(min=port, max=port)),
+            )
+            for c in sources
+        ]
     rules += [
         dict(
             protocol="6",
@@ -818,7 +841,10 @@ def oci_server_plan(a, oc):
         dict(label="instance", value="%s %s (%s), %s" % (a.name, shape, size, ad)),
         dict(label="image", value=image["display-name"]),
         dict(label="network", value=network),
-        dict(label="firewall", value="udp %d from %s; SSH 22 from %s" % (port, ", ".join(a.allow_from), a.admin_ip)),
+        dict(
+            label="firewall",
+            value="%s %d from %s; SSH 22 from %s" % (transports(port), port, ", ".join(a.allow_from), a.admin_ip),
+        ),
         dict(label="cost", value="Always Free: $0 within 2 micro instances or 2 OCPU / 12 GB of A1 per tenancy"),
     ]
     if load_inventory()["resources"].get(a.name):
@@ -865,7 +891,7 @@ def oci_server_apply(a, oc, plan):
            json.dumps(route), "--force", *wait_ok)  # fmt: skip
         route_table, cidr = vcn["default-route-table-id"], OCI_CIDR
     egress = [dict(destination="0.0.0.0/0", protocol="all", isStateless=False)]
-    ingress = oci_ingress(plan["port"], a.allow_from, [a.admin_ip])
+    ingress = oci_ingress(plan["port"], a.allow_from, [a.admin_ip], tcp=plan["port"] == FIRST_HOP_PORT)
     sl = oc("network", "security-list", "create", *c, "--vcn-id", vcn["id"], "--display-name", a.name,
             "--egress-security-rules", json.dumps(egress), "--ingress-security-rules", json.dumps(ingress),
             "--freeform-tags", tags, *wait_ok)["data"]  # fmt: skip
@@ -1008,15 +1034,27 @@ fi
 sudo -n rm -rf /tmp/avpn-src && mkdir -p /tmp/avpn-src && tar -C /tmp/avpn-src -xzf /tmp/avpn-src.tgz
 sudo -n python3 -B /tmp/avpn-src/tools/install.py --apply >/dev/null
 HAVE=$(sudo -n python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["role"])' $E/request.json 2>/dev/null || true)
-if [ -n "$HAVE" ] && [ "$HAVE" = "$ROLE" ]; then
+# Same-role keys are kept only if they carry every key this release makes for the role
+# (managed_profile.request): keys from before the HTTP/3 camouflage would be refused
+# when the chain is signed.
+CURRENT=$(sudo -n python3 -c '
+import json, sys
+r = json.load(open(sys.argv[1]))
+need = ["kem_public"]
+if r["role"] in ("client", "relay", "exit"):
+    need.append("wireguard_public_hex")
+if r["role"] in ("relay", "exit"):
+    need += ["cloak_spki_sha256", "i2p_destination"]
+print("yes" if all(k in r for k in need) else "no")' $E/request.json 2>/dev/null || echo no)
+if [ -n "$HAVE" ] && [ "$HAVE" = "$ROLE" ] && [ "$CURRENT" = yes ]; then
   echo "keys=kept"
-elif [ -n "$HAVE" ] && [ "$REPLACE" != yes ]; then
+elif [ -n "$HAVE" ] && [ "$HAVE" != "$ROLE" ] && [ "$REPLACE" != yes ]; then
   echo "this server has keys for role $HAVE; replace them to make it a $ROLE" >&2; exit 3
 else
   sudo -n systemctl stop advanced-vpn.service 2>/dev/null || true
   sudo -n rm -rf $E
   sudo -n /opt/advanced-vpn/bin/avpnctl request --role "$ROLE" --protect systemd-creds --out /root/request.json >/dev/null
-  echo "keys=new"
+  if [ "$HAVE" = "$ROLE" ]; then echo "keys=renewed"; else echo "keys=new"; fi
 fi
 sudo -n cat $E/request.json > /tmp/avpn-request.json
 echo "tpm2=$(systemd-analyze has-tpm2 >/dev/null 2>&1 && echo yes || echo no) creds_key=$(sudo -n python3 -c 'import json;print(json.load(open("/etc/advanced-vpn/enrolled/protection.json")).get("creds_key"))')"
@@ -1153,7 +1191,11 @@ def host_setup(a):
     return [
         dict(label="host", value="%s %s (%s)" % (a.name, record["public_ip"], role)),
         dict(label="installed", value="/opt/advanced-vpn (service not enabled)"),
-        dict(label="keys", value="%s; %s" % ("kept" if keys == "kept" else "generated", tpm)),
+        dict(
+            label="keys",
+            value="%s; %s"
+            % ({"kept": "kept", "renewed": "renewed (older than this release)"}.get(keys, "generated"), tpm),
+        ),
         dict(label="request", value="%s (public; give it to avpn init)" % a.out),
     ]
 
@@ -1223,6 +1265,14 @@ def servers():
 
 
 FIRST_HOP_PORT = ROLES["relay"]  # the HTTP/3 cloak in front of WireGuard, whatever the first hop's role
+
+
+def transports(port):
+    """What a hop's firewall admits on its port: the first hop takes the camouflage's
+    QUIC on UDP and its TLS fallback on TCP; every later hop takes UDP only."""
+    return "udp+tcp" if port == FIRST_HOP_PORT else "udp"
+
+
 # The exit's own address inside the tunnel. Its public address does not work from
 # inside: cloud servers do not hold it locally (the provider translates it at its edge).
 EXIT_TUNNEL_IP = "10.77.0.1"
@@ -1276,15 +1326,16 @@ def chain_layout(names, inv):
 def sg_diff(perms, wanted):
     """Authorize/revoke lists that make a group's managed rules exactly `wanted`.
 
-    Managed rules are every single-port UDP permission and TCP 22; `wanted` maps
-    (protocol, port) to the set of IPv4 CIDRs it should admit.
+    Managed rules are every single-port UDP permission, TCP 22, and TCP on the
+    camouflage port (its TLS fallback); `wanted` maps (protocol, port) to the set of
+    IPv4 CIDRs it should admit.
     """
     have = {}
     extra = {}
     for q in perms:
         key = (q.get("IpProtocol"), q.get("FromPort"))
         managed = (key[0] == "udp" and q.get("FromPort") == q.get("ToPort")) or (
-            key[0] == "tcp" and q.get("FromPort") == q.get("ToPort") == 22
+            key[0] == "tcp" and q.get("FromPort") == q.get("ToPort") in (22, FIRST_HOP_PORT)
         )
         if managed:
             have[key] = ranges_of(q)
@@ -1314,25 +1365,49 @@ def set_firewall(name, record, port, sources, ssh):
         if len(groups) != 1:
             raise CloudError("expected one security group tagged %s=%s" % (NAME, name))
         wanted = {("udp", port): set(sources), ("tcp", 22): set(ssh)}
+        # The first hop also takes the camouflage's TLS/TCP fallback on the same port.
+        wanted[("tcp", FIRST_HOP_PORT)] = set(sources) if port == FIRST_HOP_PORT else set()
         add, remove = sg_diff(groups[0].get("IpPermissions", []), wanted)
         gid = groups[0]["GroupId"]
         if add:
             aws.ec2("authorize-security-group-ingress", "--group-id", gid, "--ip-permissions", json.dumps(add))
         if remove:
             aws.ec2("revoke-security-group-ingress", "--group-id", gid, "--ip-permissions", json.dumps(remove))
-        return "%s: udp %d from %s; SSH from %s" % (gid, port, ", ".join(sources), ", ".join(ssh) or "nobody")
+        return "%s: %s %d from %s; SSH from %s" % (
+            gid,
+            transports(port),
+            port,
+            ", ".join(sources),
+            ", ".join(ssh) or "nobody",
+        )
     if record["provider"] == "oci" and record.get("managed_list"):
         oc = Oci(record.get("profile", "DEFAULT"), record.get("compartment"))
         oc("network", "security-list", "update", "--security-list-id", record["security_list"],
-           "--ingress-security-rules", json.dumps(oci_ingress(port, sources, ssh)), "--force")  # fmt: skip
-        return "security list: udp %d from %s; SSH from %s" % (port, ", ".join(sources), ", ".join(ssh) or "nobody")
+           "--ingress-security-rules", json.dumps(oci_ingress(port, sources, ssh, tcp=port == FIRST_HOP_PORT)), "--force")  # fmt: skip
+        return "security list: %s %d from %s; SSH from %s" % (
+            transports(port),
+            port,
+            ", ".join(sources),
+            ", ".join(ssh) or "nobody",
+        )
     return None
 
 
 def controller():
-    """The controller used to sign the chain (`AVPN_CTL` overrides it in tests)."""
+    """The controller used to sign the chain (`AVPN_CTL` overrides it in tests).
+
+    `avpn-cloud` runs under the bare system Python, whose cryptography may lack
+    ML-DSA; signing needs the hash-locked environment. An installed copy (user or
+    system) has its `bin/avpnctl` launcher beside `tools/`, which runs in that
+    environment: use it. A source checkout has no `bin/`, so the interpreter
+    running this file (its venv) signs."""
     override = os.environ.get("AVPN_CTL")
-    return [override] if override else [sys.executable, str(Path(__file__).with_name("avpnctl.py"))]
+    if override:
+        return [override]
+    launcher = Path(__file__).resolve().parents[1] / "bin" / "avpnctl"
+    if launcher.is_file() and os.access(launcher, os.X_OK):
+        return [str(launcher)]
+    return [sys.executable, str(Path(__file__).with_name("avpnctl.py"))]
 
 
 def rate_row(cap, hours_per_day, accept_cost, links):
@@ -1362,7 +1437,12 @@ def chain_plan(a):
                 value="%s %s %s (%s)" % (h["role"], h["name"], r["public_ip"], r.get("catalog", r["provider"])),
             )
         )
-        rows.append(dict(label="", value="udp %d from %s; firewall %s" % (h["port"], ", ".join(h["sources"]), how)))
+        rows.append(
+            dict(
+                label="",
+                value="%s %d from %s; firewall %s" % (transports(h["port"]), h["port"], ", ".join(h["sources"]), how),
+            )
+        )
         if r.get("role") and r["role"] != h["role"]:
             rows.append(dict(label="", value="new keys: it was a %s" % r["role"]))
     extra = sorted(set(servers()) - set(names))
@@ -1425,9 +1505,25 @@ def chain_plan(a):
     return dict(rows=rows, hops=hops)
 
 
+def progress_reporter():
+    """One line on stderr as each long step starts, with the seconds since the apply
+    began, so a slow step reads as slow rather than hung. Only when someone watches:
+    stderr is a terminal, or the front end streams it (AVPN_PROGRESS=1). stdout keeps
+    its single JSON object."""
+    start = time.monotonic()
+    on = os.environ.get("AVPN_PROGRESS") == "1" or sys.stderr.isatty()
+
+    def report(step):
+        if on:
+            print("  [%4ds] %s" % (time.monotonic() - start, step), file=sys.stderr, flush=True)
+
+    return report
+
+
 def chain_apply(a, plan):
     """Build the chain: firewalls, packages and requests, one signature, enrollment."""
     hops = plan["hops"]
+    step = progress_reporter()
     me = single_ip("auto")
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     work = INVENTORY.parent / "chains" / stamp
@@ -1435,11 +1531,13 @@ def chain_apply(a, plan):
     done = []
     # 1. Open each managed firewall in its final form, plus SSH from here for setup.
     for h in hops:
+        step("firewall %s: open the tunnel port, and SSH from here for setup" % h["name"])
         set_firewall(h["name"], h["record"], h["port"], h["sources"], sorted(set(h["ssh"]) | {me}))
     # 2. Install or upgrade each server and collect its request for its role.
     requests = {}
     for h in hops:
         out = work / "requests" / (h["role"] + ".req")
+        step("install %s as the %s (packages and keys; a few minutes)" % (h["name"], h["role"]))
         keys, tpm = setup_server(h["name"], h["record"], h["role"], h["port"], out, a.source, replace=True,
                                  source_arm=getattr(a, "source_arm", None))  # fmt: skip
         requests[h["role"]] = out
@@ -1460,10 +1558,12 @@ def chain_apply(a, plan):
             argv += ["--" + role, endpoint[role]]
     argv += ["--request", "client=%s" % Path(a.client_request).resolve()]
     argv += [x for role, f in requests.items() for x in ("--request", "%s=%s" % (role, f))]
+    step("sign the chain: enter the Nitrokey PIN, then touch the key")
     call(argv, parse=False)
     bundles = work / "bundles"
     # 4. Enroll and start, exit first, so each hop's next hop is already up.
     for h in reversed(hops):
+        step("enroll %s and start it" % h["name"])
         ssh, scp, base, host = remote(h["name"], h["record"])
         call([scp, "-q", *base, str(bundles / (h["role"] + ".avpn")), host + ":/tmp/avpn-bundle.avpn"], parse=False)
         call([scp, "-q", *base, str(bundles / "operator.pub"), host + ":/tmp/avpn-operator.pub"], parse=False)
@@ -1471,6 +1571,7 @@ def chain_apply(a, plan):
         if not state or state[-1] != "active":
             raise CloudError("%s did not start after enrolling" % h["name"])
     # 5. SSH only through the chain from now on.
+    step("close SSH from here (from now on: while connected)")
     for h in hops:
         set_firewall(h["name"], h["record"], h["port"], h["sources"], h["ssh"])
     inv = load_inventory()
@@ -1721,7 +1822,9 @@ def status(a):
                 except CloudError as e:
                     detail += " (unknown: %s)" % e
         if r["provider"] == "oci":
-            detail += " %s:%s" % (r["source"], r["port"])
+            # A firewall rule (`oci allow`) names its source; a server (`oci server`) its address.
+            where = r.get("source") or r.get("public_ip") or "(no instance)"
+            detail += " %s:%s" % (where, r.get("port", "?"))
         rows.append(dict(label=name, value=detail))
     return rows or [dict(label="nothing", value="no cloud resources recorded in " + str(INVENTORY))]
 

@@ -1469,6 +1469,43 @@ def emit(args, message, **data):
         print(message)
 
 
+# A Nitrokey PIN the service waits for is a systemd password request with this id
+# (keyguard.pinentry runs systemd-ask-password --id=advanced-vpn:fido2-pin).
+ASK_DIR = Path("/run/systemd/ask-password")
+PIN_REQUEST_ID = "advanced-vpn:fido2-pin"
+
+
+def pin_pending(ask_dir=None):
+    """Whether the VPN service is waiting for its Nitrokey PIN right now."""
+    d = ASK_DIR if ask_dir is None else ask_dir
+    try:
+        files = sorted(d.glob("ask.*"))
+    except OSError:
+        return False
+    for f in files:
+        try:
+            if "Id=" + PIN_REQUEST_ID in f.read_text(errors="replace").splitlines():
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def service_active():
+    """Whether advanced-vpn.service is active (starting or running)."""
+    return cmd("systemctl", "is-active", "--quiet", "advanced-vpn.service", check=False).returncode == 0
+
+
+def wait_for_pin_request(seconds=60):
+    """`avpn connect` returns once the service has started; its PIN request follows a
+    moment later. Wait for it while the service is active, so `connect && unlock`
+    never finds nothing and exits silently."""
+    deadline = time.monotonic() + seconds
+    while not pin_pending() and time.monotonic() < deadline and service_active():
+        time.sleep(0.5)
+    return pin_pending()
+
+
 def read_json_private(path, default=None):
     """Load a private JSON file, or return `default` when it does not exist."""
     return json.loads(read_private(path)) if path.exists() else default
@@ -2041,9 +2078,19 @@ def main():
         emit(a, "Guard checked.")
     elif a.action == "unlock":
         root_guard(False)
+        if not wait_for_pin_request():
+            raise RuntimeError("no Nitrokey PIN request is pending; start the service first: sudo avpn connect")
         os.execv(trusted_exe("systemd-tty-ask-password-agent"), ["systemd-tty-ask-password-agent", "--query"])
     elif a.action == "status":
-        status = read_json_private(runtime_dir(a.state, create=False) / "status.json", dict(state="not running"))
+        status = read_json_private(runtime_dir(a.state, create=False) / "status.json")
+        if status is None:
+            # Until the PIN is given the supervisor has written nothing yet: say so,
+            # instead of "not running" while the service waits.
+            status = (
+                dict(state="waiting for the Nitrokey PIN", next="sudo avpn unlock")
+                if pin_pending()
+                else dict(state="not running")
+            )
         emit(a, json.dumps(status, sort_keys=True), status=status)
     elif a.action == "info":
         info = device_info(a.state.resolve())
