@@ -131,7 +131,7 @@ random guess is right **3.3%** of the time (`1/30`).
 
 | Rate class | Grid pacing | Wire rate / direction | 2-hop app throughput (v0.10.1, median of 3) | Cover volume / direction |
 |---|---|---|---|---|
-| `metered` (default) | 20 ms × 1 slot (50 pps) | ~0.55 Mbit/s | 0.30 Mbit/s | ~5.7 GiB/day (~171 GiB/mo) |
+| `metered` | 20 ms × 1 slot (50 pps) | ~0.55 Mbit/s | 0.30 Mbit/s | ~5.7 GiB/day (~171 GiB/mo) |
 | `standard` | 2 ms × 1 slot (500 pps) | ~5.5 Mbit/s | 3.0 Mbit/s | ~57 GiB/day |
 | `fast` | 2 ms × 8 staggered slots (4,000 pps) | ~44 Mbit/s | 27.9 Mbit/s | ~455 GiB/day |
 | `line` | 2 ms × 32 staggered slots (16,000 pps) | ~177 Mbit/s | 115.3 Mbit/s | ~1.8 TiB/day |
@@ -218,22 +218,25 @@ the content); with `--front-hops 1` that one router also sees the entry's.
 
 ## What it does not stop
 
-Two adversaries are named here, because they are defeated by different means. The
-**global passive observer** can watch any link but controls nothing, and is resisted
-*structurally*: constant-rate streams and per-hop shaping leave it a flat packet rate
-on every wire it sees, and the mix lane (random delays, batched hops) removes the
-timing signal outright — no amount of collusion improves its position, only more
-observation points do. A **colluding majority of operators** is the opposite case: it
-holds observation points, not just links, and cannot be prevented — only made **slow,
-visible and partial**. Slow, because new nodes would earn trust over time and entry
-guards are kept for months, so a majority bought today still missed the paths already
-running. Visible, because mass registration is a concentration jump anyone can audit,
-and a mesh that requires distinct operators, providers and legal spheres per path
-makes cheap placement worthless. Partial, because diversity rules bound how many paths
-any majority can capture below its raw share of nodes. What no design in this class
-prevents is a patient majority that behaves perfectly and waits: the mitigations
-raise its cost and shorten what it can accumulate, and the mesh's epoch design (in
-`docs/MESH_DESIGN.md`) is the limit of what is claimed.
+Two adversaries are named here, because they are resisted by different means.
+
+- **A global passive observer** watches links but controls no node. It is resisted
+  *structurally*, not by trusting anyone. Constant-rate streams on every link give it a
+  flat packet rate, but only while the shaper keeps its clock: on a busy CPU it does not
+  (see "On real websites" above). The mix lane adds random per-hop delays, so a sender
+  is hard to pick out: at chance in the 10-client lab (`docs/evidence/MIX_LANE.json`).
+  Neither removes the timing signal in general; the mix lane only bounds it at the
+  measured settings and size.
+- **A colluding majority of operators** sees inside the nodes it runs. That cannot be
+  prevented, only made **slow, visible and partial**.
+  - What exists today: a chain refuses the same provider at both ends (`avpn cloud
+    chain`, unless `--allow-same-provider`), and the mesh's concentration report flags
+    any provider or legal sphere above one third (`tools/mesh.py`).
+  - What is planned, not built (`docs/COMPARISON.md` §4, item 12): stable entry guards
+    kept for months, a tenure ramp for new nodes, a path-capture simulation to tune the
+    diversity rules, and an append-only descriptor log with client-side alarms.
+  - No design in this class stops a patient majority that behaves perfectly and waits.
+    The measures raise its cost and what it must keep up; they do not exclude it.
 
 - **A global passive adversary** who can watch both ends of the chain at once can
   still try to correlate the flows by their timing and volume. Deep-learning attacks

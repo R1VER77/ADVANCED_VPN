@@ -1,5 +1,10 @@
 # Managed v0.2 validation — 2026-11-07
 
+> **Historical record.** This is the v0.2 validation (7–8 Nov 2026), kept as it was
+> run. Some features it tests have changed since (for example the `balanced` profile
+> was removed: there is one posture, strong). Current evidence is in
+> [`docs/evidence/`](evidence/), and each figure there names its version.
+
 ## Update — 2026-11-08 (post-quantum authentication, opt-in cap)
 
 All suites were rerun on the unchanged v0.2 tree first (all passed; the
