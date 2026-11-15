@@ -170,5 +170,101 @@ class PinPromptTests(unittest.TestCase):
         self.assertEqual(calls, [])
 
 
+class PinDialogTests(unittest.TestCase):
+    """The desktop pop-up comes first, also under sudo (as the invoking user); a dialog
+    that cannot open falls back to the terminal; Cancel stops; never over SSH."""
+
+    def prompt(self, euid=1000, env=None, tty=True, dialog=b"OK\nD dialog-pin\nOK\n", rc=0, raises=None):
+        import subprocess
+        import sys
+        import tempfile
+        from unittest import mock
+        import keyguard
+
+        calls = []
+
+        def fake_run(args, **kw):
+            calls.append((list(args), kw))
+            if raises:
+                raise raises
+            return subprocess.CompletedProcess(args, rc, stdout=dialog, stderr=b"")
+
+        self.tmp = tempfile.TemporaryDirectory()
+        environ = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY", "SSH_CONNECTION")}
+        environ.update(env or {})
+        real_path = keyguard.Path
+
+        def fake_path(*parts):
+            p = real_path(*parts)
+            # /run/user/<uid> lives under a temporary root for the sudo case.
+            if str(p).startswith("/run/user"):
+                return real_path(self.tmp.name + str(p))
+            return p
+
+        run_dir = real_path(self.tmp.name + "/run/user/1000")
+        run_dir.mkdir(parents=True)
+        (run_dir / "wayland-0").touch()
+        (run_dir / "wayland-0.lock").touch()
+        (run_dir / "bus").touch()
+        with (
+            mock.patch.dict(os.environ, environ, clear=True),
+            mock.patch.object(keyguard.os, "geteuid", return_value=euid),
+            mock.patch.object(keyguard, "Path", fake_path),
+            mock.patch.object(keyguard, "PINENTRY", sys.executable),
+            mock.patch.object(keyguard.subprocess, "run", fake_run),
+            mock.patch.object(sys.stdin, "isatty", return_value=tty),
+            mock.patch("getpass.getpass", return_value="tty-pin"),
+        ):
+            try:
+                return keyguard.pinentry(), calls
+            except RuntimeError as e:
+                return e, calls
+            finally:
+                self.tmp.cleanup()
+
+    def test_your_own_desktop_pops_up_before_the_terminal(self):
+        value, calls = self.prompt(env={"WAYLAND_DISPLAY": "wayland-0"})
+        self.assertEqual(value, "dialog-pin")
+        self.assertEqual(len(calls), 1)
+        self.assertNotIn("user", calls[0][1])  # already you: no user switch
+
+    def test_under_sudo_the_dialog_runs_as_the_invoking_user_in_their_session(self):
+        # Live regression (14 Nov 2026): as root the dialog could not open ("PIN dialog stopped").
+        value, calls = self.prompt(euid=0, env={"SUDO_UID": "1000", "SUDO_GID": "1000"})
+        self.assertEqual(value, "dialog-pin")
+        kw = calls[0][1]
+        self.assertEqual((kw["user"], kw["group"], kw["extra_groups"]), (1000, 1000, []))
+        self.assertEqual(kw["env"]["WAYLAND_DISPLAY"], "wayland-0")
+        self.assertTrue(kw["env"]["DBUS_SESSION_BUS_ADDRESS"].endswith("/run/user/1000/bus"))
+        self.assertTrue(kw["env"]["XDG_RUNTIME_DIR"].endswith("/run/user/1000"))
+
+    def test_a_dialog_that_cannot_open_falls_back_to_the_terminal(self):
+        for case in [dict(dialog=b"ERR 83918950 Inappropriate ioctl\n", rc=0), dict(raises=OSError("no display"))]:
+            value, _ = self.prompt(env={"WAYLAND_DISPLAY": "wayland-0"}, **case)
+            self.assertEqual(value, "tty-pin", case)
+
+    def test_cancel_stops_and_does_not_fall_back(self):
+        value, _ = self.prompt(env={"WAYLAND_DISPLAY": "wayland-0"}, dialog=b"ERR 83886179 Operation cancelled\n")
+        self.assertIsInstance(value, RuntimeError)
+        self.assertIn("cancelled", str(value))
+
+    def test_never_a_dialog_over_ssh_or_when_switched_off(self):
+        for extra in [{"SSH_CONNECTION": "1.2.3.4 5 6.7.8.9 22"}, {"AVPN_PIN_DIALOG": "0"}]:
+            value, calls = self.prompt(env={"WAYLAND_DISPLAY": "wayland-0", **extra})
+            self.assertEqual((value, calls), ("tty-pin", []), extra)
+
+    def test_root_without_sudo_has_no_desktop_to_use(self):
+        value, calls = self.prompt(euid=0, env={})
+        self.assertEqual((value, calls), ("tty-pin", []))
+
+    def test_root_with_a_display_of_its_own_uses_it(self):
+        # As before the pop-up came first: root's own desktop, or a root process given
+        # DISPLAY without sudo, keeps its dialog (in its own session, as root).
+        value, calls = self.prompt(euid=0, env={"DISPLAY": ":0"})
+        self.assertEqual(value, "dialog-pin")
+        self.assertIsNone(calls[0][1].get("user"))
+        self.assertEqual(calls[0][1]["env"]["DISPLAY"], ":0")
+
+
 if __name__ == "__main__":
     unittest.main()

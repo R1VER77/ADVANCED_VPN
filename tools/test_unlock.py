@@ -100,5 +100,73 @@ class StatusWordingTests(unittest.TestCase):
             self.assertEqual(json.loads(r.stdout.strip().splitlines()[-1])["status"], {"state": "not running"})
 
 
+class AnswerTests(unittest.TestCase):
+    """`avpn unlock` answers the service's request itself (systemd's password agent
+    protocol), so the PIN prompt is ours: a pop-up or a labelled terminal prompt."""
+
+    def ask(self, d, name, ident, sock, not_after=0):
+        (d / name).write_text(
+            "[Ask]\nPID=1\nSocket=%s\nAcceptCached=0\nEcho=0\nNotAfter=%d\nMessage=PIN\nId=%s\n"
+            % (sock, not_after, ident)
+        )
+
+    def test_finds_only_the_services_live_request(self):
+        import time
+
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            self.assertIsNone(avpnctl.pending_pin_request(d))
+            self.ask(d, "ask.a", "cryptsetup:/dev/sda2", "/x/other")
+            past = int(time.monotonic() * 1e6) - 1_000_000
+            self.ask(d, "ask.b", "advanced-vpn:fido2-pin", "/x/expired", not_after=past)
+            self.assertIsNone(avpnctl.pending_pin_request(d))
+            self.ask(d, "ask.c", "advanced-vpn:fido2-pin", "/x/live", not_after=0)
+            sock, f = avpnctl.pending_pin_request(d)
+            self.assertEqual((str(sock), f.name), ("/x/live", "ask.c"))
+
+    def test_the_answer_is_one_plus_prefixed_datagram(self):
+        import socket
+
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "sck.1"
+            server = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+            server.bind(str(path))
+            server.settimeout(3)
+            try:
+                avpnctl.answer_pin_request((path, None), "123456")
+                self.assertEqual(server.recv(64), b"+123456")
+            finally:
+                server.close()
+
+    def test_status_prefers_a_pending_pin_over_a_stale_file(self):
+        # Live regression (15 Nov 2026): connect showed "blocked / disconnected" from the
+        # previous run while the service was waiting for the PIN.
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            ask = d / "ask"
+            ask.mkdir()
+            rt = d / "rt"
+            rt.mkdir()
+            (rt / "status.json").write_text(json.dumps({"state": "blocked", "reason": "disconnected"}))
+            (ask / "ask.vpn").write_text(ASK.format(id="advanced-vpn:fido2-pin"))
+            code = (
+                "import sys; from pathlib import Path\n"
+                "sys.path.insert(0, %r)\n"
+                "import avpnctl; avpnctl.ASK_DIR = Path(%r)\n"
+                "avpnctl.runtime_dir = lambda state, create=True: Path(%r)\n"
+                "avpnctl.read_private = lambda p, *a: Path(p).read_bytes()\n"
+                "sys.argv = ['avpnctl', '--json', '--state', %r, 'status']\n"
+                "avpnctl.main()\n"
+            ) % (str(CTL.parent), str(ask), str(rt), str(d / "state"))
+            run = lambda: json.loads(  # noqa: E731
+                subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=60)
+                .stdout.strip()
+                .splitlines()[-1]
+            )["status"]
+            self.assertEqual(run()["state"], "waiting for the Nitrokey PIN")
+            (ask / "ask.vpn").unlink()
+            self.assertEqual(run(), {"state": "blocked", "reason": "disconnected"})
+
+
 if __name__ == "__main__":
     unittest.main()

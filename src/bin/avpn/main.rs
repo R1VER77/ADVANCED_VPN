@@ -12,6 +12,7 @@ mod cells;
 mod cloud;
 mod controller;
 mod mesh;
+mod progress;
 mod theme;
 mod topics;
 
@@ -235,7 +236,7 @@ fn run(cli: Cli, theme: Theme) -> i32 {
         return help(Some(action), theme);
     }
     if action == "cloud" {
-        return cloud::main(&args, cli.json, theme);
+        return cloud::main(&args, cli.json, theme, cli.reduced_motion);
     }
     if action == "mesh" {
         return mesh::main(&args, cli.json, theme);

@@ -14,6 +14,9 @@ the bytes used when a daily cap is set.
   - `blocked`: the supervisor stopped, or the daily cap was reached (`reason`). Traffic is held by the kill switch, not leaked.
   - `unlocked`: `avpn reset --allow-cleartext` removed the kill switch.
   - `not running`: no status since boot.
+  - `waiting for the Nitrokey PIN`: the service is asking for the PIN; answer it with `sudo avpn unlock`.
+  - `unknown`: run without `sudo` while the service runs; its status is readable by root only.
+- `detail` and `next`: why, and what to run next, when there is something to do.
 - `kill_switch`: whether the nftables guard is in place.
 - `children`: each data-plane process, with its PID and whether it is alive.
 
@@ -24,7 +27,7 @@ Nothing. A read-only query never creates runtime files.
 ## Failure modes
 
 - `not running`: the service is stopped. Start it with `avpn connect`.
-- `PermissionError`: run it with `sudo`.
+- `unknown` (`next: sudo avpn status`): you ran it as yourself; run it with `sudo`.
 
 ## Files
 

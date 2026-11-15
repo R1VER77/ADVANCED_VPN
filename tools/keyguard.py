@@ -68,25 +68,66 @@ PINENTRY = "/usr/bin/pinentry-gnome3"
 PIN_PROMPT = "ADVANCED VPN: FIDO2 PIN, then touch the Nitrokey when it flashes"
 
 
+class DialogUnavailable(RuntimeError):
+    """The desktop PIN dialog could not be shown (no session, no display, no prompter)."""
+
+
+def desktop_session():
+    """(uid, gid, environment) for showing a dialog on the desktop of the person at
+    this keyboard, or None. Run as yourself: your own session. Run as root through
+    sudo: the invoking user's session (SUDO_UID), found from their /run/user
+    directory, since sudo strips the display variables and root cannot use their
+    session bus. Never over SSH: the dialog would open on another screen."""
+    if os.environ.get("SSH_CONNECTION") or os.environ.get("AVPN_PIN_DIALOG") == "0":
+        return None
+    uid, gid = os.environ.get("SUDO_UID", ""), os.environ.get("SUDO_GID", "")
+    if os.geteuid() != 0 or not (uid.isdigit() and gid.isdigit()) or int(uid) == 0:
+        # Not through sudo (yourself, or root with a display of its own): this session.
+        if os.environ.get("WAYLAND_DISPLAY") or os.environ.get("DISPLAY"):
+            return None, None, dict(os.environ)
+        return None
+    runtime = Path("/run/user") / uid
+    env = {"PATH": "/usr/bin:/bin", "XDG_RUNTIME_DIR": str(runtime), "HOME": os.environ.get("HOME", "/")}
+    try:
+        wayland = sorted(p.name for p in runtime.glob("wayland-[0-9]*") if not p.name.endswith(".lock"))
+    except OSError:
+        wayland = []
+    if wayland:
+        env["WAYLAND_DISPLAY"] = wayland[0]
+    if Path("/tmp/.X11-unix/X0").exists():  # noqa: S108 - the X server's fixed socket, only checked
+        env["DISPLAY"] = ":0"
+    if not wayland and "DISPLAY" not in env:
+        return None
+    if (runtime / "bus").exists():
+        env["DBUS_SESSION_BUS_ADDRESS"] = "unix:path=%s" % (runtime / "bus")
+    return int(uid), int(gid), env
+
+
 def pinentry():
-    """PIN source, in order: a terminal (no-echo prompt); a desktop session
-    (pinentry-gnome3); a systemd service without a desktop, e.g. the whole-device
-    unit at boot (systemd's password agents: boot console or `avpn unlock`).
-    Anything else is refused; there is no unattended bypass.
+    """PIN source, in order: a desktop dialog (pinentry-gnome3) on the session of the
+    person at this keyboard, also under sudo; a terminal (no-echo prompt with a
+    visible label); a systemd service without either, e.g. the whole-device unit at
+    boot (systemd's password agents: boot console or `avpn unlock`). Anything else
+    is refused; there is no unattended bypass. Cancelling the dialog stops; a dialog
+    that cannot open falls back to the terminal.
 
     Desktop apps also run inside systemd scopes (INVOCATION_ID is set there), so
     the desktop check must come before the service check."""
     import sys
 
+    session = desktop_session()
+    if session and Path(PINENTRY).exists():
+        try:
+            return desktop_pinentry(session)
+        except DialogUnavailable:
+            pass
     if sys.stdin.isatty():
         import getpass
 
-        value = getpass.getpass("ADVANCED VPN: FIDO2 PIN (cannot be reset or changed here): ")
+        value = getpass.getpass("Nitrokey PIN (then touch the key when it flashes): ")
         if not value:
             raise RuntimeError("PIN unavailable")
         return value
-    if (os.environ.get("WAYLAND_DISPLAY") or os.environ.get("DISPLAY")) and Path(PINENTRY).exists():
-        return desktop_pinentry()
     if os.environ.get("INVOCATION_ID") and Path(ASK_PASSWORD).exists():
         # No --keyname/--accept-cached: the PIN is never cached in the kernel keyring.
         r = subprocess.run(
@@ -108,12 +149,23 @@ def pinentry():
     raise RuntimeError("no terminal, desktop session or systemd password agent for the PIN; run interactively")
 
 
-def desktop_pinentry():
-    """Ask for the FIDO2 PIN with the desktop pinentry dialog; never caches it."""
-    message = "SETTITLE ADVANCED VPN hardware authorization\nSETDESC Enter the existing FIDO2 PIN. This operation cannot reset or change it.\nSETPROMPT FIDO2 PIN:\nGETPIN\nBYE\n"
-    r = subprocess.run([PINENTRY], input=message.encode(), capture_output=True, timeout=180)
-    if r.returncode or any(v.startswith(b"ERR ") for v in r.stdout.splitlines()):
-        raise RuntimeError("PIN dialog stopped")
+def desktop_pinentry(session=None):
+    """Ask for the FIDO2 PIN with the desktop pinentry dialog; never caches it.
+    `session` is (uid, gid, env) from desktop_session(): under sudo the dialog runs
+    as the invoking user, in their session."""
+    uid, gid, env = session if session else (None, None, dict(os.environ))
+    message = "SETTITLE ADVANCED VPN\nSETDESC Enter your Nitrokey PIN, then touch the key when it flashes.\nThis cannot reset or change the PIN.\nSETPROMPT PIN:\nGETPIN\nBYE\n"
+    kw = dict(user=uid, group=gid, extra_groups=[]) if uid is not None else {}
+    try:
+        r = subprocess.run([PINENTRY], input=message.encode(), capture_output=True, timeout=180, env=env, **kw)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        raise DialogUnavailable(str(e)) from e
+    errors = [v for v in r.stdout.splitlines() if v.startswith(b"ERR ")]
+    # Assuan error 83886179 is "Operation cancelled": the person said no; stop there.
+    if any(b"83886179" in v or b"ancel" in v for v in errors):
+        raise RuntimeError("PIN dialog cancelled")
+    if r.returncode or errors:
+        raise DialogUnavailable("PIN dialog could not be shown")
     values = [unquote_to_bytes(v[2:].decode()) for v in r.stdout.splitlines() if v.startswith(b"D ")]
     if len(values) != 1:
         raise RuntimeError("PIN unavailable")

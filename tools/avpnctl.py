@@ -83,6 +83,28 @@ def save(path, value):
     atomic(path, canonical(value))
 
 
+def runtime_root():
+    """Where the per-state runtime directories live. Unprivileged tests may point it
+    elsewhere with AVPN_RUNTIME_ROOT, so they never depend on a VPN running on the
+    machine; root never honours it (`sudo -E` must not move a service's state)."""
+    override = os.environ.get("AVPN_RUNTIME_ROOT")
+    return Path(override) if override and os.geteuid() != 0 else Path("/run/advanced-vpn")
+
+
+# What a non-root caller is told while the root service keeps its status to itself
+# (/run/advanced-vpn is root's, 0700): not "not running", which may be false.
+STATUS_ROOT_ONLY = dict(state="unknown", detail="only root can read the service's status", next="sudo avpn status")
+
+
+def read_status(state, default=None):
+    """The running service's status for `state`, `default` when there is none, or
+    STATUS_ROOT_ONLY when this user may not look."""
+    try:
+        return read_json_private(runtime_dir(state, create=False) / "status.json", default)
+    except PermissionError:
+        return dict(STATUS_ROOT_ONLY)
+
+
 def runtime_dir(state, create=True):
     """RAM-only (tmpfs) home for everything written while running: status, PIDs,
     locks, rotated leaves, resolver file and namespace marker. Servers persist nothing
@@ -92,7 +114,7 @@ def runtime_dir(state, create=True):
     and an existing directory is still checked before anything inside it is trusted."""
     import hashlib
 
-    d = Path("/run/advanced-vpn") / ("state-" + hashlib.sha256(str(Path(state).resolve()).encode()).hexdigest()[:16])
+    d = runtime_root() / ("state-" + hashlib.sha256(str(Path(state).resolve()).encode()).hexdigest()[:16])
     if create:
         d.mkdir(mode=0o700, parents=True, exist_ok=True)
     elif not os.path.lexists(d):
@@ -1506,6 +1528,40 @@ def wait_for_pin_request(seconds=60):
     return pin_pending()
 
 
+def pending_pin_request(ask_dir=None):
+    """(socket path, ask file) of the service's pending PIN request, or None. Requests
+    whose deadline (NotAfter, microseconds of CLOCK_MONOTONIC) has passed are skipped."""
+    d = ASK_DIR if ask_dir is None else ask_dir
+    try:
+        files = sorted(d.glob("ask.*"))
+    except OSError:
+        return None
+    now_us = int(time.monotonic() * 1e6)
+    for f in files:
+        try:
+            fields = dict(line.split("=", 1) for line in f.read_text(errors="replace").splitlines() if "=" in line)
+        except OSError:
+            continue
+        if fields.get("Id") != PIN_REQUEST_ID or not fields.get("Socket"):
+            continue
+        not_after = int(fields.get("NotAfter", "0") or 0)
+        if not_after and not_after < now_us:
+            continue
+        return Path(fields["Socket"]), f
+    return None
+
+
+def answer_pin_request(request, pin):
+    """Answer a systemd password request: one datagram, "+" and the PIN, to its socket
+    (systemd's password agent protocol; the PIN is not cached anywhere)."""
+    sock_path, _ = request
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+    try:
+        s.sendto(b"+" + pin.encode(), str(sock_path))
+    finally:
+        s.close()
+
+
 def read_json_private(path, default=None):
     """Load a private JSON file, or return `default` when it does not exist."""
     return json.loads(read_private(path)) if path.exists() else default
@@ -1549,8 +1605,7 @@ def device_info(state):
             upstream_interface=preferences.get("upstream_interface"),
             daily_limit_bytes=daily_limit(preferences, profile) if profile["role"] == "client" else None,
         )
-    status_file = runtime_dir(state, create=False) / "status.json"
-    info["status"] = read_json_private(status_file, dict(state="not running"))
+    info["status"] = read_status(state, dict(state="not running"))
     return info
 
 
@@ -2080,17 +2135,32 @@ def main():
         root_guard(False)
         if not wait_for_pin_request():
             raise RuntimeError("no Nitrokey PIN request is pending; start the service first: sudo avpn connect")
-        os.execv(trusted_exe("systemd-tty-ask-password-agent"), ["systemd-tty-ask-password-agent", "--query"])
+        pin_request = pending_pin_request()
+        if pin_request is None:
+            raise RuntimeError("the PIN request expired; start the service again: sudo avpn connect")
+        # The same PIN path as everywhere: a desktop pop-up (as you, also under sudo),
+        # else a labelled terminal prompt. Not systemd's bare agent, whose prompt shows
+        # no label or cursor.
+        from keyguard import pinentry
+
+        answer_pin_request(pin_request, pinentry())
+        print("PIN sent. Touch the Nitrokey when it flashes.", flush=True)
+        deadline = time.monotonic() + 90
+        status = None
+        while time.monotonic() < deadline:
+            status = read_status(a.state)
+            if status and status.get("state") not in (None, "blocked") and not pin_pending():
+                break
+            time.sleep(0.5)
+        state = (status or {}).get("state", "not running")
+        emit(a, "Unlocked; the VPN is %s." % state, unlocked=True, status=status or dict(state=state))
     elif a.action == "status":
-        status = read_json_private(runtime_dir(a.state, create=False) / "status.json")
-        if status is None:
-            # Until the PIN is given the supervisor has written nothing yet: say so,
-            # instead of "not running" while the service waits.
-            status = (
-                dict(state="waiting for the Nitrokey PIN", next="sudo avpn unlock")
-                if pin_pending()
-                else dict(state="not running")
-            )
+        # While the service waits for its PIN, say so: the status file is either not
+        # written yet or left over from an earlier run (e.g. "blocked, disconnected").
+        if pin_pending():
+            status = dict(state="waiting for the Nitrokey PIN", next="sudo avpn unlock")
+        else:
+            status = read_status(a.state) or dict(state="not running")
         emit(a, json.dumps(status, sort_keys=True), status=status)
     elif a.action == "info":
         info = device_info(a.state.resolve())

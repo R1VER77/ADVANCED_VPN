@@ -236,6 +236,13 @@ pub fn status_rows(st: &Value) -> Vec<Row> {
     if let Some(r) = s(st, "reason") {
         rows.push(Row::pair("reason", r));
     }
+    if let Some(d) = s(st, "detail") {
+        rows.push(Row::pair("detail", d));
+    }
+    // What to do next, e.g. `sudo avpn unlock` while the service waits for the PIN.
+    if let Some(n) = s(st, "next") {
+        rows.push(Row::pair("next", n));
+    }
     if let Some(l) = st.get("daily_limit_bytes").and_then(Value::as_u64) {
         rows.push(Row::pair("daily limit", format!("{} MiB", l >> 20)));
     }
@@ -449,6 +456,17 @@ mod tests {
         assert!(
             colored.starts_with("\x1b[31m■ \x1b[0m\x1b[1;31mstatus failed"),
             "{colored:?}"
+        );
+    }
+
+    #[test]
+    fn a_status_says_why_and_what_to_do_next() {
+        // As yourself while the service runs: its status is root's to read.
+        let o = ok(json!({"ok": true, "status": {"state": "unknown",
+            "detail": "only root can read the service's status", "next": "sudo avpn status"}}));
+        assert_eq!(
+            plain(&from_outcome("status", &o)),
+            "• Status  unknown\n  └ detail  only root can read the service's status\n    next    sudo avpn status\n"
         );
     }
 

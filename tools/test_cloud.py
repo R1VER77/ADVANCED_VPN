@@ -1010,13 +1010,13 @@ class ChainTests(Stubbed):
             self.chain()
         lines = err.getvalue().splitlines()
         for step in [
-            "firewall avpn-relay",
-            "install avpn-relay",
-            "install avpn-exit",
-            "sign the chain",
-            "enroll avpn-exit",
-            "enroll avpn-relay",
-            "close SSH from here",
+            "Open the firewalls",
+            "Install avpn-relay as the relay",
+            "Install avpn-exit as the exit",
+            "Sign the chain",
+            "Start avpn-exit",
+            "Start avpn-relay",
+            "Close SSH from here",
         ]:
             self.assertTrue(any(step in line for line in lines), (step, lines))
         self.assertTrue(all(re.search(r"\[\s*\d+s\]", line) for line in lines), lines)
@@ -1028,6 +1028,57 @@ class ChainTests(Stubbed):
             os.environ.pop("AVPN_PROGRESS", None)
             self.chain()
         self.assertEqual(err.getvalue(), "")
+
+    def events(self, text):
+        mark = cloud.PROGRESS_MARK
+        # Split on "\n" only: str.splitlines() also breaks at the marker's \x1e.
+        return [json.loads(line[len(mark) :]) for line in text.split("\n") if line.startswith(mark)]
+
+    def test_the_front_end_gets_the_whole_list_then_each_change(self):
+        # Owner request (15 Nov 2026): a checklist like Claude's task panel; the plan
+        # first, then run / wait / done per step, so nothing is a silent hang.
+        import contextlib
+        import io
+
+        self.add_exit()
+        err = io.StringIO()
+        with mock.patch.dict(os.environ, {"AVPN_PROGRESS": "events"}), contextlib.redirect_stderr(err):
+            self.chain()
+        ev = self.events(err.getvalue())
+        self.assertEqual(
+            ev[0]["plan"],
+            [
+                "Open the firewalls",
+                "Install avpn-relay as the relay",
+                "Install avpn-exit as the exit",
+                "Sign the chain",
+                "Start avpn-exit",
+                "Start avpn-relay",
+                "Close SSH from here",
+            ],
+        )
+        states = [(e["step"], e["state"]) for e in ev[1:]]
+        self.assertEqual([i for i, st in states if st == "done"], list(range(7)), states)
+        self.assertIn((3, "wait"), states)
+        self.assertTrue(all(i == j for (i, st), (j, _) in zip(states, states[1:], strict=False) if st == "run"), states)
+        self.assertEqual(err.getvalue().count("\n"), len(ev))  # nothing else on stderr
+
+    def test_a_failure_is_reported_on_the_step_that_failed(self):
+        import contextlib
+        import io
+
+        self.add_exit()
+        err = io.StringIO()
+        boom = cloud.CloudError("avpn-exit did not install")
+        with (
+            mock.patch.dict(os.environ, {"AVPN_PROGRESS": "events"}),
+            contextlib.redirect_stderr(err),
+            mock.patch.object(cloud, "setup_server", side_effect=[("kept", "tpm2=yes"), boom]),
+        ):
+            with self.assertRaises(cloud.CloudError):
+                self.chain()
+        ev = self.events(err.getvalue())
+        self.assertEqual(ev[-1], {"step": 2, "state": "fail", "note": "avpn-exit did not install"})
 
     def test_the_plan_names_tcp_for_the_first_hop_only(self):
         self.add_exit()

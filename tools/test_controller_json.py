@@ -17,6 +17,20 @@ from managed_profile import lab_setup
 
 CTL = Path(__file__).resolve().parent / "avpnctl.py"
 
+# The controller's runtime directories go to a private place for these tests, so they
+# do not depend on whether this machine runs the VPN (its /run/advanced-vpn is root's).
+RUNTIME = tempfile.TemporaryDirectory()
+_env = mock.patch.dict(os.environ, {"AVPN_RUNTIME_ROOT": RUNTIME.name})
+
+
+def setUpModule():
+    _env.start()
+
+
+def tearDownModule():
+    _env.stop()
+    RUNTIME.cleanup()
+
 
 def ctl(state, *args):
     """Run the controller with --json; return (exit code, parsed stdout, stderr)."""
@@ -139,6 +153,41 @@ class ControllerJsonTests(unittest.TestCase):
         self.assertIn("post-quantum crypto library", names)
         self.assertIn("enrolled in a chain", names)
         self.assertTrue(all(set(c) == {"check", "ok", "detail"} for c in out["checks"]))
+
+
+@unittest.skipIf(os.geteuid() == 0, "root can enter any directory")
+class RootOnlyStatusTests(unittest.TestCase):
+    """While the service runs, its runtime directory is root's (0700). Run as yourself,
+    the read-only commands used to stop with PermissionError (`Path.exists()` on the
+    status file); they must work and say the status is root's to read."""
+
+    def test_read_only_commands_work_and_point_to_sudo(self):
+        with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as run:
+            lab_setup(Path(d), "192.0.2.1:41194", "198.51.100.2:4444")
+            os.chmod(run, 0o000)  # as /run/advanced-vpn is to you: no way in
+            try:
+                with mock.patch.dict(os.environ, {"AVPN_RUNTIME_ROOT": run}):
+                    for action in ["info", "hops", "doctor"]:
+                        rc, out, err = ctl(Path(d) / "client", action)
+                        self.assertEqual((rc, out["ok"]), (0, True), (action, err))
+                    rc, out, _ = ctl(Path(d) / "client", "info")
+                    self.assertEqual(out["info"]["status"]["state"], "unknown")
+                    self.assertEqual(out["info"]["status"]["next"], "sudo avpn status")
+                    rc, out, _ = ctl(Path(d) / "client", "status")
+                    self.assertEqual((rc, out["status"]["state"]), (0, "unknown"))
+                    rc, out, _ = ctl(Path(d) / "client", "doctor")
+                    self.assertNotIn("enrollment readable", [c["check"] for c in out["checks"] if not c["ok"]])
+            finally:
+                os.chmod(run, 0o700)
+
+    def test_root_never_honours_the_runtime_override(self):
+        import avpnctl
+
+        with mock.patch.dict(os.environ, {"AVPN_RUNTIME_ROOT": "/tmp/elsewhere"}):  # noqa: S108 - never used
+            with mock.patch.object(avpnctl.os, "geteuid", return_value=0):
+                self.assertEqual(avpnctl.runtime_root(), Path("/run/advanced-vpn"))
+            with mock.patch.object(avpnctl.os, "geteuid", return_value=1000):
+                self.assertEqual(avpnctl.runtime_root(), Path("/tmp/elsewhere"))  # noqa: S108
 
 
 class PrePaddingChainTests(unittest.TestCase):

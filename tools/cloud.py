@@ -1505,39 +1505,96 @@ def chain_plan(a):
     return dict(rows=rows, hops=hops)
 
 
-def progress_reporter():
-    """One line on stderr as each long step starts, with the seconds since the apply
-    began, so a slow step reads as slow rather than hung. Only when someone watches:
-    stderr is a terminal, or the front end streams it (AVPN_PROGRESS=1). stdout keeps
-    its single JSON object."""
-    start = time.monotonic()
-    on = os.environ.get("AVPN_PROGRESS") == "1" or sys.stderr.isatty()
+# Structured progress for the front end's checklist: one line per event on stderr,
+# behind a record-separator byte so ordinary stderr text still passes through. Readers
+# split on "\n" only (Python's str.splitlines() also breaks at \x1e).
+PROGRESS_MARK = "\x1eAVPN "
 
-    def report(step):
-        if on:
-            print("  [%4ds] %s" % (time.monotonic() - start, step), file=sys.stderr, flush=True)
 
-    return report
+class Progress:
+    """The steps of a long operation, reported as they run. With AVPN_PROGRESS=events
+    (the `avpn` front end) each change is a structured event that it draws as a
+    checklist; on a terminal, or with AVPN_PROGRESS=1, a plain line per step with the
+    seconds since the start; otherwise nothing (scripts, tests). stdout keeps its
+    single JSON object either way."""
+
+    def __init__(self, steps):
+        self.steps = list(steps)
+        self.start = time.monotonic()
+        self.current = None
+        mode = os.environ.get("AVPN_PROGRESS")
+        self.mode = "events" if mode == "events" else "lines" if mode == "1" or sys.stderr.isatty() else None
+        self.send(plan=self.steps)
+
+    def send(self, **event):
+        """One structured event, when the front end asked for them."""
+        if self.mode == "events":
+            print(PROGRESS_MARK + json.dumps(event), file=sys.stderr, flush=True)
+
+    def run(self, i, note=None):
+        """Step `i` has started (it finishes when the next one starts, or at `finish`)."""
+        if self.current is not None and self.current != i:
+            self.send(step=self.current, state="done")
+        self.current = i
+        self.send(step=i, state="run")
+        if self.mode == "lines":
+            text = self.steps[i] + (" (%s)" % note if note else "")
+            print("  [%4ds] %s" % (time.monotonic() - self.start, text), file=sys.stderr, flush=True)
+
+    def wait(self, i, note):
+        """Step `i` waits for the person: a PIN, a touch."""
+        self.run(i, note)
+        self.send(step=i, state="wait", note=note)
+
+    def finish(self):
+        """The last step has completed."""
+        if self.current is not None:
+            self.send(step=self.current, state="done")
+            self.current = None
+
+    def fail(self, message):
+        """The running step failed with `message`."""
+        if self.current is not None:
+            self.send(step=self.current, state="fail", note=message)
+            self.current = None
 
 
 def chain_apply(a, plan):
     """Build the chain: firewalls, packages and requests, one signature, enrollment."""
     hops = plan["hops"]
-    step = progress_reporter()
+    n = len(hops)
+    progress = Progress(
+        ["Open the firewalls"]
+        + ["Install %s as the %s" % (h["name"], h["role"]) for h in hops]
+        + ["Sign the chain"]
+        + ["Start %s" % h["name"] for h in reversed(hops)]
+        + ["Close SSH from here"]
+    )
+    try:
+        rows = chain_steps(a, hops, progress, n)
+    except BaseException as e:
+        progress.fail(str(e) or type(e).__name__)
+        raise
+    progress.finish()
+    return rows
+
+
+def chain_steps(a, hops, progress, n):
+    """The work of chain_apply, step by step (see its Progress list)."""
     me = single_ip("auto")
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     work = INVENTORY.parent / "chains" / stamp
     work.mkdir(mode=0o700, parents=True)
     done = []
     # 1. Open each managed firewall in its final form, plus SSH from here for setup.
+    progress.run(0)
     for h in hops:
-        step("firewall %s: open the tunnel port, and SSH from here for setup" % h["name"])
         set_firewall(h["name"], h["record"], h["port"], h["sources"], sorted(set(h["ssh"]) | {me}))
     # 2. Install or upgrade each server and collect its request for its role.
     requests = {}
-    for h in hops:
+    for k, h in enumerate(hops):
         out = work / "requests" / (h["role"] + ".req")
-        step("install %s as the %s (packages and keys; a few minutes)" % (h["name"], h["role"]))
+        progress.run(1 + k, "packages and keys; a few minutes")
         keys, tpm = setup_server(h["name"], h["record"], h["role"], h["port"], out, a.source, replace=True,
                                  source_arm=getattr(a, "source_arm", None))  # fmt: skip
         requests[h["role"]] = out
@@ -1558,12 +1615,12 @@ def chain_apply(a, plan):
             argv += ["--" + role, endpoint[role]]
     argv += ["--request", "client=%s" % Path(a.client_request).resolve()]
     argv += [x for role, f in requests.items() for x in ("--request", "%s=%s" % (role, f))]
-    step("sign the chain: enter the Nitrokey PIN, then touch the key")
+    progress.wait(n + 1, "enter the Nitrokey PIN, then touch the key")
     call(argv, parse=False)
     bundles = work / "bundles"
     # 4. Enroll and start, exit first, so each hop's next hop is already up.
-    for h in reversed(hops):
-        step("enroll %s and start it" % h["name"])
+    for k, h in enumerate(reversed(hops)):
+        progress.run(n + 2 + k)
         ssh, scp, base, host = remote(h["name"], h["record"])
         call([scp, "-q", *base, str(bundles / (h["role"] + ".avpn")), host + ":/tmp/avpn-bundle.avpn"], parse=False)
         call([scp, "-q", *base, str(bundles / "operator.pub"), host + ":/tmp/avpn-operator.pub"], parse=False)
@@ -1571,7 +1628,7 @@ def chain_apply(a, plan):
         if not state or state[-1] != "active":
             raise CloudError("%s did not start after enrolling" % h["name"])
     # 5. SSH only through the chain from now on.
-    step("close SSH from here (from now on: while connected)")
+    progress.run(2 * n + 2, "from now on: while connected")
     for h in hops:
         set_firewall(h["name"], h["record"], h["port"], h["sources"], h["ssh"])
     inv = load_inventory()
