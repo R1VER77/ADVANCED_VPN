@@ -102,10 +102,10 @@ reference pages in one package, with SHA256 checksums. The repository is public,
 GitHub account is needed:
 
 ```bash
-curl -fsSLO https://github.com/R1VER77/ADVANCED_VPN/releases/download/v0.10.1/SHA256SUMS
-curl -fsSLO https://github.com/R1VER77/ADVANCED_VPN/releases/download/v0.10.1/advanced-vpn-v0.10.1-x86_64-linux-gnu.tar.gz
+curl -fsSLO https://github.com/R1VER77/ADVANCED_VPN/releases/download/v0.10.2/SHA256SUMS
+curl -fsSLO https://github.com/R1VER77/ADVANCED_VPN/releases/download/v0.10.2/advanced-vpn-v0.10.2-x86_64-linux-gnu.tar.gz
 sha256sum -c SHA256SUMS
-mkdir advanced-vpn && tar -C advanced-vpn -xzf advanced-vpn-v0.10.1-x86_64-linux-gnu.tar.gz && cd advanced-vpn
+mkdir advanced-vpn && tar -C advanced-vpn -xzf advanced-vpn-v0.10.2-x86_64-linux-gnu.tar.gz && cd advanced-vpn
 ```
 
 Releases are built from signed tags. Releases after v0.10.1 also carry a signed
@@ -134,7 +134,7 @@ Both need Python 3.10+ with `venv` (`sudo apt install python3-venv`). The binari
 built on Ubuntu 22.04, so they run on Ubuntu 22.04+ and Debian 12/13 (x86-64).
 
 To cut a release: bump `version` in `Cargo.toml`, commit, and push a matching tag
-(`git tag -s v0.10.1 && git push origin v0.10.1`). The release workflow builds only if the
+(`git tag -s v0.10.2 && git push origin v0.10.2`). The release workflow builds only if the
 tag matches the version and every `verify` run on that commit passed: the tag's own run
 and the branch's. A cancelled run doesn't block, and a re-run that passes counts.
 A public tag is never moved; a failed release is followed by the next patch version.
