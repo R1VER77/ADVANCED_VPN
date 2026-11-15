@@ -498,7 +498,253 @@
     "It exposes a power-state side channel: with the CPU idle, the release timer wakes late from deep C-states, so packets are LESS regular when idle (gap AUC 0.997-1.000). Cores kept awake by busy loops remove it (no leak in 3 of 3, p 0.08-0.79); a timed loop still leaks completely with awake cores.",
     "Power QoS is not a substitute for awake cores: 20 us leaks in 3 of 3, 0 us in 2 of 3 (gap AUC 0.63-0.92). Busy loops also raise clock frequency; the residue may be frequency, not idle depth (untested).",
     "On the real carrier, the cloak's wire clock turns perfect separation (today: p = 0.0005 every run, count AUC 0.92-1.00 or gap AUC 0.001-0.07) into marginal: no leak by the corrected test in 3 of 3 runs without power QoS and 2 of 3 with it, but count p reaches 0.005 in two runs and largest-gap p 0.0005 in one.",
-    "The residue sits at load transitions: windows that continue a state carry the clock's exact count (3,264), windows right after the load stops come up short and right after it starts run over. Next: cloak counters for skipped slots and late sends, to tell stalls longer than the look-ahead from slot/packet desynchronisation."
+    "The residue sits at load transitions: windows that continue a state carry the clock's exact count (3,264), windows right after the load stops come up short and right after it starts run over. Next: cloak counters for skipped slots and late sends, to tell stalls longer than the look-ahead from slot/packet desynchronisation.",
+    "Counters (fa4d554): the residue does not come from the feeder (0 skipped slots) but from packets reaching the socket after their slot, up to 0.3 s late, inside quinn's send path.",
+    "With a fixed congestion window, lateness all but disappears (39-68 packets per run); the next cause, slots lost on failed sends while fq holds packets, was reproduced on loopback and fixed (unslotted 2,453 -> 14-17 per 4 s)."
   ],
-  "status": "Not a fix yet: the wire clock stays off by default, and fast is still not claimed against website fingerprinting on a busy CPU."
+  "status": "Not a fix yet: the wire clock stays off by default, and fast is still not claimed against website fingerprinting on a busy CPU.",
+  "counters": {
+    "setup": "same as carrier, with the cloak's clock counters (fa4d554); 3 runs, no power QoS",
+    "runs": [
+      {
+        "run": "clockc-1",
+        "leak": false,
+        "count_p": 0.013,
+        "gap_sd": {
+          "auc": 0.5022,
+          "p_value": 0.9755,
+          "control_auc_mean": 0.4985
+        },
+        "max_gap": {
+          "auc": 0.4456,
+          "p_value": 0.4568,
+          "control_auc_mean": 0.5008
+        },
+        "totals": {
+          "fed": 260554,
+          "decoys": 5109,
+          "skipped": 0,
+          "late": 49121,
+          "late_max_us": 291078,
+          "unslotted": 1132,
+          "slot_queue_max": 86
+        },
+        "per_window_means": {
+          "steady_idle": {
+            "windows": 16,
+            "late": 865.2,
+            "late_max_us": 282978,
+            "unslotted": 31.8,
+            "skipped": 0
+          },
+          "steady_loaded": {
+            "windows": 17,
+            "late": 205.1,
+            "late_max_us": 83202,
+            "unslotted": 9.5,
+            "skipped": 0
+          },
+          "idle_after_load": {
+            "windows": 13,
+            "late": 981.1,
+            "late_max_us": 95633,
+            "unslotted": 16.3,
+            "skipped": 0
+          },
+          "loaded_after_idle": {
+            "windows": 13,
+            "late": 581.1,
+            "late_max_us": 291078,
+            "unslotted": 15.4,
+            "skipped": 0
+          }
+        }
+      },
+      {
+        "run": "clockc-2",
+        "leak": true,
+        "count_p": 0.7751,
+        "gap_sd": {
+          "auc": 0.2444,
+          "p_value": 0.001,
+          "control_auc_mean": 0.4998
+        },
+        "max_gap": {
+          "auc": 0.2622,
+          "p_value": 0.0015,
+          "control_auc_mean": 0.4985
+        },
+        "totals": {
+          "fed": 260503,
+          "decoys": 5113,
+          "skipped": 0,
+          "late": 16653,
+          "late_max_us": 113936,
+          "unslotted": 172,
+          "slot_queue_max": 58
+        },
+        "per_window_means": {
+          "steady_idle": {
+            "windows": 16,
+            "late": 218.4,
+            "late_max_us": 99972,
+            "unslotted": 0.0,
+            "skipped": 0
+          },
+          "steady_loaded": {
+            "windows": 15,
+            "late": 377.9,
+            "late_max_us": 79520,
+            "unslotted": 0.9,
+            "skipped": 0
+          },
+          "idle_after_load": {
+            "windows": 14,
+            "late": 86.6,
+            "late_max_us": 5342,
+            "unslotted": 0.0,
+            "skipped": 0
+          },
+          "loaded_after_idle": {
+            "windows": 14,
+            "late": 341.6,
+            "late_max_us": 113936,
+            "unslotted": 9.4,
+            "skipped": 0
+          }
+        }
+      },
+      {
+        "run": "clockc-3",
+        "leak": false,
+        "count_p": 0.4833,
+        "gap_sd": {
+          "auc": 0.4078,
+          "p_value": 0.2294,
+          "control_auc_mean": 0.5021
+        },
+        "max_gap": {
+          "auc": 0.3789,
+          "p_value": 0.1014,
+          "control_auc_mean": 0.5006
+        },
+        "totals": {
+          "fed": 268836,
+          "decoys": 9032,
+          "skipped": 0,
+          "late": 11949,
+          "late_max_us": 227597,
+          "unslotted": 1652,
+          "slot_queue_max": 62
+        },
+        "per_window_means": {
+          "steady_idle": {
+            "windows": 15,
+            "late": 148.8,
+            "late_max_us": 71242,
+            "unslotted": 13.5,
+            "skipped": 0
+          },
+          "steady_loaded": {
+            "windows": 15,
+            "late": 119.7,
+            "late_max_us": 78336,
+            "unslotted": 12.7,
+            "skipped": 0
+          },
+          "idle_after_load": {
+            "windows": 15,
+            "late": 264.3,
+            "late_max_us": 72562,
+            "unslotted": 32.1,
+            "skipped": 0
+          },
+          "loaded_after_idle": {
+            "windows": 14,
+            "late": 181.3,
+            "late_max_us": 79964,
+            "unslotted": 3.4,
+            "skipped": 0
+          }
+        }
+      }
+    ],
+    "reading": "The feeder is exact: every window was fed its 4,080 slots and no slot was ever skipped. The loss of timing happens after it: 12,000-49,000 packets per run reached the socket after their slot (worst 114-291 ms), in idle and loaded windows alike, and were then sent at once, so their timing followed quinn's scheduling, not the grid; 172-1,652 full-size packets found no slot. Hypothesis (to test): quinn's congestion control (BBR) holds datagrams back when its estimate dips below the fixed stream rate. Next: a fixed-window controller on the client while the clock runs, judged by lateness falling to about zero."
+  },
+  "fixed_window": {
+    "setup": "as counters, with a fixed congestion window on the clocked client (quinn's congestion control and pacing off)",
+    "runs": [
+      {
+        "run": "fixedwin-1",
+        "leak": true,
+        "count_p": 0.1474,
+        "gap_sd": {
+          "auc": 0.1111,
+          "p_value": 0.0005,
+          "control_auc_mean": 0.5013
+        },
+        "max_gap": {
+          "auc": 0.1683,
+          "p_value": 0.0005,
+          "control_auc_mean": 0.5012
+        },
+        "totals": {
+          "fed": 264391,
+          "decoys": 5338,
+          "skipped": 127,
+          "late": 39,
+          "late_max_us": 2237,
+          "unslotted": 54399
+        }
+      },
+      {
+        "run": "fixedwin-2",
+        "leak": false,
+        "count_p": 0.4058,
+        "gap_sd": {
+          "auc": 0.4033,
+          "p_value": 0.2179,
+          "control_auc_mean": 0.4999
+        },
+        "max_gap": {
+          "auc": 0.3956,
+          "p_value": 0.1574,
+          "control_auc_mean": 0.5016
+        },
+        "totals": {
+          "fed": 264612,
+          "decoys": 5263,
+          "skipped": 98,
+          "late": 39,
+          "late_max_us": 4166,
+          "unslotted": 55420
+        }
+      },
+      {
+        "run": "fixedwin-3",
+        "leak": false,
+        "count_p": 0.2814,
+        "gap_sd": {
+          "auc": 0.3433,
+          "p_value": 0.0345,
+          "control_auc_mean": 0.4993
+        },
+        "max_gap": {
+          "auc": 0.3978,
+          "p_value": 0.1879,
+          "control_auc_mean": 0.4986
+        },
+        "totals": {
+          "fed": 260437,
+          "decoys": 5204,
+          "skipped": 187,
+          "late": 68,
+          "late_max_us": 3700,
+          "unslotted": 54121
+        }
+      }
+    ],
+    "reading": "Lateness fell from 12,000-49,000 packets per run (worst 114-291 ms) to 39-68 (worst 2-4 ms): quinn's congestion control was what held packets back. But 54,000-55,400 full-size packets per run found no slot and left on quinn's timing; run 1 leaked (gap spread p 0.0005).",
+    "cause": "Reproduced on loopback with fq (a cloak test in its own network namespace): 2,453 of 16,465 packets found no slot in 4 s, against 12 without fq. Packets fq holds for their departure time count against the socket's send buffer; when it filled, sendmsg failed, quinn retried the packet, and the paced socket had already spent that packet's slot. Fix: a failed send puts its slot back, and the socket asks for a send buffer large enough for the look-ahead (capped by net.core.wmem_max). Unslotted packets: 14-17 per 16,440 with the fix; 342 with both halves removed; buffer only 14, slot restore only 114. Regression test the_clock_keeps_every_packet_on_its_slot_under_fq, run in CI under unshare -Urn with fq on loopback."
+  }
 }

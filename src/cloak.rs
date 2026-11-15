@@ -186,6 +186,62 @@ pub fn transport() -> Arc<TransportConfig> {
     // Measured 2026-11-14, 3 runs x 3 fetches: NewReno 4/9 fetches, BBR 9/9.
     let mut cc = quinn::congestion::BbrConfig::default();
     cc.initial_window(4 << 20);
+    transport_with(Arc::new(cc))
+}
+
+/// The client's transport while the wire clock runs: the same, but with a fixed window.
+/// The stream's rate is set by the clock and agreed in advance, so congestion control has
+/// nothing to decide; BBR held datagrams back by up to 0.3 s when its estimate dipped
+/// below the stream's rate, and a packet that reaches the socket after its slot goes out
+/// at once, on quinn's timing instead of the grid (docs/evidence/KERNEL_PACING.json,
+/// counters). A window above `u32::MAX` also turns quinn's own pacing off.
+fn clocked_transport() -> Arc<TransportConfig> {
+    transport_with(Arc::new(FixedWindow))
+}
+
+/// A congestion "controller" that never limits: the wire clock does.
+#[derive(Clone, Debug)]
+struct FixedWindow;
+
+const FIXED_WINDOW: u64 = 1 << 40;
+
+impl quinn::congestion::Controller for FixedWindow {
+    fn on_congestion_event(
+        &mut self,
+        _: std::time::Instant,
+        _: std::time::Instant,
+        _: bool,
+        _: u64,
+    ) {
+    }
+    fn on_mtu_update(&mut self, _: u16) {}
+    fn window(&self) -> u64 {
+        FIXED_WINDOW
+    }
+    fn clone_box(&self) -> Box<dyn quinn::congestion::Controller> {
+        Box::new(self.clone())
+    }
+    fn initial_window(&self) -> u64 {
+        FIXED_WINDOW
+    }
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any> {
+        self
+    }
+}
+
+impl quinn::congestion::ControllerFactory for FixedWindow {
+    fn build(
+        self: Arc<Self>,
+        _: std::time::Instant,
+        _: u16,
+    ) -> Box<dyn quinn::congestion::Controller> {
+        Box::new(FixedWindow)
+    }
+}
+
+fn transport_with(
+    cc: Arc<dyn quinn::congestion::ControllerFactory + Send + Sync>,
+) -> Arc<TransportConfig> {
     let mut ack = quinn::AckFrequencyConfig::default();
     ack.ack_eliciting_threshold(VarInt::from_u32(64))
         .max_ack_delay(Some(Duration::from_millis(100)));
@@ -196,7 +252,7 @@ pub fn transport() -> Arc<TransportConfig> {
         .datagram_send_buffer_size(4 << 20)
         .receive_window(VarInt::from_u32(4 << 20))
         .send_window(4 << 20)
-        .congestion_controller_factory(Arc::new(cc))
+        .congestion_controller_factory(cc)
         .ack_frequency_config(Some(ack))
         .initial_mtu(OUTER_MTU)
         .min_mtu(OUTER_MTU)
@@ -830,7 +886,11 @@ async fn connect_clocked(
         Some(_) => paced_endpoint(slots.clone(), stats.clone())?,
         None => Endpoint::client("0.0.0.0:0".parse()?)?,
     };
-    endpoint.set_default_client_config(client_config(spki_sha256, cover_name.is_some())?);
+    let mut config = client_config(spki_sha256, cover_name.is_some())?;
+    if clock.is_some() {
+        config.transport_config(clocked_transport());
+    }
+    endpoint.set_default_client_config(config);
     let tls_connector = TlsConnector::from(tls_client_config(spki_sha256, cover_name.is_some())?);
     // Without a cover name no SNI is sent; the name below is then only a placeholder.
     let name = cover_name.unwrap_or_else(|| "localhost".into());
@@ -1085,14 +1145,21 @@ impl quinn::AsyncUdpSocket for PacedSocket {
             let now = monotonic_ns();
             match slot {
                 Some(at) => {
-                    if at < now {
+                    let sent = self.send_at(t, at);
+                    if sent.is_err() {
+                        // Typically a full send buffer (packets waiting in fq count against
+                        // it): quinn retries this packet, and it must keep its slot, or every
+                        // retry would shift the rest of the grid one slot (measured: one in
+                        // five packets then found no slot and left on quinn's timing).
+                        self.slots.lock().unwrap().push_front(at);
+                    } else if at < now {
                         let us = (now - at) / 1_000;
                         self.stats.clock.record(now, |b| {
                             b.late += 1;
                             b.late_max_us = b.late_max_us.max(us);
                         });
                     }
-                    return self.send_at(t, at);
+                    return sent;
                 }
                 None => self.stats.clock.record(now, |b| b.unslotted += 1),
             }
@@ -1148,6 +1215,19 @@ fn paced_endpoint(
         )
     };
     ensure!(rc == 0, "SO_TXTIME: {}", std::io::Error::last_os_error());
+    // Packets the kernel holds for their departure time count against the send buffer:
+    // ask for room for the whole look-ahead (the kernel caps it at net.core.wmem_max).
+    let size: libc::c_int = 4 << 20;
+    // SAFETY: a valid socket and an int option.
+    unsafe {
+        libc::setsockopt(
+            socket.as_raw_fd(),
+            libc::SOL_SOCKET,
+            libc::SO_SNDBUF,
+            &size as *const _ as *const libc::c_void,
+            std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+        )
+    };
     let fd = OwnedFd::from(socket.try_clone()?);
     let runtime = quinn::default_runtime().context("no async runtime for QUIC")?;
     let inner = runtime.wrap_udp_socket(socket)?;
@@ -1702,6 +1782,94 @@ mod tests {
             "fed {fed}, decoys {decoys}"
         );
         assert!(!c["trace"].as_array().unwrap().is_empty());
+    }
+
+    /// Under fq (which holds packets until their slot), a clocked session at the `fast` rate
+    /// with traffic both ways keeps nearly every packet on its slot. Before the fix, packets
+    /// held in fq filled the send buffer, every failed send lost its slot, and one packet in
+    /// seven then left on quinn's timing (2,453 in 4 s). Needs fq on loopback, so it runs
+    /// in its own network namespace (CI: `unshare -Urn`, see verify.yml):
+    ///   ip link set lo up; tc qdisc replace dev lo root fq; cargo test ... -- --ignored
+    #[tokio::test]
+    #[ignore]
+    async fn the_clock_keeps_every_packet_on_its_slot_under_fq() {
+        let (_, _, pin) = test_cert();
+        let key = [6; 32];
+        let (addr, wg, _) = server(key).await;
+        let local_wg = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let probe = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let local: SocketAddr = probe.local_addr().unwrap();
+        drop(probe);
+        let clock = WireClock {
+            packets_per_second: 4080.0,
+            lookahead: Duration::from_millis(30),
+        };
+        let cs = Arc::new(Stats::default());
+        tokio::spawn(connect_clocked(
+            local,
+            local_wg.local_addr().unwrap(),
+            addr,
+            Some("cover.example".into()),
+            pin,
+            key,
+            cs.clone(),
+            false,
+            Some(clock),
+        ));
+        let mut buf = [0u8; 2048];
+        let (_, from) = tokio::time::timeout(Duration::from_secs(5), wg.recv_from(&mut buf))
+            .await
+            .unwrap()
+            .unwrap();
+        let wg = Arc::new(wg);
+        // Downstream: the server side sends 4,000 datagrams/s back, as a real carrier does.
+        let down = {
+            let wg = wg.clone();
+            tokio::spawn(async move {
+                let mut t = tokio::time::interval(Duration::from_micros(250));
+                let p = vec![0x04; CARRIER_DATAGRAM];
+                loop {
+                    t.tick().await;
+                    let _ = wg.send_to(&p, from).await;
+                }
+            })
+        };
+        let drain = tokio::spawn(async move {
+            let mut b = [0u8; 2048];
+            loop {
+                let _ = wg.recv_from(&mut b).await;
+            }
+        });
+        tokio::time::sleep(Duration::from_secs(4)).await;
+        down.abort();
+        drain.abort();
+        let c = cs.clock.json().unwrap();
+        let (fed, unslotted) = (c["fed"].as_u64().unwrap(), c["unslotted"].as_u64().unwrap());
+        println!(
+            "fed {fed} unslotted {unslotted} late {} skipped {}",
+            c["late"], c["skipped"]
+        );
+        assert!(fed > 12_000, "the clock ran at the fast rate: {fed}");
+        assert!(
+            unslotted * 100 < fed,
+            "{unslotted} of {fed} packets left without their slot"
+        );
+    }
+
+    #[test]
+    fn the_clocked_transport_never_holds_or_paces_a_datagram() {
+        use quinn::congestion::ControllerFactory;
+        let mut c = Arc::new(FixedWindow).build(std::time::Instant::now(), OUTER_MTU);
+        // Above u32::MAX quinn turns its pacer off (quinn-proto pacing.rs); and no event
+        // may shrink the window, or BBR's behaviour would come back.
+        assert!(c.window() > u64::from(u32::MAX));
+        let now = std::time::Instant::now();
+        c.on_congestion_event(now, now, true, 1 << 20);
+        c.on_mtu_update(1200);
+        assert_eq!(
+            (c.window(), c.initial_window()),
+            (FIXED_WINDOW, FIXED_WINDOW)
+        );
     }
 
     #[test]
