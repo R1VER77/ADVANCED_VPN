@@ -49,6 +49,30 @@ class DeviceSetupTests(unittest.TestCase):
         self.assertEqual(req["role"], "client")
         self.assertTrue((state / "request.json").exists())
 
+    def test_hardware_sealed_keys_still_open_after_the_atomic_rename(self):
+        # The device is built in a hidden sibling and renamed into place: the sealed key
+        # envelopes must bind to their key material, never to the directory they were
+        # written in, or every key would be unopenable after the rename.
+        import base64
+
+        from managed_profile import LANES, load_keys
+
+        secret = os.urandom(32)
+        meta = dict(salt=base64.b64encode(os.urandom(32)).decode(), credential=base64.b64encode(b"cred-id").decode())
+        vault = self.d / "vault"
+        vault.mkdir(mode=0o700)
+        state = self.d / "enrolled"
+        with mock.patch("keyguard.hardware_secret", return_value=(secret, meta)):
+            request("relay", state, "nitrokey", vault)
+        self.assertEqual(sorted(p.name for p in self.d.iterdir()), ["enrolled", "vault"], "no leftover sibling")
+        names = [*LANES["relay"], "wireguard", "kem", "cloak", "i2p"]
+        keys = load_keys(state, names, secret, meta)
+        self.assertEqual(sorted(keys), sorted(names))
+        self.assertTrue(all(keys.values()))
+        # And the wrong hardware secret opens nothing.
+        with self.assertRaises(Exception):
+            load_keys(state, ["kem"], os.urandom(32), meta)
+
     def test_vault_must_be_private_and_owned_by_the_caller(self):
         vault = self.d / "vault"
         vault.mkdir(mode=0o700)

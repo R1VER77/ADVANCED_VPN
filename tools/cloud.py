@@ -1058,14 +1058,16 @@ else
   # decrypt a throwaway credential with the host key — instead of trusting a version
   # number, and fall back to plainly stored keys, reported loudly, when the probe
   # fails. avpnctl still picks the TPM (host+tpm2) when systemd-analyze reports one.
+  # The probe runs through a pipe, never a file: a root-written file in the sticky /tmp
+  # could not be removed by this (unprivileged) script, and under `set -e` that failed
+  # removal would abort the setup on exactly the hosts where sealing works.
   PROTECT=systemd-creds
-  PROBE=/tmp/avpn-creds-probe.$$
+  PROBE_ARGS=
   if command -v systemd-creds >/dev/null 2>&1 \
-     && printf avpn | sudo -n systemd-creds encrypt --with-key=host --name=avpn-probe - "$PROBE" >/dev/null 2>&1 \
-     && sudo -n systemd-creds decrypt --name=avpn-probe "$PROBE" - >/dev/null 2>&1; then
-    rm -f "$PROBE"
+     && [ "$(printf avpn | sudo -n systemd-creds encrypt --with-key=host --name=avpn-probe - - 2>/dev/null \
+            | sudo -n systemd-creds decrypt --name=avpn-probe - - 2>/dev/null)" = avpn ]; then
+    :
   else
-    rm -f "$PROBE"
     PROTECT=none
     PROBE_ARGS="--insecure-plaintext-keys"
     echo "WARNING: this host cannot seal keys with systemd-creds (systemd $(systemctl --version 2>/dev/null | head -1))." >&2

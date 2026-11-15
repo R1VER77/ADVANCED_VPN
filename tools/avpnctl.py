@@ -818,12 +818,15 @@ CARRIER_STALL_SECONDS = 12
 # threshold would restart every client's carrier at the same offset after a hop
 # fails, and an observer between two hops could correlate the restarts.
 CARRIER_STALL_JITTER = 4
+# Drawn from the operating system's CSPRNG: the point is that an observer cannot predict
+# the next restart moment, which a seedable generator's earlier outputs would let it do.
+_JITTER = random.SystemRandom().uniform
 
 
 class CarrierWatch:
     """Notices a client carrier whose received-byte counter has stopped moving."""
 
-    def __init__(self, limit=CARRIER_STALL_SECONDS, jitter=CARRIER_STALL_JITTER, rng=random.uniform):
+    def __init__(self, limit=CARRIER_STALL_SECONDS, jitter=CARRIER_STALL_JITTER, rng=_JITTER):
         self.limit, self.jitter, self.rng = limit, jitter, rng
         self.pid = self.rx = self.since = None
         self.window = float(limit)

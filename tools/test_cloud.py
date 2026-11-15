@@ -1452,17 +1452,35 @@ class HostScriptTests(unittest.TestCase):
         self.assertIn("systemd 250+", r.stderr)
         self.assertTrue(r.stdout.strip().splitlines()[-1].startswith("protection=none "), r.stdout)
 
+    # A systemd-creds that works like the real one through a pipe, and refuses any file
+    # argument: the probe must never write a file. (A root-written file in the sticky /tmp
+    # cannot be removed by the unprivileged script, and under `set -e` that aborted the
+    # setup on exactly the hosts where sealing works.)
+    PIPE_ONLY_CREDS = (
+        "#!/bin/sh\n"
+        'case "$*" in *" - -") ;; *) echo "file argument: $*" >&2; exit 9 ;; esac\n'
+        'case "$1" in encrypt) printf sealed: ; cat ;; decrypt) sed "s/^sealed://" ;; *) exit 1 ;; esac\n'
+    )
+
     def test_a_host_that_can_seal_uses_systemd_creds(self):
-        self.systemd_creds_stub('#!/bin/sh\n[ "$1" = encrypt ] && cat >/dev/null\nexit 0\n')
+        self.systemd_creds_stub(self.PIPE_ONLY_CREDS)
         r = self.setup("relay")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("keys=new", r.stdout)
         self.assertIn("--protect systemd-creds", self.log())
         self.assertNotIn("--insecure-plaintext-keys", self.log())
         self.assertNotIn("PLAIN FILES", r.stderr)
+        self.assertNotIn("file argument", r.stderr)
         self.assertTrue(r.stdout.strip().splitlines()[-1].startswith("protection=systemd-creds "), r.stdout)
-        # The probe credential is cleaned up either way.
-        self.assertFalse(list((self.root / "tmp").glob("avpn-creds-probe.*")))
+        self.assertFalse(list((self.root / "tmp").glob("avpn-creds-probe*")))
+
+    def test_a_probe_that_does_not_round_trip_falls_back(self):
+        # Exit codes alone are not proof: a credential must decrypt to what was sealed.
+        self.systemd_creds_stub('#!/bin/sh\n[ "$1" = encrypt ] && cat >/dev/null\necho garbage\nexit 0\n')
+        r = self.setup("relay")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("--protect none", self.log())
+        self.assertIn("PLAIN FILES", r.stderr)
 
     def test_same_role_keeps_keys_and_another_role_needs_replace(self):
         self.assertEqual(self.setup("relay").returncode, 0)

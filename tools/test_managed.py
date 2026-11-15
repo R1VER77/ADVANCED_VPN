@@ -225,6 +225,10 @@ class EnrollmentTests(unittest.TestCase):
             w.stalled(1, 1, 0)
             self.assertGreaterEqual(w.window, avpnctl.CARRIER_STALL_SECONDS - avpnctl.CARRIER_STALL_JITTER)
             self.assertLessEqual(w.window, avpnctl.CARRIER_STALL_SECONDS + avpnctl.CARRIER_STALL_JITTER)
+        # The default source is the OS CSPRNG, not a seedable Mersenne Twister.
+        import random
+
+        self.assertIsInstance(avpnctl.CarrierWatch().rng.__self__, random.SystemRandom)
 
     def test_underlay_mtu_floor_matches_the_cloak_packet_size(self):
         import re
