@@ -16,6 +16,12 @@ are wire sizes) and loads.jsonl (site, label, window, outcome).
 
 usage: python3 tools/wf_real.py collect --config fast --sites SITES.json --out DIR
            --pasta PASTA --geckodriver GECKODRIVER --python VENV_PYTHON [--workers 4]
+           [--client-cpus 0,1 --server-cpus 2,3]
+--client-cpus pins the browser and the client's data plane to the same cores (the busy-
+CPU case: a laptop's browser competing with its VPN), --server-cpus the relay, exit and
+capture. With AVPN_WIRE_CLOCK_PPS set (the cloak's wire clock), the client's link gets
+the fq qdisc the clock's departure times need, and each worker records the clock's
+counters (clock.json) beside its settings (settings.json).
 SITES.json: {"monitored": [...], "loads": 30, "open_world": [...]} (domains). Not CI.
 """
 
@@ -106,6 +112,28 @@ def link(a, b, a_ip, b_ip, name):
         sh(*pre, "link", "set", dev, "up")
 
 
+def pinned(cpus, argv):
+    """`argv` run on `cpus` (taskset), or unchanged when no cores are given."""
+    return ["/usr/bin/taskset", "-c", cpus, *argv] if cpus else list(argv)
+
+
+def host_power():
+    """What the host's power management is doing, recorded with each run: whether it is
+    on mains power, and the CPU frequency governor (the busy-CPU residue depends on both)."""
+
+    def read(path):
+        try:
+            return Path(path).read_text().strip()
+        except OSError:
+            return None
+
+    supplies = sorted(Path("/sys/class/power_supply").glob("A*/online"))
+    return dict(
+        on_mains=read(supplies[0]) == "1" if supplies else None,
+        governor=read("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor"),
+    )
+
+
 def worker(a):
     """Inside the worker's namespaces: build the tunnel, then load every assigned page."""
     from avpnctl import lab_guard
@@ -127,6 +155,20 @@ def worker(a):
     sh("/usr/sbin/sysctl", "-qw", "net.ipv4.ip_forward=1")
     procs = []
     loads = json.loads(a.loads.read_text())
+    clock = os.environ.get("AVPN_WIRE_CLOCK_PPS")
+    (out / "settings.json").write_text(
+        json.dumps(
+            dict(
+                config=a.config,
+                client_cpus=a.client_cpus,
+                server_cpus=a.server_cpus,
+                wire_clock_pps=clock,
+                catch_up_ms=os.environ.get("AVPN_CATCH_UP_MS"),
+                **host_power(),
+            )
+        )
+        + "\n"
+    )
     try:
         if a.config == "undefended":
             for ns in ["cli", "ext"]:
@@ -196,9 +238,11 @@ def worker(a):
             )
             for role, ns in [("exit", "ext"), ("relay", "rel"), ("client", "cli")]:
                 f = (out / (role + ".log")).open("a")
+                cpus = a.client_cpus if role == "client" else a.server_cpus
                 procs.append(
-                    in_netns(ns, [sys.executable, ROOT / "tools/avpnctl.py", "--state", state / role, "--bin-dir",
-                                  a.bin_dir, "--lab", "connect"], stdout=f, stderr=subprocess.STDOUT)
+                    in_netns(ns, pinned(cpus, [sys.executable, ROOT / "tools/avpnctl.py", "--state", state / role,
+                                               "--bin-dir", a.bin_dir, "--lab", "connect"]),
+                             stdout=f, stderr=subprocess.STDOUT)
                 )  # fmt: skip
                 time.sleep(2)
             browse_ns, capture_ns, capture_dev = "avpn-app", "cli", "ca"
@@ -218,8 +262,8 @@ def worker(a):
             run = [] if a.config == "undefended" else [
                 sys.executable, ROOT / "tools/avpnctl.py", "--state", out / "chain/client", "--lab", "run", "--"]  # fmt: skip
             # Its own process group, so a hung browser is killed with every child it started.
-            p = in_netns("cli", run + list(argv), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                         start_new_session=True)  # fmt: skip
+            p = in_netns("cli", pinned(a.client_cpus, run + list(argv)), stdout=subprocess.PIPE,
+                         stderr=subprocess.PIPE, text=True, start_new_session=True)  # fmt: skip
             try:
                 o, e = p.communicate(timeout=timeout)
             except subprocess.TimeoutExpired:
@@ -264,12 +308,15 @@ def worker(a):
             r = nsexec(ns, a.ethtool, "-K", dev, "gro", "off", "gso", "off", "tso", "off", check=False)
             if r.returncode:
                 raise RuntimeError("cannot turn offload off on the captured link: " + r.stderr.strip()[:200])
+        if clock and a.config != "undefended":
+            # The wire clock's departure times are honoured by the fq qdisc only.
+            r = nsexec(capture_ns, "/usr/sbin/tc", "qdisc", "replace", "dev", capture_dev, "root", "fq",
+                       "flow_limit", "10000", "limit", "20000", check=False)  # fmt: skip
+            if r.returncode:
+                raise RuntimeError("cannot put fq on the client's link: " + r.stderr.strip()[:200])
         packets = out / "packets.bin"
-        procs.append(
-            subprocess.Popen(
-                ["/usr/sbin/ip", "netns", "exec", capture_ns, sys.executable, "-c", SNIFF, capture_dev, str(packets)]
-            )  # fmt: skip
-        )
+        sniff = ["/usr/sbin/ip", "netns", "exec", capture_ns, sys.executable, "-c", SNIFF, capture_dev, str(packets)]
+        procs.append(subprocess.Popen(pinned(a.server_cpus, sniff)))
         with (out / "loads.jsonl").open("a") as log:
             for site, label in loads:
                 r = in_browser_ns("env", "HOME=/tmp", a.python, "-c", BROWSE, a.geckodriver, site, out,
@@ -287,6 +334,15 @@ def worker(a):
                 log.write(json.dumps(dict(site=site, label=label, **row, **health)) + "\n")
                 log.flush()
     finally:
+        if clock and a.config != "undefended":
+            from avpnctl import runtime_dir
+
+            status = runtime_dir(out / "chain/client", create=False) / "cloak-status.json"
+            try:
+                c = json.loads(status.read_text()).get("clock") or {}
+                (out / "clock.json").write_text(json.dumps({k: v for k, v in c.items() if k != "trace"}) + "\n")
+            except (OSError, ValueError):
+                pass
         for p in reversed(procs):
             if p.poll() is None:
                 p.send_signal(signal.SIGTERM)
@@ -313,7 +369,7 @@ def collect(a):
             ["unshare", "--user", "--map-root-user", "--map-auto", "--net", "--mount", sys.executable, __file__,
              "worker", "--config", a.config, "--loads", str(part), "--out", str(out / ("w%d" % w)), "--bin-dir",
              str(a.bin_dir), "--geckodriver", str(a.geckodriver), "--python", str(a.python), "--ethtool",
-             str(a.ethtool)],
+             str(a.ethtool), "--client-cpus", a.client_cpus, "--server-cpus", a.server_cpus],
             stdout=log, stderr=subprocess.STDOUT,
         )  # fmt: skip
         time.sleep(0.5)
@@ -337,6 +393,8 @@ def main():
         x.add_argument("--geckodriver", type=Path, required=True)
         x.add_argument("--python", type=Path, required=True)
         x.add_argument("--ethtool", type=Path, default=Path("/usr/sbin/ethtool"))
+        x.add_argument("--client-cpus", default="", help="cores for the browser and the client (e.g. 0,1)")
+        x.add_argument("--server-cpus", default="", help="cores for the relay, exit and capture (e.g. 2,3)")
         if name == "collect":
             x.add_argument("--sites", type=Path, required=True)
             x.add_argument("--workers", type=int, default=4)
