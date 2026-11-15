@@ -15,6 +15,12 @@ no server sees the plaintext marker, and only the first hop sees the client's
 address (later hops see only their predecessor).
 
 --mode carrier times WireGuard+DAITA alone (client host namespace -> first hop).
+
+--cpu-probe N measures the busy-CPU leak instead of a transfer: the client's processes
+are pinned to --client-cpus, busy loops load those cores on a random balanced schedule
+of N windows while the tunnel idles, and the client's wire packets per window on the
+first link are scored against the schedule (AUC, permutation p-value, shuffled-label
+control). Set AVPN_CATCH_UP_MS in the environment to measure the catch-up variant.
 Rate-budget and DAITA-profile overrides exist only to measure their effect.
 """
 
@@ -132,6 +138,76 @@ def shape_window(records, a, b, outgoing, segment=WIRE_SEGMENT):
     )
 
 
+def load_schedule(windows, rng):
+    """A random on/off CPU-load schedule with as many on as off windows (balanced, so
+    the score cannot come from an imbalance), shuffled by `rng`."""
+    plan = [1] * (windows // 2) + [0] * (windows - windows // 2)
+    rng.shuffle(plan)
+    return plan
+
+
+def window_counts(records, start, window, n, outgoing=0, segment=WIRE_SEGMENT, trim=0.1):
+    """Wire packets per schedule window on the observed link (GSO super-frames counted as
+    the segments they carry). The first and last `trim` of each window are left out, so
+    the time a load takes to start or stop is not scored."""
+
+    def parts(size):
+        return max(1, round((size - 28) / segment))
+
+    counts = [0] * n
+    for t, size, o in records:
+        if o != outgoing:
+            continue
+        k, offset = divmod(t - start, window)
+        k = int(k)
+        if 0 <= k < n and trim * window <= offset < (1 - trim) * window:
+            counts[k] += parts(size)
+    return counts
+
+
+def _auc(on, off):
+    """P(an 'on' window has fewer packets than an 'off' one), ties counted half: 0.5 is
+    chance, 1.0 means every loaded window sent less (the busy-CPU leak)."""
+    if not on or not off:
+        return 0.5
+    wins = sum((a < b) + 0.5 * (a == b) for a in on for b in off)
+    return wins / (len(on) * len(off))
+
+
+def leak_score(counts, schedule, rng, permutations=2000):
+    """How well the CPU-load schedule shows in the wire's per-window packet counts.
+
+    Returns the mean packets per window with and without load, the relative drop, the
+    AUC, a permutation p-value for |AUC - 0.5| (labels shuffled `permutations` times),
+    and a shuffled-label control AUC that must sit near 0.5."""
+    on = [c for c, s in zip(counts, schedule, strict=True) if s]
+    off = [c for c, s in zip(counts, schedule, strict=True) if not s]
+    auc = _auc(on, off)
+    observed = abs(auc - 0.5)
+    labels = list(schedule)
+    extreme = 0
+    controls = []
+    for _ in range(permutations):
+        rng.shuffle(labels)
+        a = _auc(
+            [c for c, s in zip(counts, labels, strict=True) if s],
+            [c for c, s in zip(counts, labels, strict=True) if not s],
+        )
+        controls.append(a)
+        extreme += abs(a - 0.5) >= observed
+    mean_on = sum(on) / len(on) if on else 0.0
+    mean_off = sum(off) / len(off) if off else 0.0
+    return dict(
+        windows=len(counts),
+        packets_per_window_loaded=round(mean_on, 1),
+        packets_per_window_idle=round(mean_off, 1),
+        drop_under_load=round((mean_off - mean_on) / mean_off, 4) if mean_off else 0.0,
+        auc=round(auc, 4),
+        p_value=round((extreme + 1) / (permutations + 1), 4),
+        control_auc_mean=round(sum(controls) / len(controls), 4) if controls else 0.5,
+    )
+
+
 def shape_report(path, marks):
     """Idle vs transfer shape in both directions of the observed link (towards the hop
     that observes it, and back)."""
@@ -202,6 +278,63 @@ def disk_snapshot(directory):
     }
 
 
+LOAD = "while True:\n    pass\n"
+
+
+def cpu_probe(a, observers, shape_file, hops, online_seconds):
+    """Load the client's cores on a random schedule while the tunnel idles; score how
+    well the client's wire packet counts per window reveal the schedule."""
+    import random
+    import struct
+
+    rng = random.Random(a.seed) if a.seed is not None else random.SystemRandom()
+    schedule = load_schedule(a.cpu_probe, rng)
+    time.sleep(2)  # let the stream settle after the readiness pings
+    loads = []
+    start = time.time()
+    try:
+        for k, loaded in enumerate(schedule):
+            if loaded and not loads:
+                loads = [
+                    subprocess.Popen(["taskset", "-c", a.client_cpus, sys.executable, "-c", LOAD])
+                    for _ in range(a.load_procs)
+                ]
+            elif not loaded and loads:
+                for x in loads:
+                    x.kill()
+                    x.wait()
+                loads = []
+            time.sleep(max(0.0, start + (k + 1) * a.probe_window - time.time()))
+    finally:
+        for x in loads:
+            x.kill()
+            x.wait()
+    for server, proc in observers:
+        if server == "shape":
+            proc.send_signal(signal.SIGTERM)
+            proc.wait(timeout=5)
+    raw = shape_file.read_bytes()
+    records = [struct.unpack_from("<dHB", raw, i) for i in range(0, len(raw) - len(raw) % 11, 11)]
+    counts = window_counts(records, start, a.probe_window, len(schedule), segment=segment_size(records))
+    score = leak_score(counts, schedule, random.Random(0))
+    return dict(
+        probe="busy-CPU leak",
+        hops=hops,
+        rate=a.rate,
+        catch_up_ms=int(os.environ.get("AVPN_CATCH_UP_MS", "0") or 0),
+        client_cpus=a.client_cpus,
+        server_cpus=a.server_cpus,
+        load_procs=a.load_procs,
+        window_seconds=a.probe_window,
+        online_seconds=online_seconds,
+        host_cpus=os.cpu_count(),
+        schedule=schedule,
+        counts=counts,
+        score=score,
+        leak=score["p_value"] < 0.01,
+    )
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--state", type=Path, required=True)
@@ -236,7 +369,15 @@ def main():
         type=int,
         help="MTU of the client's link to the first hop; below 1448 the cloak must carry the tunnel over TCP",
     )
+    p.add_argument("--cpu-probe", type=int, default=0, help="busy-CPU leak probe: windows (0: off)")
+    p.add_argument("--probe-window", type=float, default=1.0, help="seconds per probe window")
+    p.add_argument("--load-procs", type=int, default=2, help="busy loops while a window is loaded")
+    p.add_argument("--client-cpus", default="0,1", help="cores for the client (and the load)")
+    p.add_argument("--server-cpus", default="2,3", help="cores for the servers")
+    p.add_argument("--seed", type=int, help="fix the probe schedule (default: random)")
     a = p.parse_args()
+    if a.cpu_probe and a.cpu_probe < 10:
+        p.error("--cpu-probe needs at least 10 windows")
     os.umask(0o077)
     lab_guard()
     if {r["ifname"] for r in json.loads(run("ip", "-j", "link").stdout)} != {"lo"}:
@@ -288,9 +429,15 @@ def main():
         return x
 
     def manager(role):
+        pin = []
+        if a.cpu_probe:
+            # The data plane inherits the controller's affinity: the client's on the
+            # loaded cores, the servers' off them.
+            pin = ["taskset", "-c", a.client_cpus if role == "client" else a.server_cpus]
         return spawn(
             "av-" + role,
             [
+                *pin,
                 sys.executable,
                 ROOT / "tools/avpnctl.py",
                 "--state",
@@ -420,8 +567,8 @@ def main():
                 )
                 for s in chain
             ]
-            if a.shape_idle:
-                hop = chain[0] if a.shape_link == "first" else chain[-1]
+            if a.shape_idle or a.cpu_probe:
+                hop = chain[0] if a.shape_link == "first" or a.cpu_probe else chain[-1]
                 shape_file = state / ("shape-%d.bin" % phase)
                 observers.append(
                     (
@@ -448,6 +595,10 @@ def main():
             else:
                 raise RuntimeError("tunnel did not come up within 90 s; last app error: " + probe.stderr[-800:])
             online_seconds = round(time.monotonic() - started, 2)
+            if a.cpu_probe:
+                results.append(cpu_probe(a, observers, shape_file, hops, online_seconds))
+                print(json.dumps(results[-1]), flush=True)
+                break
             marks = {}
             if a.shape_idle:
                 time.sleep(2)  # let the stream settle after the readiness pings
