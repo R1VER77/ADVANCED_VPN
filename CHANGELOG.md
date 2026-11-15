@@ -24,7 +24,8 @@ measured figure in the docs names the version it was measured on.
   (`docs/evidence/CPU_LEAK_PROBE.json`).
 - Experimental (off by default): the cloak's wire clock, `AVPN_WIRE_CLOCK_PPS`, a first step of
   the busy-CPU fix: kernel-paced departure with decoys in empty slots
-  (`docs/evidence/KERNEL_PACING.json`; not yet a fix).
+  (`docs/evidence/KERNEL_PACING.json`). With a fixed congestion window and slots kept on
+  failed sends, it passes the busy-CPU probe 3 of 3; not yet confirmed on real websites.
 - `avpn cloud chain --apply` shows a live checklist; PIN prompts are a desktop pop-up
   (also under sudo), and `avpn status` works without root while the service runs.
 - Formal models now run and are proved in CI (Tamarin 1.12.0), each with a broken variant

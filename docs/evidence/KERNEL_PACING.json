@@ -500,9 +500,10 @@
     "On the real carrier, the cloak's wire clock turns perfect separation (today: p = 0.0005 every run, count AUC 0.92-1.00 or gap AUC 0.001-0.07) into marginal: no leak by the corrected test in 3 of 3 runs without power QoS and 2 of 3 with it, but count p reaches 0.005 in two runs and largest-gap p 0.0005 in one.",
     "The residue sits at load transitions: windows that continue a state carry the clock's exact count (3,264), windows right after the load stops come up short and right after it starts run over. Next: cloak counters for skipped slots and late sends, to tell stalls longer than the look-ahead from slot/packet desynchronisation.",
     "Counters (fa4d554): the residue does not come from the feeder (0 skipped slots) but from packets reaching the socket after their slot, up to 0.3 s late, inside quinn's send path.",
-    "With a fixed congestion window, lateness all but disappears (39-68 packets per run); the next cause, slots lost on failed sends while fq holds packets, was reproduced on loopback and fixed (unslotted 2,453 -> 14-17 per 4 s)."
+    "With a fixed congestion window, lateness all but disappears (39-68 packets per run); the next cause, slots lost on failed sends while fq holds packets, was reproduced on loopback and fixed (unslotted 2,453 -> 14-17 per 4 s).",
+    "With both fixes (34004ba), the probe finds no leak in 3 of 3 runs on the real carrier, against perfect separation (p = 0.0005) with today's default; a consistent, non-significant lean in the timing features remains, consistent with the power-state effect."
   ],
-  "status": "Not a fix yet: the wire clock stays off by default, and fast is still not claimed against website fingerprinting on a busy CPU.",
+  "status": "The first configuration that passes the probe, but not yet a fix to claim: the wire clock stays off by default until the real-website fingerprinting run (wf_real.py) confirms it and the power-state lean is settled; the first hop still sees which slots were decoys.",
   "counters": {
     "setup": "same as carrier, with the cloak's clock counters (fa4d554); 3 runs, no power QoS",
     "runs": [
@@ -746,5 +747,104 @@
     ],
     "reading": "Lateness fell from 12,000-49,000 packets per run (worst 114-291 ms) to 39-68 (worst 2-4 ms): quinn's congestion control was what held packets back. But 54,000-55,400 full-size packets per run found no slot and left on quinn's timing; run 1 leaked (gap spread p 0.0005).",
     "cause": "Reproduced on loopback with fq (a cloak test in its own network namespace): 2,453 of 16,465 packets found no slot in 4 s, against 12 without fq. Packets fq holds for their departure time count against the socket's send buffer; when it filled, sendmsg failed, quinn retried the packet, and the paced socket had already spent that packet's slot. Fix: a failed send puts its slot back, and the socket asks for a send buffer large enough for the look-ahead (capped by net.core.wmem_max). Unslotted packets: 14-17 per 16,440 with the fix; 342 with both halves removed; buffer only 14, slot restore only 114. Regression test the_clock_keeps_every_packet_on_its_slot_under_fq, run in CI under unshare -Urn with fq on loopback."
+  },
+  "fixed_window_and_slots": {
+    "setup": "34004ba: fixed congestion window and slots kept on failed sends; as before (fast, 2 hops, catch-up 50, 4,080 slots/s, 30 ms look-ahead, fq), no power QoS; run outside Claude's sandbox via systemd-run --user",
+    "runs": [
+      {
+        "run": "fixslot-1",
+        "leak": false,
+        "count_auc": 0.47,
+        "count_p": 0.6137,
+        "gap_sd": {
+          "auc": 0.64,
+          "p_value": 0.067,
+          "control_auc_mean": 0.5012
+        },
+        "max_gap": {
+          "auc": 0.43,
+          "p_value": 0.3593,
+          "control_auc_mean": 0.4991
+        },
+        "control": 0.502,
+        "packets_per_window": {
+          "loaded": 3264.5,
+          "idle": 3264.3,
+          "min": 3263,
+          "max": 3270
+        },
+        "totals": {
+          "fed": 260257,
+          "decoys": 5116,
+          "skipped": 0,
+          "late": 0,
+          "late_max_us": 0,
+          "unslotted": 35
+        }
+      },
+      {
+        "run": "fixslot-2",
+        "leak": false,
+        "count_auc": 0.4944,
+        "count_p": 0.8291,
+        "gap_sd": {
+          "auc": 0.6078,
+          "p_value": 0.1599,
+          "control_auc_mean": 0.502
+        },
+        "max_gap": {
+          "auc": 0.3711,
+          "p_value": 0.0855,
+          "control_auc_mean": 0.4997
+        },
+        "control": 0.5004,
+        "packets_per_window": {
+          "loaded": 3264.2,
+          "idle": 3263.8,
+          "min": 3256,
+          "max": 3269
+        },
+        "totals": {
+          "fed": 260379,
+          "decoys": 5106,
+          "skipped": 0,
+          "late": 0,
+          "late_max_us": 0,
+          "unslotted": 33
+        }
+      },
+      {
+        "run": "fixslot-3",
+        "leak": false,
+        "count_auc": 0.5728,
+        "count_p": 0.1789,
+        "gap_sd": {
+          "auc": 0.61,
+          "p_value": 0.1399,
+          "control_auc_mean": 0.5025
+        },
+        "max_gap": {
+          "auc": 0.3744,
+          "p_value": 0.096,
+          "control_auc_mean": 0.4979
+        },
+        "control": 0.4986,
+        "packets_per_window": {
+          "loaded": 3265.7,
+          "idle": 3264.3,
+          "min": 3263,
+          "max": 3312
+        },
+        "totals": {
+          "fed": 259997,
+          "decoys": 5092,
+          "skipped": 0,
+          "late": 0,
+          "late_max_us": 0,
+          "unslotted": 39
+        }
+      }
+    ],
+    "reading": "No leak in 3 of 3 runs: count p 0.18-0.83, gap spread p 0.07-0.16, largest gap p 0.09-0.36; packets per window 3,256-3,270 (one window 3,312) whether loaded or idle, and the transition effect is gone. The clock kept time: 0 slots skipped, 0 late sends, 33-39 unslotted of about 260,000. Caveat: the timing features lean the same way in all three runs (gap spread AUC 0.61-0.64, largest gap 0.37-0.43) without reaching significance, as the CPU power-state effect seen in isolation would; it is not shown gone."
   }
 }

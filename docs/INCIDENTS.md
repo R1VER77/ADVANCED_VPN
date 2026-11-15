@@ -38,7 +38,12 @@ private vulnerability reporting (see [SECURITY.md](../SECURITY.md)).
     left at load transitions.
   - **Found on the way:** kernel pacing alone exposes a CPU power-state side channel (idle
     cores wake the release timer late), which awake cores remove and power QoS only reduces.
-  - **Not yet a fix,** and `fast` is still not claimed while the device is busy.
+  - **Since `34004ba`** (quinn's congestion control off while the clock runs, and slots kept on
+    failed sends), the probe finds **no leak in 3 of 3 runs** (count flat at 3,256–3,270 per
+    window, loaded or idle). A consistent but not significant lean in the timing features
+    remains, as the power-state effect would leave.
+  - **Not yet a fix to claim:** the clock stays off by default until the real-website run
+    confirms it, and `fast` is still not claimed while the device is busy.
 - **Evidence:** `docs/evidence/WF_REAL_PILOT.json`, `docs/evidence/CPU_LEAK_PROBE.json`,
   `docs/evidence/KERNEL_PACING.json`.
 
