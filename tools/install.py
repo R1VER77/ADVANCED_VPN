@@ -40,6 +40,33 @@ PIP_PATIENCE = ["--retries", "10", "--timeout", "60"]
 
 
 SUGGEST = "No servers yet? avpn cloud suggest lists free places to run them; avpn cloud chain --apply joins them."
+HAVE_SERVERS = "avpn cloud status lists your servers; avpn cloud chain --apply joins them into a chain."
+
+
+def next_servers_step(home=None):
+    """The line the installer prints after a successful install. 'No servers yet?'
+    only when the cloud inventory really is empty: printed after an upgrade it was
+    simply wrong. `home` overrides whose inventory to look at (SUDO_USER under
+    --apply, so a sudo install still sees the operator's servers)."""
+    import pwd
+
+    if home is None:
+        name = os.environ.get("SUDO_USER")
+        if name:
+            try:
+                home = Path(pwd.getpwnam(name).pw_dir)
+            except KeyError:
+                home = None
+    if home is not None:
+        # Another user's inventory: their .config, never the inherited XDG variable.
+        inventory = Path(home) / ".config" / "advanced-vpn" / "cloud.json"
+    else:
+        inventory = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "advanced-vpn" / "cloud.json"
+    try:
+        resources = json.loads(inventory.read_text())["resources"] if inventory.exists() else {}
+    except (OSError, ValueError, KeyError):
+        resources = {}
+    return HAVE_SERVERS if resources else SUGGEST
 
 
 def pack(root, out):
@@ -227,7 +254,7 @@ def prepare_device(target, role, protect, vault=None, insecure=False):
     subprocess.run(argv, check=True)
     print("Next: give %s to the operator (avpn init), then: sudo avpn enroll BUNDLE --operator-key operator.pub" % out)
     if role == "client":
-        print(SUGGEST)
+        print(next_servers_step())
 
 
 def main():
@@ -266,7 +293,7 @@ def main():
         print("Installed %s for this user: %s (command: %s)" % (version, app, bin_dir / "avpn"))
         if str(bin_dir) not in os.environ.get("PATH", "").split(":"):
             print("Add %s to PATH to run avpn." % bin_dir)
-        print(SUGGEST)
+        print(next_servers_step())
         return
     if a.out is None:
         import tempfile

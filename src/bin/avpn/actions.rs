@@ -128,20 +128,64 @@ pub fn perform(ctrl: &Controller, action: &str, args: &[String]) -> Done {
             cells.extend(status_cells(ctrl));
             Done { code: 0, cells }
         }
-        "disconnect" => match service("stop") {
-            Ok(()) => Done {
+        "disconnect" => {
+            // Live regression (bug 8): `systemctl stop` succeeds even when the unit
+            // is inactive, so stopping only the service reported "Disconnected"
+            // while a `connect --foreground` supervisor kept running. Always ask
+            // the controller too: it SIGTERMs whatever supervisor is actually
+            // live for this state (and reports "not running" as success).
+            let via_service = service("stop");
+            let fg = ctrl.call("disconnect", args);
+            let mut stopped = false;
+            let mut rows: Vec<Row> = Vec::new();
+            match &via_service {
+                Ok(()) => {
+                    stopped = true;
+                    rows.push(Row::detail(
+                        "service stopped; the kill switch stays in place (avpn help reset)",
+                    ));
+                }
+                Err(h) => rows.extend(h.iter().cloned().map(Row::detail)),
+            }
+            match &fg {
+                Ok(o) if o.ok() => {
+                    stopped = true;
+                    if let Some(m) = o.value.get("message").and_then(|m| m.as_str()) {
+                        rows.push(Row::detail(m.to_string()));
+                    }
+                }
+                // The controller refused (a user without root cannot run it, and
+                // polkit may already have stopped the service): fine when the
+                // service path worked, fatal when neither did.
+                _ if via_service.is_ok() => {}
+                Ok(o) => {
+                    return Done {
+                        code: o.code.max(1),
+                        cells: from_outcome("disconnect", o),
+                    };
+                }
+                Err(e) => {
+                    return failed(
+                        "disconnect failed".into(),
+                        vec![format!("{e:#}"), "avpn doctor".into()],
+                    );
+                }
+            }
+            if !stopped {
+                return failed(
+                    "disconnect failed".into(),
+                    vec!["neither the service nor a supervisor could be stopped".into()],
+                );
+            }
+            Done {
                 code: 0,
                 cells: vec![Cell::Result {
                     title: "Disconnected".into(),
                     summary: Some(SERVICE.into()),
-                    rows: vec![Row::detail(
-                        "stopped; the kill switch stays in place (avpn help reset)",
-                    )],
+                    rows,
                 }],
-            },
-            // Not run by the service (e.g. `connect --foreground`): signal the supervisor.
-            Err(_) => controller(ctrl, "disconnect", args),
-        },
+            }
+        }
         _ => controller(ctrl, action, args),
     }
 }

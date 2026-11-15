@@ -311,3 +311,33 @@ class TableWatchTests(unittest.TestCase):
             del tables["advanced_vpn"]
             with self.assertRaisesRegex(RuntimeError, "kill switch keeps being altered"):
                 watch.check(now=10)
+
+    def test_an_absent_table_logs_nfts_error_line_not_the_caret_marker(self):
+        # Real nft (checked with 1.1.3 in a network namespace) answers a missing table
+        # with the error, the echoed command and a caret marker under it:
+        #   Error: No such file or directory
+        #   list table inet advanced_vpn
+        #                   ^^^^
+        # The restore reason must quote the Error line, never the marker or the echo.
+        import avpnctl
+
+        tables = {"advanced_vpn": "table inet advanced_vpn { policy drop }\n"}
+
+        def cmd(*args, check=True, input=None):
+            name = args[-1]
+            out = tables.get(name)
+            stderr = (
+                ""
+                if out is not None
+                else "Error: No such file or directory\nlist table inet %s\n                ^^^^\n" % name
+            )
+            return mock.Mock(returncode=0 if out is not None else 1, stdout=out or "", stderr=stderr)
+
+        with mock.patch.multiple(avpnctl, cmd=cmd, nft=lambda text, ns=None: None):
+            watch = avpnctl.TableWatch([("advanced_vpn", None)])
+            del tables["advanced_vpn"]
+            watch.check()
+            reason = watch.reasons[("advanced_vpn", None)]
+            self.assertIn("absent (Error: No such file or directory)", reason)
+            self.assertNotIn("^^^", reason)
+            self.assertNotIn("list table", reason)

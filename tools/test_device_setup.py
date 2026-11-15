@@ -34,6 +34,21 @@ class DeviceSetupTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "already has keys"):
             request("client", state, "none")
 
+    def test_a_midway_failure_leaves_no_half_written_device(self):
+        # Bug 9b: a failure after the keys were generated (a sealing error, a full
+        # disk) used to leave a half-made directory that the next setup "kept" or
+        # refused as existing keys. The device must appear all at once or not at all.
+        state = self.d / "enrolled"
+        with mock.patch("managed_profile.store_keys", side_effect=OSError("no space left on device")):
+            with self.assertRaises(OSError):
+                request("client", state, "none")
+        self.assertFalse(state.exists(), "a failed request must not leave a device directory")
+        self.assertEqual(list(self.d.iterdir()), [], "and no half-made sibling either")
+        # A retry after the failure succeeds instead of being refused.
+        req = request("client", state, "none")
+        self.assertEqual(req["role"], "client")
+        self.assertTrue((state / "request.json").exists())
+
     def test_vault_must_be_private_and_owned_by_the_caller(self):
         vault = self.d / "vault"
         vault.mkdir(mode=0o700)

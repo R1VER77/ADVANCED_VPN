@@ -8,7 +8,9 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import stat
+import tempfile
 import zipfile
 from cryptography import x509
 
@@ -514,13 +516,18 @@ def forget_key(state, name):
 
 def request(role, state, protect, vault=None):
     """Generate this device's private keys locally and protect them immediately.
-    Returns the public enrollment request; no private key leaves the device."""
-    from keyguard import kem_keypair, hardware_secret, b64
+    Returns the public enrollment request; no private key leaves the device.
+
+    The device directory appears atomically (built in a hidden sibling, renamed
+    into place): a failure part-way leaves no half-written state for the next
+    setup to find, so a retry starts clean instead of being refused."""
+    from keyguard import hardware_secret
 
     if role not in LANES or protect not in PROTECTIONS:
         raise ValueError("unknown role or protection")
     if (protect == "nitrokey") != (vault is not None):
         raise ValueError("a hardware vault is required exactly for nitrokey protection")
+    state = Path(state)
     if state.exists():
         raise ValueError("this device already has keys in %s; reset it before generating new ones" % state)
     # Unlock the vault first (one PIN + touch): a refused or wrong vault leaves no
@@ -528,7 +535,20 @@ def request(role, state, protect, vault=None):
     secret = meta = None
     if protect == "nitrokey":
         secret, meta = hardware_secret(vault)
-    state.mkdir(mode=0o700, parents=False, exist_ok=False)
+    tmp = Path(tempfile.mkdtemp(prefix=".avpn-request-", dir=state.parent))
+    try:
+        req = _request_into(role, tmp, protect, vault, secret, meta)
+        os.rename(tmp, state)  # the device only exists once every key is sealed
+    except BaseException:
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise
+    return req
+
+
+def _request_into(role, state, protect, vault, secret, meta):
+    """Build one device's keys inside `state` (a private temporary directory)."""
+    from keyguard import kem_keypair, b64
+
     keys = {}
     certs = {}
     for lane in LANES[role]:

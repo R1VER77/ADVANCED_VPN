@@ -183,7 +183,9 @@ class EnrollmentTests(unittest.TestCase):
     def test_a_carrier_that_receives_nothing_is_restarted(self):
         import avpnctl
 
-        w = avpnctl.CarrierWatch(limit=20)
+        # Jitter disabled here so the thresholds are exact; the jitter itself has its
+        # own test below (roadmap 13.6: restart moments must not be correlatable).
+        w = avpnctl.CarrierWatch(limit=20, jitter=0, rng=lambda a, b: 0)
         self.assertFalse(w.stalled(10, 500, 0))
         self.assertFalse(w.stalled(10, 500, 19.9))
         self.assertTrue(w.stalled(10, 500, 20))
@@ -201,6 +203,28 @@ class EnrollmentTests(unittest.TestCase):
         # An unreadable status is never a reason to restart.
         self.assertFalse(w.stalled(11, None, 100))
         self.assertFalse(w.stalled(11, None, 200))
+
+    def test_the_stall_window_is_jittered_so_restarts_cannot_be_correlated(self):
+        import avpnctl
+
+        drawn = iter([3, -3])
+        w = avpnctl.CarrierWatch(limit=20, jitter=3, rng=lambda a, b: next(drawn))
+        # Episode 1 draws +3: the restart would happen at t=23, not a fixed t=20.
+        self.assertFalse(w.stalled(10, 500, 0))
+        self.assertEqual(w.window, 23)
+        self.assertFalse(w.stalled(10, 500, 22.9))
+        self.assertTrue(w.stalled(10, 500, 23))
+        # Episode 2 (a byte arrived, or a fresh carrier) draws its own window, 17.
+        self.assertFalse(w.stalled(10, 501, 30))
+        self.assertEqual(w.window, 17)
+        self.assertFalse(w.stalled(10, 501, 46.9))
+        self.assertTrue(w.stalled(10, 501, 47))
+        # The defaults keep every drawn window inside [limit-jitter, limit+jitter].
+        for _ in range(200):
+            w = avpnctl.CarrierWatch()
+            w.stalled(1, 1, 0)
+            self.assertGreaterEqual(w.window, avpnctl.CARRIER_STALL_SECONDS - avpnctl.CARRIER_STALL_JITTER)
+            self.assertLessEqual(w.window, avpnctl.CARRIER_STALL_SECONDS + avpnctl.CARRIER_STALL_JITTER)
 
     def test_underlay_mtu_floor_matches_the_cloak_packet_size(self):
         import re

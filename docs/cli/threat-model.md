@@ -218,6 +218,23 @@ the content); with `--front-hops 1` that one router also sees the entry's.
 
 ## What it does not stop
 
+Two adversaries are named here, because they are defeated by different means. The
+**global passive observer** can watch any link but controls nothing, and is resisted
+*structurally*: constant-rate streams and per-hop shaping leave it a flat packet rate
+on every wire it sees, and the mix lane (random delays, batched hops) removes the
+timing signal outright — no amount of collusion improves its position, only more
+observation points do. A **colluding majority of operators** is the opposite case: it
+holds observation points, not just links, and cannot be prevented — only made **slow,
+visible and partial**. Slow, because new nodes would earn trust over time and entry
+guards are kept for months, so a majority bought today still missed the paths already
+running. Visible, because mass registration is a concentration jump anyone can audit,
+and a mesh that requires distinct operators, providers and legal spheres per path
+makes cheap placement worthless. Partial, because diversity rules bound how many paths
+any majority can capture below its raw share of nodes. What no design in this class
+prevents is a patient majority that behaves perfectly and waits: the mitigations
+raise its cost and shorten what it can accumulate, and the mesh's epoch design (in
+`docs/MESH_DESIGN.md`) is the limit of what is claimed.
+
 - **A global passive adversary** who can watch both ends of the chain at once can
   still try to correlate the flows by their timing and volume. Deep-learning attacks
   (DeepCorr, Var-CNN) are good at this against low-latency tunnels. Constant cells and

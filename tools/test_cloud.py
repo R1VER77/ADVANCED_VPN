@@ -252,6 +252,20 @@ class CloudTests(Stubbed):
         self.assertEqual(rows["avpn-exit"], "oci advanced-vpn:avpn-exit 9.9.9.9/32:4444")
         self.assertEqual(rows["avpn-a1exit"], "oci exit (no instance):4444")
 
+    def test_status_marks_servers_whose_keys_could_not_be_sealed(self):
+        # Bug 9a: a host that fell back to plain keys says so wherever it is listed.
+        inv = cloud.load_inventory()
+        inv["resources"]["avpn-relay"] = dict(
+            provider="aws", role="relay", instance="i-1", public_ip="16.0.0.9", key_protection="none"
+        )
+        inv["resources"]["avpn-exit"] = dict(
+            provider="oci", rule="advanced-vpn:avpn-exit", source="9.9.9.9/32", port=4444, key_protection="systemd-creds"
+        )  # fmt: skip
+        cloud.save_inventory(inv)
+        rows = {r["label"]: r["value"] for r in self.run_cli("status")["rows"]}
+        self.assertIn("[PLAINTEXT KEYS]", rows["avpn-relay"])
+        self.assertNotIn("[PLAINTEXT KEYS]", rows["avpn-exit"])
+
     def test_dry_run_plans_without_creating_anything(self):
         r = self.run_cli("aws", "relay", "--apply", "--dry-run", "--profile", "p", "--allow-from", "16.170.0.7")
         text = json.dumps(r["rows"])
@@ -1073,7 +1087,7 @@ class ChainTests(Stubbed):
         with (
             mock.patch.dict(os.environ, {"AVPN_PROGRESS": "events"}),
             contextlib.redirect_stderr(err),
-            mock.patch.object(cloud, "setup_server", side_effect=[("kept", "tpm2=yes"), boom]),
+            mock.patch.object(cloud, "setup_server", side_effect=[("kept", "systemd-creds", "tpm2=yes"), boom]),
         ):
             with self.assertRaises(cloud.CloudError):
                 self.chain()
@@ -1182,7 +1196,7 @@ echo "$(basename "$0") $*" >> "$STUB_LOG.ssh"
 case "$*" in
   *" true") exit 0 ;;
   *"getconf GNU_LIBC_VERSION") echo "glibc ${STUB_GLIBC:-2.41}" ;;
-  *"bash -s -- "*) cat > "$STUB_DIR/remote-script.sh"; echo "keys=new"; echo "tpm2=yes creds_key=host+tpm2" ;;
+  *"bash -s -- "*) cat > "$STUB_DIR/remote-script.sh"; echo "keys=new"; echo "protection=systemd-creds tpm2=yes creds_key=host+tpm2" ;;
   *"bash -s") cat > "$STUB_DIR/enroll-script.sh"; echo active ;;
 esac
 """
@@ -1267,7 +1281,12 @@ class HostSetupTests(unittest.TestCase):
         self.assertTrue({n.split("/")[0] for n in names} <= {s.split("/")[0] for s in install.SOURCES} | {"target"})
         script = (self.d / "remote-script.sh").read_text()
         self.assertIn("libtss2", script)
-        self.assertIn("--protect systemd-creds", script)
+        # Bug 9a: the protection is chosen by a live probe of systemd-creds, not
+        # hard-coded, and falls back to plain keys (loudly) on hosts that cannot seal.
+        self.assertIn("PROTECT=systemd-creds", script)
+        self.assertIn('request --role "$ROLE" --protect "$PROTECT"', script)
+        self.assertIn("--insecure-plaintext-keys", script)
+        self.assertIn("PLAIN FILES", script)
         self.assertIn("replace them to make it a", script)
         # Root-run Python must not leave root-owned caches behind in the user's temp tree.
         self.assertIn("python3 -B /tmp/avpn-src/tools/install.py", script)
@@ -1278,10 +1297,10 @@ class HostSetupTests(unittest.TestCase):
         self.assertIn("StrictHostKeyChecking=accept-new", log)
         self.assertIn("IdentityAgent=none", log)
         self.assertIn("bash -s -- relay 443 no no", log)
-        self.assertIn("tpm2=yes creds_key=host+tpm2", json.dumps(r["rows"]))
-        self.assertEqual(
-            json.loads(cloud.INVENTORY.read_text())["resources"]["avpn-relay"]["request"], str(self.d / "relay.req")
-        )
+        self.assertIn("protection=systemd-creds tpm2=yes creds_key=host+tpm2", json.dumps(r["rows"]))
+        inv = json.loads(cloud.INVENTORY.read_text())["resources"]["avpn-relay"]
+        self.assertEqual(inv["request"], str(self.d / "relay.req"))
+        self.assertEqual(inv["key_protection"], "systemd-creds")
 
     def test_binaries_too_new_for_the_servers_c_library_are_refused_before_upload(self):
         (self.src / "target/release/advanced-vpn").write_bytes(b"\0GLIBC_2.17\0GLIBC_2.38\0GLIBC_2.4\0")
@@ -1321,6 +1340,7 @@ a = sys.argv[1:]
 root = os.environ["ROOT"]
 open(root + "/log", "a").write("avpnctl " + " ".join(a) + "\n")
 role = a[a.index("--role") + 1]
+protect = a[a.index("--protect") + 1]
 e = root + "/etc/advanced-vpn/enrolled"
 os.makedirs(e, exist_ok=True)
 req = {"schema": 1, "role": role, "certificates": {}, "kem_public": "k"}
@@ -1329,7 +1349,7 @@ if role in ("client", "relay", "exit"):
 if role in ("relay", "exit"):
     req.update(cloak_spki_sha256="00", i2p_destination="d")
 json.dump(req, open(e + "/request.json", "w"))
-json.dump({"creds_key": "host"}, open(e + "/protection.json", "w"))
+json.dump({"mode": protect, "creds_key": "host"}, open(e + "/protection.json", "w"))
 """
 
 
@@ -1413,6 +1433,36 @@ class HostScriptTests(unittest.TestCase):
         self.assertLess(log.index("harden"), log.index("apt-get"))
         self.assertFalse((self.root / "etc/advanced-vpn/shared-host").exists())
         self.assertFalse((self.root / "tmp/avpn-src.tgz").exists())
+
+    def systemd_creds_stub(self, body):
+        stub = self.root / "bin/systemd-creds"
+        stub.write_text(body)
+        stub.chmod(0o755)
+
+    def test_a_host_that_cannot_seal_falls_back_to_plain_keys_loudly(self):
+        # Bug 9a: systemd 249 (Ubuntu 22.04, the free OCI exit) cannot run systemd-creds.
+        # The setup must still complete, with plainly stored keys that say so.
+        self.systemd_creds_stub("#!/bin/sh\nexit 1\n")
+        r = self.setup("relay")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("keys=new", r.stdout)
+        self.assertIn("--protect none", self.log())
+        self.assertIn("--insecure-plaintext-keys", self.log())
+        self.assertIn("PLAIN FILES", r.stderr)
+        self.assertIn("systemd 250+", r.stderr)
+        self.assertTrue(r.stdout.strip().splitlines()[-1].startswith("protection=none "), r.stdout)
+
+    def test_a_host_that_can_seal_uses_systemd_creds(self):
+        self.systemd_creds_stub('#!/bin/sh\n[ "$1" = encrypt ] && cat >/dev/null\nexit 0\n')
+        r = self.setup("relay")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("keys=new", r.stdout)
+        self.assertIn("--protect systemd-creds", self.log())
+        self.assertNotIn("--insecure-plaintext-keys", self.log())
+        self.assertNotIn("PLAIN FILES", r.stderr)
+        self.assertTrue(r.stdout.strip().splitlines()[-1].startswith("protection=systemd-creds "), r.stdout)
+        # The probe credential is cleaned up either way.
+        self.assertFalse(list((self.root / "tmp").glob("avpn-creds-probe.*")))
 
     def test_same_role_keeps_keys_and_another_role_needs_replace(self):
         self.assertEqual(self.setup("relay").returncode, 0)

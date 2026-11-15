@@ -16,6 +16,7 @@ import ipaddress
 import json
 import os
 import pwd
+import random
 from pathlib import Path
 import re
 import resource
@@ -813,22 +814,29 @@ CLOAK_TOKEN_LABEL = b"advanced-vpn cloak"
 # mode: GotaTun's DAITA can stop releasing the packets Tamaraw holds back, for example
 # after the first hop was unreachable at start; a fresh carrier recovers.)
 CARRIER_STALL_SECONDS = 12
+# The restart threshold is jittered around that mean (roadmap item 13.6): a fixed
+# threshold would restart every client's carrier at the same offset after a hop
+# fails, and an observer between two hops could correlate the restarts.
+CARRIER_STALL_JITTER = 4
 
 
 class CarrierWatch:
     """Notices a client carrier whose received-byte counter has stopped moving."""
 
-    def __init__(self, limit=CARRIER_STALL_SECONDS):
-        self.limit = limit
+    def __init__(self, limit=CARRIER_STALL_SECONDS, jitter=CARRIER_STALL_JITTER, rng=random.uniform):
+        self.limit, self.jitter, self.rng = limit, jitter, rng
         self.pid = self.rx = self.since = None
+        self.window = float(limit)
 
     def stalled(self, pid, rx, now):
-        """True when carrier `pid` has received no new bytes for `limit` seconds.
-        A new process, or any received byte, starts the clock again."""
+        """True when carrier `pid` has received no new bytes for its stall window.
+        A new process, or any received byte, starts the clock again and draws a
+        fresh window in [limit - jitter, limit + jitter]."""
         if pid != self.pid or rx is None or rx != self.rx:
             self.pid, self.rx, self.since = pid, rx, now
+            self.window = self.limit + self.rng(-self.jitter, self.jitter)
             return False
-        return now - self.since >= self.limit
+        return now - self.since >= self.window
 
 
 def carrier_rx(state):
@@ -1312,6 +1320,46 @@ def control_signal(state, signum):
     os.kill(info["pid"], signum)
 
 
+def _supervisor_gone(pid, identity):
+    """True when `pid` no longer runs as `identity`: gone, or already dead and only
+    waiting to be reaped (a zombie's /proc entry survives until its parent waits)."""
+    try:
+        data = Path("/proc/" + str(pid) + "/stat").read_text()
+    except OSError:
+        return True
+    rest = data.rsplit(")", 1)[1].split()
+    return rest[0] == "Z" or rest[19] != identity
+
+
+def stop_supervisor(state, timeout=10):
+    """SIGTERM the live supervisor for `state` and confirm it exits.
+
+    Returns True when a supervisor was running and stopped within `timeout`
+    seconds, False when none was (no record, or a stale PID from an earlier
+    run). A supervisor that ignores SIGTERM is an error, not a success: the
+    kill switch would stay held by a half-stopped controller. Disconnect is
+    idempotent; rotate keeps using `control_signal`, where a stale PID stays
+    an error."""
+    record = runtime_dir(state, create=False) / "controller.json"
+    try:
+        info = json.loads(read_private(record))
+    except (OSError, ValueError):
+        return False
+    try:
+        pid, identity = int(info["pid"]), info["identity"]
+    except (KeyError, TypeError, ValueError):
+        return False
+    if _supervisor_gone(pid, identity):
+        return False
+    deadline = time.monotonic() + timeout
+    os.kill(pid, signal.SIGTERM)
+    while time.monotonic() < deadline:
+        if _supervisor_gone(pid, identity):
+            return True
+        time.sleep(0.1)
+    raise RuntimeError("the supervisor did not stop within %d s" % timeout)
+
+
 def fd_bytes(fd):
     """The whole contents of a sealed memfd."""
     return os.pread(fd, os.fstat(fd).st_size, 0)
@@ -1693,7 +1741,16 @@ def doctor(state, check_egress=False):
             "sealed with " + str(info.get("creds_key")) + ("; TPM2 usable now" if tpm else "; no usable TPM2"),
         )
     elif info.get("protection"):
-        check("key protection", info["protection"] != "none", info["protection"])
+        # Bug 9a: a host whose systemd cannot seal with systemd-creds falls back to
+        # plain keys, so say what that means and what to do about it, not just "none".
+        check(
+            "key protection",
+            info["protection"] != "none",
+            "plain files, root-readable: this host cannot seal keys with systemd-creds "
+            "(systemd 250+ needed); use an encrypted disk or a newer host"
+            if info["protection"] == "none"
+            else info["protection"],
+        )
     listed = probe("nft", "list", "tables") if os.geteuid() == 0 else None
     tables = listed.stdout if listed else ""
     if info.get("role") == "client" and info.get("mode") == "whole-device":
@@ -2088,8 +2145,17 @@ def main():
         supervise(a.state.resolve(), a.bin_dir.resolve(), a.lab, whole)
     elif a.action == "disconnect":
         root_guard(a.lab)
-        control_signal(a.state, signal.SIGTERM)
-        emit(a, "Disconnect requested; the kill switch stays in place.")
+        # Live regression (bug 8): `disconnect` reported success whenever the service
+        # was inactive, but never stopped a supervisor running in the foreground
+        # (`connect --foreground`). Stop whatever is actually running, and confirm.
+        stopped = stop_supervisor(a.state)
+        emit(
+            a,
+            "Supervisor stopped; the kill switch stays in place."
+            if stopped
+            else "No supervisor is running; the kill switch stays in place.",
+            stopped=stopped,
+        )
     elif a.action == "rotate":
         root_guard(a.lab)
         control_signal(a.state, signal.SIGHUP)

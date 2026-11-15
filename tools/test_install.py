@@ -119,5 +119,51 @@ class UserInstallTests(unittest.TestCase):
         self.assertFalse([n for n in names if n.startswith("codex-")])
 
 
+class NextStepTests(unittest.TestCase):
+    """The installer's closing line must match reality (no 'No servers yet?' after an
+    upgrade of a machine that has servers)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.home = Path(self.tmp.name) / "home"
+        (self.home / ".config" / "advanced-vpn").mkdir(parents=True)
+        # An explicit home wins over the caller's own XDG variable.
+        self.xdg = Path(self.tmp.name) / "xdg"
+        (self.xdg / "advanced-vpn").mkdir(parents=True)
+        self.env = mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": str(self.xdg)})
+        self.env.start()
+
+    def tearDown(self):
+        self.env.stop()
+        self.tmp.cleanup()
+
+    def inventory(self, resources):
+        (self.home / ".config" / "advanced-vpn" / "cloud.json").write_text(
+            json.dumps(dict(schema=1, resources=resources))
+        )
+
+    def test_no_inventory_or_an_empty_one_says_no_servers_yet(self):
+        self.assertEqual(install.next_servers_step(home=self.home), install.SUGGEST)
+        self.inventory({})
+        self.assertEqual(install.next_servers_step(home=self.home), install.SUGGEST)
+
+    def test_servers_on_record_are_acknowledged_instead(self):
+        self.inventory({"avpn-relay": dict(provider="aws")})
+        line = install.next_servers_step(home=self.home)
+        self.assertNotIn("No servers yet", line)
+        self.assertIn("avpn cloud status", line)
+
+    def test_a_broken_inventory_file_is_treated_as_empty(self):
+        (self.home / ".config" / "advanced-vpn" / "cloud.json").write_text("{not json")
+        self.assertEqual(install.next_servers_step(home=self.home), install.SUGGEST)
+
+    def test_the_install_paths_print_the_checked_line_not_a_fixed_one(self):
+        # The wiring, not just the helper: both install exits must print what
+        # next_servers_step returns, never the unconditional suggestion.
+        source = Path(install.__file__).read_text()
+        self.assertEqual(source.count("print(next_servers_step())"), 2, "both call sites must use the check")
+        self.assertNotIn("print(SUGGEST)", source)
+
+
 if __name__ == "__main__":
     unittest.main()

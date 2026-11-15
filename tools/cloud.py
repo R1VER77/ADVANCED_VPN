@@ -1053,11 +1053,30 @@ elif [ -n "$HAVE" ] && [ "$HAVE" != "$ROLE" ] && [ "$REPLACE" != yes ]; then
 else
   sudo -n systemctl stop advanced-vpn.service 2>/dev/null || true
   sudo -n rm -rf $E
-  sudo -n /opt/advanced-vpn/bin/avpnctl request --role "$ROLE" --protect systemd-creds --out /root/request.json >/dev/null
+  # Bug 9a: systemd-creds sealing needs a new enough systemd (250+; Ubuntu 22.04's 249
+  # cannot), and the TSS2 libraries this script installs. Probe it — encrypt and
+  # decrypt a throwaway credential with the host key — instead of trusting a version
+  # number, and fall back to plainly stored keys, reported loudly, when the probe
+  # fails. avpnctl still picks the TPM (host+tpm2) when systemd-analyze reports one.
+  PROTECT=systemd-creds
+  PROBE=/tmp/avpn-creds-probe.$$
+  if command -v systemd-creds >/dev/null 2>&1 \
+     && printf avpn | sudo -n systemd-creds encrypt --with-key=host --name=avpn-probe - "$PROBE" >/dev/null 2>&1 \
+     && sudo -n systemd-creds decrypt --name=avpn-probe "$PROBE" - >/dev/null 2>&1; then
+    rm -f "$PROBE"
+  else
+    rm -f "$PROBE"
+    PROTECT=none
+    PROBE_ARGS="--insecure-plaintext-keys"
+    echo "WARNING: this host cannot seal keys with systemd-creds (systemd $(systemctl --version 2>/dev/null | head -1))." >&2
+    echo "WARNING: the VPN keys on this server will be PLAIN FILES, readable by root only." >&2
+    echo "WARNING: prefer a host with systemd 250+ (Debian 12/13), or use full-disk encryption here." >&2
+  fi
+  sudo -n /opt/advanced-vpn/bin/avpnctl request --role "$ROLE" --protect "$PROTECT" $PROBE_ARGS --out /root/request.json >/dev/null
   if [ "$HAVE" = "$ROLE" ]; then echo "keys=renewed"; else echo "keys=new"; fi
 fi
 sudo -n cat $E/request.json > /tmp/avpn-request.json
-echo "tpm2=$(systemd-analyze has-tpm2 >/dev/null 2>&1 && echo yes || echo no) creds_key=$(sudo -n python3 -c 'import json;print(json.load(open("/etc/advanced-vpn/enrolled/protection.json")).get("creds_key"))')"
+echo "protection=$(sudo -n python3 -c 'import json;print(json.load(open("/etc/advanced-vpn/enrolled/protection.json")).get("mode"))' 2>/dev/null || echo unknown) tpm2=$(systemd-analyze has-tpm2 >/dev/null 2>&1 && echo yes || echo no) creds_key=$(sudo -n python3 -c 'import json;print(json.load(open("/etc/advanced-vpn/enrolled/protection.json")).get("creds_key"))')"
 sudo -n rm -rf /tmp/avpn-src /tmp/avpn-src.tgz
 """.replace("@@HARDEN@@", retention.HARDEN.rstrip("\n"))
 
@@ -1171,7 +1190,10 @@ def setup_server(name, record, role, port, out, source, replace=False, source_ar
         raise CloudError("the request from %s is not for role %s" % (name, role))
     lines = report.strip().splitlines()
     keys = next((x.split("=", 1)[1] for x in lines if x.startswith("keys=")), "new")
-    return keys, (lines[-1] if lines else "")
+    # Bug 9a: the host's key-protection mode travels with the report, so it can be
+    # recorded and shown loudly wherever plain keys had to be accepted.
+    protection = next((x.split("=", 1)[1].split()[0] for x in lines if x.startswith("protection=")), "unknown")
+    return keys, protection, (lines[-1] if lines else "")
 
 
 def host_setup(a):
@@ -1184,17 +1206,23 @@ def host_setup(a):
     if role not in ROLES:
         raise CloudError("give --role relay|middle|exit for %s" % a.name)
     port = record["port"] if record.get("role") == role and record.get("port") else ROLES[role]
-    keys, tpm = setup_server(a.name, record, role, port, a.out, a.source, replace=a.replace,
-                             source_arm=getattr(a, "source_arm", None))  # fmt: skip
-    record.update(role=role, port=port, request=str(a.out))
+    keys, protection, tpm = setup_server(a.name, record, role, port, a.out, a.source, replace=a.replace,
+                                        source_arm=getattr(a, "source_arm", None))  # fmt: skip
+    record.update(role=role, port=port, request=str(a.out), key_protection=protection)
     save_inventory(inv)
     return [
         dict(label="host", value="%s %s (%s)" % (a.name, record["public_ip"], role)),
         dict(label="installed", value="/opt/advanced-vpn (service not enabled)"),
         dict(
             label="keys",
-            value="%s; %s"
-            % ({"kept": "kept", "renewed": "renewed (older than this release)"}.get(keys, "generated"), tpm),
+            value="%s; %s; %s"
+            % (
+                {"kept": "kept", "renewed": "renewed (older than this release)"}.get(keys, "generated"),
+                "PLAINTEXT KEYS (this host cannot seal with systemd-creds)"
+                if protection == "none"
+                else "sealed: " + protection,
+                tpm,
+            ),
         ),
         dict(label="request", value="%s (public; give it to avpn init)" % a.out),
     ]
@@ -1595,10 +1623,21 @@ def chain_steps(a, hops, progress, n):
     for k, h in enumerate(hops):
         out = work / "requests" / (h["role"] + ".req")
         progress.run(1 + k, "packages and keys; a few minutes")
-        keys, tpm = setup_server(h["name"], h["record"], h["role"], h["port"], out, a.source, replace=True,
-                                 source_arm=getattr(a, "source_arm", None))  # fmt: skip
+        keys, protection, tpm = setup_server(h["name"], h["record"], h["role"], h["port"], out, a.source,
+                                             replace=True, source_arm=getattr(a, "source_arm", None))  # fmt: skip
+        h["record"]["key_protection"] = protection
         requests[h["role"]] = out
-        done.append(dict(label=h["name"], value="%s, keys %s, %s" % (h["role"], keys, tpm)))
+        done.append(
+            dict(
+                label=h["name"],
+                value="%s, keys %s, %s"
+                % (
+                    h["role"],
+                    keys,
+                    "PLAINTEXT KEYS; " + tpm if protection == "none" else tpm,
+                ),
+            )
+        )
     # 3. One signature over the whole chain.
     endpoint = {h["role"]: "%s:%d" % (h["record"]["public_ip"], h["port"]) for h in hops}
     argv = [*controller(), "--json", "init", "--out", str(work / "bundles"), "--hops", str(len(hops))]
@@ -1882,6 +1921,9 @@ def status(a):
             # A firewall rule (`oci allow`) names its source; a server (`oci server`) its address.
             where = r.get("source") or r.get("public_ip") or "(no instance)"
             detail += " %s:%s" % (where, r.get("port", "?"))
+        if r.get("key_protection") == "none":
+            # Bug 9a: a host that could not seal its keys says so wherever it is listed.
+            detail += " [PLAINTEXT KEYS]"
         rows.append(dict(label=name, value=detail))
     return rows or [dict(label="nothing", value="no cloud resources recorded in " + str(INVENTORY))]
 
