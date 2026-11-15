@@ -368,6 +368,10 @@ def cpu_probe(a, observers, shape_file, hops, online_seconds):
         hops=hops,
         rate=a.rate,
         catch_up_ms=int(os.environ.get("AVPN_CATCH_UP_MS", "0") or 0),
+        wire_clock_pps=float(os.environ.get("AVPN_WIRE_CLOCK_PPS", "0") or 0),
+        wire_clock_lookahead_ms=int(os.environ.get("AVPN_WIRE_CLOCK_MS", "30") or 30),
+        # Declared, not detected: the lab cannot see another user's open files.
+        pm_qos_us_declared=os.environ.get("AVPN_PROBE_PM_QOS_US"),
         client_cpus=a.client_cpus,
         server_cpus=a.server_cpus,
         load_procs=a.load_procs,
@@ -548,6 +552,11 @@ def main():
                 run("ip", "-n", ns, "link", "set", dev, "up")
             if n2 != "destination":
                 ingress[n2] = d2  # server's link from its predecessor
+            if k == 0 and os.environ.get("AVPN_WIRE_CLOCK_PPS"):
+                # The wire clock's departure times are honoured by the fq qdisc only.
+                tc = shutil.which("tc") or "/usr/sbin/tc"
+                run("ip", "netns", "exec", "av-" + n1, tc, "qdisc", "replace", "dev", d1, "root", "fq",
+                    "flow_limit", "10000", "limit", "20000")  # fmt: skip
             if k == 0 and a.underlay_mtu:
                 for ns, dev in [("av-" + n1, d1), ("av-" + n2, d2)]:
                     run("ip", "-n", ns, "link", "set", dev, "mtu", str(a.underlay_mtu))

@@ -22,6 +22,9 @@ measured figure in the docs names the version it was measured on.
 - The busy-CPU leak reproduces locally: `throughput_bench.py --cpu-probe` scores the packet
   count and the timing per window; catch-up restores the count but not the timing
   (`docs/evidence/CPU_LEAK_PROBE.json`).
+- Experimental (off by default): the cloak's wire clock, `AVPN_WIRE_CLOCK_PPS`, a first step of
+  the busy-CPU fix: kernel-paced departure with decoys in empty slots
+  (`docs/evidence/KERNEL_PACING.json`; not yet a fix).
 - `avpn cloud chain --apply` shows a live checklist; PIN prompts are a desktop pop-up
   (also under sudo), and `avpn status` works without root while the service runs.
 - Formal models now run and are proved in CI (Tamarin 1.12.0), each with a broken variant

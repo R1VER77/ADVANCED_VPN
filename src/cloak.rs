@@ -706,17 +706,68 @@ pub async fn connect(
     stats: Arc<Stats>,
     front: bool,
 ) -> Result<()> {
+    let clock = WireClock::from_env();
+    connect_clocked(
+        local,
+        wireguard,
+        remote,
+        cover_name,
+        spki_sha256,
+        key,
+        stats,
+        front,
+        clock,
+    )
+    .await
+}
+
+/// [`connect`] with the wire clock given (`None`: off).
+#[allow(clippy::too_many_arguments)]
+async fn connect_clocked(
+    local: SocketAddr,
+    wireguard: SocketAddr,
+    remote: SocketAddr,
+    cover_name: Option<String>,
+    spki_sha256: [u8; 32],
+    key: [u8; TOKEN_LEN],
+    stats: Arc<Stats>,
+    front: bool,
+    clock: Option<WireClock>,
+) -> Result<()> {
     let udp = Arc::new(UdpSocket::bind(local).await?);
-    let mut endpoint = Endpoint::client("0.0.0.0:0".parse()?)?;
+    // The wire clock (experimental): only on QUIC, never with an I2P front (streams).
+    let clock = clock.filter(|_| !front);
+    let slots: Arc<Mutex<std::collections::VecDeque<u64>>> = Arc::default();
+    let queue: Arc<Mutex<std::collections::VecDeque<Bytes>>> = Arc::default();
+    let mut endpoint = match clock {
+        Some(_) => paced_endpoint(slots.clone())?,
+        None => Endpoint::client("0.0.0.0:0".parse()?)?,
+    };
     endpoint.set_default_client_config(client_config(spki_sha256, cover_name.is_some())?);
     let tls_connector = TlsConnector::from(tls_client_config(spki_sha256, cover_name.is_some())?);
     // Without a cover name no SNI is sent; the name below is then only a placeholder.
     let name = cover_name.unwrap_or_else(|| "localhost".into());
     let current: Arc<Mutex<Option<ClientSink>>> = Arc::default();
     let held: Arc<Mutex<Held>> = Arc::default();
+    if let Some(clock) = clock {
+        tokio::spawn(feed(
+            clock,
+            current.clone(),
+            queue.clone(),
+            slots.clone(),
+            stats.clone(),
+        ));
+    }
     {
-        let (udp, current, held, stats) =
-            (udp.clone(), current.clone(), held.clone(), stats.clone());
+        let (udp, current, held, stats, queue) = (
+            udp.clone(),
+            current.clone(),
+            held.clone(),
+            stats.clone(),
+            queue.clone(),
+        );
+        // Bounded: at most a second of the carrier's own rate waits for the clock.
+        let cap = clock.map_or(0, |c| c.packets_per_second as usize).max(64);
         tokio::spawn(async move {
             let mut buf = vec![0u8; 2048];
             loop {
@@ -729,6 +780,15 @@ pub async fn connect(
                 let d = Bytes::copy_from_slice(&buf[..n]);
                 let session = current.lock().unwrap().clone();
                 match session {
+                    Some(ClientSink::Quic(_)) if clock.is_some() => {
+                        // The feeder sends it in the next free slot.
+                        let mut q = queue.lock().unwrap();
+                        if q.len() >= cap {
+                            q.pop_front();
+                            add(&stats.dropped);
+                        }
+                        q.push_back(d);
+                    }
                     Some(s) => {
                         if s.send(d) {
                             add(&stats.sent);
@@ -789,6 +849,259 @@ pub async fn connect(
         *current.lock().unwrap() = None;
         stats.connected.store(false, Ordering::Relaxed);
         tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+}
+
+/// The client's wire clock (busy-CPU fix, experimental: off unless `AVPN_WIRE_CLOCK_PPS`
+/// is set). On a busy CPU the carrier's packets left late or not at all, and their timing
+/// traced the page's work (docs/evidence/WF_REAL_PILOT.json, CPU_LEAK_PROBE.json). With
+/// the clock, the cloak owns departure: a feeder runs `lookahead` ahead of real time and
+/// gives every slot of a fixed grid exactly one full-size datagram (WireGuard's, or a decoy
+/// the first hop's WireGuard drops), and the paced socket stamps each packet with its slot
+/// (`SO_TXTIME`) so the `fq` qdisc releases it on time whatever this thread is doing.
+/// A stall shorter than `lookahead` leaves no trace on the wire. Limit: the first hop,
+/// which decrypts this layer, still sees which slots carried WireGuard and which decoys.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WireClock {
+    /// Slots per second: a little above the carrier's own rate, so its queue drains.
+    pub packets_per_second: f64,
+    /// How far ahead of real time slots are handed to the kernel.
+    pub lookahead: Duration,
+}
+
+impl WireClock {
+    /// From `AVPN_WIRE_CLOCK_PPS` (the carrier's packets per second) and
+    /// `AVPN_WIRE_CLOCK_MS` (look-ahead, default 30 ms); `None` when unset or invalid.
+    pub fn from_env() -> Option<Self> {
+        let pps: f64 = std::env::var("AVPN_WIRE_CLOCK_PPS").ok()?.parse().ok()?;
+        let ms: u64 = std::env::var("AVPN_WIRE_CLOCK_MS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(30);
+        (pps.is_finite() && pps > 0.0 && (1..=500).contains(&ms)).then_some(Self {
+            packets_per_second: pps * WIRE_CLOCK_HEADROOM,
+            lookahead: Duration::from_millis(ms),
+        })
+    }
+
+    fn step_ns(&self) -> u64 {
+        (1e9 / self.packets_per_second) as u64
+    }
+}
+
+/// The wire clock runs this much faster than the carrier, so WireGuard's queue drains
+/// and catch-up bursts are absorbed; spare slots carry decoys.
+const WIRE_CLOCK_HEADROOM: f64 = 1.02;
+
+/// A decoy: a full-size datagram whose first byte is no WireGuard message type, so the
+/// first hop's WireGuard drops it silently (`try_into_wg`); full size so QUIC never packs
+/// two into one packet.
+fn decoy() -> Bytes {
+    Bytes::from(vec![0u8; CARRIER_DATAGRAM])
+}
+
+/// CLOCK_MONOTONIC in nanoseconds: the clock `SO_TXTIME` and `fq` use.
+fn monotonic_ns() -> u64 {
+    let mut ts = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    // SAFETY: a valid timespec pointer for CLOCK_MONOTONIC.
+    unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut ts) };
+    ts.tv_sec as u64 * 1_000_000_000 + ts.tv_nsec as u64
+}
+
+/// Grid slots due before `horizon`, from slot `k` of a grid starting at `t0` with `step`.
+/// Slots already more than one step in the past are skipped (a stall longer than the
+/// look-ahead: those slots cannot be sent on time any more); returns the slots to feed and
+/// the next `k`.
+fn due_slots(t0: u64, step: u64, mut k: u64, now: u64, horizon: u64) -> (Vec<u64>, u64) {
+    let mut out = Vec::new();
+    if t0 + k * step + step < now {
+        k = (now - t0) / step + 1;
+    }
+    while t0 + k * step < horizon {
+        out.push(t0 + k * step);
+        k += 1;
+    }
+    (out, k)
+}
+
+const SO_TXTIME: libc::c_int = 61;
+const SCM_TXTIME: libc::c_int = SO_TXTIME;
+
+/// quinn's UDP socket with departure times: every full-size packet (one carrying a
+/// datagram) takes the next slot the feeder queued and leaves at that time; anything
+/// else (an ACK-only packet) goes out at once through quinn's own socket.
+#[derive(Debug)]
+struct PacedSocket {
+    inner: Arc<dyn quinn::AsyncUdpSocket>,
+    fd: std::os::fd::OwnedFd,
+    slots: Arc<Mutex<std::collections::VecDeque<u64>>>,
+}
+
+impl PacedSocket {
+    fn send_at(&self, t: &quinn::udp::Transmit, at_ns: u64) -> std::io::Result<()> {
+        use std::os::fd::AsRawFd;
+        let SocketAddr::V4(dst) = t.destination else {
+            return Err(std::io::Error::other("the wire clock paces IPv4 only"));
+        };
+        let addr = libc::sockaddr_in {
+            sin_family: libc::AF_INET as libc::sa_family_t,
+            sin_port: dst.port().to_be(),
+            sin_addr: libc::in_addr {
+                s_addr: u32::from(*dst.ip()).to_be(),
+            },
+            sin_zero: [0; 8],
+        };
+        let mut iov = libc::iovec {
+            iov_base: t.contents.as_ptr() as *mut libc::c_void,
+            iov_len: t.contents.len(),
+        };
+        // SAFETY: CMSG_SPACE is a pure size computation.
+        let space = unsafe { libc::CMSG_SPACE(std::mem::size_of::<u64>() as u32) } as usize;
+        let mut control = vec![0u8; space];
+        // SAFETY: msghdr is plain data; every pointer below outlives the sendmsg call.
+        let mut msg: libc::msghdr = unsafe { std::mem::zeroed() };
+        msg.msg_name = &addr as *const _ as *mut libc::c_void;
+        msg.msg_namelen = std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t;
+        msg.msg_iov = &mut iov;
+        msg.msg_iovlen = 1;
+        msg.msg_control = control.as_mut_ptr() as *mut libc::c_void;
+        msg.msg_controllen = space as _;
+        // SAFETY: the control buffer holds one cmsg of CMSG_SPACE(8) bytes.
+        unsafe {
+            let c = libc::CMSG_FIRSTHDR(&msg);
+            (*c).cmsg_level = libc::SOL_SOCKET;
+            (*c).cmsg_type = SCM_TXTIME;
+            (*c).cmsg_len = libc::CMSG_LEN(std::mem::size_of::<u64>() as u32) as _;
+            std::ptr::copy_nonoverlapping(&at_ns as *const u64 as *const u8, libc::CMSG_DATA(c), 8);
+        }
+        // SAFETY: a valid socket and msghdr.
+        let n = unsafe { libc::sendmsg(self.fd.as_raw_fd(), &msg, libc::MSG_DONTWAIT) };
+        if n < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(())
+    }
+}
+
+impl quinn::AsyncUdpSocket for PacedSocket {
+    fn create_io_poller(self: Arc<Self>) -> std::pin::Pin<Box<dyn quinn::UdpPoller>> {
+        self.inner.clone().create_io_poller()
+    }
+
+    fn try_send(&self, t: &quinn::udp::Transmit) -> std::io::Result<()> {
+        if t.contents.len() >= OUTER_MTU as usize {
+            let slot = self.slots.lock().unwrap().pop_front();
+            if let Some(at) = slot {
+                return self.send_at(t, at);
+            }
+        }
+        self.inner.try_send(t)
+    }
+
+    fn poll_recv(
+        &self,
+        cx: &mut std::task::Context,
+        bufs: &mut [std::io::IoSliceMut<'_>],
+        meta: &mut [quinn::udp::RecvMeta],
+    ) -> std::task::Poll<std::io::Result<usize>> {
+        self.inner.poll_recv(cx, bufs, meta)
+    }
+
+    fn local_addr(&self) -> std::io::Result<SocketAddr> {
+        self.inner.local_addr()
+    }
+
+    fn max_transmit_segments(&self) -> usize {
+        1
+    }
+
+    fn max_receive_segments(&self) -> usize {
+        self.inner.max_receive_segments()
+    }
+
+    fn may_fragment(&self) -> bool {
+        self.inner.may_fragment()
+    }
+}
+
+/// A client endpoint whose full-size packets leave at the slots in `slots`.
+fn paced_endpoint(slots: Arc<Mutex<std::collections::VecDeque<u64>>>) -> Result<Endpoint> {
+    use std::os::fd::{AsRawFd, OwnedFd};
+    let socket = std::net::UdpSocket::bind("0.0.0.0:0")?;
+    let txtime = libc::sock_txtime {
+        clockid: libc::CLOCK_MONOTONIC,
+        flags: 0,
+    };
+    // SAFETY: a valid socket and a sock_txtime of the right size.
+    let rc = unsafe {
+        libc::setsockopt(
+            socket.as_raw_fd(),
+            libc::SOL_SOCKET,
+            SO_TXTIME,
+            &txtime as *const _ as *const libc::c_void,
+            std::mem::size_of::<libc::sock_txtime>() as libc::socklen_t,
+        )
+    };
+    ensure!(rc == 0, "SO_TXTIME: {}", std::io::Error::last_os_error());
+    let fd = OwnedFd::from(socket.try_clone()?);
+    let runtime = quinn::default_runtime().context("no async runtime for QUIC")?;
+    let inner = runtime.wrap_udp_socket(socket)?;
+    Ok(Endpoint::new_with_abstract_socket(
+        quinn::EndpointConfig::default(),
+        None,
+        Arc::new(PacedSocket { inner, fd, slots }),
+        runtime,
+    )?)
+}
+
+/// The wire clock's feeder: while a QUIC session is up, gives every slot due within the
+/// look-ahead one datagram (WireGuard's oldest, or a decoy) and queues its slot for the
+/// paced socket. A stall shorter than the look-ahead is caught up the moment it ends.
+async fn feed(
+    clock: WireClock,
+    current: Arc<Mutex<Option<ClientSink>>>,
+    queue: Arc<Mutex<std::collections::VecDeque<Bytes>>>,
+    slots: Arc<Mutex<std::collections::VecDeque<u64>>>,
+    stats: Arc<Stats>,
+) {
+    let step = clock.step_ns();
+    let ahead = clock.lookahead.as_nanos() as u64;
+    let mut grid: Option<(u64, u64)> = None; // (t0, next k) of the current session
+    loop {
+        let sink = current.lock().unwrap().clone();
+        match sink {
+            Some(ClientSink::Quic(c)) => {
+                let now = monotonic_ns();
+                let (t0, k) = *grid.get_or_insert((now + ahead, 0));
+                let (due, next) = due_slots(t0, step, k, now, now + ahead);
+                grid = Some((t0, next));
+                for at in due {
+                    let d = queue.lock().unwrap().pop_front();
+                    let real = d.is_some();
+                    slots.lock().unwrap().push_back(at);
+                    if c.send_datagram(d.unwrap_or_else(decoy)).is_ok() {
+                        if real {
+                            add(&stats.sent);
+                        }
+                    } else {
+                        slots.lock().unwrap().pop_back();
+                        if real {
+                            add(&stats.dropped);
+                        }
+                    }
+                }
+            }
+            _ => {
+                // No QUIC session (connecting, or the TCP fallback): a new session starts
+                // a new grid with no stale slots.
+                grid = None;
+                slots.lock().unwrap().clear();
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(2)).await;
     }
 }
 
@@ -1181,6 +1494,90 @@ mod tests {
             .unwrap();
         assert_eq!(&buf[..n], b"reply");
         assert!(stats.connected.load(Ordering::Relaxed) && cs.connected.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn the_wire_clock_catches_up_a_short_stall_and_skips_a_long_one() {
+        let (t0, step) = (1_000, 100);
+        // On time: slots due before the horizon, in order.
+        let (due, k) = due_slots(t0, step, 0, 1_000, 1_350);
+        assert_eq!((due, k), (vec![1_000, 1_100, 1_200, 1_300], 4));
+        // A stall shorter than the look-ahead: every missed slot is still fed, late, and the
+        // paced socket sends each at its own time.
+        let (due, k) = due_slots(t0, step, 4, 1_380, 1_730);
+        assert_eq!((due, k), (vec![1_400, 1_500, 1_600, 1_700], 8));
+        // A stall longer than the look-ahead: slots already in the past are skipped.
+        let (due, k) = due_slots(t0, step, 8, 2_550, 2_900);
+        assert_eq!((due, k), (vec![2_600, 2_700, 2_800], 19));
+    }
+
+    #[tokio::test]
+    async fn the_wire_clock_fills_every_slot_and_still_carries_wireguard() {
+        let (_, _, pin) = test_cert();
+        let key = [5; 32];
+        let (addr, wg, _) = server(key).await;
+        let local_wg = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let probe = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let local: SocketAddr = probe.local_addr().unwrap();
+        drop(probe);
+        let clock = WireClock {
+            packets_per_second: 500.0,
+            lookahead: Duration::from_millis(20),
+        };
+        let cs = Arc::new(Stats::default());
+        tokio::spawn(connect_clocked(
+            local,
+            local_wg.local_addr().unwrap(),
+            addr,
+            Some("cover.example".into()),
+            pin,
+            key,
+            cs.clone(),
+            false,
+            Some(clock),
+        ));
+        let mut buf = [0u8; 2048];
+        // Wait for the session; then, with nothing from WireGuard, only decoys arrive.
+        let first = tokio::time::timeout(Duration::from_secs(5), wg.recv_from(&mut buf))
+            .await
+            .expect("the clock sends as soon as the session is up")
+            .unwrap();
+        assert_eq!(
+            (first.0, buf[0]),
+            (CARRIER_DATAGRAM, 0),
+            "a full-size decoy"
+        );
+        let start = std::time::Instant::now();
+        let mut decoys = 0;
+        while start.elapsed() < Duration::from_secs(1) {
+            if let Ok(Ok((n, _))) =
+                tokio::time::timeout(Duration::from_millis(100), wg.recv_from(&mut buf)).await
+            {
+                assert_eq!((n, buf[0]), (CARRIER_DATAGRAM, 0));
+                decoys += 1;
+            }
+        }
+        assert!(
+            (400..=600).contains(&decoys),
+            "one decoy per slot, about 500/s: {decoys}"
+        );
+        // A real WireGuard datagram takes the next slot and arrives intact.
+        let packet = vec![0x04; CARRIER_DATAGRAM];
+        local_wg.send_to(&packet, local).await.unwrap();
+        let mut found = false;
+        for _ in 0..200 {
+            let (n, _) = tokio::time::timeout(Duration::from_secs(1), wg.recv_from(&mut buf))
+                .await
+                .unwrap()
+                .unwrap();
+            if buf[0] != 0 {
+                assert_eq!(&buf[..n], &packet[..]);
+                found = true;
+                break;
+            }
+        }
+        assert!(found, "WireGuard's datagram was carried among the decoys");
+        assert_eq!(cs.sent.load(Ordering::Relaxed), 1);
     }
 
     #[tokio::test]

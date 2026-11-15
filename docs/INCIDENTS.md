@@ -31,7 +31,16 @@ private vulnerability reporting (see [SECURITY.md](../SECURITY.md)).
   packets still give the load away: wider gaps in nearly every loaded window (gap-spread
   AUC 0.001–0.07, where 0.5 is chance), p = 0.0005 in each run. A fix must remove both. The probe scores
   both and is the fix's regression gate.
-- **Evidence:** `docs/evidence/WF_REAL_PILOT.json`, `docs/evidence/CPU_LEAK_PROBE.json`.
+- **Fix in progress (15 Nov 2026):** the cloak's client-side wire clock (`AVPN_WIRE_CLOCK_PPS`,
+  off by default) hands every slot of a fixed grid to the kernel 30 ms ahead, with WireGuard's
+  datagram or a decoy, and the `fq` qdisc releases each on time.
+  - **Result so far:** on the real carrier it turns perfect separation into a marginal signal,
+    left at load transitions.
+  - **Found on the way:** kernel pacing alone exposes a CPU power-state side channel (idle
+    cores wake the release timer late), which awake cores remove and power QoS only reduces.
+  - **Not yet a fix,** and `fast` is still not claimed while the device is busy.
+- **Evidence:** `docs/evidence/WF_REAL_PILOT.json`, `docs/evidence/CPU_LEAK_PROBE.json`,
+  `docs/evidence/KERNEL_PACING.json`.
 
 ## Fixed
 

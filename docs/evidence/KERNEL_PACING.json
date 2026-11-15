@@ -1,0 +1,504 @@
+{
+  "schema": 1,
+  "name": "Kernel-paced departure for the busy-CPU leak",
+  "date": "2026-11-15",
+  "code": "main at 895a993 plus the cloak wire clock (AVPN_WIRE_CLOCK_PPS, off by default)",
+  "host": {
+    "cpus": 8,
+    "where": "owner's laptop; user-namespace labs (isolated: unshare -Urnm, power QoS: sudo unshare -nm)"
+  },
+  "auc_convention": "AUC = P(a loaded window's value is the smaller one); 0.5 is chance. leak = any feature separates the schedule at p < 0.01/3.",
+  "isolated": {
+    "setup": "tools/txtime_experiment.py: UDP at 4,000 packets/s from cores 0,1 over a veth to another namespace (kernel receive timestamps); 2 busy loops on cores 0,1 on a random balanced schedule; 60 x 1 s windows; 3 runs per variant",
+    "variants": [
+      {
+        "variant": "today's timed loop (naive) and kernel-paced txtime 30 ms, interleaved",
+        "runs": [
+          {
+            "count_auc": 0.5356,
+            "count_p": 0.6477,
+            "gap_sd": {
+              "auc": 0.3,
+              "p_value": 0.0085,
+              "control_auc_mean": 0.4987
+            },
+            "max_gap": {
+              "auc": 0.2267,
+              "p_value": 0.0005,
+              "control_auc_mean": 0.5013
+            },
+            "leak": true,
+            "mode": "naive"
+          },
+          {
+            "count_auc": 0.5,
+            "count_p": 1.0,
+            "gap_sd": {
+              "auc": 0.9978,
+              "p_value": 0.0005,
+              "control_auc_mean": 0.5004
+            },
+            "max_gap": {
+              "auc": 0.8089,
+              "p_value": 0.0005,
+              "control_auc_mean": 0.4991
+            },
+            "leak": true,
+            "mode": "txtime"
+          },
+          {
+            "count_auc": 0.7344,
+            "count_p": 0.0015,
+            "gap_sd": {
+              "auc": 0.2211,
+              "p_value": 0.0005,
+              "control_auc_mean": 0.4993
+            },
+            "max_gap": {
+              "auc": 0.1289,
+              "p_value": 0.0005,
+              "control_auc_mean": 0.4985
+            },
+            "leak": true,
+            "mode": "naive"
+          },
+          {
+            "count_auc": 0.5,
+            "count_p": 1.0,
+            "gap_sd": {
+              "auc": 0.9967,
+              "p_value": 0.0005,
+              "control_auc_mean": 0.4996
+            },
+            "max_gap": {
+              "auc": 0.9933,
+              "p_value": 0.0005,
+              "control_auc_mean": 0.4998
+            },
+            "leak": true,
+            "mode": "txtime"
+          },
+          {
+            "count_auc": 0.745,
+            "count_p": 0.001,
+            "gap_sd": {
+              "auc": 0.1467,
+              "p_value": 0.0005,
+              "control_auc_mean": 0.5023
+            },
+            "max_gap": {
+              "auc": 0.1389,
+              "p_value": 0.0005,
+              "control_auc_mean": 0.498
+            },
+            "leak": true,
+            "mode": "naive"
+          },
+          {
+            "count_auc": 0.5,
+            "count_p": 1.0,
+            "gap_sd": {
+              "auc": 1.0,
+              "p_value": 0.0005,
+              "control_auc_mean": 0.4968
+            },
+            "max_gap": {
+              "auc": 0.9578,
+              "p_value": 0.0005,
+              "control_auc_mean": 0.5001
+            },
+            "leak": true,
+            "mode": "txtime"
+          }
+        ]
+      },
+      {
+        "variant": "txtime 30 ms, cores kept awake by 2 constant busy loops",
+        "runs": [
+          {
+            "count_auc": 0.5,
+            "count_p": 1.0,
+            "gap_sd": {
+              "auc": 0.62,
+              "p_value": 0.1214,
+              "control_auc_mean": 0.5001
+            },
+            "max_gap": {
+              "auc": 0.6267,
+              "p_value": 0.0875,
+              "control_auc_mean": 0.4989
+            },
+            "leak": false,
+            "mode": "txtime"
+          },
+          {
+            "count_auc": 0.5167,
+            "count_p": 0.5067,
+            "gap_sd": {
+              "auc": 0.6322,
+              "p_value": 0.0805,
+              "control_auc_mean": 0.5006
+            },
+            "max_gap": {
+              "auc": 0.6606,
+              "p_value": 0.03,
+              "control_auc_mean": 0.5002
+            },
+            "leak": false,
+            "mode": "txtime"
+          },
+          {
+            "count_auc": 0.5,
+            "count_p": 1.0,
+            "gap_sd": {
+              "auc": 0.5211,
+              "p_value": 0.7856,
+              "control_auc_mean": 0.4997
+            },
+            "max_gap": {
+              "auc": 0.5511,
+              "p_value": 0.5052,
+              "control_auc_mean": 0.4989
+            },
+            "leak": false,
+            "mode": "txtime"
+          }
+        ]
+      },
+      {
+        "variant": "naive timed loop, cores kept awake",
+        "runs": [
+          {
+            "count_auc": 1.0,
+            "count_p": 0.0005,
+            "gap_sd": {
+              "auc": 0.0,
+              "p_value": 0.0005,
+              "control_auc_mean": 0.4992
+            },
+            "max_gap": {
+              "auc": 0.0,
+              "p_value": 0.0005,
+              "control_auc_mean": 0.5004
+            },
+            "leak": true,
+            "mode": "naive"
+          },
+          {
+            "count_auc": 1.0,
+            "count_p": 0.0005,
+            "gap_sd": {
+              "auc": 0.0,
+              "p_value": 0.0005,
+              "control_auc_mean": 0.4988
+            },
+            "max_gap": {
+              "auc": 0.0,
+              "p_value": 0.0005,
+              "control_auc_mean": 0.5009
+            },
+            "leak": true,
+            "mode": "naive"
+          },
+          {
+            "count_auc": 1.0,
+            "count_p": 0.0005,
+            "gap_sd": {
+              "auc": 0.0,
+              "p_value": 0.0005,
+              "control_auc_mean": 0.5006
+            },
+            "max_gap": {
+              "auc": 0.0,
+              "p_value": 0.0005,
+              "control_auc_mean": 0.4995
+            },
+            "leak": true,
+            "mode": "naive"
+          }
+        ]
+      },
+      {
+        "variant": "txtime 30 ms, power QoS /dev/cpu_dma_latency 20 us",
+        "runs": [
+          {
+            "count_auc": 0.5,
+            "count_p": 1.0,
+            "gap_sd": {
+              "auc": 0.8144,
+              "p_value": 0.0005,
+              "control_auc_mean": 0.4987
+            },
+            "max_gap": {
+              "auc": 0.7589,
+              "p_value": 0.0015,
+              "control_auc_mean": 0.4986
+            },
+            "leak": true,
+            "mode": "txtime"
+          },
+          {
+            "count_auc": 0.5,
+            "count_p": 1.0,
+            "gap_sd": {
+              "auc": 0.8078,
+              "p_value": 0.0005,
+              "control_auc_mean": 0.5006
+            },
+            "max_gap": {
+              "auc": 0.8311,
+              "p_value": 0.0005,
+              "control_auc_mean": 0.5008
+            },
+            "leak": true,
+            "mode": "txtime"
+          },
+          {
+            "count_auc": 0.5,
+            "count_p": 1.0,
+            "gap_sd": {
+              "auc": 0.9244,
+              "p_value": 0.0005,
+              "control_auc_mean": 0.4996
+            },
+            "max_gap": {
+              "auc": 0.8989,
+              "p_value": 0.0005,
+              "control_auc_mean": 0.5006
+            },
+            "leak": true,
+            "mode": "txtime"
+          }
+        ]
+      },
+      {
+        "variant": "txtime 30 ms, power QoS 0 us",
+        "runs": [
+          {
+            "count_auc": 0.5,
+            "count_p": 1.0,
+            "gap_sd": {
+              "auc": 0.6633,
+              "p_value": 0.024,
+              "control_auc_mean": 0.5002
+            },
+            "max_gap": {
+              "auc": 0.7389,
+              "p_value": 0.003,
+              "control_auc_mean": 0.5
+            },
+            "leak": true,
+            "mode": "txtime"
+          },
+          {
+            "count_auc": 0.5,
+            "count_p": 1.0,
+            "gap_sd": {
+              "auc": 0.6267,
+              "p_value": 0.0915,
+              "control_auc_mean": 0.5004
+            },
+            "max_gap": {
+              "auc": 0.7,
+              "p_value": 0.004,
+              "control_auc_mean": 0.5009
+            },
+            "leak": false,
+            "mode": "txtime"
+          },
+          {
+            "count_auc": 0.5,
+            "count_p": 1.0,
+            "gap_sd": {
+              "auc": 0.79,
+              "p_value": 0.0005,
+              "control_auc_mean": 0.5006
+            },
+            "max_gap": {
+              "auc": 0.7972,
+              "p_value": 0.0005,
+              "control_auc_mean": 0.5017
+            },
+            "leak": true,
+            "mode": "txtime"
+          }
+        ]
+      }
+    ]
+  },
+  "carrier": {
+    "setup": "throughput_bench.py --cpu-probe 60, 2 hops, fast; AVPN_CATCH_UP_MS=50; AVPN_WIRE_CLOCK_PPS=4000 (4,080 slots/s with 2% headroom, 30 ms look-ahead); fq on the client's link; run strictly one at a time",
+    "runs": [
+      {
+        "run": "clock-1",
+        "wire_clock_pps": 4000.0,
+        "lookahead_ms": 30,
+        "catch_up_ms": 50,
+        "pm_qos_us_declared": null,
+        "count_auc": 0.435,
+        "count_p": 0.2519,
+        "gap_sd": {
+          "auc": 0.42,
+          "p_value": 0.3053,
+          "control_auc_mean": 0.5007
+        },
+        "max_gap": {
+          "auc": 0.3178,
+          "p_value": 0.0135,
+          "control_auc_mean": 0.4979
+        },
+        "control": 0.5001,
+        "leak": false,
+        "packets_per_window": {
+          "steady_idle": 3267.6,
+          "steady_loaded": 3263.7,
+          "idle_after_load": 3242.9,
+          "loaded_after_idle": 3296.5
+        }
+      },
+      {
+        "run": "clock-2",
+        "wire_clock_pps": 4000.0,
+        "lookahead_ms": 30,
+        "catch_up_ms": 50,
+        "pm_qos_us_declared": null,
+        "count_auc": 0.4094,
+        "count_p": 0.2024,
+        "gap_sd": {
+          "auc": 0.5789,
+          "p_value": 0.2974,
+          "control_auc_mean": 0.5017
+        },
+        "max_gap": {
+          "auc": 0.4044,
+          "p_value": 0.2044,
+          "control_auc_mean": 0.499
+        },
+        "control": 0.4993,
+        "leak": false,
+        "packets_per_window": {
+          "steady_idle": 3173.1,
+          "steady_loaded": 3252.9,
+          "idle_after_load": 3218.4,
+          "loaded_after_idle": 3288.5
+        }
+      },
+      {
+        "run": "clock-3",
+        "wire_clock_pps": 4000.0,
+        "lookahead_ms": 30,
+        "catch_up_ms": 50,
+        "pm_qos_us_declared": null,
+        "count_auc": 0.3133,
+        "count_p": 0.005,
+        "gap_sd": {
+          "auc": 0.64,
+          "p_value": 0.0575,
+          "control_auc_mean": 0.4987
+        },
+        "max_gap": {
+          "auc": 0.42,
+          "p_value": 0.2969,
+          "control_auc_mean": 0.5007
+        },
+        "control": 0.4983,
+        "leak": false,
+        "packets_per_window": {
+          "steady_idle": 3264.3,
+          "steady_loaded": 3264.0,
+          "idle_after_load": 3236.5,
+          "loaded_after_idle": 3346.9
+        }
+      },
+      {
+        "run": "clock-qos-1",
+        "wire_clock_pps": 4000.0,
+        "lookahead_ms": 30,
+        "catch_up_ms": 50,
+        "pm_qos_us_declared": "20",
+        "count_auc": 0.3994,
+        "count_p": 0.1269,
+        "gap_sd": {
+          "auc": 0.4056,
+          "p_value": 0.2164,
+          "control_auc_mean": 0.5014
+        },
+        "max_gap": {
+          "auc": 0.3233,
+          "p_value": 0.0215,
+          "control_auc_mean": 0.4996
+        },
+        "control": 0.4998,
+        "leak": false,
+        "packets_per_window": {
+          "steady_idle": 3263.9,
+          "steady_loaded": 3247.2,
+          "idle_after_load": 3260.4,
+          "loaded_after_idle": 3254.0
+        }
+      },
+      {
+        "run": "clock-qos-2",
+        "wire_clock_pps": 4000.0,
+        "lookahead_ms": 30,
+        "catch_up_ms": 50,
+        "pm_qos_us_declared": "20",
+        "count_auc": 0.3411,
+        "count_p": 0.005,
+        "gap_sd": {
+          "auc": 0.4356,
+          "p_value": 0.3848,
+          "control_auc_mean": 0.5001
+        },
+        "max_gap": {
+          "auc": 0.2611,
+          "p_value": 0.0005,
+          "control_auc_mean": 0.4977
+        },
+        "control": 0.5004,
+        "leak": true,
+        "packets_per_window": {
+          "steady_idle": 3261.0,
+          "steady_loaded": 3269.8,
+          "idle_after_load": 3260.9,
+          "loaded_after_idle": 3287.6
+        }
+      },
+      {
+        "run": "clock-qos-3",
+        "wire_clock_pps": 4000.0,
+        "lookahead_ms": 30,
+        "catch_up_ms": 50,
+        "pm_qos_us_declared": "20",
+        "count_auc": 0.485,
+        "count_p": 0.8411,
+        "gap_sd": {
+          "auc": 0.4456,
+          "p_value": 0.4613,
+          "control_auc_mean": 0.4996
+        },
+        "max_gap": {
+          "auc": 0.38,
+          "p_value": 0.1084,
+          "control_auc_mean": 0.496
+        },
+        "control": 0.4985,
+        "leak": false,
+        "packets_per_window": {
+          "steady_idle": 3264.0,
+          "steady_loaded": 3264.0,
+          "idle_after_load": 3263.2,
+          "loaded_after_idle": 3262.3
+        }
+      }
+    ]
+  },
+  "findings": [
+    "Kernel-paced departure (SO_TXTIME + fq, 30 ms look-ahead) removes the scheduling leak: in isolation the per-window count is exactly constant (AUC 0.500, p = 1, every run) where a timed loop leaks.",
+    "It exposes a power-state side channel: with the CPU idle, the release timer wakes late from deep C-states, so packets are LESS regular when idle (gap AUC 0.997-1.000). Cores kept awake by busy loops remove it (no leak in 3 of 3, p 0.08-0.79); a timed loop still leaks completely with awake cores.",
+    "Power QoS is not a substitute for awake cores: 20 us leaks in 3 of 3, 0 us in 2 of 3 (gap AUC 0.63-0.92). Busy loops also raise clock frequency; the residue may be frequency, not idle depth (untested).",
+    "On the real carrier, the cloak's wire clock turns perfect separation (today: p = 0.0005 every run, count AUC 0.92-1.00 or gap AUC 0.001-0.07) into marginal: no leak by the corrected test in 3 of 3 runs without power QoS and 2 of 3 with it, but count p reaches 0.005 in two runs and largest-gap p 0.0005 in one.",
+    "The residue sits at load transitions: windows that continue a state carry the clock's exact count (3,264), windows right after the load stops come up short and right after it starts run over. Next: cloak counters for skipped slots and late sends, to tell stalls longer than the look-ahead from slot/packet desynchronisation."
+  ],
+  "status": "Not a fix yet: the wire clock stays off by default, and fast is still not claimed against website fingerprinting on a busy CPU."
+}
