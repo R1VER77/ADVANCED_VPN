@@ -19,6 +19,9 @@ measured figure in the docs names the version it was measured on.
 - Carrier restarts after a stall wait a random 8–16 s instead of a fixed 12 s, drawn from
   the operating system's CSPRNG.
 - WebRTC/STUN leak test in the managed lab.
+- The busy-CPU leak reproduces locally: `throughput_bench.py --cpu-probe` scores the packet
+  count and the timing per window; catch-up restores the count but not the timing
+  (`docs/evidence/CPU_LEAK_PROBE.json`).
 - `avpn cloud chain --apply` shows a live checklist; PIN prompts are a desktop pop-up
   (also under sudo), and `avpn status` works without root while the service runs.
 - Formal models now run and are proved in CI (Tamarin 1.12.0), each with a broken variant

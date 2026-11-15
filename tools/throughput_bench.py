@@ -19,8 +19,9 @@ address (later hops see only their predecessor).
 --cpu-probe N measures the busy-CPU leak instead of a transfer: the client's processes
 are pinned to --client-cpus, busy loops load those cores on a random balanced schedule
 of N windows while the tunnel idles, and the client's wire packets per window on the
-first link are scored against the schedule (AUC, permutation p-value, shuffled-label
-control). Set AVPN_CATCH_UP_MS in the environment to measure the catch-up variant.
+first link are scored against the schedule: packets per window, and the spread and
+largest gap between them (catch-up restores the count but not the timing); each with
+AUC, permutation p-value and a shuffled-label control. Set AVPN_CATCH_UP_MS in the environment to measure the catch-up variant.
 Rate-budget and DAITA-profile overrides exist only to measure their effect.
 """
 
@@ -165,6 +166,31 @@ def window_counts(records, start, window, n, outgoing=0, segment=WIRE_SEGMENT, t
     return counts
 
 
+def window_timing(records, start, window, n, outgoing=0, segment=WIRE_SEGMENT, trim=0.1):
+    """Per schedule window: the spread of gaps between the client's wire packets and the
+    largest gap. Catch-up keeps the count per window but sends missed packets late and
+    bunched, so on a busy CPU the timing leaks even when the count does not."""
+    import statistics
+
+    def parts(size):
+        return max(1, round((size - 28) / segment))
+
+    times = [[] for _ in range(n)]
+    for t, size, o in records:
+        if o != outgoing:
+            continue
+        k, offset = divmod(t - start, window)
+        k = int(k)
+        if 0 <= k < n and trim * window <= offset < (1 - trim) * window:
+            times[k].extend([t] * parts(size))
+    out = []
+    for ts in times:
+        ts.sort()
+        gaps = [b - a for a, b in itertools.pairwise(ts)] or [0.0]
+        out.append(dict(gap_sd=statistics.pstdev(gaps), max_gap=max(gaps)))
+    return out
+
+
 def _auc(on, off):
     """P(an 'on' window has fewer packets than an 'off' one), ties counted half: 0.5 is
     chance, 1.0 means every loaded window sent less (the busy-CPU leak)."""
@@ -174,14 +200,12 @@ def _auc(on, off):
     return wins / (len(on) * len(off))
 
 
-def leak_score(counts, schedule, rng, permutations=2000):
-    """How well the CPU-load schedule shows in the wire's per-window packet counts.
-
-    Returns the mean packets per window with and without load, the relative drop, the
-    AUC, a permutation p-value for |AUC - 0.5| (labels shuffled `permutations` times),
-    and a shuffled-label control AUC that must sit near 0.5."""
-    on = [c for c, s in zip(counts, schedule, strict=True) if s]
-    off = [c for c, s in zip(counts, schedule, strict=True) if not s]
+def separation(values, schedule, rng, permutations=2000):
+    """(AUC, permutation p) for how well per-window `values` tell loaded windows from idle
+    ones. AUC is P(a loaded window's value is the smaller), 0.5 is chance; p tests
+    |AUC - 0.5| against `permutations` shuffles of the schedule."""
+    on = [v for v, s in zip(values, schedule, strict=True) if s]
+    off = [v for v, s in zip(values, schedule, strict=True) if not s]
     auc = _auc(on, off)
     observed = abs(auc - 0.5)
     labels = list(schedule)
@@ -190,22 +214,42 @@ def leak_score(counts, schedule, rng, permutations=2000):
     for _ in range(permutations):
         rng.shuffle(labels)
         a = _auc(
-            [c for c, s in zip(counts, labels, strict=True) if s],
-            [c for c, s in zip(counts, labels, strict=True) if not s],
+            [v for v, s in zip(values, labels, strict=True) if s],
+            [v for v, s in zip(values, labels, strict=True) if not s],
         )
         controls.append(a)
         extreme += abs(a - 0.5) >= observed
+    return auc, (extreme + 1) / (permutations + 1), sum(controls) / len(controls) if controls else 0.5
+
+
+def leak_score(counts, schedule, rng, permutations=2000, timing=None):
+    """How well the CPU-load schedule shows on the wire, per window.
+
+    Counts: the mean packets per window with and without load, the relative drop, AUC,
+    permutation p and a shuffled-label control that must sit near 0.5. With `timing`
+    (from window_timing), the same for the gap spread and the largest gap. `leak` is
+    true when any feature separates the schedule at p < 0.01 / (number of features)."""
+    on = [c for c, s in zip(counts, schedule, strict=True) if s]
+    off = [c for c, s in zip(counts, schedule, strict=True) if not s]
+    auc, p, control = separation(counts, schedule, rng, permutations)
     mean_on = sum(on) / len(on) if on else 0.0
     mean_off = sum(off) / len(off) if off else 0.0
-    return dict(
+    out = dict(
         windows=len(counts),
         packets_per_window_loaded=round(mean_on, 1),
         packets_per_window_idle=round(mean_off, 1),
         drop_under_load=round((mean_off - mean_on) / mean_off, 4) if mean_off else 0.0,
         auc=round(auc, 4),
-        p_value=round((extreme + 1) / (permutations + 1), 4),
-        control_auc_mean=round(sum(controls) / len(controls), 4) if controls else 0.5,
+        p_value=round(p, 4),
+        control_auc_mean=round(control, 4),
     )
+    features = {"count": p}
+    for name in ("gap_sd", "max_gap") if timing else ():
+        f_auc, f_p, f_control = separation([w[name] for w in timing], schedule, rng, permutations)
+        out[name] = dict(auc=round(f_auc, 4), p_value=round(f_p, 4), control_auc_mean=round(f_control, 4))
+        features[name] = f_p
+    out["leak"] = min(features.values()) < 0.01 / len(features)
+    return out
 
 
 def shape_report(path, marks):
@@ -315,8 +359,10 @@ def cpu_probe(a, observers, shape_file, hops, online_seconds):
             proc.wait(timeout=5)
     raw = shape_file.read_bytes()
     records = [struct.unpack_from("<dHB", raw, i) for i in range(0, len(raw) - len(raw) % 11, 11)]
-    counts = window_counts(records, start, a.probe_window, len(schedule), segment=segment_size(records))
-    score = leak_score(counts, schedule, random.Random(0))
+    segment = segment_size(records)
+    counts = window_counts(records, start, a.probe_window, len(schedule), segment=segment)
+    timing = window_timing(records, start, a.probe_window, len(schedule), segment=segment)
+    score = leak_score(counts, schedule, random.Random(0), timing=timing)
     return dict(
         probe="busy-CPU leak",
         hops=hops,
@@ -328,10 +374,11 @@ def cpu_probe(a, observers, shape_file, hops, online_seconds):
         window_seconds=a.probe_window,
         online_seconds=online_seconds,
         host_cpus=os.cpu_count(),
+        start=start,
         schedule=schedule,
         counts=counts,
         score=score,
-        leak=score["p_value"] < 0.01,
+        leak=score["leak"],
     )
 
 

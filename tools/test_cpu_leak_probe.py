@@ -10,13 +10,20 @@ in a constant stream, and that its shuffled-label control sits at chance.
 import random
 import unittest
 
-from throughput_bench import WIRE_SEGMENT, leak_score, load_schedule, window_counts
+from throughput_bench import WIRE_SEGMENT, leak_score, load_schedule, window_counts, window_timing
 
 WINDOW = 1.0
 RATE = 4000  # packets/s, the `fast` class
 
 
-def stream(schedule, drop, rng, start=100.0, jitter=0.02, noise=0.01):
+def bunch(t, start, period=0.05, stall=0.02):
+    """Catch-up's signature: nothing is sent during a stall at the start of each period,
+    then the missed packets go out together when the clock catches up."""
+    slot, offset = divmod(t - start, period)
+    return start + slot * period + stall if offset < stall else t
+
+
+def stream(schedule, drop, rng, start=100.0, jitter=0.02, noise=0.01, bunched=False):
     """Synthetic first-hop records (time, IPv4 size, outgoing flag): a constant-rate
     stream whose rate falls by `drop` in loaded windows, with timing jitter and an
     independent `noise` (standard deviation) in each window's count. The
@@ -26,6 +33,8 @@ def stream(schedule, drop, rng, start=100.0, jitter=0.02, noise=0.01):
         n = int(RATE * WINDOW * (1 - drop if loaded else 1) * (1 + rng.gauss(0, noise)))
         for i in range(n):
             t = start + k * WINDOW + (i + 0.5) * WINDOW / n + rng.uniform(-jitter, jitter) / RATE
+            if bunched and loaded:
+                t = bunch(t, start)
             records.append((t, WIRE_SEGMENT + 28, 0))
         for i in range(RATE):
             records.append((start + k * WINDOW + i / RATE, WIRE_SEGMENT + 28, 1))
@@ -74,6 +83,28 @@ class LeakScoreTests(unittest.TestCase):
         # 4000 pps in the other direction are not counted).
         self.assertAlmostEqual(counts[0], 1600, delta=5)
         self.assertAlmostEqual(counts[1], 3200, delta=5)
+
+    def full_score(self, drop, bunched, seed=1, windows=60):
+        rng = random.Random(seed)
+        schedule = load_schedule(windows, rng)
+        records = stream(schedule, drop, rng, bunched=bunched)
+        counts = window_counts(records, 100.0, WINDOW, windows)
+        timing = window_timing(records, 100.0, WINDOW, windows)
+        return leak_score(counts, schedule, random.Random(seed + 1), permutations=500, timing=timing)
+
+    def test_catch_up_keeps_the_count_but_its_timing_is_caught(self):
+        # Measured locally (CPU_LEAK_PROBE.json): with AVPN_CATCH_UP_MS=50 the count per
+        # window is restored while the gap spread still gives the load away.
+        s = self.full_score(drop=0.0, bunched=True)
+        self.assertGreater(s["p_value"], 0.01, "the count alone must not see it")
+        self.assertLess(s["gap_sd"]["p_value"], 0.01)
+        self.assertTrue(s["leak"])
+
+    def test_a_constant_stream_shows_nothing_on_any_feature(self):
+        for seed in (1, 2, 3):
+            s = self.full_score(drop=0.0, bunched=False, seed=seed)
+            self.assertFalse(s["leak"], s)
+            self.assertLess(abs(s["gap_sd"]["control_auc_mean"] - 0.5), 0.03)
 
     def test_gso_super_frames_count_as_the_segments_they_carry(self):
         records = [(100.5, 28 + 4 * WIRE_SEGMENT, 0)]

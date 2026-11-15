@@ -25,7 +25,13 @@ private vulnerability reporting (see [SECURITY.md](../SECURITY.md)).
   omission was itself a claim-integrity defect.** The fix is the first technical priority:
   measure it with a local harness, then move departure timing out of a userspace thread
   that competes for the CPU.
-- **Evidence:** `docs/evidence/WF_REAL_PILOT.json`.
+- **Reproduced locally (15 Nov 2026):** `throughput_bench.py --cpu-probe` loads the client's
+  cores on a random schedule and finds it on the wire in 3 of 3 runs (count AUC 0.92–1.00,
+  p = 0.0005). With `AVPN_CATCH_UP_MS=50` the packet count is restored, but the gaps between
+  packets still give the load away: wider gaps in nearly every loaded window (gap-spread
+  AUC 0.001–0.07, where 0.5 is chance), p = 0.0005 in each run. A fix must remove both. The probe scores
+  both and is the fix's regression gate.
+- **Evidence:** `docs/evidence/WF_REAL_PILOT.json`, `docs/evidence/CPU_LEAK_PROBE.json`.
 
 ## Fixed
 
