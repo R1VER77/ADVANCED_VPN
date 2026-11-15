@@ -97,10 +97,19 @@ channels — the DC-net is a scalpel, not a general bus.
 - **Claim discipline:** because pads come from a PRG seeded by ML-KEM-derived
   keys, the unlinkability guarantee is **computational**, full stop. The doc
   must never say "information-theoretic." The upgrade path (not v2): burn
-  pre-provisioned true-random pad material held on the Nitrokey; at 64 B ×
-  (n−1) pairs × 17 280 rounds/month ≈ 21 MB per member-month for a 24-member
-  cell — logistically plausible, but re-keying on churn burns it faster, so
-  this stays an explicitly opt-in hardened mode.
+  pre-provisioned true-random pad material; at 64 B × (n−1) pairs × 17 280
+  rounds/month ≈ 21 MB per member-month for a 24-member cell. **The pads give
+  information-theoretic security only if each pair also exchanges them
+  information-theoretically (in person, on physical media).** Pad material sent
+  to the partner under ML-KEM is only as strong as that encryption: computational
+  again, whatever generated it. A Nitrokey can protect such material at rest, but
+  a FIDO2 token cannot hold it (tens of KB of storage at most). Re-keying on
+  churn burns pads faster, so this stays an explicitly opt-in hardened mode.
+- **What is claimed is indistinguishability, not pad secrecy.** Once a member
+  colludes, the adversary can learn an honest pair's pad (in a 3-member cell it
+  is B's silent frame XOR the pad B shares with the colluder), and still cannot
+  tell which honest member sent. The claim, its proof and what is machine-checked
+  are in §6.
 
 ## 3. Wire format
 
@@ -173,12 +182,57 @@ compute locally from gossip-synced frames: O(n) frames observed ≈ 24 × 111 B
 
 Hooks into `VERIFICATION_PLAN.md` (extend its priority list):
 
-8. **DC-net round state machine** — Tamarin model of the XOR-cancellation +
-   round-binding properties: pad cancellation, replay-of-stale-round fails,
-   sender-position independence. The three properties are exactly harness
-   §6-F.1/F.3/F.2 in symbolic form. **Model authored: `dcnet.spthy`** (4
-   lemmas: pad_secrecy, sender_anonymity, cancellation, frame_origin) —
-   authored, not yet executed; run `tamarin-prover dcnet.spthy --prove`.
+8. **DC-net round state machine** — machine-checked with Tamarin 1.12.0 /
+   Maude 3.5.1 on 15 Nov 2026, run in CI (`tools/tamarin_check.py`, job
+   `formal-models`), results in `docs/evidence/TAMARIN.json`:
+   - `formal/dcnet/dcnet_authenticity.spthy`: `frame_authenticity` (every
+     accepted frame was transmitted by a member in that very round, so
+     fabricated frames and stale-round replays fail), `keys_secret`,
+     `executable_accept`. Mutation-checked: without the MAC check, or with the
+     round left out of the MAC, Tamarin finds an attack.
+   - `formal/dcnet/dcnet.spthy`: `cancellation` (a round decodes to zero, to
+     the one sender's event, or, on a collision, two members sent), `keys_secret`.
+     Mutation-checked: a silent frame that drops one pad is falsified.
+   - `formal/dcnet/dcnet_no_collusion.spthy`: with every member honest, no pad
+     of the round is derivable.
+   - `formal/dcnet/dcnet_collusion.spthy`: with one member colluding, decoding is
+     exact, the honest pair's key stays secret, and the honest pair's **pad is
+     derivable** (`collusion_reveals_pad`), which is why pad secrecy is not the
+     anonymity claim.
+
+   **Not machine-checked: sender anonymity itself.** It is an equivalence
+   property; Tamarin's `--diff` mode with XOR did not terminate, even on the
+   two-party core, and ProVerif and DeepSec do not support XOR. Its proof is
+   the one below. The first model (pre-15 Nov) had never been run: it did not
+   parse, its lemmas quantified over state facts, and its sender-anonymity
+   lemma rested on "identification requires learning a pad", which the
+   collusion model shows is false.
+
+   **Hand proof of sender anonymity (computational).** A cell has members M,
+   pairwise keys `K_ij`, and round pads `p_ij(r) = PRG(HKDF(K_ij), r)`. Member
+   i sends `c_i = m_i ⊕ (⊕_{j≠i} p_ij)`, where `m_i` is the event for the
+   sender and zero otherwise. The adversary controls a set C of colluding
+   members (it knows their keys), sees every frame and the decoded event m,
+   and H = M \ C are the honest members, |H| ≥ 2.
+   1. Replace each honest-honest pad by an independent uniform string. By the
+      PRG/HKDF security of the honest pair keys (established over the hybrid
+      ML-KEM-768 + X25519 exchange), no efficient adversary notices.
+   2. For honest i, the adversary can remove the pads i shares with
+      colluders: `c'_i = c_i ⊕ (⊕_{j∈C} p_ij) = m_i ⊕ (⊕_{j∈H, j≠i} p_ij)`.
+      The colluders' own frames are functions of their keys. So the view is
+      `(c'_i)_{i∈H}`, m, and values independent of the honest-honest pads.
+   3. The honest pairs form a complete (so connected) graph on H. Over GF(2),
+      the map from its edge values `(p_ij)` to the vertex sums
+      `(⊕_j p_ij)_{i∈H}` has rank |H| − 1, onto the vectors whose XOR is zero.
+      With uniform edge values, `(c'_i)` is therefore uniform over
+      `{x : ⊕_{i∈H} x_i = m}` whichever honest member is the sender.
+   4. So the views for any two honest senders are identical in the ideal
+      game, and indistinguishable in the real one. ∎
+
+   Limits: |H| = 1 (everyone else colludes) identifies the sender trivially;
+   the proof covers one round's frames, not jamming (§5) or network metadata,
+   which the constant-rate links carry, and is only as strong as the PRG and
+   the pairwise key exchange.
 9. **Pad derivation** — Kani harness over `pad_ij(r) = PRG(HKDF(...))`:
    round-context separation, no pad reuse across epochs.
 

@@ -56,11 +56,14 @@ Model in Tamarin (spthy) with the built-in XOR theory:
 
 ## Status
 
-- `pq_sphinx_reblind.spthy` in this directory is a **skeleton**: the rules
-  and lemma statements above, with TODO markers where the XOR/ephemeral
-  handling needs restriction lemmas. It does NOT yet verify.
-- Running it requires Tamarin 1.10+ with the XOR theory; expect the
-  `no_linkability` lemma to need an source-label refinement on `PadFromK1`.
+- 15 Nov 2026: the pack's `pq_sphinx_reblind.spthy` was a skeleton that did
+  not parse. It is rewritten and proved with Tamarin 1.12.0 in CI
+  (`element_hidden`, `pad_hidden`, `executable`, `global_xor_reveals_pad`;
+  see the file's header and `docs/evidence/TAMARIN.json`).
+- Finding: `pad_fresh` as stated above is false against an observer of both
+  links (XOR of the right input/output pair is the pad). The claim to verify
+  is unlinkability, an equivalence; Tamarin `--diff` with XOR did not
+  terminate on it, so it stays with the manual analysis and the reviewer.
 - The manual malleability analysis (item 2) is drafted for the external
   reviewer in this document, not in the spthy.
 - Estimated effort: 2–4 weeks of one formal-methods-literate person, or a

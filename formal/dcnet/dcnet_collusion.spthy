@@ -1,0 +1,57 @@
+// dcnet_collusion.spthy — one DC-net round with a colluding member.
+// Companion to dcnet.spthy (multi-round authenticity and cancellation) and
+// docs/DCNET_CONTROL_DESIGN.md §2.
+//
+// A 3-member cell: A and B honest, C colluding (both of C's pairwise keys are public).
+// A sends the event ~m, B is silent; every frame and the decoded event are public.
+//
+// LEMMAS (proved with Tamarin 1.12.0 / Maude 3.5.1):
+//  - honest_key_secret     the honest pair's key K_AB is never learned.
+//  - decodes_exactly       the three frames XOR to exactly the event (pads cancel).
+//  - executable            the round can run.
+//  - collusion_reveals_pad (exists-trace) the adversary DOES derive the honest pair's pad
+//                          h(<K_AB, r>): B's silent frame XOR the pad B shares with C.
+//
+// Why the last one matters: the earlier model argued "identifying a sender requires
+// learning its pads, and pads are secret, so the sender is anonymous". Under collusion
+// the pad is learned, and still the sender is not identified: the adversary holds
+// (m XOR u, u) when A sent and (u, m XOR u) when B sent, for a uniform u it cannot tell
+// apart. Anonymity is therefore an indistinguishability (equivalence) property, not pad
+// secrecy. Tamarin's --diff mode with XOR did not terminate on it (see dcnet.spthy), so
+// that step remains the standard one-time-pad argument, stated as such.
+
+theory dcnet_collusion
+begin
+
+builtins: hashing, xor
+
+rule round:
+  let fa = ~m XOR h(<~kab, ~r>) XOR h(<~kac, ~r>)
+      fb = h(<~kab, ~r>) XOR h(<~kbc, ~r>)
+      fc = h(<~kac, ~r>) XOR h(<~kbc, ~r>)
+  in
+  [ Fr(~kab), Fr(~kac), Fr(~kbc), Fr(~r), Fr(~m) ]
+  // The decoded value is the XOR of exactly the frames sent below.
+  --[ Round(~kab, ~r, ~m), Decodes(~r, ~m, fa XOR fb XOR fc) ]->
+  [ Out(~r),
+    Out(~kac), Out(~kbc),
+    Out(<'A', fa>),
+    Out(<'B', fb>),
+    Out(<'C', fc>),
+    Out(~m) ]
+
+lemma honest_key_secret:
+  "All k r m #i. Round(k, r, m) @i ==> not (Ex #j. K(k) @j)"
+
+lemma decodes_exactly:
+  "All r m x #i. Decodes(r, m, x) @i ==> x = m"
+
+lemma executable:
+  exists-trace
+  "Ex k r m #i. Round(k, r, m) @i"
+
+lemma collusion_reveals_pad:
+  exists-trace
+  "Ex k r m #i #j. Round(k, r, m) @i & K(h(<k, r>)) @j"
+
+end

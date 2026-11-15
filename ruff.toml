@@ -18,7 +18,12 @@ ignore = [
 # Their test names describe them, so only the module docstring (D100) is required.
 "tools/test_*.py" = ["S101", "S108", "S607", "B017", "D101", "D102", "D103"]
 "tools/*_test.py" = ["S101", "S108", "S607", "D101", "D102", "D103"]
-"tools/throughput_bench.py" = ["S101", "S108", "S607", "D101", "D102", "D103"]
+# The busy-CPU probe and its test use seeded generators for reproducible schedules and
+# permutation statistics, never for secrets (the unseeded probe uses SystemRandom).
+"tools/throughput_bench.py" = ["S101", "S108", "S607", "S311", "D101", "D102", "D103"]
+"tools/test_cpu_leak_probe.py" = ["S101", "S311", "D101", "D102", "D103"]
+# Runs the provers found on PATH (CI installs pinned, checksum-verified releases there).
+"tools/tamarin_check.py" = ["S607"]
 "tools/vm_validation.py" = ["S101", "S108", "S607", "S104", "D101", "D102", "D103"]
 "tools/lab_peer.py" = ["S104", "B023", "D101", "D102", "D103"]
 "tools/managed_lab_peer.py" = ["S104", "D101", "D102", "D103"]

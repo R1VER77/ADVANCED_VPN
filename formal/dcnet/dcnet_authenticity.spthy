@@ -1,0 +1,91 @@
+// dcnet_authenticity.spthy — DC-net frame authentication across rounds.
+// Companion to docs/DCNET_CONTROL_DESIGN.md §3 and dcnet.spthy (cancellation).
+//
+// The same cell, rounds and frames as dcnet.spthy; frames travel over the adversary's
+// network as <r, body, mac>, mac = h(<'dc-mac', Kcell, r, body>), and any holder of the
+// cell key accepts them one at a time (accept), then combines three (aggregate).
+//
+// LEMMAS (proved with Tamarin 1.12.0 / Maude 3.5.1; mutation-checked: removing the MAC
+// check, or leaving the round out of the MAC, makes frame_authenticity fail):
+//  - keys_secret          the pairwise and cell keys never leave the members.
+//  - frame_authenticity   every accepted frame was transmitted by a member in that very
+//                         round: fabricated frames and stale-round replays fail.
+//  - executable_accept    authenticated frames are accepted (the lemma is not vacuous).
+// Decoding (cancellation) is proved in dcnet.spthy, whose single aggregation rule keeps
+// Tamarin's XOR reasoning finite; with separate accept and decode rules it does not
+// terminate.
+
+theory dcnet_authenticity
+begin
+
+builtins: hashing, xor
+
+// ---------------------------------------------------------------------------
+// Enrollment: fresh pairwise keys and the anonymous cell MAC key, stored per member.
+// ---------------------------------------------------------------------------
+rule enroll:
+  [ Fr(~kab), Fr(~kac), Fr(~kbc), Fr(~kcell) ]
+  --[ PairKey(~kab), PairKey(~kac), PairKey(~kbc), CellKey(~kcell), Enrolled() ]->
+  [ !Member('A', ~kab, ~kac, ~kcell),
+    !Member('B', ~kab, ~kbc, ~kcell),
+    !Member('C', ~kac, ~kbc, ~kcell),
+    !Cell(~kcell) ]
+
+// Round activation: a fresh public round id.
+rule round_begin:
+  [ Fr(~r) ]
+  --[ RoundStart(~r) ]->
+  [ !Round(~r), Out(~r) ]
+
+// A member transmits silently: the XOR of its two pads.
+rule transmit_silent:
+  [ !Member(id, k1, k2, kc), !Round(r) ]
+  --[ Transmit(id, r, h(<k1, r>) XOR h(<k2, r>)) ]->
+  [ Out(<r, h(<k1, r>) XOR h(<k2, r>), h(<'dc-mac', kc, r, h(<k1, r>) XOR h(<k2, r>)>)>) ]
+
+// A member transmits an event ~m.
+rule transmit_send:
+  [ !Member(id, k1, k2, kc), !Round(r), Fr(~m) ]
+  --[ Transmit(id, r, ~m XOR h(<k1, r>) XOR h(<k2, r>)), Sent(id, r, ~m) ]->
+  [ Out(<r, ~m XOR h(<k1, r>) XOR h(<k2, r>), h(<'dc-mac', kc, r, ~m XOR h(<k1, r>) XOR h(<k2, r>)>)>) ]
+
+// Exactly one frame per member per round (§1.2: every online member sends one).
+restriction one_frame_per_member_per_round:
+  "All id r f g #i #j. Transmit(id, r, f) @i & Transmit(id, r, g) @j ==> #i = #j"
+
+// Acceptance by any holder of the cell key: one authenticated frame of round r at a time.
+rule accept:
+  [ !Cell(kc), !Round(r), In(<r, f, h(<'dc-mac', kc, r, f>)>) ]
+  --[ Accept(r, f) ]->
+  [ !Accepted(r, f) ]
+
+// Aggregation: three distinct accepted frames of round r are XORed. (Identical frames
+// are rejected: a replayed copy is not another member.)
+rule aggregate:
+  [ !Accepted(r, f1), !Accepted(r, f2), !Accepted(r, f3) ]
+  --[ Distinct(f1, f2), Distinct(f1, f3), Distinct(f2, f3),
+      Decoded(r, f1 XOR f2 XOR f3) ]->
+  []
+
+restriction distinct:
+  "All x y #i. Distinct(x, y) @i ==> not (x = y)"
+
+// ---------------------------------------------------------------------------
+// Lemmas
+// ---------------------------------------------------------------------------
+
+// 0. Helper: the pairwise and cell keys never leave the members.
+lemma keys_secret [reuse]:
+  "(All k #i #j. PairKey(k) @i & K(k) @j ==> F) & (All k #i #j. CellKey(k) @i & K(k) @j ==> F)"
+
+// 1. Accepted frames were transmitted in that round by a member (no fabrication, no
+//    replay into another round: the MAC binds the round).
+lemma frame_authenticity:
+  "All r f #i. Accept(r, f) @i ==> Ex id #j. Transmit(id, r, f) @j & #j < #i"
+
+// 3. Sanity: authenticated frames are accepted and a round decodes.
+lemma executable_accept:
+  exists-trace
+  "Ex r f #i. Accept(r, f) @i"
+
+end

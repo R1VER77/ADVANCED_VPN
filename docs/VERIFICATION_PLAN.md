@@ -6,14 +6,23 @@ Noise IK, ML-KEM, ML-DSA, HPKE's base mode, Sphinx and Katzenpost's PKI. Our own
 cryptographic constructions are proved: each one below is ours, unaudited, and decides
 who gets in, what stays secret or who can be linked.
 
-Status: planned. Nothing here is proved yet, and nothing in the documentation may claim a
-property from this list until its model and its gates are in CI.
+Status (15 Nov 2026): the DC-net round core (item 7) and part of Option E's re-blinding
+(item 8) are machine-checked in CI; everything else is planned. Nothing in the
+documentation may claim a property from this list until its model and its gates are in CI.
+Proofs run with Tamarin 1.12.0 and Maude 3.5.1 (official release binaries, pinned by
+SHA-256 in `.github/workflows/verify.yml`, job `formal-models`); `tools/tamarin_check.py`
+fails unless every listed lemma is verified; results in `docs/evidence/TAMARIN.json`.
+
+Lesson from the first runs: equivalence properties over XOR (sender anonymity,
+unlinkability) did not terminate in Tamarin's `--diff` mode, and ProVerif and DeepSec do
+not support XOR. Those properties get hand proofs, with the trace properties around them
+machine-checked.
 
 ## How
 
 | Tool | For | Install |
 |---|---|---|
-| **Tamarin prover** | stateful protocols: replay windows, spent sets, freshness caches; authentication and secrecy under compromise | official Linux release binary plus Maude, pinned in `formal/Dockerfile` |
+| **Tamarin prover** | stateful protocols: replay windows, spent sets, freshness caches; authentication and secrecy under compromise | official Linux release binary plus Maude, pinned by SHA-256 in CI job `formal-models` |
 | **ProVerif** | equivalence properties: unlinkability, indistinguishability | `opam install proverif`, pinned in the same image |
 | **Kani** (Rust bounded model checker) | the code itself where it is arithmetic state rather than protocol: the replay window, the credit counter | `cargo install kani-verifier` |
 | **cargo-fuzz**, **proptest**, **Hypothesis** | the parsers and the edges no model reaches | crates and the Python lock |
@@ -94,20 +103,35 @@ one set that names every bundle's manifest hash.
 
 ### 7. DC-net control channel (`src/dcnet.rs`)
 
-Pairwise PRG pads that cancel in the group XOR; one event per round. The model from the
-design pack (`formal/dcnet/dcnet.spthy`) is a starting point, unproved.
+Pairwise PRG pads that cancel in the group XOR; one event per round. **Proved (Tamarin,
+in CI):** frame authenticity across rounds, so fabricated frames and stale-round replays
+fail (mutation-checked: no MAC check, or no round in the MAC); cancellation
+(mutation-checked); key secrecy; pad secrecy with every member honest; and, with a
+colluding member, exact decoding while the honest pair's pad becomes derivable. Models in
+`formal/dcnet/`.
 
-- **Sender anonymity within a cell** against everyone but the sender (ProVerif equivalence: any two members sending the same event are indistinguishable).
-- **Round binding**: a body replayed from another round never decodes (Tamarin; the mutation drops the round from the pad context; the Rust and Python golden vectors already fail on it).
+- **Sender anonymity within a cell**, against colluding members: hand proof in
+  `docs/DCNET_CONTROL_DESIGN.md` §6 (indistinguishability of honest senders; the
+  equivalence did not terminate in Tamarin, and ProVerif has no XOR).
+- **Round binding of the pads themselves** (a body replayed from another round never
+  decodes): the Rust and Python golden vectors fail on it today; the symbolic model binds
+  rounds through the MAC.
 - The claim stays computational (PRG pads), never information-theoretic.
 
 ### 8. Option E's re-blinding (`crates/avpn-mix-lane`, design §2.3)
 
 The one non-standard construction in the option E header: the entry hop removes an XOR
 pad from hop 2's X25519 element. Model: `crates/avpn-mix-lane/tamarin/pq_sphinx_reblind.spthy`
-(from the pack, unproved).
+(rewritten 15 Nov 2026: the pack's file was a skeleton that did not parse).
 
-- **Unlinkability across an honest hop**: no observer of two links can match a cell (ProVerif equivalence).
+- **Proved (Tamarin, in CI):** an observer of the entry link never learns hop 2's element
+  or the pad unless the entry key is compromised (mutation-checked: an unblinded element is
+  found); the construction runs.
+- **Shown:** an observer of both links holds the pad symbolically (XOR of the right pair),
+  so "the pad stays secret" is not the claim to make; the claim is unlinkability.
+- **Unlinkability across an honest hop** (no observer of two links can match a cell): an
+  equivalence, not machine-checked (Tamarin `--diff` with XOR did not terminate; ProVerif
+  has no XOR). Secrecy of the KEM secret itself also did not terminate.
 - An external cryptographer's review (gate G3 of the cutover) is still required; no security claim rests on §2.3 until both are done.
 
 ## Not formal, and where it is covered instead
@@ -120,6 +144,6 @@ pad from hop 2's X25519 element. Model: `crates/avpn-mix-lane/tamarin/pq_sphinx_
 
 `formal/` holds one directory per component: the model (`.spthy` or `.pv`), its broken
 variant, a README stating the assumptions and lemmas in prose, and the generator for its
-test vectors. `formal/Dockerfile` pins Tamarin, Maude and ProVerif. CI job `formal` runs
-everything. `docs/COMPARISON.md` and the threat model cite each property only once its
+test vectors. CI job `formal-models` pins Tamarin and Maude and runs
+`tools/tamarin_check.py` (every lemma, every broken variant). `docs/COMPARISON.md` and the threat model cite each property only once its
 job is green.

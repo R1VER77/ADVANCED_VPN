@@ -1,0 +1,158 @@
+{
+  "schema": 1,
+  "tool": "tamarin-prover 1.12.0, (C) David Basin, Cas Cremers, Jannik Dreier, Simon Meier, Ralf Sasse, Benedikt Schmidt, 2010-2023",
+  "maude": "3.5.1",
+  "date": "2026-11-15",
+  "models": {
+    "formal/dcnet/dcnet.spthy": {
+      "seconds": 49.2,
+      "lemmas": {
+        "keys_secret": {
+          "kind": "all-traces",
+          "result": "verified",
+          "steps": 13
+        },
+        "frame_authenticity": {
+          "kind": "all-traces",
+          "result": "verified",
+          "steps": 260
+        },
+        "cancellation": {
+          "kind": "all-traces",
+          "result": "verified",
+          "steps": 167
+        }
+      }
+    },
+    "formal/dcnet/dcnet_authenticity.spthy": {
+      "seconds": 29.7,
+      "lemmas": {
+        "keys_secret": {
+          "kind": "all-traces",
+          "result": "verified",
+          "steps": 13
+        },
+        "frame_authenticity": {
+          "kind": "all-traces",
+          "result": "verified",
+          "steps": 11
+        },
+        "executable_accept": {
+          "kind": "exists-trace",
+          "result": "verified",
+          "steps": 15
+        }
+      }
+    },
+    "formal/dcnet/dcnet_no_collusion.spthy": {
+      "seconds": 40.5,
+      "lemmas": {
+        "pad_secrecy_without_collusion": {
+          "kind": "all-traces",
+          "result": "verified",
+          "steps": 2288
+        }
+      }
+    },
+    "formal/dcnet/dcnet_collusion.spthy": {
+      "seconds": 1.4,
+      "lemmas": {
+        "honest_key_secret": {
+          "kind": "all-traces",
+          "result": "verified",
+          "steps": 2
+        },
+        "decodes_exactly": {
+          "kind": "all-traces",
+          "result": "verified",
+          "steps": 2
+        },
+        "executable": {
+          "kind": "exists-trace",
+          "result": "verified",
+          "steps": 3
+        },
+        "collusion_reveals_pad": {
+          "kind": "exists-trace",
+          "result": "verified",
+          "steps": 8
+        }
+      }
+    },
+    "crates/avpn-mix-lane/tamarin/pq_sphinx_reblind.spthy": {
+      "seconds": 8.5,
+      "lemmas": {
+        "element_hidden": {
+          "kind": "all-traces",
+          "result": "verified",
+          "steps": 18
+        },
+        "pad_hidden": {
+          "kind": "all-traces",
+          "result": "verified",
+          "steps": 18
+        },
+        "executable": {
+          "kind": "exists-trace",
+          "result": "verified",
+          "steps": 7
+        },
+        "global_xor_reveals_pad": {
+          "kind": "exists-trace",
+          "result": "verified",
+          "steps": 5
+        }
+      }
+    }
+  },
+  "mutants": [
+    {
+      "model": "formal/dcnet/dcnet_authenticity.spthy",
+      "lemma": "frame_authenticity",
+      "edits": 1,
+      "result": "falsified - found trace",
+      "seconds": 2.7
+    },
+    {
+      "model": "formal/dcnet/dcnet_authenticity.spthy",
+      "lemma": "frame_authenticity",
+      "edits": 3,
+      "result": "falsified - found trace",
+      "seconds": 28.4
+    },
+    {
+      "model": "formal/dcnet/dcnet.spthy",
+      "lemma": "cancellation",
+      "edits": 1,
+      "result": "falsified - found trace",
+      "seconds": 80.3
+    },
+    {
+      "model": "formal/dcnet/dcnet_no_collusion.spthy",
+      "lemma": "pad_secrecy_without_collusion",
+      "edits": 1,
+      "result": "falsified - found trace",
+      "seconds": 1.9
+    },
+    {
+      "model": "formal/dcnet/dcnet_collusion.spthy",
+      "lemma": "decodes_exactly",
+      "edits": 1,
+      "result": "falsified - found trace",
+      "seconds": 0.4
+    },
+    {
+      "model": "crates/avpn-mix-lane/tamarin/pq_sphinx_reblind.spthy",
+      "lemma": "element_hidden",
+      "edits": 1,
+      "result": "falsified - found trace",
+      "seconds": 0.4
+    }
+  ],
+  "not_proved": [
+    "DC-net sender anonymity as observational equivalence: --diff with XOR did not terminate, even on the two-party core; the argument is the hand proof in docs/DCNET_CONTROL_DESIGN.md section 6",
+    "DC-net per-round pad secrecy and an existence trace in the multi-round, MAC-authenticated model: did not terminate (single-round versions are proved)",
+    "A colluder learning only XORs of honest pads in a 4-member cell: did not terminate",
+    "Re-blinding: secrecy of the KEM secret itself, and unlinkability across hop 1 (an equivalence): did not terminate; the construction stays review-pending"
+  ]
+}

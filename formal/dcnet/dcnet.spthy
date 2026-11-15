@@ -1,34 +1,39 @@
-// dcnet.spthy — Tamarin model of the DC-net control channel round core.
-// Companion to docs/DCNET_CONTROL_DESIGN.md §6 (VERIFICATION_PLAN items 8–9).
+// dcnet.spthy — Tamarin model of the DC-net control channel round core (trace properties).
+// Companion to docs/DCNET_CONTROL_DESIGN.md §2–§4 and §6 (VERIFICATION_PLAN items 8–9).
+// Sender anonymity is an equivalence property and lives in dcnet_anonymity.spthy.
 //
-// MODELED (3-member cell, fixed arity — minimal non-trivial cell; the
-// generalization to n members is mechanical but needs a variable-arity
-// encoding that Tamarin handles less well):
+// MODELED (a 3-member cell, the smallest non-trivial one):
+//  - enrollment: one fresh pairwise key per member pair, and an anonymous cell MAC key
+//    (the design's blinded per-epoch key: it proves membership, never which member);
+//  - rounds: fresh, public, never reused (§1.2);
+//  - transmit: each member sends exactly one frame per round (restriction), the XOR of
+//    the pads it shares, plus its event if it is the sender (§2);
+//    pad_ij(r) = h(<K_ij, r>) (the PRG/HKDF chain, symbolically one-way);
+//  - frames travel over the adversary-controlled network as <r, body, mac> with
+//    mac = h(<'dc-mac', Kcell, r, body>) (§3);
+//  - aggregation: any party with the cell key accepts three distinct, authenticated
+//    frames of round r and XORs them (§4).
 //
-//  1. pad_secrecy      — no per-round pad term is ever derivable by the
-//                        adversary (pads exist only inside XOR combinations).
-//  2. sender_anonymity — explicit attacker rule: identification of member a
-//                        requires knowledge of a's pad terms; combined with
-//                        (1) it never fires. This is the standard DC-net
-//                        reduction: after the aggregate publishes m, sender
-//                        identification is equivalent to learning some pad.
-//  3. cancellation     — whatever the group aggregate decodes to is exactly
-//                        the event some member sent (completeness).
-//  4. frame_origin     — Frame facts arise only from honest transmits, so
-//                        the HMAC-authenticated aggregate cannot be fed
-//                        stale or fabricated rounds (stale-replay fails).
+// LEMMAS (proved with Tamarin 1.12.0 / Maude 3.5.1; CI runs them, docs/evidence/TAMARIN.json):
+//  0. keys_secret          the pairwise and cell keys never leave the members.
+//  1. frame_authenticity   accepted frames were transmitted in that very round (proved
+//                          and mutation-checked in dcnet_authenticity.spthy).
+//  2. cancellation         a round decodes to zero (nobody sent), to the one sender's
+//                          event, or (collision) at least two members sent (§4 policy).
 //
-// NOT MODELED (documented limits, not silent gaps):
-//  - active bit-flipping inside frames (tagging): the MAC makes frames
-//    authenticated; tampered frames fail seal() and never create Frame facts.
-//  - member churn / epoch re-keying.
-//  - the PRG/HKDF derivation chain (symbolically, h(k, r) is a one-way term).
+// Not proved here, and why:
+//  - per-round pad secrecy and an existence ("executable") trace: with frames of
+//    unboundedly many rounds and XOR inside the MAC, Tamarin does not terminate (tried:
+//    default, s, S, C, i heuristics, DFS/BFS trace search, bound 12; up to 20 minutes).
+//    A round's decoding and what a colluding member learns are proved in
+//    dcnet_collusion.spthy instead.
+//  - sender anonymity: it is an equivalence property ("A sent" vs "B sent" look the same).
+//    Tamarin's --diff mode with XOR did not terminate even on the two-party core
+//    (m^p, p, m) vs (p, m^p, m); the argument stays the standard one-time-pad argument
+//    (docs/DCNET_CONTROL_DESIGN.md §2), not a machine-checked proof.
 //
-// STATUS: authored against Tamarin 1.x syntax; NOT YET EXECUTED (no local
-// prover in the authoring environment). Run with:
-//   tamarin-prover dcnet.spthy --prove
-// Expected: all four lemmas auto-prove (they are small; if sender_anonymity
-// needs heuristics help, try --heuristic=s).
+// NOT MODELED (documented limits): member churn and epoch re-keying; jamming (§5 accepts
+// DoS); byte-level framing (CRC, flags constant).
 
 theory dcnet_round
 begin
@@ -36,136 +41,71 @@ begin
 builtins: hashing, xor
 
 // ---------------------------------------------------------------------------
-// Facts
-//   Key(a, b, k)    — persistent: member a holds pairwise key k with member b
-//   Frame(a, r, f)  — persistent: a's authenticated frame in round r
-//   Round(r)        — persistent: round r is active
-//   Out(...)        — adversary knowledge (built-in)
-//
-// Actions
-//   HonestTransmit(a, r, f) — a built and broadcast frame f for round r
-//   SentEvent(s, r, m)      — s embedded event m in its round-r frame
-//   Decoded(r, x)           — the aggregate of round r decoded to x
-//   Identified(a)           — adversary identified a as a sender (attack)
+// Enrollment: fresh pairwise keys and the anonymous cell MAC key, stored per member.
 // ---------------------------------------------------------------------------
-
-// Enrollment: fresh pairwise keys for the cell (honest setup).
 rule enroll:
-  [ Fr(~kab), Fr(~kac), Fr(~kbc) ]
-  -->
-  [ Key(a, b, ~kab), Key(b, a, ~kab),
-    Key(a, c, ~kac), Key(c, a, ~kac),
-    Key(b, c, ~kbc), Key(c, b, ~kbc) ]
+  [ Fr(~kab), Fr(~kac), Fr(~kbc), Fr(~kcell) ]
+  --[ PairKey(~kab), PairKey(~kac), PairKey(~kbc), CellKey(~kcell), Enrolled() ]->
+  [ !Member('A', ~kab, ~kac, ~kcell),
+    !Member('B', ~kab, ~kbc, ~kcell),
+    !Member('C', ~kac, ~kbc, ~kcell),
+    !Cell(~kcell) ]
 
-// Round activation. Rounds are public and never reused.
+// Round activation: a fresh public round id.
 rule round_begin:
   [ Fr(~r) ]
-  -->
-  [ Round(~r), Out(~r) ]
+  --[ RoundStart(~r) ]->
+  [ !Round(~r), Out(~r) ]
 
-// Member a transmits SILENTLY in round r:
-//   frame = pad_a(r) = h(kab, r) XOR h(kac, r)
-rule transmit_a_silent:
-  [ Key(a, b, kab), Key(a, c, kac), Round(r) ]
-  --[ HonestTransmit(a, r, h(kab, r) XOR h(kac, r)) ]->
-  [ Frame(a, r, h(kab, r) XOR h(kac, r)),
-    Out(h(kab, r) XOR h(kac, r)) ]
+// A member transmits silently: the XOR of its two pads.
+rule transmit_silent:
+  [ !Member(id, k1, k2, kc), !Round(r) ]
+  --[ Transmit(id, r, h(<k1, r>) XOR h(<k2, r>)) ]->
+  [ Out(<r, h(<k1, r>) XOR h(<k2, r>), h(<'dc-mac', kc, r, h(<k1, r>) XOR h(<k2, r>)>)>) ]
 
-rule transmit_a_send:
-  [ Key(a, b, kab), Key(a, c, kac), Round(r), Fr(~m) ]
-  --[ HonestTransmit(a, r, ~m XOR h(kab, r) XOR h(kac, r)),
-      SentEvent(a, r, ~m) ]->
-  [ Frame(a, r, ~m XOR h(kab, r) XOR h(kac, r)),
-    Out(~m XOR h(kab, r) XOR h(kac, r)) ]
+// A member transmits an event ~m.
+rule transmit_send:
+  [ !Member(id, k1, k2, kc), !Round(r), Fr(~m) ]
+  --[ Transmit(id, r, ~m XOR h(<k1, r>) XOR h(<k2, r>)), Sent(id, r, ~m) ]->
+  [ Out(<r, ~m XOR h(<k1, r>) XOR h(<k2, r>), h(<'dc-mac', kc, r, ~m XOR h(<k1, r>) XOR h(<k2, r>)>)>) ]
 
-// (b and c variants; Tamarin has no meta-programming, so they are spelled out)
-rule transmit_b_silent:
-  [ Key(b, a, kab), Key(b, c, kbc), Round(r) ]
-  --[ HonestTransmit(b, r, h(kab, r) XOR h(kbc, r)) ]->
-  [ Frame(b, r, h(kab, r) XOR h(kbc, r)),
-    Out(h(kab, r) XOR h(kbc, r)) ]
+// Exactly one frame per member per round (§1.2: every online member sends one).
+restriction one_frame_per_member_per_round:
+  "All id r f g #i #j. Transmit(id, r, f) @i & Transmit(id, r, g) @j ==> #i = #j"
 
-rule transmit_b_send:
-  [ Key(b, a, kab), Key(b, c, kbc), Round(r), Fr(~m) ]
-  --[ HonestTransmit(b, r, ~m XOR h(kab, r) XOR h(kbc, r)),
-      SentEvent(b, r, ~m) ]->
-  [ Frame(b, r, ~m XOR h(kab, r) XOR h(kbc, r)),
-    Out(~m XOR h(kab, r) XOR h(kbc, r)) ]
-
-rule transmit_c_silent:
-  [ Key(c, a, kac), Key(c, b, kbc), Round(r) ]
-  --[ HonestTransmit(c, r, h(kac, r) XOR h(kbc, r)) ]->
-  [ Frame(c, r, h(kac, r) XOR h(kbc, r)),
-    Out(h(kac, r) XOR h(kbc, r)) ]
-
-rule transmit_c_send:
-  [ Key(c, a, kac), Key(c, b, kbc), Round(r), Fr(~m) ]
-  --[ HonestTransmit(c, r, ~m XOR h(kac, r) XOR h(kbc, r)),
-      SentEvent(c, r, ~m) ]->
-  [ Frame(c, r, ~m XOR h(kac, r) XOR h(kbc, r)),
-    Out(~m XOR h(kac, r) XOR h(kbc, r)) ]
-
-// Aggregate: anyone (including the adversary) may XOR the three public
-// frames of a round. Pads cancel pairwise (each pair key contributes to
-// exactly two frames), so the result is the sent event, or zero (X(x, x)).
+// Aggregation by any holder of the cell key: three distinct authenticated frames of
+// round r are XORed. (Identical frames are rejected: a replayed copy is not a member.)
 rule aggregate:
-  [ Frame(a, r, fa), Frame(b, r, fb), Frame(c, r, fc) ]
-  --[ Decoded(r, xor(xor(fa, fb), fc)) ]->
-  [ Out(xor(xor(fa, fb), fc)) ]
+  [ !Cell(kc), !Round(r),
+    In(<r, f1, h(<'dc-mac', kc, r, f1>)>),
+    In(<r, f2, h(<'dc-mac', kc, r, f2>)>),
+    In(<r, f3, h(<'dc-mac', kc, r, f3>)>) ]
+  --[ Accept(r, f1), Accept(r, f2), Accept(r, f3),
+      Distinct(f1, f2), Distinct(f1, f3), Distinct(f2, f3),
+      Decoded(r, f1 XOR f2 XOR f3) ]->
+  []
 
-// ---------------------------------------------------------------------------
-// Attacker model: the sender-identification reduction.
-// After the aggregate publishes m, identifying the sender of m is equivalent
-// to computing some member's pad (frame XOR m = pad for the sender's frame;
-// for silent members frame XOR pad = 0). Model identification explicitly:
-// the adversary identifies a iff it can derive a's full pad term.
-// ---------------------------------------------------------------------------
-
-rule identify_a:
-  [ Key(a, b, kab), Key(a, c, kac), Round(r),
-    K(h(kab, r)), K(h(kac, r)) ]
-  --[ Identified(a) ]-> []
-
-rule identify_b:
-  [ Key(b, a, kab), Key(b, c, kbc), Round(r),
-    K(h(kab, r)), K(h(kbc, r)) ]
-  --[ Identified(b) ]-> []
-
-rule identify_c:
-  [ Key(c, a, kac), Key(c, b, kbc), Round(r),
-    K(h(kac, r)), K(h(kbc, r)) ]
-  --[ Identified(c) ]-> []
+restriction distinct:
+  "All x y #i. Distinct(x, y) @i ==> not (x = y)"
 
 // ---------------------------------------------------------------------------
 // Lemmas
 // ---------------------------------------------------------------------------
 
-// 1. Pad secrecy: no individual pad term is ever learned. Pads leave the
-//    honest parties only inside XOR combinations, and XOR of an unknown
-//    term cannot be split.
-lemma pad_secrecy:
-  "All a b k r #i. Key(a, b, k) @i ==> not (Ex #j. K(h(k, r)) @j)"
+// 0. Helper: the pairwise and cell keys never leave the members.
+lemma keys_secret [reuse]:
+  "(All k #i #j. PairKey(k) @i & K(k) @j ==> F) & (All k #i #j. CellKey(k) @i & K(k) @j ==> F)"
 
-// 2. Sender anonymity: the identification rule can never fire.
-lemma sender_anonymity:
-  "All a #i. Identified(a) @i ==> False"
+// 1. Accepted frames were transmitted in that round by a member (no fabrication, no
+//    replay into another round: the MAC binds the round).
+lemma frame_authenticity:
+  "All r f #i. Accept(r, f) @i ==> Ex id #j. Transmit(id, r, f) @j & #j < #i"
 
-// 3. Cancellation (completeness): whatever a round's aggregate decodes to
-//    is exactly one member's event (or the null term when nobody sent).
-//    XOR-normalization does the work: every pad appears twice and cancels.
+// 2. Completeness of decoding, with the design's collision outcome.
 lemma cancellation:
   "All r x #i. Decoded(r, x) @i ==>
-     (Ex s #j. SentEvent(s, r, x) @j) | x = Zero"
-
-// 4. Frame origin: every Frame fact comes from an honest transmit of the
-//    same (member, round, value). Consequence: the aggregate cannot be fed
-//    a stale or fabricated frame — stale replay fails structurally.
-lemma frame_origin:
-  "All a r f #i. Frame(a, r, f) @i ==>
-     Ex #j. HonestTransmit(a, r, f) @j"
-
-// Well-formedness: rounds are unique (each fresh round id activates once).
-lemma round_unique:
-  "All r #i #j. Round(r) @i & Round(r) @j ==> #i = #j"
+     x = zero
+     | (Ex id #j. Sent(id, r, x) @j)
+     | (Ex id1 id2 m1 m2 #j #l. Sent(id1, r, m1) @j & Sent(id2, r, m2) @l & not (id1 = id2))"
 
 end

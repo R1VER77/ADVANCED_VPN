@@ -1,0 +1,23 @@
+// dcnet_no_collusion.spthy — one DC-net round, no colluding member.
+// Companion to dcnet.spthy and dcnet_collusion.spthy (docs/DCNET_CONTROL_DESIGN.md §2, §6).
+//
+// LEMMA (proved with Tamarin 1.12.0 / Maude 3.5.1):
+//  - pad_secrecy_without_collusion: with every member honest, none of the round's three
+//    pairwise pads is ever derivable, although every frame and the event are public.
+//    (With a colluding member this is false: dcnet_collusion.spthy, collusion_reveals_pad.)
+
+theory dcnet_no_collusion
+begin
+builtins: hashing, xor
+rule round:
+  [ Fr(~kab), Fr(~kac), Fr(~kbc), Fr(~r), Fr(~m) ]
+  --[ Round(~kab, ~kac, ~kbc, ~r) ]->
+  [ Out(~r),
+    Out(<'A', ~m XOR h(<~kab, ~r>) XOR h(<~kac, ~r>)>),
+    Out(<'B', h(<~kab, ~r>) XOR h(<~kbc, ~r>)>),
+    Out(<'C', h(<~kac, ~r>) XOR h(<~kbc, ~r>)>),
+    Out(~m) ]
+lemma pad_secrecy_without_collusion:
+  "All a b c r #i. Round(a, b, c, r) @i ==>
+     not (Ex #j. K(h(<a, r>)) @j) & not (Ex #j. K(h(<b, r>)) @j) & not (Ex #j. K(h(<c, r>)) @j)"
+end
