@@ -49,6 +49,30 @@ private vulnerability reporting (see [SECURITY.md](../SECURITY.md)).
 
 ## Fixed
 
+### Pad tools could reuse a one-time pad; the information-theoretic claim overstated its proof (16 Nov 2026)
+- **What:** an independent audit (16 Nov 2026) found four state bugs in the pad and identity
+  tools, each reproduced by a counterexample on the pushed code:
+  - two `Chain` handles opened before either took a round both returned that round's pad;
+  - two concurrent `Book` consumers could both read a record before it was advanced and
+    erased: one-time pad reuse;
+  - a stale `zkid.Identity` handle could write an earlier epoch back over a later one,
+    restoring an earlier membership secret at rest and undoing forward privacy;
+  - a torn write of a deniable store's single header slot (power loss) lost the layer.
+  The design doc and padbook also called a book "information-theoretic" when its sources'
+  assumptions were only supported, not established: the extractor's seed is the Nitrokey's
+  ChaCha8 output (pseudorandom, not uniform), drawing other sources first establishes order,
+  not independence, and an SP 800-90B estimate is evidence, not a proof.
+- **Not affected:** anything deployed. These tools are reachable from no command of the
+  VPN; no cell has run outside the lab. Both e2e runs used one process at a time.
+- **Fix:** every take, advance and epoch step locks, reloads its state from disk, checks
+  against that and commits before returning a secret (`tools/state_transaction.py`); renames
+  fsync their directory; the deniable store's v2 format keeps two header generations per
+  layer and writes data copy-on-write (fresh stores only; v1 is not migrated). The claim is
+  now `conditional-information-theoretic`, with the assumptions stated in
+  `docs/DCNET_CONTROL_DESIGN.md` §2. The audit's counterexamples now fail on the code; its
+  13 new tests catch the bugs when the fixes are removed (checked by mutation). Real
+  Nitrokey: `docs/evidence/PADSTORE_E2E.json`.
+
 ### DC-net collisions could decode as an event nobody sent (16 Nov 2026, before use)
 - **What:** an event's check was CRC-8 with a zero start and no final XOR, which is linear:
   the XOR of two valid events carries a valid CRC, and the zero padding stays zero. When

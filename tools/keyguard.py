@@ -58,6 +58,11 @@ def atomic(path, data):
         if path.is_symlink():
             raise ValueError("symlink target refused")
         os.replace(tmp, path)
+        parent_fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        try:
+            os.fsync(parent_fd)
+        finally:
+            os.close(parent_fd)
     finally:
         if tmp.exists():
             tmp.unlink()

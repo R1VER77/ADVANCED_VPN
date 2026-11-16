@@ -5,19 +5,21 @@ person, forward-secure chains for pairs who cannot meet.
 Each member's contribution is kernel output (os.urandom: getrandom(2)) XOR Nitrokey output, drawn
 before any noise is recorded, XOR, for a book, the extracted output of an assessed raw
 noise source (`assess`, then `make --raw`): raw CPU timing jitter from
-jitterentropy's recorder, health-tested (SP 800-90B 4.4) and Toeplitz-extracted to within
-2^-64 of uniform per block, counting half of NIST ea_non_iid's min-entropy estimate. The
+jitterentropy's recorder, health-tested (SP 800-90B 4.4) and Toeplitz-extracted under conditional
+entropy/seed assumptions, counting half of the empirical min-entropy estimate. The
 Nitrokey alone is not enough for an information-theoretic claim: its `rng` command
 returns a ChaCha8 stream seeded once per boot (firmware source, Trussed). A pair's book
-is the XOR of both contributions, so it is uniform and secret if either is. A chain's
+is the XOR of both contributions; uniformity and secrecy require an appropriate
+independence or conditional-source assumption as well as a good contribution. A chain's
 32-byte seed is made the same way and then moves one way each round (src/dcnet.rs
 Ratchet); it is always computational.
 
 Each contribution travels sealed to the partner's hybrid ML-KEM-768 + X25519 key
 (tools/keyguard.py kem_seal), bound to its delivery label and raw-source record:
 `in_person` (removable media, never on a network) or `remote` (as strong as the hybrid
-KEM). A book is information-theoretic when at least one contribution carries an assessed
-raw source and was handed over in person; otherwise it is computational.
+KEM). The software reports conditional-information-theoretic for declared in-person
+raw-source provenance; this does not certify the physical assumptions. Otherwise it
+reports computational.
 
 Nothing is in the clear, at rest or in transit (after TrueCrypt's volume header: a random
 salt, then everything encrypted). book.bin is a random salt, a nonce and the encrypted
@@ -29,17 +31,19 @@ one-way chain (chain[k+1] = HKDF(chain[k], "next")), filled with random records 
 separate keys. An envelope is an Elligator 2 representative of a dirty X25519 ephemeral,
 an ML-KEM-768 ciphertext and AES-256-GCM over the padded header and contribution: random
 bytes to anyone without the recipient's key. Taking a round
-advances the chain first and then zeroes the used records, so a seized disk, even with
-the Nitrokey and its PIN, opens no round already used (short of an old copy of the
-small state file that flash wear-levelling kept). Rounds follow the clock
+advances the chain first and then zeroes the used records before successful return.
+The current state no longer opens used rounds through this API; snapshots, flash
+remnants and hostile hosts remain outside that guarantee. Rounds follow the clock
 (round = unix time // 30): a round already past is refused, so restoring an old state
-cannot replay pads. A used-up book stops; nothing falls back to derived pads.
+is refused through this API with a trustworthy clock. Whole snapshots, hostile
+clocks and flash remnants are not defeated. A used-up book stops; nothing falls back to derived pads.
 
 Run with --help for the commands. Never a software random source alone: without a
 Nitrokey, `make` refuses; without `--raw`, the contribution is labelled computational.
 """
 
 import argparse
+import contextlib
 import atexit
 import ctypes
 import hashlib
@@ -217,7 +221,7 @@ def is_hex(s):
 # through a Toeplitz extractor. A contribution is the extractor's output XOR the Nitrokey.
 JITTER_BLOCK = 1024  # 8-bit samples per extractor block (8192 raw bits)
 JITTER_CHUNK = 65536  # samples per recorder run
-EPSILON_LOG2 = 64  # each extracted block is within 2^-64 of uniform (leftover hash lemma)
+EPSILON_LOG2 = 64  # Target bound under independent-seed/conditional-entropy assumptions.
 SAFETY = 0.5  # the extractor counts half the assessed min-entropy per sample
 ALPHA_LOG2 = 20  # health-test false-alarm probability 2^-20 (SP 800-90B 4.4)
 APT_WINDOW = 512  # adaptive proportion test window for non-binary samples
@@ -328,10 +332,10 @@ def raw_bytes(n, raw, recorder, run=subprocess.run):
 def contribution_bytes(n, raw=None, recorder=None, nitropy=None, getrandom=os.urandom, nitrokey=None, rawfn=None):
     """A member's contribution: kernel output XOR Nitrokey output, XOR (when `raw` is an
     assessment record) the extracted raw jitter source. The kernel and Nitrokey bytes are
-    drawn first and the jitter recorded after, so neither stream can depend on the noise
-    it is mixed with: the XOR is then uniform if the raw part is. Kernel and Nitrokey add
+    drawn first and the jitter recorded after, which establishes ordering, not statistical independence. Uniformity requires a
+    justified conditional entropy bound, independent extractor seed and independent mixing. Kernel and Nitrokey add
     defence in depth (computational: ChaCha20, ChaCha8); only the raw part can make a
-    book information-theoretic."""
+    book conditionally information-theoretic under the stated source assumptions."""
     nitrokey = nitrokey or nitrokey_bytes
     rawfn = rawfn or raw_bytes
     kernel = getrandom(n)
@@ -557,6 +561,12 @@ class DirFiles:
     def __init__(self, path):
         self.path = Path(path)
 
+    def transaction(self):
+        """Exclusive ownership for a complete reload/check/advance/erase operation."""
+        import state_transaction
+
+        return state_transaction.directory(self.path)
+
     def create(self):
         """Make the directory; refuses one that exists."""
         self.path.mkdir(mode=0o700, parents=False, exist_ok=False)
@@ -613,29 +623,33 @@ def write_book(directory, h, contributions, pads, secret, meta, chain_seed):
     if h["kind"] != "book" or len(pads) != h["rounds"] * PAD or len(chain_seed) != 32:
         raise ValueError("pads or chain seed do not match the book")
     directory = files(directory)
-    directory.create()
-    salt, chain, records = os.urandom(SALT), chain_seed, bytearray()
-    for k in range(h["rounds"]):
-        records += cascade_seal(_round_keys(chain), _nonce(k), pads[k * PAD : (k + 1) * PAD], salt + b"|%d" % k)
-        chain = _hkdf(chain, b"next")
-    bucket = -(-h["rounds"] // BUCKET_ROUNDS) * BUCKET_ROUNDS
-    records += os.urandom((bucket - h["rounds"]) * RECORD)  # filler, as random as the rest
-    directory.write(PADS_FILE, bytes(records))
-    info = dict(book=h, contributions=contributions, state=dict(next=0, chain=chain_seed.hex()))
-    _save(directory, salt, file_keys(secret, meta, salt), info)
+    if isinstance(directory, DirFiles):
+        directory.create()
+    with directory.transaction():
+        if not isinstance(directory, DirFiles):
+            directory.create()
+        salt, chain, records = os.urandom(SALT), chain_seed, bytearray()
+        for k in range(h["rounds"]):
+            records += cascade_seal(_round_keys(chain), _nonce(k), pads[k * PAD : (k + 1) * PAD], salt + b"|%d" % k)
+            chain = _hkdf(chain, b"next")
+        bucket = -(-h["rounds"] // BUCKET_ROUNDS) * BUCKET_ROUNDS
+        records += os.urandom((bucket - h["rounds"]) * RECORD)  # filler, as random as the rest
+        directory.write(PADS_FILE, bytes(records))
+        info = dict(book=h, contributions=contributions, state=dict(next=0, chain=chain_seed.hex()))
+        _save(directory, salt, file_keys(secret, meta, salt), info)
 
 
 def edge_claim(contributions, kind="book"):
-    """'information-theoretic' for a book when at least one contribution both carries an
-    assessed raw source and was handed over in person (that contribution alone is then
-    uniform and never crossed a network, so the XOR is too). Otherwise computational:
+    """Conditional IT construction when provenance declares assessed physical noise and
+    in-person custody. This does not verify source entropy, independence, seed quality,
+    custody or secure erasure; the label certifies none of those. Otherwise computational:
     Nitrokey output is a ChaCha8 stream, a remote contribution is as strong as the hybrid
     KEM, and a chain's pads are derived with SHA-256."""
     if kind == "chain":
         return "computational"
     for c in contributions.values():
         if c.get("delivery") == "in_person" and c.get("raw") and c["raw"].get("h_used", 0) > 0:
-            return "information-theoretic"
+            return "conditional-information-theoretic"
     return "computational"
 
 
@@ -656,21 +670,33 @@ def write_chain(directory, h, contributions, seed, secret, meta):
     if h["kind"] != "chain" or len(seed) != SEED:
         raise ValueError("not a chain seed")
     directory = files(directory)
-    directory.create()
-    salt = os.urandom(SALT)
-    info = dict(book=h, contributions=contributions, state=dict(next=0, chain=seed.hex()))
-    _save(directory, salt, file_keys(secret, meta, salt), info)
+    if isinstance(directory, DirFiles):
+        directory.create()
+    with directory.transaction():
+        if not isinstance(directory, DirFiles):
+            directory.create()
+        salt = os.urandom(SALT)
+        info = dict(book=h, contributions=contributions, state=dict(next=0, chain=seed.hex()))
+        _save(directory, salt, file_keys(secret, meta, salt), info)
+
+
+def reload_info(where, salt, keys):
+    """Reload authenticated state under an already-held store transaction."""
+    data = files(where).read(BOOK_FILE, 1 << 20)
+    if data[:SALT] != salt:
+        raise ValueError("state identity changed; reopen the store")
+    return json.loads(cascade_open(keys, data[SALT : SALT + 12], data[SALT + 12 :], salt))
 
 
 class _Stored:
-    """A book or chain opened with the Nitrokey's hmac-secret."""
+    """A book or chain; every operation reloads its state under exclusive ownership."""
 
     kind = None
 
     def __init__(self, directory, secret, meta, clock=time.time):
         self.dir = files(directory)
         self.salt, keys, self.info = _load(self.dir, secret, meta)
-        self.keys = Secret(keys)  # the book file's cascade key, wiped on exit or `with`
+        self.keys = Secret(keys)
         self.h = self.info["book"]
         if self.h.get("kind") != self.kind:
             raise ValueError("not a %s" % self.kind)
@@ -682,10 +708,24 @@ class _Stored:
     def __exit__(self, *_):
         self.keys.wipe()
 
-    @property
-    def state(self):
+    @contextlib.contextmanager
+    def _transaction(self):
+        with self.dir.transaction():
+            info = reload_info(self.dir, self.salt, self.keys.bytes)
+            if info["book"] != self.h:
+                raise ValueError("state identity changed; reopen the store")
+            self.info = info
+            yield
+
+    def _state(self):
         s = self.info["state"]
         return dict(next=s["next"], chain=bytes.fromhex(s["chain"]))
+
+    @property
+    def state(self):
+        """A fresh snapshot, including advances made by other handles."""
+        with self._transaction():
+            return self._state()
 
     def _advance(self, next_k, chain):
         self.info["state"] = dict(next=next_k, chain=chain.hex())
@@ -693,58 +733,64 @@ class _Stored:
 
     def _check(self, rnd):
         k = rnd - self.h["first_round"]
-        if k < self.state["next"] or rnd < round_now(self.clock()) - 1:
+        if k < self._state()["next"] or rnd < round_now(self.clock()) - 1:
             raise ValueError("round already used or past")
         return k
 
     def claim(self):
-        """This edge's claim: information-theoretic or computational."""
-        return edge_claim(self.info["contributions"], self.kind)
+        """A provenance-qualified claim, never a software certification of physical noise."""
+        with self._transaction():
+            return edge_claim(self.info["contributions"], self.kind)
 
 
 class Chain(_Stored):
-    """An at-rest chain: each round's pad once; the stored state moves past it first."""
+    """An at-rest chain; a completed operation consumes a round globally once."""
 
     kind = "chain"
 
     def take(self, rnd):
-        """The pad of round `rnd`, once; refuses a used, skipped or past round."""
-        k = self._check(rnd)
-        s = bytearray(self.state["chain"])  # the chain state in RAM, wiped below
-        for _ in range(self.state["next"], k):
-            s[:] = chain_next(s)
-        pad = chain_pad(s, rnd)
-        self._advance(k + 1, chain_next(s))
-        _memzero(s)
+        """Commit the advanced state before releasing this round's pad."""
+        with self._transaction():
+            k = self._check(rnd)
+            state = self._state()
+            s = bytearray(state["chain"])
+            try:
+                for _ in range(state["next"], k):
+                    s[:] = chain_next(s)
+                pad = chain_pad(s, rnd)
+                self._advance(k + 1, chain_next(s))
+            finally:
+                _memzero(s)
         return pad
 
 
 class Book(_Stored):
-    """An at-rest book: hands out each round once."""
+    """An at-rest book; a completed operation consumes a round globally once."""
 
     kind = "book"
 
     def rounds_left(self):
-        """Rounds still in the book."""
-        return self.h["rounds"] - self.state["next"]
+        """Fresh count of the rounds not yet burned by any consumer."""
+        with self._transaction():
+            return self.h["rounds"] - self._state()["next"]
 
     def take(self, rnd):
-        """The pad of round `rnd`, once. Refuses a used, skipped or past round, and a round
-        past the book. The key chain advances (and is saved) before the used records are
-        zeroed, so no crash leaves a pad that could be read twice."""
-        k = self._check(rnd)
-        if k >= self.h["rounds"]:
-            raise ValueError("book used up: the cell stops")
-        chain, first = bytearray(self.state["chain"]), self.state["next"]
-        for _ in range(first, k):
-            chain[:] = _hkdf(chain, b"next")
-        record = self.dir.read_at(PADS_FILE, k * RECORD, RECORD)
-        pad = cascade_open(_round_keys(chain), _nonce(k), record, self.salt + b"|%d" % k)
-        # 1. The chain moves past this round: its keys and every earlier ones are gone.
-        self._advance(k + 1, _hkdf(chain, b"next"))
-        _memzero(chain)
-        # 2. The used and skipped records are zeroed.
-        self.dir.write_at(PADS_FILE, first * RECORD, bytes((k + 1 - first) * RECORD))
+        """Advance and erase under one transaction; a failure releases no pad."""
+        with self._transaction():
+            k = self._check(rnd)
+            if k >= self.h["rounds"]:
+                raise ValueError("book used up: the cell stops")
+            state = self._state()
+            chain, first = bytearray(state["chain"]), state["next"]
+            try:
+                for _ in range(first, k):
+                    chain[:] = _hkdf(chain, b"next")
+                record = self.dir.read_at(PADS_FILE, k * RECORD, RECORD)
+                pad = cascade_open(_round_keys(chain), _nonce(k), record, self.salt + b"|%d" % k)
+                self._advance(k + 1, _hkdf(chain, b"next"))
+                self.dir.write_at(PADS_FILE, first * RECORD, bytes((k + 1 - first) * RECORD))
+            finally:
+                _memzero(chain)
         return pad
 
 
@@ -763,7 +809,7 @@ def kem_private(secret, meta, value):
 
 
 def harden():
-    """No core dumps, no swap, not dumpable by another process, and secrets wiped on exit."""
+    """Attempt memory locking/dump restrictions and install wiping; OS success is not certified."""
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
     try:
         libc = ctypes.CDLL(None, use_errno=True)

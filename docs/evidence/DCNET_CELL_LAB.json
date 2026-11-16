@@ -72,6 +72,36 @@
     "rust_replay": "pass",
     "verdict": "PASS"
    }
+  },
+  {
+   "run": "after the audit's state fixes (locked, reloaded book state)",
+   "seed": 3,
+   "rounds_requested": 40,
+   "result": {
+    "books_made_seconds": 23.0,
+    "edge_claims": [
+     "computational"
+    ],
+    "exit_codes": [
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "rounds": {
+     "silent": 15,
+     "single": 17,
+     "collision": 8
+    },
+    "members_agree_every_round": true,
+    "outcomes_as_scheduled": true,
+    "both_ends_of_every_pair_took_the_same_pad": true,
+    "every_book_used_up": true,
+    "used_round_refused": true,
+    "rust_replay": "pass",
+    "verdict": "PASS"
+   }
   }
  ],
  "notes": [

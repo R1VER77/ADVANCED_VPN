@@ -59,5 +59,8 @@
  "limits": [
   "One machine, one pair, one day's book; both members simulated on one host and one Nitrokey.",
   "The jitter assessment is SP 800-90B's initial (runtime) estimate; the restart test is not run."
+ ],
+ "notes": [
+  "16 Nov 2026: the label 'information-theoretic' recorded here was renamed 'conditional-information-theoretic' (docs/INCIDENTS.md): the source assumptions are stated, not proven. The run itself is unchanged."
  ]
 }

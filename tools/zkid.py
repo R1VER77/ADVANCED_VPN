@@ -108,7 +108,7 @@ class Identity:
     """An opened store. `secret(epoch)` steps forward (saved first) and returns x_epoch."""
 
     def __init__(self, directory, secret, meta, clock=time.time):
-        self.dir = Path(directory)
+        self.dir = padbook.files(directory)
         self.salt, keys, self.info = padbook._load(self.dir, secret, meta)
         self.keys = padbook.Secret(keys)
         if self.info["book"].get("kind") != KIND:
@@ -133,26 +133,38 @@ class Identity:
 
     @property
     def epoch(self):
-        """The epoch whose secret the store holds."""
-        return self.info["state"]["epoch"]
+        """The durable epoch, including changes made by other handles."""
+        with self.dir.transaction():
+            self.info = padbook.reload_info(self.dir, self.salt, self.keys.bytes)
+            return self.info["state"]["epoch"]
 
     def secret(self, epoch=None):
-        """x for `epoch` (default: now). Refuses an epoch before the one stored (that
-        secret is gone, by design) and one past the tree's end. The store is advanced and
-        saved before the secret is returned."""
-        e = epoch_now(self.clock()) if epoch is None else epoch
-        if e < self.epoch:
-            raise ValueError("that epoch's secret was erased")
-        if e > self.start + self.lifetime:
-            raise ValueError("the tree has ended: enrol in the next one")
-        x = bytearray(bytes.fromhex(self.info["state"]["x"]))
-        for _ in range(self.epoch, e):
-            x[:] = step(bytes(x))
-        out = bytes(x)
-        padbook._memzero(x)
-        if e != self.epoch:
-            self.info["state"] = dict(epoch=e, x=out.hex())
-            padbook._save(self.dir, self.salt, self.keys.bytes, self.info)
+        """Release an epoch secret only after a serialized, durable forward advance.
+
+        Old snapshots, hostile kernels and immutable CPython copies are outside this
+        software guarantee. The guarantee concerns completed state advances.
+        """
+        with self.dir.transaction():
+            info = padbook.reload_info(self.dir, self.salt, self.keys.bytes)
+            if info["book"] != self.info["book"]:
+                raise ValueError("state identity changed; reopen the store")
+            self.info = info
+            e = epoch_now(self.clock()) if epoch is None else epoch
+            current = info["state"]["epoch"]
+            if e < current:
+                raise ValueError("that epoch's secret was erased")
+            if e > self.start + self.lifetime:
+                raise ValueError("the tree has ended: enrol in the next one")
+            x = bytearray(bytes.fromhex(info["state"]["x"]))
+            try:
+                for _ in range(current, e):
+                    x[:] = step(bytes(x))
+                out = bytes(x)
+                if e != current:
+                    info["state"] = dict(epoch=e, x=out.hex())
+                    padbook._save(self.dir, self.salt, self.keys.bytes, info)
+            finally:
+                padbook._memzero(x)
         return out
 
 

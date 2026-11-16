@@ -133,7 +133,7 @@ class ContributionTests(unittest.TestCase):
     def test_an_edge_is_information_theoretic_only_with_a_raw_source_handed_over_in_person(self):
         raw = dict(h_used=1.0)
         c = padbook.edge_claim
-        it, comp = "information-theoretic", "computational"
+        it, comp = "conditional-information-theoretic", "computational"
         self.assertEqual(
             c({"alice": dict(delivery="in_person", raw=raw), "bob": dict(delivery="remote", raw=None)}), it
         )
@@ -196,7 +196,7 @@ class AtRestTests(unittest.TestCase):
         again = padbook.Book(d, SECRET, META, clock=lambda: NOW)
         self.assertEqual(again.rounds_left(), 5)
         self.assertEqual(again.take(ROUND + 3), self.pads[192:256])
-        self.assertEqual(again.claim(), "information-theoretic")
+        self.assertEqual(again.claim(), "conditional-information-theoretic")
 
     def test_restoring_an_old_state_opens_no_used_round(self):
         d, _ = self.make()

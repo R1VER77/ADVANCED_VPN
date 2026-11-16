@@ -120,12 +120,28 @@ From hardware only, never a software random source. Each pair uses one of two ki
 | What the pair holds | a book: 64 bytes per round, the XOR of both members' contributions | a 32-byte seed, the XOR of both members' contributions; `s(r+1) = SHA-256("dc-next" ‖ s(r))`, pad = `SHA-256("dc-pad-0" ‖ s(r) ‖ r) ‖ SHA-256("dc-pad-1" ‖ s(r) ‖ r)` |
 | Each contribution | kernel output XOR Nitrokey output XOR the extracted output of the member's assessed raw noise source | kernel output XOR Nitrokey output |
 | How it travels | on removable media, sealed to the partner's ML-KEM-768 + X25519 key, never on a network | over the network, sealed the same way |
-| Claim | **information-theoretic** when at least one contribution carries an assessed raw source and was handed over in person; computational otherwise | **computational** (ML-KEM-768 + X25519 and SHA-256), forward-secure |
+| Claim | **conditionally information-theoretic** (`conditional-information-theoretic`) when at least one contribution carries an assessed raw source and was handed over in person, under the source assumptions below; computational otherwise | **computational** (ML-KEM-768 + X25519 and SHA-256), forward-secure |
 | Volume | 184 KB per pair per day, 67 MB per pair per year | none after the seed |
 | Runs out | yes: the pair, and so the cell, stops (fails closed) | no |
 
 Mixing is allowed within a cell. Anonymity is information-theoretic among the honest
-members joined by information-theoretic books, and computational beyond them (§6).
+members joined by in-person books **if those books' source assumptions hold** (below), and
+computational beyond them (§6).
+
+**The source assumptions** (an independent audit, 16 Nov 2026, corrected our earlier
+wording, which treated them as established):
+1. The extracted jitter block has at least the counted min-entropy, conditioned on
+   everything else the adversary knows. `ea_non_iid` and the health tests are evidence for
+   this, not a proof: SP 800-90B estimates entropy from samples, it does not certify it.
+2. The Toeplitz seed is uniform and independent of the noise. It comes from the Nitrokey,
+   whose output is a ChaCha8 stream: pseudorandom, not uniform, so the leftover hash lemma's
+   2⁻⁶⁴ bound holds against an adversary who cannot tell that stream from random, a
+   computational assumption, unless a truly uniform seed is substituted.
+3. The kernel and Nitrokey bytes XORed in do not depend on the noise. Drawing them first
+   establishes order, not independence: it stops either source adapting to noise it has
+   not seen, but a shared CPU, kernel or environment can still correlate them.
+The software therefore reports `conditional-information-theoretic`, never more: it records
+provenance, it cannot verify these physical assumptions.
 
 - **Why the Nitrokey alone is not enough.** Its `rng` command (`nitropy nk3 rng`,
   admin-app command 0x60) returns 57 bytes of Trussed's `random_bytes`, which is a
@@ -142,27 +158,33 @@ members joined by information-theoretic books, and computational beyond them (§
   and adaptive-proportion tests (cutoffs from that estimate, false alarms 2⁻²⁰) and the
   recorder's own health tests.
   - A Toeplitz extractor turns each block of 1,024 samples into bits within 2⁻⁶⁴ of
-    uniform (leftover hash lemma: output = counted min-entropy − 128 bits). Its seed is
-    public, drawn once from the Nitrokey before any sample is used; the bound needs it
-    independent of the noise, not secret.
+    uniform (leftover hash lemma: output = counted min-entropy − 128 bits), **if** the
+    counted min-entropy holds and the seed is uniform and independent of the noise
+    (assumptions 1 and 2 above). The seed is public, drawn once from the Nitrokey before
+    any sample is used; it need not be secret, but from a ChaCha8 stream it is only
+    pseudorandom. A seed of coin flips or dice would remove assumption 2 (about 11,700
+    bits for this block size); a two-source extractor over both members' independent
+    jitter would remove the seed altogether, at a higher min-entropy requirement.
   - Caveats, stated wherever the claim is: jitter entropy depends on the CPU and its load,
     so the assessment holds for the machine it was made on; it comes from
     microarchitectural timing, debated as physical randomness (Tails relies on the
     kernel's use of it and cites a BSI study validating it); and it lives on the member's
     CPU, which also does the XOR. A dedicated open-hardware noise device with a raw mode
     (for example the Infinite Noise TRNG, `infnoise --raw`) can be XORed in the same
-    way; the book stays information-theoretic if either raw source's assessment holds.
+    way; the claim then needs either raw source's assumptions to hold.
 - **Three sources per contribution, drawn in order.** The kernel's output (`getrandom`:
   ChaCha20 over a pool of RDSEED, interrupt timing and the rest) and the Nitrokey's are
   drawn *before* any jitter is recorded, then XORed with the extracted noise. XOR with an
-  independent stream never weakens a pad, so the contribution fails only if all three
-  fail. Only the raw part can make it information-theoretic, and only if the other two do
-  not depend on it: the Nitrokey is a separate device, and the kernel bytes are fixed
-  before the noise they are mixed with occurs (the kernel's interrupt timings also jostle
-  the jitter measurements, so drawing them afterwards would weaken the independence
-  argument).
+  independent stream never weakens a pad, so against independent failures the
+  contribution fails only if all three fail. Only the raw part can make it
+  information-theoretic, and only if the other two do not depend on it. The order serves
+  that: a source cannot adapt to noise that has not happened yet (the kernel's interrupt
+  timings also jostle the jitter measurements, so drawing them afterwards would let the
+  kernel's bytes depend on the noise). But order is not independence: a shared CPU,
+  kernel or environment can still correlate them (assumption 3).
 - **One seed, both members.** Each member contributes the same length and the pair
-  uses the XOR, so the pads are uniform and secret if either contribution is.
+  uses the XOR, so the pads are uniform and secret if either contribution is, and the
+  other does not depend on it.
 - **At rest, encrypted under the Nitrokey.** A book is stored as one AES-256-GCM record
   per round under a per-round key from a one-way key chain. A chain's state is stored
   the same way. Only the current link is kept, wrapped by a key derived from the
@@ -214,8 +236,12 @@ separate keys, so one cipher broken alone opens nothing stored.
 **Deniable storage (`tools/padstore.py`).**
 - **Goal:** under coercion, a member opens a decoy set of books, and nothing shows that more
   exist. That matters most for the events closest to coercion (`MixLaneFallback`).
-- **Design:** one fixed-size store of random-looking blocks with 8 header slots. Unused slots
-  and blocks are random bytes, like used ones. A layer's key is the Nitrokey's hmac-secret
+- **Design (store v2):** one fixed-size store of random-looking blocks with 16 header slots,
+  two per layer (up to 8 layers). Unused slots and blocks are random bytes, like used ones.
+  Each layer's two slots hold alternating generations of its encrypted header, and data
+  is copy-on-write: new blocks are written and synced, then the next generation's header,
+  then the old blocks are scrubbed. A torn write (power loss) leaves the previous
+  generation intact; v1, with one header slot rewritten in place, lost the layer. A layer's key is the Nitrokey's hmac-secret
   for a salt derived from that layer's passphrase. It is the second salt of the assertion
   that also yields the vault secret, so one touch opens the layer and its books.
   - Unlock tries every slot, so the work does not depend on how many layers exist.
@@ -232,7 +258,13 @@ separate keys, so one cipher broken alone opens nothing stored.
 - **Day to day,** one passphrase: the top layer's, which reaches every layer below. More are
   asked only when a layer is added (the current top's and the new one's), and under coercion
   the member gives the decoy's.
+- **Concurrency:** one lock on the store file serializes every layer operation, and books
+  and chains reload their state under a lock on each take (`tools/state_transaction.py`), so
+  two handles or processes cannot take the same round. v1 could: found by an independent
+  audit, 16 Nov 2026 (`docs/INCIDENTS.md`).
 - **Limits, to be stated whenever it is claimed:**
+  - locks serialize cooperating processes, not a hostile kernel; a restored snapshot of the
+    whole store is not detected;
   - an adversary who images the disk twice sees which "random" blocks changed, and books
     change every round, so only a single seizure is covered;
   - flash wear-levelling and journaling file systems keep old blocks;
@@ -290,7 +322,8 @@ Not taken:
   cancels **by construction** (verified by the harness, §6-F.1).
 - **Claim discipline.** Say "information-theoretic" only for books made with an assessed
   raw source and handed over in person, only together with "among members joined by
-  such books", and with the jitter caveats above. Pads sent over the
+  such books", always as conditional on the source assumptions (§2), and with the jitter
+  caveats above. Pads sent over the
   network are as strong as ML-KEM-768 + X25519 and SHA-256, whatever generated them.
 - **What is claimed is indistinguishability, not pad secrecy.** Once a member
   colludes, the adversary can learn an honest pair's pad (in a 3-member cell it
@@ -441,8 +474,9 @@ Hooks into `VERIFICATION_PLAN.md` (extend its priority list):
    colluding members (it knows their pads), sees every frame and the decoded event m,
    and H = M \ C are the honest members, |H| ≥ 2. Let I be the honest pairs joined by
    an in-person book, and suppose the graph (H, I) is connected.
-   1. Honest-honest pads from information-theoretic books are already (within 2⁻⁶⁴ per
-      block) independent uniform strings: each is the XOR of two contributions, at least
+   1. Assume the source assumptions (§2) for the in-person books. Then their honest-honest
+      pads are (within 2⁻⁶⁴ per block) independent uniform strings: each is the XOR of
+      two contributions, at least
       one of them extracted from an assessed raw source and handed over in person, so
       secret and uniform, never on a network. Pads from network chains are
       computationally indistinguishable from uniform (ML-KEM-768 + X25519 and
@@ -516,7 +550,8 @@ state the K).
 > of control events within a cell of concurrently online members, under the
 > assumption that at least one pairwise pad per event is uncompromised. Pads come
 > only from hardware. Among members joined by one-time pads made with an assessed
-> raw noise source and handed over in person, the guarantee is information-theoretic;
+> raw noise source and handed over in person, the guarantee is information-theoretic
+> under the stated source assumptions (min-entropy, extractor seed, independence);
 > over Nitrokey-only books or pads seeded across the network, it is computational
 > (the chains forward-secure). The channel is intentionally narrow: it does
 > not carry bulk traffic, it is disabled in single-operator mode, and it

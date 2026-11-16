@@ -62,9 +62,10 @@ catches both, and it turns "the CPU leaks" into a regression test.
 ## 4. Two-Contribution Pad Books with edge claims — *library*
 
 **What:** each DC-net pair's one-time pad book is the XOR of two contributions, one per
-member. A book is **information-theoretic only if at least one contribution both carries an
-assessed raw noise source and was handed over in person**; otherwise it is labelled
-computational. The claim is computed per edge, sealed with the contribution, and shown by
+member. A book is labelled **conditionally information-theoretic only if at least one
+contribution both carries an assessed raw noise source and was handed over in person**, and
+then only under stated source assumptions (min-entropy, a uniform extractor seed,
+independence: `docs/DCNET_CONTROL_DESIGN.md` §2); otherwise it is labelled computational. The claim is computed per edge, sealed with the contribution, and shown by
 `padbook.py status`.
 
 **Why:** a pad is secret if either half is, so no single member's device or delivery has to be
@@ -81,8 +82,10 @@ Nitrokey bytes drawn **before** the raw noise is recorded.
 kernel's pool is fed by interrupts, which also perturb the jitter measurement; drawn first, its
 output depends only on the past, and the noise it is mixed with happens afterwards.
 
-**Prior art:** entropy-pool mixing (Fortuna, Linux RNG). New here: ordering as the
-independence argument for an information-theoretic XOR.
+**Prior art:** entropy-pool mixing (Fortuna, Linux RNG). Ordering stops a source adapting
+to noise it has not seen; it does not by itself establish statistical independence (a shared
+CPU, kernel or environment can still correlate them), so the information-theoretic XOR
+stays conditional on that assumption.
 
 **Code:** `contribution_bytes` in `tools/padbook.py`, with an order test.
 
@@ -140,7 +143,8 @@ near-uniform, not exactly.
 
 **What:** within one cell, pairs who met use one-time books and pairs who cannot use a
 forward-secure SHA-256 chain. The anonymity claim is information-theoretic among the honest
-members connected by information-theoretic edges, computational across the rest — the standard
+members connected by in-person edges, under those edges' source assumptions, and computational
+across the rest — the standard
 GF(2) rank argument, restricted to the edges whose pads stay unknown.
 
 **Evidence:** Tamarin models `formal/dcnet/dcnet_one_time_pads.spthy`, `dcnet_ratchet.spthy`,

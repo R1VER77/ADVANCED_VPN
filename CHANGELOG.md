@@ -42,7 +42,8 @@ measured figure in the docs names the version it was measured on.
   Not yet re-measured with both directions clocked.
 - DC-net pads come from hardware only, in two kinds: one-time pad books for pairs who met
   in person and a forward-secure chain for pairs who cannot meet (computational). The
-  derived `PRG(HKDF(K_ij))` pads are gone. A book is information-theoretic only when a
+  derived `PRG(HKDF(K_ij))` pads are gone. A book is information-theoretic, conditionally
+  on stated source assumptions (labelled `conditional-information-theoretic`), only when a
   contribution mixes in an assessed raw noise source and is handed over in person: raw
   CPU timing jitter (jitterentropy's recorder), assessed with NIST SP 800-90B `ea_non_iid`,
   health-tested, and Toeplitz-extracted, XORed with kernel and Nitrokey output drawn before
@@ -53,6 +54,14 @@ measured figure in the docs names the version it was measured on.
   opens no used round; a pad is used once, a used-up book stops the cell.
   `tools/padbook.py` assesses, makes, seals and combines them; cells are 4–60 members,
   rounds every 30 s.
+- Pad books, chains and the zk identity can no longer hand out a used pad or move an
+  identity back an epoch when two handles or processes use them: every operation locks,
+  reloads from disk and commits before returning (found by an independent audit;
+  `docs/INCIDENTS.md`). Deniable store format v2: two header generations per layer and
+  copy-on-write data, so a power loss no longer loses a layer (fresh stores only). A book
+  made with an assessed raw source in person is now labelled
+  `conditional-information-theoretic`: the source assumptions are stated, not claimed as
+  proven.
 - DC-net events are checked with a 72-bit truncated SHA-256 instead of CRC-8. CRC-8 is
   linear, so a two-sender collision could decode as an event nobody sent and a member could
   rewrite another's event (`docs/INCIDENTS.md`). Found by the first end-to-end cell run
