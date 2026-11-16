@@ -26,6 +26,14 @@ measured figure in the docs names the version it was measured on.
   the busy-CPU fix: kernel-paced departure with decoys in empty slots
   (`docs/evidence/KERNEL_PACING.json`). With a fixed congestion window and slots kept on
   failed sends, it passes the busy-CPU probe 3 of 3; not yet confirmed on real websites.
+  Fixed: under the clock the relay's BBR window collapsed to about 11 packets within a few
+  minutes and stayed there (the clock delays every acknowledgement; the handshake set a
+  sub-millisecond minimum RTT), so the downstream lost 96% and real pages failed (1 of 8
+  loads). A clocked chain's relay now sends with the fixed window too: 8 of 8 loads, no
+  reconnects (`docs/evidence/KERNEL_PACING.json`, `downstream_collapse`).
+- Both cloaks' status files report the QUIC path (window, round trip, losses);
+  `throughput_bench.py --cpu-probe` records both directions and the client's reconnects;
+  `wf_real.py` keeps each failed load's reason and the chain's logs.
 - `avpn cloud chain --apply` shows a live checklist; PIN prompts are a desktop pop-up
   (also under sudo), and `avpn status` works without root while the service runs.
 - Formal models now run and are proved in CI (Tamarin 1.12.0), each with a broken variant

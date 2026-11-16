@@ -68,9 +68,9 @@ for k,v in PREFS.items():o.set_preference(k,v)
 profile=tempfile.mkdtemp();o.add_argument("-profile");o.add_argument(profile)
 d=webdriver.Firefox(options=o,service=Service(gecko));d.set_page_load_timeout(30)
 time.sleep(3)  # let the browser's own start-up settle before the window opens
-t=time.time();status="ok"
+t=time.time();status="ok";error=None
 try:d.get("https://"+site+"/")
-except Exception as e:status=type(e).__name__
+except Exception as e:status,error=type(e).__name__,str(e).strip()[:300]
 loaded=time.time();time.sleep(max(0,t+%(window)s-time.time()))
 # The browser's own account of the load (the same with or without a defence on the wire),
 # so failed loads can be dropped by one rule for every configuration.
@@ -80,7 +80,7 @@ except Exception:resources,doc_bytes=None,None
 try:d.quit()
 except Exception:pass
 shutil.rmtree(profile,ignore_errors=True)  # ~40 MB a load: never let them pile up in /tmp
-print(json.dumps(dict(start=t,loaded=loaded,end=t+%(window)s,status=status,resources=resources,doc_bytes=doc_bytes)))
+print(json.dumps(dict(start=t,loaded=loaded,end=t+%(window)s,status=status,error=error,resources=resources,doc_bytes=doc_bytes)))
 """ % {"window": WINDOW}
 
 
@@ -343,6 +343,18 @@ def worker(a):
                 (out / "clock.json").write_text(json.dumps({k: v for k, v in c.items() if k != "trace"}) + "\n")
             except (OSError, ValueError):
                 pass
+        if a.config != "undefended":
+            # The chain's logs and status live in RAM (the runtime directory) and vanish
+            # with the run's namespaces: keep a copy next to the capture.
+            from avpnctl import runtime_dir
+
+            for role in ["client", "relay", "exit"]:
+                try:
+                    rt = runtime_dir(out / "chain" / role, create=False)
+                    for f in sorted(rt.glob("*.lab.log")) + sorted(rt.glob("*-status.json")):
+                        (out / f"{role}.{f.name}").write_bytes(f.read_bytes()[-2_000_000:])
+                except (OSError, RuntimeError):
+                    pass
         for p in reversed(procs):
             if p.poll() is None:
                 p.send_signal(signal.SIGTERM)

@@ -189,7 +189,8 @@ pub fn transport() -> Arc<TransportConfig> {
     transport_with(Arc::new(cc))
 }
 
-/// The client's transport while the wire clock runs: the same, but with a fixed window.
+/// The transport of both ends while the wire clock runs: the same, but with a fixed window
+/// (the server's side: [`server_config_clocked`]).
 /// The stream's rate is set by the clock and agreed in advance, so congestion control has
 /// nothing to decide; BBR held datagrams back by up to 0.3 s when its estimate dipped
 /// below the stream's rate, and a packet that reaches the socket after its slot goes out
@@ -376,9 +377,25 @@ pub fn tls_client_config(
 /// Server QUIC configuration: TLS 1.3, ALPN `h3`, the given ECDSA certificate (DER) and PKCS#8
 /// key, no client certificate (a public web server asks for none).
 pub fn server_config(cert: Vec<u8>, key: Vec<u8>) -> Result<ServerConfig> {
+    server_config_clocked(cert, key, WireClock::from_env().is_some())
+}
+
+/// [`server_config`] for a chain whose client runs the wire clock (`clocked`) or not.
+///
+/// Under the clock the server sends with the fixed window too. Every acknowledgement the
+/// client sends rides in a packet the clock holds for up to its look-ahead, while the
+/// handshake (unpaced) set quinn's minimum RTT: BBR then sized its window from a 96 us
+/// minimum against a 27 ms round trip, shrank it to 11 packets and never recovered, and the
+/// downstream lost 96% of its datagrams (real-website re-run, 2026-11-15). The downstream's
+/// rate is the carrier's, set by the signed class, as on plain WireGuard over UDP.
+fn server_config_clocked(cert: Vec<u8>, key: Vec<u8>, clocked: bool) -> Result<ServerConfig> {
     let t = rustls_server(cert, key, ALPN)?;
     let mut s = ServerConfig::with_crypto(Arc::new(QuicServerConfig::try_from(t)?));
-    s.transport_config(transport());
+    s.transport_config(if clocked {
+        clocked_transport()
+    } else {
+        transport()
+    });
     Ok(s)
 }
 
@@ -408,7 +425,30 @@ pub struct Stats {
     pub dropped: AtomicU64,
     /// The wire clock's timing, when it is on (client only, RAM only).
     pub clock: ClockTrace,
+    /// The QUIC path as this end's sender sees it (congestion window, round trip, losses),
+    /// refreshed while datagrams flow: a stalled direction shows here, not in the counts.
+    pub path: Mutex<Option<serde_json::Value>>,
 }
+
+impl Stats {
+    /// Every [`PATH_EVERY`] datagrams, keep a snapshot of `c`'s path.
+    fn note_path(&self, c: &Connection, n: u64) {
+        if n.is_multiple_of(PATH_EVERY) {
+            let p = c.stats().path;
+            *self.path.lock().unwrap() = Some(serde_json::json!({
+                "cwnd": p.cwnd,
+                "rtt_us": p.rtt.as_micros() as u64,
+                "min_rtt_us": p.min_rtt.as_micros() as u64,
+                "congestion_events": p.congestion_events,
+                "lost_packets": p.lost_packets,
+                "sent_packets": p.sent_packets,
+            }));
+        }
+    }
+}
+
+/// How often (in datagrams) the path snapshot is refreshed.
+const PATH_EVERY: u64 = 256;
 
 /// How the wire clock kept time: totals, and the same per 100 ms for the last two minutes,
 /// so a measurement can line them up with its own windows (see `throughput_bench.py
@@ -509,6 +549,7 @@ impl Stats {
             "received": n(&self.received),
             "dropped": n(&self.dropped),
             "clock": self.clock.json(),
+            "path": self.path.lock().unwrap().clone(),
         })
     }
 }
@@ -666,6 +707,7 @@ pub async fn serve(
                         .is_ok()
                     {
                         add(&stats_down.sent);
+                        stats_down.note_path(&conn_down, stats_down.sent.load(Ordering::Relaxed));
                     } else {
                         add(&stats_down.dropped);
                     }
@@ -1361,6 +1403,7 @@ async fn session(
         let d = c.read_datagram().await.context("session ended")?;
         if udp.send_to(&d, wireguard).await.is_ok() {
             add(&stats.received);
+            stats.note_path(c, stats.received.load(Ordering::Relaxed));
         }
     }
 }
@@ -1493,9 +1536,14 @@ mod tests {
 
     /// A cloak server on loopback, with a stand-in WireGuard socket behind it.
     async fn server(key: [u8; 32]) -> (SocketAddr, UdpSocket, Arc<Stats>) {
+        server_with(key, false).await
+    }
+
+    /// A server cloak, with the clocked chain's transport when `clocked`.
+    async fn server_with(key: [u8; 32], clocked: bool) -> (SocketAddr, UdpSocket, Arc<Stats>) {
         let (cert, k, _) = test_cert();
         let endpoint = Endpoint::server(
-            server_config(cert, k).unwrap(),
+            server_config_clocked(cert, k, clocked).unwrap(),
             "127.0.0.1:0".parse().unwrap(),
         )
         .unwrap();
@@ -1853,6 +1901,105 @@ mod tests {
         assert!(
             unslotted * 100 < fed,
             "{unslotted} of {fed} packets left without their slot"
+        );
+    }
+
+    /// Datagrams per second that reach the client's WireGuard while the server side sends
+    /// 4,000/s for `secs` seconds, with the client's wire clock on or off; and the server's
+    /// counters.
+    async fn downstream_per_second(
+        clock: Option<WireClock>,
+        clocked_server: bool,
+        secs: u64,
+    ) -> (Vec<u64>, Arc<Stats>) {
+        let (_, _, pin) = test_cert();
+        let key = [7; 32];
+        let (addr, wg, server_stats) = server_with(key, clocked_server).await;
+        let local_wg = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let probe = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let local: SocketAddr = probe.local_addr().unwrap();
+        drop(probe);
+        let cs = Arc::new(Stats::default());
+        tokio::spawn(connect_clocked(
+            local,
+            local_wg.local_addr().unwrap(),
+            addr,
+            Some("cover.example".into()),
+            pin,
+            key,
+            cs.clone(),
+            false,
+            clock,
+        ));
+        // The client's WireGuard speaks first (as a handshake does), so the server learns it.
+        let mut buf = [0u8; 2048];
+        let packet = vec![0x04; CARRIER_DATAGRAM];
+        let mut from = None;
+        for _ in 0..100 {
+            local_wg.send_to(&packet, local).await.unwrap();
+            if let Ok(Ok((_, f))) =
+                tokio::time::timeout(Duration::from_millis(100), wg.recv_from(&mut buf)).await
+            {
+                from = Some(f);
+                break;
+            }
+        }
+        let from = from.expect("the session came up");
+        let wg = Arc::new(wg);
+        let down = {
+            let wg = wg.clone();
+            tokio::spawn(async move {
+                let mut t = tokio::time::interval(Duration::from_micros(250));
+                let p = vec![0x04; CARRIER_DATAGRAM];
+                loop {
+                    t.tick().await;
+                    let _ = wg.send_to(&p, from).await;
+                }
+            })
+        };
+        let drain = tokio::spawn(async move {
+            let mut b = [0u8; 2048];
+            loop {
+                let _ = wg.recv_from(&mut b).await;
+            }
+        });
+        let mut per_second = Vec::new();
+        for _ in 0..secs {
+            let end = tokio::time::Instant::now() + Duration::from_secs(1);
+            let mut n = 0;
+            while let Ok(Ok(_)) = tokio::time::timeout_at(end, local_wg.recv_from(&mut buf)).await {
+                n += 1;
+            }
+            per_second.push(n);
+        }
+        down.abort();
+        drain.abort();
+        (per_second, server_stats)
+    }
+
+    /// The server of a clocked chain sends its downstream with the fixed window. With BBR,
+    /// the clock's held-back acknowledgements (27 ms round trip against the unpaced
+    /// handshake's 81 us minimum) shrank the relay's window to 8-11 packets within 20 s
+    /// and it never grew back: the client got 4% of the downstream, its carrier restarted
+    /// every 10 s, and 1 page load in 8 worked (8 in 8 with the fixed window, same lab).
+    #[tokio::test]
+    async fn a_clocked_chains_server_never_shrinks_its_window() {
+        let clock = WireClock {
+            packets_per_second: 4080.0,
+            lookahead: Duration::from_millis(30),
+        };
+        let (per_second, server) = downstream_per_second(Some(clock), true, 3).await;
+        let path = server
+            .path
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("the server noted its path");
+        assert_eq!(path["cwnd"], FIXED_WINDOW, "server path: {path}");
+        let got: u64 = per_second.iter().sum();
+        assert!(
+            got > 3_000,
+            "the downstream reached the client: {per_second:?}"
         );
     }
 

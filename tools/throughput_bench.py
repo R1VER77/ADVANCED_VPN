@@ -384,6 +384,7 @@ def cpu_probe(a, observers, shape_file, hops, online_seconds):
         if c:
             clock = {k: c[k] for k in (*CLOCK_FIELDS, "slot_queue_max") if k in c}
             clock["per_window"] = clock_windows(c.get("trace", []), start_mono, a.probe_window, len(schedule))
+    carriers = carrier_health(shape_file.parent)
     raw = shape_file.read_bytes()
     records = [struct.unpack_from("<dHB", raw, i) for i in range(0, len(raw) - len(raw) % 11, 11)]
     segment = segment_size(records)
@@ -409,10 +410,31 @@ def cpu_probe(a, observers, shape_file, hops, online_seconds):
         start_monotonic=start_mono,
         schedule=schedule,
         clock=clock,
+        carriers=carriers,
         counts=counts,
         score=score,
         leak=score["leak"],
     )
+
+
+def carrier_health(state):
+    """Both directions of every cloak in the chain, and the client's reconnects: a probe
+    that only watches the client's wire would miss a tunnel whose downstream has died
+    (the real-website re-run's clock passes lost 96% of the downstream that way)."""
+    out = {}
+    for role_dir in sorted(p for p in state.iterdir() if p.is_dir()):
+        rt = runtime_dir(role_dir, create=False)
+        try:
+            c = json.loads((rt / "cloak-status.json").read_text())
+        except (OSError, ValueError, RuntimeError):
+            continue
+        out[role_dir.name] = {k: c.get(k) for k in ("role", "sent", "received", "dropped", "sessions")}
+    try:
+        log = (runtime_dir(state / "client", create=False) / "core.lab.log").read_text(errors="replace")
+        out["client_reconnects"] = log.count('"reconnecting"')
+    except (OSError, RuntimeError):
+        pass
+    return out
 
 
 def main():

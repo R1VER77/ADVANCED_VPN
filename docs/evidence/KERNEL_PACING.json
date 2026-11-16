@@ -1,1060 +1,1357 @@
 {
-  "schema": 1,
-  "name": "Kernel-paced departure for the busy-CPU leak",
-  "date": "2026-11-15",
-  "code": "main at 895a993 plus the cloak wire clock (AVPN_WIRE_CLOCK_PPS, off by default)",
-  "host": {
-    "cpus": 8,
-    "where": "owner's laptop; user-namespace labs (isolated: unshare -Urnm, power QoS: sudo unshare -nm)"
-  },
-  "auc_convention": "AUC = P(a loaded window's value is the smaller one); 0.5 is chance. leak = any feature separates the schedule at p < 0.01/3.",
-  "isolated": {
-    "setup": "tools/txtime_experiment.py: UDP at 4,000 packets/s from cores 0,1 over a veth to another namespace (kernel receive timestamps); 2 busy loops on cores 0,1 on a random balanced schedule; 60 x 1 s windows; 3 runs per variant",
-    "variants": [
-      {
-        "variant": "today's timed loop (naive) and kernel-paced txtime 30 ms, interleaved",
-        "runs": [
-          {
-            "count_auc": 0.5356,
-            "count_p": 0.6477,
-            "gap_sd": {
-              "auc": 0.3,
-              "p_value": 0.0085,
-              "control_auc_mean": 0.4987
-            },
-            "max_gap": {
-              "auc": 0.2267,
-              "p_value": 0.0005,
-              "control_auc_mean": 0.5013
-            },
-            "leak": true,
-            "mode": "naive"
-          },
-          {
-            "count_auc": 0.5,
-            "count_p": 1.0,
-            "gap_sd": {
-              "auc": 0.9978,
-              "p_value": 0.0005,
-              "control_auc_mean": 0.5004
-            },
-            "max_gap": {
-              "auc": 0.8089,
-              "p_value": 0.0005,
-              "control_auc_mean": 0.4991
-            },
-            "leak": true,
-            "mode": "txtime"
-          },
-          {
-            "count_auc": 0.7344,
-            "count_p": 0.0015,
-            "gap_sd": {
-              "auc": 0.2211,
-              "p_value": 0.0005,
-              "control_auc_mean": 0.4993
-            },
-            "max_gap": {
-              "auc": 0.1289,
-              "p_value": 0.0005,
-              "control_auc_mean": 0.4985
-            },
-            "leak": true,
-            "mode": "naive"
-          },
-          {
-            "count_auc": 0.5,
-            "count_p": 1.0,
-            "gap_sd": {
-              "auc": 0.9967,
-              "p_value": 0.0005,
-              "control_auc_mean": 0.4996
-            },
-            "max_gap": {
-              "auc": 0.9933,
-              "p_value": 0.0005,
-              "control_auc_mean": 0.4998
-            },
-            "leak": true,
-            "mode": "txtime"
-          },
-          {
-            "count_auc": 0.745,
-            "count_p": 0.001,
-            "gap_sd": {
-              "auc": 0.1467,
-              "p_value": 0.0005,
-              "control_auc_mean": 0.5023
-            },
-            "max_gap": {
-              "auc": 0.1389,
-              "p_value": 0.0005,
-              "control_auc_mean": 0.498
-            },
-            "leak": true,
-            "mode": "naive"
-          },
-          {
-            "count_auc": 0.5,
-            "count_p": 1.0,
-            "gap_sd": {
-              "auc": 1.0,
-              "p_value": 0.0005,
-              "control_auc_mean": 0.4968
-            },
-            "max_gap": {
-              "auc": 0.9578,
-              "p_value": 0.0005,
-              "control_auc_mean": 0.5001
-            },
-            "leak": true,
-            "mode": "txtime"
-          }
-        ]
-      },
-      {
-        "variant": "txtime 30 ms, cores kept awake by 2 constant busy loops",
-        "runs": [
-          {
-            "count_auc": 0.5,
-            "count_p": 1.0,
-            "gap_sd": {
-              "auc": 0.62,
-              "p_value": 0.1214,
-              "control_auc_mean": 0.5001
-            },
-            "max_gap": {
-              "auc": 0.6267,
-              "p_value": 0.0875,
-              "control_auc_mean": 0.4989
-            },
-            "leak": false,
-            "mode": "txtime"
-          },
-          {
-            "count_auc": 0.5167,
-            "count_p": 0.5067,
-            "gap_sd": {
-              "auc": 0.6322,
-              "p_value": 0.0805,
-              "control_auc_mean": 0.5006
-            },
-            "max_gap": {
-              "auc": 0.6606,
-              "p_value": 0.03,
-              "control_auc_mean": 0.5002
-            },
-            "leak": false,
-            "mode": "txtime"
-          },
-          {
-            "count_auc": 0.5,
-            "count_p": 1.0,
-            "gap_sd": {
-              "auc": 0.5211,
-              "p_value": 0.7856,
-              "control_auc_mean": 0.4997
-            },
-            "max_gap": {
-              "auc": 0.5511,
-              "p_value": 0.5052,
-              "control_auc_mean": 0.4989
-            },
-            "leak": false,
-            "mode": "txtime"
-          }
-        ]
-      },
-      {
-        "variant": "naive timed loop, cores kept awake",
-        "runs": [
-          {
-            "count_auc": 1.0,
-            "count_p": 0.0005,
-            "gap_sd": {
-              "auc": 0.0,
-              "p_value": 0.0005,
-              "control_auc_mean": 0.4992
-            },
-            "max_gap": {
-              "auc": 0.0,
-              "p_value": 0.0005,
-              "control_auc_mean": 0.5004
-            },
-            "leak": true,
-            "mode": "naive"
-          },
-          {
-            "count_auc": 1.0,
-            "count_p": 0.0005,
-            "gap_sd": {
-              "auc": 0.0,
-              "p_value": 0.0005,
-              "control_auc_mean": 0.4988
-            },
-            "max_gap": {
-              "auc": 0.0,
-              "p_value": 0.0005,
-              "control_auc_mean": 0.5009
-            },
-            "leak": true,
-            "mode": "naive"
-          },
-          {
-            "count_auc": 1.0,
-            "count_p": 0.0005,
-            "gap_sd": {
-              "auc": 0.0,
-              "p_value": 0.0005,
-              "control_auc_mean": 0.5006
-            },
-            "max_gap": {
-              "auc": 0.0,
-              "p_value": 0.0005,
-              "control_auc_mean": 0.4995
-            },
-            "leak": true,
-            "mode": "naive"
-          }
-        ]
-      },
-      {
-        "variant": "txtime 30 ms, power QoS /dev/cpu_dma_latency 20 us",
-        "runs": [
-          {
-            "count_auc": 0.5,
-            "count_p": 1.0,
-            "gap_sd": {
-              "auc": 0.8144,
-              "p_value": 0.0005,
-              "control_auc_mean": 0.4987
-            },
-            "max_gap": {
-              "auc": 0.7589,
-              "p_value": 0.0015,
-              "control_auc_mean": 0.4986
-            },
-            "leak": true,
-            "mode": "txtime"
-          },
-          {
-            "count_auc": 0.5,
-            "count_p": 1.0,
-            "gap_sd": {
-              "auc": 0.8078,
-              "p_value": 0.0005,
-              "control_auc_mean": 0.5006
-            },
-            "max_gap": {
-              "auc": 0.8311,
-              "p_value": 0.0005,
-              "control_auc_mean": 0.5008
-            },
-            "leak": true,
-            "mode": "txtime"
-          },
-          {
-            "count_auc": 0.5,
-            "count_p": 1.0,
-            "gap_sd": {
-              "auc": 0.9244,
-              "p_value": 0.0005,
-              "control_auc_mean": 0.4996
-            },
-            "max_gap": {
-              "auc": 0.8989,
-              "p_value": 0.0005,
-              "control_auc_mean": 0.5006
-            },
-            "leak": true,
-            "mode": "txtime"
-          }
-        ]
-      },
-      {
-        "variant": "txtime 30 ms, power QoS 0 us",
-        "runs": [
-          {
-            "count_auc": 0.5,
-            "count_p": 1.0,
-            "gap_sd": {
-              "auc": 0.6633,
-              "p_value": 0.024,
-              "control_auc_mean": 0.5002
-            },
-            "max_gap": {
-              "auc": 0.7389,
-              "p_value": 0.003,
-              "control_auc_mean": 0.5
-            },
-            "leak": true,
-            "mode": "txtime"
-          },
-          {
-            "count_auc": 0.5,
-            "count_p": 1.0,
-            "gap_sd": {
-              "auc": 0.6267,
-              "p_value": 0.0915,
-              "control_auc_mean": 0.5004
-            },
-            "max_gap": {
-              "auc": 0.7,
-              "p_value": 0.004,
-              "control_auc_mean": 0.5009
-            },
-            "leak": false,
-            "mode": "txtime"
-          },
-          {
-            "count_auc": 0.5,
-            "count_p": 1.0,
-            "gap_sd": {
-              "auc": 0.79,
-              "p_value": 0.0005,
-              "control_auc_mean": 0.5006
-            },
-            "max_gap": {
-              "auc": 0.7972,
-              "p_value": 0.0005,
-              "control_auc_mean": 0.5017
-            },
-            "leak": true,
-            "mode": "txtime"
-          }
-        ]
-      }
-    ]
-  },
-  "carrier": {
-    "setup": "throughput_bench.py --cpu-probe 60, 2 hops, fast; AVPN_CATCH_UP_MS=50; AVPN_WIRE_CLOCK_PPS=4000 (4,080 slots/s with 2% headroom, 30 ms look-ahead); fq on the client's link; run strictly one at a time",
+ "schema": 1,
+ "name": "Kernel-paced departure for the busy-CPU leak",
+ "date": "2026-11-15",
+ "code": "main at 895a993 plus the cloak wire clock (AVPN_WIRE_CLOCK_PPS, off by default)",
+ "host": {
+  "cpus": 8,
+  "where": "owner's laptop; user-namespace labs (isolated: unshare -Urnm, power QoS: sudo unshare -nm)"
+ },
+ "auc_convention": "AUC = P(a loaded window's value is the smaller one); 0.5 is chance. leak = any feature separates the schedule at p < 0.01/3.",
+ "isolated": {
+  "setup": "tools/txtime_experiment.py: UDP at 4,000 packets/s from cores 0,1 over a veth to another namespace (kernel receive timestamps); 2 busy loops on cores 0,1 on a random balanced schedule; 60 x 1 s windows; 3 runs per variant",
+  "variants": [
+   {
+    "variant": "today's timed loop (naive) and kernel-paced txtime 30 ms, interleaved",
     "runs": [
-      {
-        "run": "clock-1",
-        "wire_clock_pps": 4000.0,
-        "lookahead_ms": 30,
-        "catch_up_ms": 50,
-        "pm_qos_us_declared": null,
-        "count_auc": 0.435,
-        "count_p": 0.2519,
-        "gap_sd": {
-          "auc": 0.42,
-          "p_value": 0.3053,
-          "control_auc_mean": 0.5007
-        },
-        "max_gap": {
-          "auc": 0.3178,
-          "p_value": 0.0135,
-          "control_auc_mean": 0.4979
-        },
-        "control": 0.5001,
-        "leak": false,
-        "packets_per_window": {
-          "steady_idle": 3267.6,
-          "steady_loaded": 3263.7,
-          "idle_after_load": 3242.9,
-          "loaded_after_idle": 3296.5
-        }
+     {
+      "count_auc": 0.5356,
+      "count_p": 0.6477,
+      "gap_sd": {
+       "auc": 0.3,
+       "p_value": 0.0085,
+       "control_auc_mean": 0.4987
       },
-      {
-        "run": "clock-2",
-        "wire_clock_pps": 4000.0,
-        "lookahead_ms": 30,
-        "catch_up_ms": 50,
-        "pm_qos_us_declared": null,
-        "count_auc": 0.4094,
-        "count_p": 0.2024,
-        "gap_sd": {
-          "auc": 0.5789,
-          "p_value": 0.2974,
-          "control_auc_mean": 0.5017
-        },
-        "max_gap": {
-          "auc": 0.4044,
-          "p_value": 0.2044,
-          "control_auc_mean": 0.499
-        },
-        "control": 0.4993,
-        "leak": false,
-        "packets_per_window": {
-          "steady_idle": 3173.1,
-          "steady_loaded": 3252.9,
-          "idle_after_load": 3218.4,
-          "loaded_after_idle": 3288.5
-        }
+      "max_gap": {
+       "auc": 0.2267,
+       "p_value": 0.0005,
+       "control_auc_mean": 0.5013
       },
-      {
-        "run": "clock-3",
-        "wire_clock_pps": 4000.0,
-        "lookahead_ms": 30,
-        "catch_up_ms": 50,
-        "pm_qos_us_declared": null,
-        "count_auc": 0.3133,
-        "count_p": 0.005,
-        "gap_sd": {
-          "auc": 0.64,
-          "p_value": 0.0575,
-          "control_auc_mean": 0.4987
-        },
-        "max_gap": {
-          "auc": 0.42,
-          "p_value": 0.2969,
-          "control_auc_mean": 0.5007
-        },
-        "control": 0.4983,
-        "leak": false,
-        "packets_per_window": {
-          "steady_idle": 3264.3,
-          "steady_loaded": 3264.0,
-          "idle_after_load": 3236.5,
-          "loaded_after_idle": 3346.9
-        }
+      "leak": true,
+      "mode": "naive"
+     },
+     {
+      "count_auc": 0.5,
+      "count_p": 1.0,
+      "gap_sd": {
+       "auc": 0.9978,
+       "p_value": 0.0005,
+       "control_auc_mean": 0.5004
       },
-      {
-        "run": "clock-qos-1",
-        "wire_clock_pps": 4000.0,
-        "lookahead_ms": 30,
-        "catch_up_ms": 50,
-        "pm_qos_us_declared": "20",
-        "count_auc": 0.3994,
-        "count_p": 0.1269,
-        "gap_sd": {
-          "auc": 0.4056,
-          "p_value": 0.2164,
-          "control_auc_mean": 0.5014
-        },
-        "max_gap": {
-          "auc": 0.3233,
-          "p_value": 0.0215,
-          "control_auc_mean": 0.4996
-        },
-        "control": 0.4998,
-        "leak": false,
-        "packets_per_window": {
-          "steady_idle": 3263.9,
-          "steady_loaded": 3247.2,
-          "idle_after_load": 3260.4,
-          "loaded_after_idle": 3254.0
-        }
+      "max_gap": {
+       "auc": 0.8089,
+       "p_value": 0.0005,
+       "control_auc_mean": 0.4991
       },
-      {
-        "run": "clock-qos-2",
-        "wire_clock_pps": 4000.0,
-        "lookahead_ms": 30,
-        "catch_up_ms": 50,
-        "pm_qos_us_declared": "20",
-        "count_auc": 0.3411,
-        "count_p": 0.005,
-        "gap_sd": {
-          "auc": 0.4356,
-          "p_value": 0.3848,
-          "control_auc_mean": 0.5001
-        },
-        "max_gap": {
-          "auc": 0.2611,
-          "p_value": 0.0005,
-          "control_auc_mean": 0.4977
-        },
-        "control": 0.5004,
-        "leak": true,
-        "packets_per_window": {
-          "steady_idle": 3261.0,
-          "steady_loaded": 3269.8,
-          "idle_after_load": 3260.9,
-          "loaded_after_idle": 3287.6
-        }
+      "leak": true,
+      "mode": "txtime"
+     },
+     {
+      "count_auc": 0.7344,
+      "count_p": 0.0015,
+      "gap_sd": {
+       "auc": 0.2211,
+       "p_value": 0.0005,
+       "control_auc_mean": 0.4993
       },
-      {
-        "run": "clock-qos-3",
-        "wire_clock_pps": 4000.0,
-        "lookahead_ms": 30,
-        "catch_up_ms": 50,
-        "pm_qos_us_declared": "20",
-        "count_auc": 0.485,
-        "count_p": 0.8411,
-        "gap_sd": {
-          "auc": 0.4456,
-          "p_value": 0.4613,
-          "control_auc_mean": 0.4996
-        },
-        "max_gap": {
-          "auc": 0.38,
-          "p_value": 0.1084,
-          "control_auc_mean": 0.496
-        },
-        "control": 0.4985,
-        "leak": false,
-        "packets_per_window": {
-          "steady_idle": 3264.0,
-          "steady_loaded": 3264.0,
-          "idle_after_load": 3263.2,
-          "loaded_after_idle": 3262.3
-        }
-      }
+      "max_gap": {
+       "auc": 0.1289,
+       "p_value": 0.0005,
+       "control_auc_mean": 0.4985
+      },
+      "leak": true,
+      "mode": "naive"
+     },
+     {
+      "count_auc": 0.5,
+      "count_p": 1.0,
+      "gap_sd": {
+       "auc": 0.9967,
+       "p_value": 0.0005,
+       "control_auc_mean": 0.4996
+      },
+      "max_gap": {
+       "auc": 0.9933,
+       "p_value": 0.0005,
+       "control_auc_mean": 0.4998
+      },
+      "leak": true,
+      "mode": "txtime"
+     },
+     {
+      "count_auc": 0.745,
+      "count_p": 0.001,
+      "gap_sd": {
+       "auc": 0.1467,
+       "p_value": 0.0005,
+       "control_auc_mean": 0.5023
+      },
+      "max_gap": {
+       "auc": 0.1389,
+       "p_value": 0.0005,
+       "control_auc_mean": 0.498
+      },
+      "leak": true,
+      "mode": "naive"
+     },
+     {
+      "count_auc": 0.5,
+      "count_p": 1.0,
+      "gap_sd": {
+       "auc": 1.0,
+       "p_value": 0.0005,
+       "control_auc_mean": 0.4968
+      },
+      "max_gap": {
+       "auc": 0.9578,
+       "p_value": 0.0005,
+       "control_auc_mean": 0.5001
+      },
+      "leak": true,
+      "mode": "txtime"
+     }
     ]
-  },
-  "findings": [
-    "Kernel-paced departure (SO_TXTIME + fq, 30 ms look-ahead) removes the scheduling leak: in isolation the per-window count is exactly constant (AUC 0.500, p = 1, every run) where a timed loop leaks.",
-    "It exposes a power-state side channel: with the CPU idle, the release timer wakes late from deep C-states, so packets are LESS regular when idle (gap AUC 0.997-1.000). Cores kept awake by busy loops remove it (no leak in 3 of 3, p 0.08-0.79); a timed loop still leaks completely with awake cores.",
-    "Power QoS is not a substitute for awake cores: 20 us leaks in 3 of 3, 0 us in 2 of 3 (gap AUC 0.63-0.92). Busy loops also raise clock frequency; the residue may be frequency, not idle depth (untested).",
-    "On the real carrier, the cloak's wire clock turns perfect separation (today: p = 0.0005 every run, count AUC 0.92-1.00 or gap AUC 0.001-0.07) into marginal: no leak by the corrected test in 3 of 3 runs without power QoS and 2 of 3 with it, but count p reaches 0.005 in two runs and largest-gap p 0.0005 in one.",
-    "The residue sits at load transitions: windows that continue a state carry the clock's exact count (3,264), windows right after the load stops come up short and right after it starts run over. Next: cloak counters for skipped slots and late sends, to tell stalls longer than the look-ahead from slot/packet desynchronisation.",
-    "Counters (fa4d554): the residue does not come from the feeder (0 skipped slots) but from packets reaching the socket after their slot, up to 0.3 s late, inside quinn's send path.",
-    "With a fixed congestion window, lateness all but disappears (39-68 packets per run); the next cause, slots lost on failed sends while fq holds packets, was reproduced on loopback and fixed (unslotted 2,453 -> 14-17 per 4 s).",
-    "With both fixes (34004ba), the probe finds no leak in 3 of 3 runs on the real carrier, against perfect separation (p = 0.0005) with today's default; a consistent, non-significant lean in the timing features remains, consistent with the power-state effect.",
-    "Power-state test: the remaining lean mixes power-management jitter (idle windows rougher) and contention jitter (loaded windows rougher); fixing the frequency comes closest, no single setting removes both. Next: the real-website run decides whether microsecond residues matter after a real network path."
+   },
+   {
+    "variant": "txtime 30 ms, cores kept awake by 2 constant busy loops",
+    "runs": [
+     {
+      "count_auc": 0.5,
+      "count_p": 1.0,
+      "gap_sd": {
+       "auc": 0.62,
+       "p_value": 0.1214,
+       "control_auc_mean": 0.5001
+      },
+      "max_gap": {
+       "auc": 0.6267,
+       "p_value": 0.0875,
+       "control_auc_mean": 0.4989
+      },
+      "leak": false,
+      "mode": "txtime"
+     },
+     {
+      "count_auc": 0.5167,
+      "count_p": 0.5067,
+      "gap_sd": {
+       "auc": 0.6322,
+       "p_value": 0.0805,
+       "control_auc_mean": 0.5006
+      },
+      "max_gap": {
+       "auc": 0.6606,
+       "p_value": 0.03,
+       "control_auc_mean": 0.5002
+      },
+      "leak": false,
+      "mode": "txtime"
+     },
+     {
+      "count_auc": 0.5,
+      "count_p": 1.0,
+      "gap_sd": {
+       "auc": 0.5211,
+       "p_value": 0.7856,
+       "control_auc_mean": 0.4997
+      },
+      "max_gap": {
+       "auc": 0.5511,
+       "p_value": 0.5052,
+       "control_auc_mean": 0.4989
+      },
+      "leak": false,
+      "mode": "txtime"
+     }
+    ]
+   },
+   {
+    "variant": "naive timed loop, cores kept awake",
+    "runs": [
+     {
+      "count_auc": 1.0,
+      "count_p": 0.0005,
+      "gap_sd": {
+       "auc": 0.0,
+       "p_value": 0.0005,
+       "control_auc_mean": 0.4992
+      },
+      "max_gap": {
+       "auc": 0.0,
+       "p_value": 0.0005,
+       "control_auc_mean": 0.5004
+      },
+      "leak": true,
+      "mode": "naive"
+     },
+     {
+      "count_auc": 1.0,
+      "count_p": 0.0005,
+      "gap_sd": {
+       "auc": 0.0,
+       "p_value": 0.0005,
+       "control_auc_mean": 0.4988
+      },
+      "max_gap": {
+       "auc": 0.0,
+       "p_value": 0.0005,
+       "control_auc_mean": 0.5009
+      },
+      "leak": true,
+      "mode": "naive"
+     },
+     {
+      "count_auc": 1.0,
+      "count_p": 0.0005,
+      "gap_sd": {
+       "auc": 0.0,
+       "p_value": 0.0005,
+       "control_auc_mean": 0.5006
+      },
+      "max_gap": {
+       "auc": 0.0,
+       "p_value": 0.0005,
+       "control_auc_mean": 0.4995
+      },
+      "leak": true,
+      "mode": "naive"
+     }
+    ]
+   },
+   {
+    "variant": "txtime 30 ms, power QoS /dev/cpu_dma_latency 20 us",
+    "runs": [
+     {
+      "count_auc": 0.5,
+      "count_p": 1.0,
+      "gap_sd": {
+       "auc": 0.8144,
+       "p_value": 0.0005,
+       "control_auc_mean": 0.4987
+      },
+      "max_gap": {
+       "auc": 0.7589,
+       "p_value": 0.0015,
+       "control_auc_mean": 0.4986
+      },
+      "leak": true,
+      "mode": "txtime"
+     },
+     {
+      "count_auc": 0.5,
+      "count_p": 1.0,
+      "gap_sd": {
+       "auc": 0.8078,
+       "p_value": 0.0005,
+       "control_auc_mean": 0.5006
+      },
+      "max_gap": {
+       "auc": 0.8311,
+       "p_value": 0.0005,
+       "control_auc_mean": 0.5008
+      },
+      "leak": true,
+      "mode": "txtime"
+     },
+     {
+      "count_auc": 0.5,
+      "count_p": 1.0,
+      "gap_sd": {
+       "auc": 0.9244,
+       "p_value": 0.0005,
+       "control_auc_mean": 0.4996
+      },
+      "max_gap": {
+       "auc": 0.8989,
+       "p_value": 0.0005,
+       "control_auc_mean": 0.5006
+      },
+      "leak": true,
+      "mode": "txtime"
+     }
+    ]
+   },
+   {
+    "variant": "txtime 30 ms, power QoS 0 us",
+    "runs": [
+     {
+      "count_auc": 0.5,
+      "count_p": 1.0,
+      "gap_sd": {
+       "auc": 0.6633,
+       "p_value": 0.024,
+       "control_auc_mean": 0.5002
+      },
+      "max_gap": {
+       "auc": 0.7389,
+       "p_value": 0.003,
+       "control_auc_mean": 0.5
+      },
+      "leak": true,
+      "mode": "txtime"
+     },
+     {
+      "count_auc": 0.5,
+      "count_p": 1.0,
+      "gap_sd": {
+       "auc": 0.6267,
+       "p_value": 0.0915,
+       "control_auc_mean": 0.5004
+      },
+      "max_gap": {
+       "auc": 0.7,
+       "p_value": 0.004,
+       "control_auc_mean": 0.5009
+      },
+      "leak": false,
+      "mode": "txtime"
+     },
+     {
+      "count_auc": 0.5,
+      "count_p": 1.0,
+      "gap_sd": {
+       "auc": 0.79,
+       "p_value": 0.0005,
+       "control_auc_mean": 0.5006
+      },
+      "max_gap": {
+       "auc": 0.7972,
+       "p_value": 0.0005,
+       "control_auc_mean": 0.5017
+      },
+      "leak": true,
+      "mode": "txtime"
+     }
+    ]
+   }
+  ]
+ },
+ "carrier": {
+  "setup": "throughput_bench.py --cpu-probe 60, 2 hops, fast; AVPN_CATCH_UP_MS=50; AVPN_WIRE_CLOCK_PPS=4000 (4,080 slots/s with 2% headroom, 30 ms look-ahead); fq on the client's link; run strictly one at a time",
+  "runs": [
+   {
+    "run": "clock-1",
+    "wire_clock_pps": 4000.0,
+    "lookahead_ms": 30,
+    "catch_up_ms": 50,
+    "pm_qos_us_declared": null,
+    "count_auc": 0.435,
+    "count_p": 0.2519,
+    "gap_sd": {
+     "auc": 0.42,
+     "p_value": 0.3053,
+     "control_auc_mean": 0.5007
+    },
+    "max_gap": {
+     "auc": 0.3178,
+     "p_value": 0.0135,
+     "control_auc_mean": 0.4979
+    },
+    "control": 0.5001,
+    "leak": false,
+    "packets_per_window": {
+     "steady_idle": 3267.6,
+     "steady_loaded": 3263.7,
+     "idle_after_load": 3242.9,
+     "loaded_after_idle": 3296.5
+    }
+   },
+   {
+    "run": "clock-2",
+    "wire_clock_pps": 4000.0,
+    "lookahead_ms": 30,
+    "catch_up_ms": 50,
+    "pm_qos_us_declared": null,
+    "count_auc": 0.4094,
+    "count_p": 0.2024,
+    "gap_sd": {
+     "auc": 0.5789,
+     "p_value": 0.2974,
+     "control_auc_mean": 0.5017
+    },
+    "max_gap": {
+     "auc": 0.4044,
+     "p_value": 0.2044,
+     "control_auc_mean": 0.499
+    },
+    "control": 0.4993,
+    "leak": false,
+    "packets_per_window": {
+     "steady_idle": 3173.1,
+     "steady_loaded": 3252.9,
+     "idle_after_load": 3218.4,
+     "loaded_after_idle": 3288.5
+    }
+   },
+   {
+    "run": "clock-3",
+    "wire_clock_pps": 4000.0,
+    "lookahead_ms": 30,
+    "catch_up_ms": 50,
+    "pm_qos_us_declared": null,
+    "count_auc": 0.3133,
+    "count_p": 0.005,
+    "gap_sd": {
+     "auc": 0.64,
+     "p_value": 0.0575,
+     "control_auc_mean": 0.4987
+    },
+    "max_gap": {
+     "auc": 0.42,
+     "p_value": 0.2969,
+     "control_auc_mean": 0.5007
+    },
+    "control": 0.4983,
+    "leak": false,
+    "packets_per_window": {
+     "steady_idle": 3264.3,
+     "steady_loaded": 3264.0,
+     "idle_after_load": 3236.5,
+     "loaded_after_idle": 3346.9
+    }
+   },
+   {
+    "run": "clock-qos-1",
+    "wire_clock_pps": 4000.0,
+    "lookahead_ms": 30,
+    "catch_up_ms": 50,
+    "pm_qos_us_declared": "20",
+    "count_auc": 0.3994,
+    "count_p": 0.1269,
+    "gap_sd": {
+     "auc": 0.4056,
+     "p_value": 0.2164,
+     "control_auc_mean": 0.5014
+    },
+    "max_gap": {
+     "auc": 0.3233,
+     "p_value": 0.0215,
+     "control_auc_mean": 0.4996
+    },
+    "control": 0.4998,
+    "leak": false,
+    "packets_per_window": {
+     "steady_idle": 3263.9,
+     "steady_loaded": 3247.2,
+     "idle_after_load": 3260.4,
+     "loaded_after_idle": 3254.0
+    }
+   },
+   {
+    "run": "clock-qos-2",
+    "wire_clock_pps": 4000.0,
+    "lookahead_ms": 30,
+    "catch_up_ms": 50,
+    "pm_qos_us_declared": "20",
+    "count_auc": 0.3411,
+    "count_p": 0.005,
+    "gap_sd": {
+     "auc": 0.4356,
+     "p_value": 0.3848,
+     "control_auc_mean": 0.5001
+    },
+    "max_gap": {
+     "auc": 0.2611,
+     "p_value": 0.0005,
+     "control_auc_mean": 0.4977
+    },
+    "control": 0.5004,
+    "leak": true,
+    "packets_per_window": {
+     "steady_idle": 3261.0,
+     "steady_loaded": 3269.8,
+     "idle_after_load": 3260.9,
+     "loaded_after_idle": 3287.6
+    }
+   },
+   {
+    "run": "clock-qos-3",
+    "wire_clock_pps": 4000.0,
+    "lookahead_ms": 30,
+    "catch_up_ms": 50,
+    "pm_qos_us_declared": "20",
+    "count_auc": 0.485,
+    "count_p": 0.8411,
+    "gap_sd": {
+     "auc": 0.4456,
+     "p_value": 0.4613,
+     "control_auc_mean": 0.4996
+    },
+    "max_gap": {
+     "auc": 0.38,
+     "p_value": 0.1084,
+     "control_auc_mean": 0.496
+    },
+    "control": 0.4985,
+    "leak": false,
+    "packets_per_window": {
+     "steady_idle": 3264.0,
+     "steady_loaded": 3264.0,
+     "idle_after_load": 3263.2,
+     "loaded_after_idle": 3262.3
+    }
+   }
+  ]
+ },
+ "findings": [
+  "Kernel-paced departure (SO_TXTIME + fq, 30 ms look-ahead) removes the scheduling leak: in isolation the per-window count is exactly constant (AUC 0.500, p = 1, every run) where a timed loop leaks.",
+  "It exposes a power-state side channel: with the CPU idle, the release timer wakes late from deep C-states, so packets are LESS regular when idle (gap AUC 0.997-1.000). Cores kept awake by busy loops remove it (no leak in 3 of 3, p 0.08-0.79); a timed loop still leaks completely with awake cores.",
+  "Power QoS is not a substitute for awake cores: 20 us leaks in 3 of 3, 0 us in 2 of 3 (gap AUC 0.63-0.92). Busy loops also raise clock frequency; the residue may be frequency, not idle depth (untested).",
+  "On the real carrier, the cloak's wire clock turns perfect separation (today: p = 0.0005 every run, count AUC 0.92-1.00 or gap AUC 0.001-0.07) into marginal: no leak by the corrected test in 3 of 3 runs without power QoS and 2 of 3 with it, but count p reaches 0.005 in two runs and largest-gap p 0.0005 in one.",
+  "The residue sits at load transitions: windows that continue a state carry the clock's exact count (3,264), windows right after the load stops come up short and right after it starts run over. Next: cloak counters for skipped slots and late sends, to tell stalls longer than the look-ahead from slot/packet desynchronisation.",
+  "Counters (fa4d554): the residue does not come from the feeder (0 skipped slots) but from packets reaching the socket after their slot, up to 0.3 s late, inside quinn's send path.",
+  "With a fixed congestion window, lateness all but disappears (39-68 packets per run); the next cause, slots lost on failed sends while fq holds packets, was reproduced on loopback and fixed (unslotted 2,453 -> 14-17 per 4 s).",
+  "With both fixes (34004ba), the probe finds no leak in 3 of 3 runs on the real carrier, against perfect separation (p = 0.0005) with today's default; a consistent, non-significant lean in the timing features remains, consistent with the power-state effect.",
+  "Power-state test: the remaining lean mixes power-management jitter (idle windows rougher) and contention jitter (loaded windows rougher); fixing the frequency comes closest, no single setting removes both. Next: the real-website run decides whether microsecond residues matter after a real network path."
+ ],
+ "status": "The first configuration that passes the probe, but not yet a fix to claim: the wire clock stays off by default until the real-website fingerprinting run (wf_real.py) confirms it and the power-state lean is settled; the first hop still sees which slots were decoys.",
+ "counters": {
+  "setup": "same as carrier, with the cloak's clock counters (fa4d554); 3 runs, no power QoS",
+  "runs": [
+   {
+    "run": "clockc-1",
+    "leak": false,
+    "count_p": 0.013,
+    "gap_sd": {
+     "auc": 0.5022,
+     "p_value": 0.9755,
+     "control_auc_mean": 0.4985
+    },
+    "max_gap": {
+     "auc": 0.4456,
+     "p_value": 0.4568,
+     "control_auc_mean": 0.5008
+    },
+    "totals": {
+     "fed": 260554,
+     "decoys": 5109,
+     "skipped": 0,
+     "late": 49121,
+     "late_max_us": 291078,
+     "unslotted": 1132,
+     "slot_queue_max": 86
+    },
+    "per_window_means": {
+     "steady_idle": {
+      "windows": 16,
+      "late": 865.2,
+      "late_max_us": 282978,
+      "unslotted": 31.8,
+      "skipped": 0
+     },
+     "steady_loaded": {
+      "windows": 17,
+      "late": 205.1,
+      "late_max_us": 83202,
+      "unslotted": 9.5,
+      "skipped": 0
+     },
+     "idle_after_load": {
+      "windows": 13,
+      "late": 981.1,
+      "late_max_us": 95633,
+      "unslotted": 16.3,
+      "skipped": 0
+     },
+     "loaded_after_idle": {
+      "windows": 13,
+      "late": 581.1,
+      "late_max_us": 291078,
+      "unslotted": 15.4,
+      "skipped": 0
+     }
+    }
+   },
+   {
+    "run": "clockc-2",
+    "leak": true,
+    "count_p": 0.7751,
+    "gap_sd": {
+     "auc": 0.2444,
+     "p_value": 0.001,
+     "control_auc_mean": 0.4998
+    },
+    "max_gap": {
+     "auc": 0.2622,
+     "p_value": 0.0015,
+     "control_auc_mean": 0.4985
+    },
+    "totals": {
+     "fed": 260503,
+     "decoys": 5113,
+     "skipped": 0,
+     "late": 16653,
+     "late_max_us": 113936,
+     "unslotted": 172,
+     "slot_queue_max": 58
+    },
+    "per_window_means": {
+     "steady_idle": {
+      "windows": 16,
+      "late": 218.4,
+      "late_max_us": 99972,
+      "unslotted": 0.0,
+      "skipped": 0
+     },
+     "steady_loaded": {
+      "windows": 15,
+      "late": 377.9,
+      "late_max_us": 79520,
+      "unslotted": 0.9,
+      "skipped": 0
+     },
+     "idle_after_load": {
+      "windows": 14,
+      "late": 86.6,
+      "late_max_us": 5342,
+      "unslotted": 0.0,
+      "skipped": 0
+     },
+     "loaded_after_idle": {
+      "windows": 14,
+      "late": 341.6,
+      "late_max_us": 113936,
+      "unslotted": 9.4,
+      "skipped": 0
+     }
+    }
+   },
+   {
+    "run": "clockc-3",
+    "leak": false,
+    "count_p": 0.4833,
+    "gap_sd": {
+     "auc": 0.4078,
+     "p_value": 0.2294,
+     "control_auc_mean": 0.5021
+    },
+    "max_gap": {
+     "auc": 0.3789,
+     "p_value": 0.1014,
+     "control_auc_mean": 0.5006
+    },
+    "totals": {
+     "fed": 268836,
+     "decoys": 9032,
+     "skipped": 0,
+     "late": 11949,
+     "late_max_us": 227597,
+     "unslotted": 1652,
+     "slot_queue_max": 62
+    },
+    "per_window_means": {
+     "steady_idle": {
+      "windows": 15,
+      "late": 148.8,
+      "late_max_us": 71242,
+      "unslotted": 13.5,
+      "skipped": 0
+     },
+     "steady_loaded": {
+      "windows": 15,
+      "late": 119.7,
+      "late_max_us": 78336,
+      "unslotted": 12.7,
+      "skipped": 0
+     },
+     "idle_after_load": {
+      "windows": 15,
+      "late": 264.3,
+      "late_max_us": 72562,
+      "unslotted": 32.1,
+      "skipped": 0
+     },
+     "loaded_after_idle": {
+      "windows": 14,
+      "late": 181.3,
+      "late_max_us": 79964,
+      "unslotted": 3.4,
+      "skipped": 0
+     }
+    }
+   }
   ],
-  "status": "The first configuration that passes the probe, but not yet a fix to claim: the wire clock stays off by default until the real-website fingerprinting run (wf_real.py) confirms it and the power-state lean is settled; the first hop still sees which slots were decoys.",
-  "counters": {
-    "setup": "same as carrier, with the cloak's clock counters (fa4d554); 3 runs, no power QoS",
-    "runs": [
-      {
-        "run": "clockc-1",
-        "leak": false,
-        "count_p": 0.013,
-        "gap_sd": {
-          "auc": 0.5022,
-          "p_value": 0.9755,
-          "control_auc_mean": 0.4985
-        },
-        "max_gap": {
-          "auc": 0.4456,
-          "p_value": 0.4568,
-          "control_auc_mean": 0.5008
-        },
-        "totals": {
-          "fed": 260554,
-          "decoys": 5109,
-          "skipped": 0,
-          "late": 49121,
-          "late_max_us": 291078,
-          "unslotted": 1132,
-          "slot_queue_max": 86
-        },
-        "per_window_means": {
-          "steady_idle": {
-            "windows": 16,
-            "late": 865.2,
-            "late_max_us": 282978,
-            "unslotted": 31.8,
-            "skipped": 0
-          },
-          "steady_loaded": {
-            "windows": 17,
-            "late": 205.1,
-            "late_max_us": 83202,
-            "unslotted": 9.5,
-            "skipped": 0
-          },
-          "idle_after_load": {
-            "windows": 13,
-            "late": 981.1,
-            "late_max_us": 95633,
-            "unslotted": 16.3,
-            "skipped": 0
-          },
-          "loaded_after_idle": {
-            "windows": 13,
-            "late": 581.1,
-            "late_max_us": 291078,
-            "unslotted": 15.4,
-            "skipped": 0
-          }
-        }
-      },
-      {
-        "run": "clockc-2",
-        "leak": true,
-        "count_p": 0.7751,
-        "gap_sd": {
-          "auc": 0.2444,
-          "p_value": 0.001,
-          "control_auc_mean": 0.4998
-        },
-        "max_gap": {
-          "auc": 0.2622,
-          "p_value": 0.0015,
-          "control_auc_mean": 0.4985
-        },
-        "totals": {
-          "fed": 260503,
-          "decoys": 5113,
-          "skipped": 0,
-          "late": 16653,
-          "late_max_us": 113936,
-          "unslotted": 172,
-          "slot_queue_max": 58
-        },
-        "per_window_means": {
-          "steady_idle": {
-            "windows": 16,
-            "late": 218.4,
-            "late_max_us": 99972,
-            "unslotted": 0.0,
-            "skipped": 0
-          },
-          "steady_loaded": {
-            "windows": 15,
-            "late": 377.9,
-            "late_max_us": 79520,
-            "unslotted": 0.9,
-            "skipped": 0
-          },
-          "idle_after_load": {
-            "windows": 14,
-            "late": 86.6,
-            "late_max_us": 5342,
-            "unslotted": 0.0,
-            "skipped": 0
-          },
-          "loaded_after_idle": {
-            "windows": 14,
-            "late": 341.6,
-            "late_max_us": 113936,
-            "unslotted": 9.4,
-            "skipped": 0
-          }
-        }
-      },
-      {
-        "run": "clockc-3",
-        "leak": false,
-        "count_p": 0.4833,
-        "gap_sd": {
-          "auc": 0.4078,
-          "p_value": 0.2294,
-          "control_auc_mean": 0.5021
-        },
-        "max_gap": {
-          "auc": 0.3789,
-          "p_value": 0.1014,
-          "control_auc_mean": 0.5006
-        },
-        "totals": {
-          "fed": 268836,
-          "decoys": 9032,
-          "skipped": 0,
-          "late": 11949,
-          "late_max_us": 227597,
-          "unslotted": 1652,
-          "slot_queue_max": 62
-        },
-        "per_window_means": {
-          "steady_idle": {
-            "windows": 15,
-            "late": 148.8,
-            "late_max_us": 71242,
-            "unslotted": 13.5,
-            "skipped": 0
-          },
-          "steady_loaded": {
-            "windows": 15,
-            "late": 119.7,
-            "late_max_us": 78336,
-            "unslotted": 12.7,
-            "skipped": 0
-          },
-          "idle_after_load": {
-            "windows": 15,
-            "late": 264.3,
-            "late_max_us": 72562,
-            "unslotted": 32.1,
-            "skipped": 0
-          },
-          "loaded_after_idle": {
-            "windows": 14,
-            "late": 181.3,
-            "late_max_us": 79964,
-            "unslotted": 3.4,
-            "skipped": 0
-          }
-        }
-      }
-    ],
-    "reading": "The feeder is exact: every window was fed its 4,080 slots and no slot was ever skipped. The loss of timing happens after it: 12,000-49,000 packets per run reached the socket after their slot (worst 114-291 ms), in idle and loaded windows alike, and were then sent at once, so their timing followed quinn's scheduling, not the grid; 172-1,652 full-size packets found no slot. Hypothesis (to test): quinn's congestion control (BBR) holds datagrams back when its estimate dips below the fixed stream rate. Next: a fixed-window controller on the client while the clock runs, judged by lateness falling to about zero."
+  "reading": "The feeder is exact: every window was fed its 4,080 slots and no slot was ever skipped. The loss of timing happens after it: 12,000-49,000 packets per run reached the socket after their slot (worst 114-291 ms), in idle and loaded windows alike, and were then sent at once, so their timing followed quinn's scheduling, not the grid; 172-1,652 full-size packets found no slot. Hypothesis (to test): quinn's congestion control (BBR) holds datagrams back when its estimate dips below the fixed stream rate. Next: a fixed-window controller on the client while the clock runs, judged by lateness falling to about zero."
+ },
+ "fixed_window": {
+  "setup": "as counters, with a fixed congestion window on the clocked client (quinn's congestion control and pacing off)",
+  "runs": [
+   {
+    "run": "fixedwin-1",
+    "leak": true,
+    "count_p": 0.1474,
+    "gap_sd": {
+     "auc": 0.1111,
+     "p_value": 0.0005,
+     "control_auc_mean": 0.5013
+    },
+    "max_gap": {
+     "auc": 0.1683,
+     "p_value": 0.0005,
+     "control_auc_mean": 0.5012
+    },
+    "totals": {
+     "fed": 264391,
+     "decoys": 5338,
+     "skipped": 127,
+     "late": 39,
+     "late_max_us": 2237,
+     "unslotted": 54399
+    }
+   },
+   {
+    "run": "fixedwin-2",
+    "leak": false,
+    "count_p": 0.4058,
+    "gap_sd": {
+     "auc": 0.4033,
+     "p_value": 0.2179,
+     "control_auc_mean": 0.4999
+    },
+    "max_gap": {
+     "auc": 0.3956,
+     "p_value": 0.1574,
+     "control_auc_mean": 0.5016
+    },
+    "totals": {
+     "fed": 264612,
+     "decoys": 5263,
+     "skipped": 98,
+     "late": 39,
+     "late_max_us": 4166,
+     "unslotted": 55420
+    }
+   },
+   {
+    "run": "fixedwin-3",
+    "leak": false,
+    "count_p": 0.2814,
+    "gap_sd": {
+     "auc": 0.3433,
+     "p_value": 0.0345,
+     "control_auc_mean": 0.4993
+    },
+    "max_gap": {
+     "auc": 0.3978,
+     "p_value": 0.1879,
+     "control_auc_mean": 0.4986
+    },
+    "totals": {
+     "fed": 260437,
+     "decoys": 5204,
+     "skipped": 187,
+     "late": 68,
+     "late_max_us": 3700,
+     "unslotted": 54121
+    }
+   }
+  ],
+  "reading": "Lateness fell from 12,000-49,000 packets per run (worst 114-291 ms) to 39-68 (worst 2-4 ms): quinn's congestion control was what held packets back. But 54,000-55,400 full-size packets per run found no slot and left on quinn's timing; run 1 leaked (gap spread p 0.0005).",
+  "cause": "Reproduced on loopback with fq (a cloak test in its own network namespace): 2,453 of 16,465 packets found no slot in 4 s, against 12 without fq. Packets fq holds for their departure time count against the socket's send buffer; when it filled, sendmsg failed, quinn retried the packet, and the paced socket had already spent that packet's slot. Fix: a failed send puts its slot back, and the socket asks for a send buffer large enough for the look-ahead (capped by net.core.wmem_max). Unslotted packets: 14-17 per 16,440 with the fix; 342 with both halves removed; buffer only 14, slot restore only 114. Regression test the_clock_keeps_every_packet_on_its_slot_under_fq, run in CI under unshare -Urn with fq on loopback."
+ },
+ "fixed_window_and_slots": {
+  "setup": "34004ba: fixed congestion window and slots kept on failed sends; as before (fast, 2 hops, catch-up 50, 4,080 slots/s, 30 ms look-ahead, fq), no power QoS; run outside Claude's sandbox via systemd-run --user",
+  "runs": [
+   {
+    "run": "fixslot-1",
+    "leak": false,
+    "count_auc": 0.47,
+    "count_p": 0.6137,
+    "gap_sd": {
+     "auc": 0.64,
+     "p_value": 0.067,
+     "control_auc_mean": 0.5012
+    },
+    "max_gap": {
+     "auc": 0.43,
+     "p_value": 0.3593,
+     "control_auc_mean": 0.4991
+    },
+    "control": 0.502,
+    "packets_per_window": {
+     "loaded": 3264.5,
+     "idle": 3264.3,
+     "min": 3263,
+     "max": 3270
+    },
+    "totals": {
+     "fed": 260257,
+     "decoys": 5116,
+     "skipped": 0,
+     "late": 0,
+     "late_max_us": 0,
+     "unslotted": 35
+    }
+   },
+   {
+    "run": "fixslot-2",
+    "leak": false,
+    "count_auc": 0.4944,
+    "count_p": 0.8291,
+    "gap_sd": {
+     "auc": 0.6078,
+     "p_value": 0.1599,
+     "control_auc_mean": 0.502
+    },
+    "max_gap": {
+     "auc": 0.3711,
+     "p_value": 0.0855,
+     "control_auc_mean": 0.4997
+    },
+    "control": 0.5004,
+    "packets_per_window": {
+     "loaded": 3264.2,
+     "idle": 3263.8,
+     "min": 3256,
+     "max": 3269
+    },
+    "totals": {
+     "fed": 260379,
+     "decoys": 5106,
+     "skipped": 0,
+     "late": 0,
+     "late_max_us": 0,
+     "unslotted": 33
+    }
+   },
+   {
+    "run": "fixslot-3",
+    "leak": false,
+    "count_auc": 0.5728,
+    "count_p": 0.1789,
+    "gap_sd": {
+     "auc": 0.61,
+     "p_value": 0.1399,
+     "control_auc_mean": 0.5025
+    },
+    "max_gap": {
+     "auc": 0.3744,
+     "p_value": 0.096,
+     "control_auc_mean": 0.4979
+    },
+    "control": 0.4986,
+    "packets_per_window": {
+     "loaded": 3265.7,
+     "idle": 3264.3,
+     "min": 3263,
+     "max": 3312
+    },
+    "totals": {
+     "fed": 259997,
+     "decoys": 5092,
+     "skipped": 0,
+     "late": 0,
+     "late_max_us": 0,
+     "unslotted": 39
+    }
+   }
+  ],
+  "reading": "No leak in 3 of 3 runs: count p 0.18-0.83, gap spread p 0.07-0.16, largest gap p 0.09-0.36; packets per window 3,256-3,270 (one window 3,312) whether loaded or idle, and the transition effect is gone. The clock kept time: 0 slots skipped, 0 late sends, 33-39 unslotted of about 260,000. Caveat: the timing features lean the same way in all three runs (gap spread AUC 0.61-0.64, largest gap 0.37-0.43) without reaching significance, as the CPU power-state effect seen in isolation would; it is not shown gone."
+ },
+ "power_state": {
+  "setup": "34004ba wire clock on the real carrier (fast, 2 hops, catch-up 50), 3 interleaved rounds of 4 variants: base (powersave governor, all idle states down to C10), freq (every core fixed at 1.8 GHz, no turbo), qos (/dev/cpu_dma_latency 0 us), both. i7-8565U, intel_pstate; settings restored afterwards.",
+  "runs": [
+   {
+    "round": 1,
+    "variant": "base",
+    "leak": true,
+    "count_p": 0.2459,
+    "gap_sd": {
+     "auc": 0.8533,
+     "p_value": 0.0005,
+     "control_auc_mean": 0.4986
+    },
+    "max_gap": {
+     "auc": 0.53,
+     "p_value": 0.6877,
+     "control_auc_mean": 0.499
+    },
+    "late": 0,
+    "unslotted": 20
+   },
+   {
+    "round": 1,
+    "variant": "freq",
+    "leak": false,
+    "count_p": 0.3018,
+    "gap_sd": {
+     "auc": 0.5111,
+     "p_value": 0.8786,
+     "control_auc_mean": 0.4966
+    },
+    "max_gap": {
+     "auc": 0.3733,
+     "p_value": 0.1004,
+     "control_auc_mean": 0.5006
+    },
+    "late": 0,
+    "unslotted": 38
+   },
+   {
+    "round": 1,
+    "variant": "qos",
+    "leak": true,
+    "count_p": 1.0,
+    "gap_sd": {
+     "auc": 0.4289,
+     "p_value": 0.3533,
+     "control_auc_mean": 0.4996
+    },
+    "max_gap": {
+     "auc": 0.2722,
+     "p_value": 0.003,
+     "control_auc_mean": 0.5019
+    },
+    "late": 0,
+    "unslotted": 15
+   },
+   {
+    "round": 1,
+    "variant": "both",
+    "result": "did not run: the tunnel did not come up within 90 s (the chain's core kept reconnecting)"
+   },
+   {
+    "round": 2,
+    "variant": "base",
+    "leak": false,
+    "count_p": 0.5087,
+    "gap_sd": {
+     "auc": 0.7122,
+     "p_value": 0.005,
+     "control_auc_mean": 0.5003
+    },
+    "max_gap": {
+     "auc": 0.3556,
+     "p_value": 0.064,
+     "control_auc_mean": 0.5031
+    },
+    "late": 0,
+    "unslotted": 19
+   },
+   {
+    "round": 2,
+    "variant": "freq",
+    "leak": false,
+    "count_p": 0.7761,
+    "gap_sd": {
+     "auc": 0.5933,
+     "p_value": 0.2194,
+     "control_auc_mean": 0.5013
+    },
+    "max_gap": {
+     "auc": 0.34,
+     "p_value": 0.032,
+     "control_auc_mean": 0.5027
+    },
+    "late": 0,
+    "unslotted": 18
+   },
+   {
+    "round": 2,
+    "variant": "qos",
+    "leak": true,
+    "count_p": 0.9365,
+    "gap_sd": {
+     "auc": 0.4711,
+     "p_value": 0.7091,
+     "control_auc_mean": 0.4966
+    },
+    "max_gap": {
+     "auc": 0.2689,
+     "p_value": 0.003,
+     "control_auc_mean": 0.4998
+    },
+    "late": 0,
+    "unslotted": 21
+   },
+   {
+    "round": 2,
+    "variant": "both",
+    "leak": false,
+    "count_p": 0.4878,
+    "gap_sd": {
+     "auc": 0.3333,
+     "p_value": 0.0265,
+     "control_auc_mean": 0.5003
+    },
+    "max_gap": {
+     "auc": 0.38,
+     "p_value": 0.1164,
+     "control_auc_mean": 0.503
+    },
+    "late": 0,
+    "unslotted": 23
+   },
+   {
+    "round": 3,
+    "variant": "base",
+    "leak": true,
+    "count_p": 0.7511,
+    "gap_sd": {
+     "auc": 0.8944,
+     "p_value": 0.0005,
+     "control_auc_mean": 0.4983
+    },
+    "max_gap": {
+     "auc": 0.5178,
+     "p_value": 0.8091,
+     "control_auc_mean": 0.5001
+    },
+    "late": 0,
+    "unslotted": 16
+   },
+   {
+    "round": 3,
+    "variant": "freq",
+    "leak": true,
+    "count_p": 1.0,
+    "gap_sd": {
+     "auc": 0.7633,
+     "p_value": 0.0005,
+     "control_auc_mean": 0.5004
+    },
+    "max_gap": {
+     "auc": 0.3056,
+     "p_value": 0.01,
+     "control_auc_mean": 0.4984
+    },
+    "late": 0,
+    "unslotted": 17
+   },
+   {
+    "round": 3,
+    "variant": "qos",
+    "leak": false,
+    "count_p": 0.6102,
+    "gap_sd": {
+     "auc": 0.3244,
+     "p_value": 0.0245,
+     "control_auc_mean": 0.5019
+    },
+    "max_gap": {
+     "auc": 0.33,
+     "p_value": 0.0215,
+     "control_auc_mean": 0.4986
+    },
+    "late": 0,
+    "unslotted": 15
+   },
+   {
+    "round": 3,
+    "variant": "both",
+    "leak": false,
+    "count_p": 0.0375,
+    "gap_sd": {
+     "auc": 0.3033,
+     "p_value": 0.012,
+     "control_auc_mean": 0.5007
+    },
+    "max_gap": {
+     "auc": 0.3444,
+     "p_value": 0.0355,
+     "control_auc_mean": 0.5053
+    },
+    "late": 0,
+    "unslotted": 18
+   }
+  ],
+  "reading": "Two effects of opposite sign mix. With normal power management, loaded windows are smoother (gap spread AUC 0.71-0.89; leak 2 of 3): an idle CPU in deep sleep or at low frequency releases packets less evenly. With shallow sleep, loaded windows are rougher (AUC 0.27-0.33 on the largest gap or gap spread; leak 2 of 3 for qos): contention shows through, probably because the kernel's release of paced packets competes with the load on the same cores. Fixed frequency comes closest (2 of 3 clean); both together gave no significant leak in 2 valid runs but still lean. No setting removes the signal entirely. The effects are microseconds on a quiet virtual link timestamped at the first hop: a strong lab adversary. Whether they survive a real path's millisecond jitter is the question for the real-website run. Base runs leaned harder here than in the earlier wire-clock runs (0.61-0.64), so conditions move this signal."
+ },
+ "downstream_collapse": {
+  "setup": "tools/wf_real.py collect --config fast with AVPN_WIRE_CLOCK_PPS=4000 AVPN_CATCH_UP_MS=50, the re-run's pinning (client and browser on cores 0,1; relay, exit and capture on 2,3) and fq on the client link; 4 sites x 2 loads; both cloaks' QUIC path (cwnd, RTT) sampled every 5 s from outside the lab",
+  "real_run": "Real-website re-run 2026-11-15, clock passes: round 1 had 1 of 40 loads ok, round 2 none (every load dnsNotFound). Live in round 2: the relay's cloak handed QUIC about 4,000 datagrams/s for the client, the client's cloak received about 170/s (4%); the client's carrier, given no real data back, was restarted every 10-12 s. The fast pass of the same round delivered 85% (no clock).",
+  "mechanism": "The handshake is not paced, so quinn's minimum RTT is the link's (81-96 us in the lab). Afterwards every acknowledgement from the client rides in a packet the clock holds for up to its 30 ms look-ahead, so the relay sees about 27 ms. BBR's window is bandwidth x minimum RTT: it shrank to 8-11 packets and never grew back.",
+  "fix": "src/cloak.rs server_config_clocked: a clocked chain's server sends with the fixed window too (as the clocked client already did). The downstream's rate is the carrier's, set by the signed class, as on WireGuard over UDP. Test: a_clocked_chains_server_never_shrinks_its_window (fails with BBR).",
+  "repro_battery_bbr": {
+   "relay_window": "BBR (as before the fix)",
+   "on_mains": false,
+   "loads_ok": 1,
+   "loads": 8,
+   "client_reconnects": 14,
+   "relay_sent_to_client_received": [
+    928938,
+    502043
+   ],
+   "relay_path_every_15s": [
+    {
+     "t": "19:05:11",
+     "cwnd": 20536020,
+     "rtt_us": 27322,
+     "min_rtt_us": 156,
+     "relay_sent": 20792
+    },
+    {
+     "t": "19:05:33",
+     "cwnd": 81140060,
+     "rtt_us": 27429,
+     "min_rtt_us": 156,
+     "relay_sent": 104330
+    },
+    {
+     "t": "19:05:56",
+     "cwnd": 72914792,
+     "rtt_us": 22073,
+     "min_rtt_us": 96,
+     "relay_sent": 188390
+    },
+    {
+     "t": "19:06:25",
+     "cwnd": 59107754,
+     "rtt_us": 15660,
+     "min_rtt_us": 96,
+     "relay_sent": 258679
+    },
+    {
+     "t": "19:06:54",
+     "cwnd": 52456667,
+     "rtt_us": 17361,
+     "min_rtt_us": 96,
+     "relay_sent": 334683
+    },
+    {
+     "t": "19:07:23",
+     "cwnd": 793780,
+     "rtt_us": 27547,
+     "min_rtt_us": 96,
+     "relay_sent": 404686
+    },
+    {
+     "t": "19:07:42",
+     "cwnd": 47810027,
+     "rtt_us": 27197,
+     "min_rtt_us": 96,
+     "relay_sent": 473707
+    },
+    {
+     "t": "19:07:59",
+     "cwnd": 15064,
+     "rtt_us": 27675,
+     "min_rtt_us": 96,
+     "relay_sent": 541707
+    },
+    {
+     "t": "19:08:16",
+     "cwnd": 15064,
+     "rtt_us": 27054,
+     "min_rtt_us": 96,
+     "relay_sent": 609710
+    },
+    {
+     "t": "19:08:33",
+     "cwnd": 15064,
+     "rtt_us": 27340,
+     "min_rtt_us": 96,
+     "relay_sent": 677714
+    },
+    {
+     "t": "19:08:50",
+     "cwnd": 15064,
+     "rtt_us": 27102,
+     "min_rtt_us": 96,
+     "relay_sent": 745718
+    },
+    {
+     "t": "19:09:08",
+     "cwnd": 15064,
+     "rtt_us": 26773,
+     "min_rtt_us": 96,
+     "relay_sent": 813721
+    },
+    {
+     "t": "19:09:25",
+     "cwnd": 15064,
+     "rtt_us": 27435,
+     "min_rtt_us": 96,
+     "relay_sent": 881726
+    },
+    {
+     "t": "19:09:42",
+     "cwnd": 15064,
+     "rtt_us": 27615,
+     "min_rtt_us": 96,
+     "relay_sent": 949730
+    }
+   ]
   },
-  "fixed_window": {
-    "setup": "as counters, with a fixed congestion window on the clocked client (quinn's congestion control and pacing off)",
-    "runs": [
-      {
-        "run": "fixedwin-1",
-        "leak": true,
-        "count_p": 0.1474,
-        "gap_sd": {
-          "auc": 0.1111,
-          "p_value": 0.0005,
-          "control_auc_mean": 0.5013
-        },
-        "max_gap": {
-          "auc": 0.1683,
-          "p_value": 0.0005,
-          "control_auc_mean": 0.5012
-        },
-        "totals": {
-          "fed": 264391,
-          "decoys": 5338,
-          "skipped": 127,
-          "late": 39,
-          "late_max_us": 2237,
-          "unslotted": 54399
-        }
-      },
-      {
-        "run": "fixedwin-2",
-        "leak": false,
-        "count_p": 0.4058,
-        "gap_sd": {
-          "auc": 0.4033,
-          "p_value": 0.2179,
-          "control_auc_mean": 0.4999
-        },
-        "max_gap": {
-          "auc": 0.3956,
-          "p_value": 0.1574,
-          "control_auc_mean": 0.5016
-        },
-        "totals": {
-          "fed": 264612,
-          "decoys": 5263,
-          "skipped": 98,
-          "late": 39,
-          "late_max_us": 4166,
-          "unslotted": 55420
-        }
-      },
-      {
-        "run": "fixedwin-3",
-        "leak": false,
-        "count_p": 0.2814,
-        "gap_sd": {
-          "auc": 0.3433,
-          "p_value": 0.0345,
-          "control_auc_mean": 0.4993
-        },
-        "max_gap": {
-          "auc": 0.3978,
-          "p_value": 0.1879,
-          "control_auc_mean": 0.4986
-        },
-        "totals": {
-          "fed": 260437,
-          "decoys": 5204,
-          "skipped": 187,
-          "late": 68,
-          "late_max_us": 3700,
-          "unslotted": 54121
-        }
-      }
-    ],
-    "reading": "Lateness fell from 12,000-49,000 packets per run (worst 114-291 ms) to 39-68 (worst 2-4 ms): quinn's congestion control was what held packets back. But 54,000-55,400 full-size packets per run found no slot and left on quinn's timing; run 1 leaked (gap spread p 0.0005).",
-    "cause": "Reproduced on loopback with fq (a cloak test in its own network namespace): 2,453 of 16,465 packets found no slot in 4 s, against 12 without fq. Packets fq holds for their departure time count against the socket's send buffer; when it filled, sendmsg failed, quinn retried the packet, and the paced socket had already spent that packet's slot. Fix: a failed send puts its slot back, and the socket asks for a send buffer large enough for the look-ahead (capped by net.core.wmem_max). Unslotted packets: 14-17 per 16,440 with the fix; 342 with both halves removed; buffer only 14, slot restore only 114. Regression test the_clock_keeps_every_packet_on_its_slot_under_fq, run in CI under unshare -Urn with fq on loopback."
+  "repro_mains_fixed": {
+   "relay_window": "fixed (clocked transport)",
+   "on_mains": true,
+   "loads_ok": 8,
+   "loads": 8,
+   "client_reconnects": 0,
+   "relay_sent_to_client_received": [
+    769571,
+    765307
+   ],
+   "relay_path_every_15s": [
+    {
+     "t": "19:31:34",
+     "cwnd": 1099511627776,
+     "rtt_us": 27870,
+     "min_rtt_us": 68,
+     "relay_sent": 18614
+    },
+    {
+     "t": "19:31:52",
+     "cwnd": 1099511627776,
+     "rtt_us": 27576,
+     "min_rtt_us": 68,
+     "relay_sent": 90609
+    },
+    {
+     "t": "19:32:10",
+     "cwnd": 1099511627776,
+     "rtt_us": 27672,
+     "min_rtt_us": 68,
+     "relay_sent": 162580
+    },
+    {
+     "t": "19:32:27",
+     "cwnd": 1099511627776,
+     "rtt_us": 23403,
+     "min_rtt_us": 68,
+     "relay_sent": 230592
+    },
+    {
+     "t": "19:32:45",
+     "cwnd": 1099511627776,
+     "rtt_us": 26434,
+     "min_rtt_us": 68,
+     "relay_sent": 302592
+    },
+    {
+     "t": "19:33:02",
+     "cwnd": 1099511627776,
+     "rtt_us": 27234,
+     "min_rtt_us": 68,
+     "relay_sent": 373974
+    },
+    {
+     "t": "19:33:20",
+     "cwnd": 1099511627776,
+     "rtt_us": 29548,
+     "min_rtt_us": 68,
+     "relay_sent": 441853
+    },
+    {
+     "t": "19:33:38",
+     "cwnd": 1099511627776,
+     "rtt_us": 27027,
+     "min_rtt_us": 68,
+     "relay_sent": 504204
+    },
+    {
+     "t": "19:33:56",
+     "cwnd": 1099511627776,
+     "rtt_us": 28165,
+     "min_rtt_us": 68,
+     "relay_sent": 576185
+    },
+    {
+     "t": "19:34:14",
+     "cwnd": 1099511627776,
+     "rtt_us": 27191,
+     "min_rtt_us": 68,
+     "relay_sent": 648185
+    },
+    {
+     "t": "19:34:31",
+     "cwnd": 1099511627776,
+     "rtt_us": 28010,
+     "min_rtt_us": 68,
+     "relay_sent": 720185
+    },
+    {
+     "t": "19:34:49",
+     "cwnd": 1099511627776,
+     "rtt_us": 27168,
+     "min_rtt_us": 68,
+     "relay_sent": 788185
+    }
+   ]
   },
-  "fixed_window_and_slots": {
-    "setup": "34004ba: fixed congestion window and slots kept on failed sends; as before (fast, 2 hops, catch-up 50, 4,080 slots/s, 30 ms look-ahead, fq), no power QoS; run outside Claude's sandbox via systemd-run --user",
-    "runs": [
-      {
-        "run": "fixslot-1",
-        "leak": false,
-        "count_auc": 0.47,
-        "count_p": 0.6137,
-        "gap_sd": {
-          "auc": 0.64,
-          "p_value": 0.067,
-          "control_auc_mean": 0.5012
-        },
-        "max_gap": {
-          "auc": 0.43,
-          "p_value": 0.3593,
-          "control_auc_mean": 0.4991
-        },
-        "control": 0.502,
-        "packets_per_window": {
-          "loaded": 3264.5,
-          "idle": 3264.3,
-          "min": 3263,
-          "max": 3270
-        },
-        "totals": {
-          "fed": 260257,
-          "decoys": 5116,
-          "skipped": 0,
-          "late": 0,
-          "late_max_us": 0,
-          "unslotted": 35
-        }
-      },
-      {
-        "run": "fixslot-2",
-        "leak": false,
-        "count_auc": 0.4944,
-        "count_p": 0.8291,
-        "gap_sd": {
-          "auc": 0.6078,
-          "p_value": 0.1599,
-          "control_auc_mean": 0.502
-        },
-        "max_gap": {
-          "auc": 0.3711,
-          "p_value": 0.0855,
-          "control_auc_mean": 0.4997
-        },
-        "control": 0.5004,
-        "packets_per_window": {
-          "loaded": 3264.2,
-          "idle": 3263.8,
-          "min": 3256,
-          "max": 3269
-        },
-        "totals": {
-          "fed": 260379,
-          "decoys": 5106,
-          "skipped": 0,
-          "late": 0,
-          "late_max_us": 0,
-          "unslotted": 33
-        }
-      },
-      {
-        "run": "fixslot-3",
-        "leak": false,
-        "count_auc": 0.5728,
-        "count_p": 0.1789,
-        "gap_sd": {
-          "auc": 0.61,
-          "p_value": 0.1399,
-          "control_auc_mean": 0.5025
-        },
-        "max_gap": {
-          "auc": 0.3744,
-          "p_value": 0.096,
-          "control_auc_mean": 0.4979
-        },
-        "control": 0.4986,
-        "packets_per_window": {
-          "loaded": 3265.7,
-          "idle": 3264.3,
-          "min": 3263,
-          "max": 3312
-        },
-        "totals": {
-          "fed": 259997,
-          "decoys": 5092,
-          "skipped": 0,
-          "late": 0,
-          "late_max_us": 0,
-          "unslotted": 39
-        }
-      }
-    ],
-    "reading": "No leak in 3 of 3 runs: count p 0.18-0.83, gap spread p 0.07-0.16, largest gap p 0.09-0.36; packets per window 3,256-3,270 (one window 3,312) whether loaded or idle, and the transition effect is gone. The clock kept time: 0 slots skipped, 0 late sends, 33-39 unslotted of about 260,000. Caveat: the timing features lean the same way in all three runs (gap spread AUC 0.61-0.64, largest gap 0.37-0.43) without reaching significance, as the CPU power-state effect seen in isolation would; it is not shown gone."
-  },
-  "power_state": {
-    "setup": "34004ba wire clock on the real carrier (fast, 2 hops, catch-up 50), 3 interleaved rounds of 4 variants: base (powersave governor, all idle states down to C10), freq (every core fixed at 1.8 GHz, no turbo), qos (/dev/cpu_dma_latency 0 us), both. i7-8565U, intel_pstate; settings restored afterwards.",
-    "runs": [
-      {
-        "round": 1,
-        "variant": "base",
-        "leak": true,
-        "count_p": 0.2459,
-        "gap_sd": {
-          "auc": 0.8533,
-          "p_value": 0.0005,
-          "control_auc_mean": 0.4986
-        },
-        "max_gap": {
-          "auc": 0.53,
-          "p_value": 0.6877,
-          "control_auc_mean": 0.499
-        },
-        "late": 0,
-        "unslotted": 20
-      },
-      {
-        "round": 1,
-        "variant": "freq",
-        "leak": false,
-        "count_p": 0.3018,
-        "gap_sd": {
-          "auc": 0.5111,
-          "p_value": 0.8786,
-          "control_auc_mean": 0.4966
-        },
-        "max_gap": {
-          "auc": 0.3733,
-          "p_value": 0.1004,
-          "control_auc_mean": 0.5006
-        },
-        "late": 0,
-        "unslotted": 38
-      },
-      {
-        "round": 1,
-        "variant": "qos",
-        "leak": true,
-        "count_p": 1.0,
-        "gap_sd": {
-          "auc": 0.4289,
-          "p_value": 0.3533,
-          "control_auc_mean": 0.4996
-        },
-        "max_gap": {
-          "auc": 0.2722,
-          "p_value": 0.003,
-          "control_auc_mean": 0.5019
-        },
-        "late": 0,
-        "unslotted": 15
-      },
-      {
-        "round": 1,
-        "variant": "both",
-        "result": "did not run: the tunnel did not come up within 90 s (the chain's core kept reconnecting)"
-      },
-      {
-        "round": 2,
-        "variant": "base",
-        "leak": false,
-        "count_p": 0.5087,
-        "gap_sd": {
-          "auc": 0.7122,
-          "p_value": 0.005,
-          "control_auc_mean": 0.5003
-        },
-        "max_gap": {
-          "auc": 0.3556,
-          "p_value": 0.064,
-          "control_auc_mean": 0.5031
-        },
-        "late": 0,
-        "unslotted": 19
-      },
-      {
-        "round": 2,
-        "variant": "freq",
-        "leak": false,
-        "count_p": 0.7761,
-        "gap_sd": {
-          "auc": 0.5933,
-          "p_value": 0.2194,
-          "control_auc_mean": 0.5013
-        },
-        "max_gap": {
-          "auc": 0.34,
-          "p_value": 0.032,
-          "control_auc_mean": 0.5027
-        },
-        "late": 0,
-        "unslotted": 18
-      },
-      {
-        "round": 2,
-        "variant": "qos",
-        "leak": true,
-        "count_p": 0.9365,
-        "gap_sd": {
-          "auc": 0.4711,
-          "p_value": 0.7091,
-          "control_auc_mean": 0.4966
-        },
-        "max_gap": {
-          "auc": 0.2689,
-          "p_value": 0.003,
-          "control_auc_mean": 0.4998
-        },
-        "late": 0,
-        "unslotted": 21
-      },
-      {
-        "round": 2,
-        "variant": "both",
-        "leak": false,
-        "count_p": 0.4878,
-        "gap_sd": {
-          "auc": 0.3333,
-          "p_value": 0.0265,
-          "control_auc_mean": 0.5003
-        },
-        "max_gap": {
-          "auc": 0.38,
-          "p_value": 0.1164,
-          "control_auc_mean": 0.503
-        },
-        "late": 0,
-        "unslotted": 23
-      },
-      {
-        "round": 3,
-        "variant": "base",
-        "leak": true,
-        "count_p": 0.7511,
-        "gap_sd": {
-          "auc": 0.8944,
-          "p_value": 0.0005,
-          "control_auc_mean": 0.4983
-        },
-        "max_gap": {
-          "auc": 0.5178,
-          "p_value": 0.8091,
-          "control_auc_mean": 0.5001
-        },
-        "late": 0,
-        "unslotted": 16
-      },
-      {
-        "round": 3,
-        "variant": "freq",
-        "leak": true,
-        "count_p": 1.0,
-        "gap_sd": {
-          "auc": 0.7633,
-          "p_value": 0.0005,
-          "control_auc_mean": 0.5004
-        },
-        "max_gap": {
-          "auc": 0.3056,
-          "p_value": 0.01,
-          "control_auc_mean": 0.4984
-        },
-        "late": 0,
-        "unslotted": 17
-      },
-      {
-        "round": 3,
-        "variant": "qos",
-        "leak": false,
-        "count_p": 0.6102,
-        "gap_sd": {
-          "auc": 0.3244,
-          "p_value": 0.0245,
-          "control_auc_mean": 0.5019
-        },
-        "max_gap": {
-          "auc": 0.33,
-          "p_value": 0.0215,
-          "control_auc_mean": 0.4986
-        },
-        "late": 0,
-        "unslotted": 15
-      },
-      {
-        "round": 3,
-        "variant": "both",
-        "leak": false,
-        "count_p": 0.0375,
-        "gap_sd": {
-          "auc": 0.3033,
-          "p_value": 0.012,
-          "control_auc_mean": 0.5007
-        },
-        "max_gap": {
-          "auc": 0.3444,
-          "p_value": 0.0355,
-          "control_auc_mean": 0.5053
-        },
-        "late": 0,
-        "unslotted": 18
-      }
-    ],
-    "reading": "Two effects of opposite sign mix. With normal power management, loaded windows are smoother (gap spread AUC 0.71-0.89; leak 2 of 3): an idle CPU in deep sleep or at low frequency releases packets less evenly. With shallow sleep, loaded windows are rougher (AUC 0.27-0.33 on the largest gap or gap spread; leak 2 of 3 for qos): contention shows through, probably because the kernel's release of paced packets competes with the load on the same cores. Fixed frequency comes closest (2 of 3 clean); both together gave no significant leak in 2 valid runs but still lean. No setting removes the signal entirely. The effects are microseconds on a quiet virtual link timestamped at the first hop: a strong lab adversary. Whether they survive a real path's millisecond jitter is the question for the real-website run. Base runs leaned harder here than in the earlier wire-clock runs (0.61-0.64), so conditions move this signal."
+  "repro_mains_bbr_control": {
+   "relay_window": "BBR (as before the fix)",
+   "on_mains": true,
+   "loads_ok": 1,
+   "loads": 8,
+   "client_reconnects": 11,
+   "relay_sent_to_client_received": [
+    656032,
+    97144
+   ],
+   "relay_path_every_15s": [
+    {
+     "t": "19:39:50",
+     "cwnd": 30573644,
+     "rtt_us": 27115,
+     "min_rtt_us": 81,
+     "relay_sent": 18871
+    },
+    {
+     "t": "19:40:07",
+     "cwnd": 20460,
+     "rtt_us": 26988,
+     "min_rtt_us": 81,
+     "relay_sent": 86871
+    },
+    {
+     "t": "19:40:24",
+     "cwnd": 10825,
+     "rtt_us": 27340,
+     "min_rtt_us": 81,
+     "relay_sent": 154872
+    },
+    {
+     "t": "19:40:41",
+     "cwnd": 10825,
+     "rtt_us": 27161,
+     "min_rtt_us": 81,
+     "relay_sent": 222876
+    },
+    {
+     "t": "19:40:58",
+     "cwnd": 10825,
+     "rtt_us": 27070,
+     "min_rtt_us": 81,
+     "relay_sent": 290880
+    },
+    {
+     "t": "19:41:15",
+     "cwnd": 5680,
+     "rtt_us": 27000,
+     "min_rtt_us": 81,
+     "relay_sent": 358880
+    },
+    {
+     "t": "19:41:32",
+     "cwnd": 10825,
+     "rtt_us": 27204,
+     "min_rtt_us": 81,
+     "relay_sent": 426888
+    },
+    {
+     "t": "19:41:48",
+     "cwnd": 10825,
+     "rtt_us": 27404,
+     "min_rtt_us": 81,
+     "relay_sent": 494893
+    },
+    {
+     "t": "19:42:05",
+     "cwnd": 10825,
+     "rtt_us": 26540,
+     "min_rtt_us": 81,
+     "relay_sent": 562897
+    },
+    {
+     "t": "19:42:22",
+     "cwnd": 10825,
+     "rtt_us": 27282,
+     "min_rtt_us": 81,
+     "relay_sent": 626900
+    }
+   ]
   }
+ }
 }

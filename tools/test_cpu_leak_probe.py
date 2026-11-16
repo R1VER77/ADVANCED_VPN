@@ -7,10 +7,23 @@ packet counts reveal it. These tests prove the scoring finds a planted dip, find
 in a constant stream, and that its shuffled-label control sits at chance.
 """
 
+import json
+import os
 import random
+import tempfile
 import unittest
+from pathlib import Path
+from unittest import mock
 
-from throughput_bench import WIRE_SEGMENT, clock_windows, leak_score, load_schedule, window_counts, window_timing
+from throughput_bench import (
+    WIRE_SEGMENT,
+    carrier_health,
+    clock_windows,
+    leak_score,
+    load_schedule,
+    window_counts,
+    window_timing,
+)
 
 WINDOW = 1.0
 RATE = 4000  # packets/s, the `fast` class
@@ -125,6 +138,29 @@ class LeakScoreTests(unittest.TestCase):
     def test_gso_super_frames_count_as_the_segments_they_carry(self):
         records = [(100.5, 28 + 4 * WIRE_SEGMENT, 0)]
         self.assertEqual(window_counts(records, 100.0, WINDOW, 1), [4])
+
+
+class CarrierHealthTests(unittest.TestCase):
+    def test_both_directions_and_the_clients_reconnects_are_reported(self):
+        from avpnctl import runtime_dir
+
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {"AVPN_RUNTIME_ROOT": tmp + "/run"}):
+            state = Path(tmp) / "state"
+            for role, sent, received in [("client", 10, 400), ("relay", 4000, 12)]:
+                (state / role).mkdir(parents=True)
+                rt = runtime_dir(state / role)
+                (rt / "cloak-status.json").write_text(
+                    json.dumps(dict(role=role, sent=sent, received=received, dropped=0, sessions=1, clock=None))
+                )
+            (runtime_dir(state / "client") / "core.lab.log").write_text(
+                '{"event":"tunnel_ready"}\n{"event":"reconnecting"}\n{"event":"reconnecting"}\n'
+            )
+            (state / "exit").mkdir()  # no cloak: left out
+            h = carrier_health(state)
+        self.assertEqual(h["relay"]["sent"], 4000)
+        self.assertEqual(h["client"]["received"], 400)
+        self.assertEqual(h["client_reconnects"], 2)
+        self.assertNotIn("exit", h)
 
 
 if __name__ == "__main__":

@@ -30,6 +30,15 @@ class PinningTests(unittest.TestCase):
         self.assertIn('"qdisc", "replace", "dev", capture_dev, "root", "fq"', src)
         self.assertIn('"clock.json"', src)
 
+    def test_a_failed_load_keeps_the_browsers_reason_and_the_chain_keeps_its_logs(self):
+        # Round 1 of the re-run lost 37 clock loads to a bare "WebDriverException" and the
+        # chain's RAM-only logs vanished with its namespaces; neither may happen again.
+        self.assertIn("status,error=type(e).__name__,str(e).strip()[:300]", wf_real.BROWSE)
+        self.assertIn("status=status,error=error,", wf_real.BROWSE)
+        src = inspect.getsource(wf_real.worker)
+        self.assertIn('rt.glob("*.lab.log")', src)
+        self.assertIn('(out / f"{role}.{f.name}").write_bytes', src)
+
     def test_each_run_records_the_hosts_power_state(self):
         power = wf_real.host_power()
         self.assertEqual(set(power), {"on_mains", "governor"})
