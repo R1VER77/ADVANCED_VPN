@@ -55,10 +55,11 @@ no information-theoretic claim (see §2 — the pads are PRG-derived).
   assignment = `H(member_id || epoch) mod n_cells`, so no one chooses their
   cellmates and re-assignment happens every epoch (e.g., 24 h) to bound
   long-term pair exposure.
-- Cells of **4–60 members** (`CellPads::new` refuses others). Four is the floor:
-  one colluder then still leaves three honest members, who keep every pad of theirs
-  secret (§2, "Pad exposure"); in a 3-member cell one colluder leaves two, who share
-  their round pad with it. Larger cells hide a sender among more people but need a
+- Cells of **4–60 members** (`CellPads::new` refuses others). Four is the floor, and
+  it is about the anonymity set, not the pads: against one colluder a sender is one of
+  three, against two one of two. In a 3-member cell one colluder already leaves a coin
+  toss and two name the sender. What colluders can learn of an honest pad is harmless
+  at any size, since a pad is worth its own round only (§2, "Pad exposure"). Larger cells hide a sender among more people but need a
   pad book or chain per pair, and in-person books need every pair to have met.
 - Mesh-mode only. In single-operator mode there is no peer group; the
   construct is meaningless (an anonymity set of 1 is a tautology) and the
@@ -252,8 +253,7 @@ Not taken:
 ### What a cell does not give
 
 - **Not for groups under four.** `CellPads::new` refuses them: in a 3-member cell, one
-  colluder already leaves two honest members, who then share their round pad with it.
-  Four people hide which of the four sent, from outsiders who can see who the four are;
+  colluder already narrows the sender to a coin toss, and two name it. Four people hide which of the four sent, from outsiders who can see who the four are;
   one colluder narrows it to three, two to a pair.
 - **Not a general anonymous network.** A cell carries one 64-byte control event per
   round, of four kinds (§0); traffic, messages and browsing go elsewhere.
@@ -292,8 +292,8 @@ Not taken:
   A learned pad is worth its own round only. A book's pads are independent hardware
   random values (`dcnet_one_time_pads.spthy`: a pad is known only if that round's use
   leaked it), and a chain's state moves one way (`dcnet_ratchet.spthy`: a captured
-  state reveals no earlier round). The 4-member floor keeps three honest members
-  against one colluder.
+  state reveals no earlier round). So pad exposure sets no minimum size; the 4-member
+  floor is the anonymity set's (§1.1).
 
 ## 3. Wire format
 

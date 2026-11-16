@@ -70,7 +70,9 @@ measured figure in the docs names the version it was measured on.
   the real Nitrokey and jitter source: both sides take identical pads, used and past rounds
   are refused, nothing readable at rest or in transit (`docs/evidence/PADBOOK_E2E.json`). The design doc explains
   the pads in plain terms and what a cell does not give; its old true-random pad estimate
-  was per day, not per month.
+  was per day, not per month. The 4-member floor is justified by the anonymity set (a
+  sender is one of three against one colluder), not by pad exposure, which the models
+  show is worth one round at any size.
 - Both cloaks' status files report the QUIC path (window, round trip, losses);
   `throughput_bench.py --cpu-probe` records both directions and the client's reconnects;
   `wf_real.py` keeps each failed load's reason and the chain's logs.

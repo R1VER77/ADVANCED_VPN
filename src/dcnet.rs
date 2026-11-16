@@ -50,8 +50,10 @@ pub const MAC_LEN: usize = 32;
 /// Frame magic: identifies a DC-net frame.
 pub const MAGIC: u16 = 0xDC4E;
 
-/// Smallest cell (design doc §1.1): one colluder still leaves three honest members, so
-/// no honest pad of a round can be derived (formal/dcnet/dcnet_collusion_4.spthy).
+/// Smallest cell (design doc §1.1), an anonymity-set policy: against one colluder a sender
+/// is one of three, against two one of two. Pads are not the reason: what colluders can
+/// learn of an honest pad is worth its own round only, whatever the size
+/// (formal/dcnet/dcnet_one_time_pads.spthy, dcnet_ratchet.spthy).
 pub const MIN_CELL_SIZE: usize = 4;
 /// Largest cell: beyond this the O(n) round traffic and pad books outweigh the gain.
 pub const MAX_CELL_SIZE: usize = 60;
@@ -354,8 +356,8 @@ impl CellPads {
     /// Pads for member `my_index` of an `n`-member cell, from its n-1 books.
     ///
     /// Refuses cells outside [`MIN_CELL_SIZE`]..=[`MAX_CELL_SIZE`]: anonymity holds among
-    /// the honest members H while |H| >= 2, and from four members one colluder still
-    /// leaves three, who keep every pad of theirs secret.
+    /// the honest members H while |H| >= 2; four members keep a sender one of three
+    /// against one colluder (in three, one colluder leaves a coin toss).
     pub fn new(n: usize, my_index: usize, books: Vec<PairPads>) -> Result<Self, DcError> {
         if !(MIN_CELL_SIZE..=MAX_CELL_SIZE).contains(&n) || my_index >= n || books.len() != n - 1 {
             return Err(DcError::BadPads);
@@ -865,8 +867,8 @@ mod tests {
 
     #[test]
     fn cells_outside_the_size_bounds_are_refused() {
-        // Below four, one colluder can leave two honest members, who then share their
-        // round pad with it; above 60 the round traffic outweighs the gain.
+        // Below four, one colluder narrows the sender to two and two colluders name it;
+        // above 60 the round traffic outweighs the gain.
         let books = |n: usize| {
             (1..n)
                 .map(|_| PairPads::OneTime(PadBook::new(0, vec![1u8; BODY_LEN]).unwrap()))
