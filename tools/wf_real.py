@@ -309,11 +309,13 @@ def worker(a):
             if r.returncode:
                 raise RuntimeError("cannot turn offload off on the captured link: " + r.stderr.strip()[:200])
         if clock and a.config != "undefended":
-            # The wire clock's departure times are honoured by the fq qdisc only.
-            r = nsexec(capture_ns, "/usr/sbin/tc", "qdisc", "replace", "dev", capture_dev, "root", "fq",
-                       "flow_limit", "10000", "limit", "20000", check=False)  # fmt: skip
-            if r.returncode:
-                raise RuntimeError("cannot put fq on the client's link: " + r.stderr.strip()[:200])
+            # The wire clock's departure times are honoured by the fq qdisc only: on the
+            # client's link (upstream) and the relay's end of it (the relay's clock, downstream).
+            for ns, dev in [(capture_ns, capture_dev), ("rel", "cb")]:
+                r = nsexec(ns, "/usr/sbin/tc", "qdisc", "replace", "dev", dev, "root", "fq",
+                           "flow_limit", "10000", "limit", "20000", check=False)  # fmt: skip
+                if r.returncode:
+                    raise RuntimeError("cannot put fq on %s/%s: %s" % (ns, dev, r.stderr.strip()[:200]))
         packets = out / "packets.bin"
         sniff = ["/usr/sbin/ip", "netns", "exec", capture_ns, sys.executable, "-c", SNIFF, capture_dev, str(packets)]
         procs.append(subprocess.Popen(pinned(a.server_cpus, sniff)))

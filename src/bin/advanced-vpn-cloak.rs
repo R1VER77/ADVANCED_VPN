@@ -152,7 +152,16 @@ async fn work() -> Result<()> {
             println!("{{\"configuration_valid\":true,\"role\":\"server\"}}");
             return Ok(());
         }
-        let endpoint = quinn::Endpoint::server(config, c.listen)?;
+        // The relay's downstream on the wire clock when the chain is clocked (experimental:
+        // AVPN_WIRE_CLOCK_PPS, as on the client; the egress link needs the fq qdisc).
+        let (endpoint, clock) = match cloak::WireClock::from_env() {
+            Some(clock) => {
+                let (e, sc) =
+                    cloak::clocked_server_endpoint(config, c.listen, clock, stats.clone())?;
+                (e, Some(sc))
+            }
+            None => (quinn::Endpoint::server(config, c.listen)?, None),
+        };
         let tcp_listener = tokio::net::TcpListener::bind(c.listen).await?;
         let acceptor = tokio_rustls::TlsAcceptor::from(tls_config);
         let (wg, tokens_tcp, stats_quic, stats_tcp) =
@@ -160,7 +169,7 @@ async fn work() -> Result<()> {
         let front = c.front.is_some();
         tokio::spawn(async move {
             tokio::select! {
-                r = cloak::serve(endpoint, c.wireguard, tokens, stats_quic) => r,
+                r = cloak::serve_clocked(endpoint, c.wireguard, tokens, stats_quic, clock) => r,
                 r = cloak::serve_tcp(tcp_listener, acceptor, wg, tokens_tcp, stats_tcp, front) => r,
             }
         })

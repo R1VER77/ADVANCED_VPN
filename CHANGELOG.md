@@ -34,6 +34,12 @@ measured figure in the docs names the version it was measured on.
   sub-millisecond minimum RTT), so the downstream lost 96% and real pages failed (1 of 8
   loads). A clocked chain's relay now sends with the fixed window too: 8 of 8 loads, no
   reconnects (`docs/evidence/KERNEL_PACING.json`, `downstream_collapse`).
+- Experimental: the relay clocks its downstream too (with `AVPN_WIRE_CLOCK_PPS` set on the
+  relay; its egress link needs the `fq` qdisc): one grid per member session, every slot a
+  WireGuard reply or a decoy the client's WireGuard drops. The real-website re-run had
+  located the clock's residual leak in the downstream (k-FP 10.5% on downstream packets
+  alone, p = 0.0099 over 100 shuffled-label runs; upstream alone 9.0%, not significant).
+  Not yet re-measured with both directions clocked.
 - DC-net pads come from hardware only, in two kinds: one-time pad books for pairs who met
   in person and a forward-secure chain for pairs who cannot meet (computational). The
   derived `PRG(HKDF(K_ij))` pads are gone. A book is information-theoretic only when a

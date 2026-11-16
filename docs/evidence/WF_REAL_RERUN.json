@@ -129,9 +129,33 @@
   "Every clock pass kept its tunnel up (the relay fix): before it, round-1 and round-2 clock passes had 1 and 0 of 40 loads."
  ],
  "next": [
-  "Clock the downstream too (the relay's sends), then re-run.",
+  "Re-run with the relay's clock on (both directions clocked), on mains power and an otherwise idle machine.",
   "More permutations (100+) and more sites/loads for a tighter residual estimate.",
   "A shorter look-ahead, measured for its busy-CPU cost."
  ],
- "status": "Strong evidence for the wire clock, not yet a default: residual downstream leak, a latency cost, and one 20-site closed-world setup."
+ "status": "Strong evidence for the wire clock, not yet a default: residual downstream leak, a latency cost, and one 20-site closed-world setup.",
+ "residual_by_direction_100_permutations": {
+  "date": "2026-11-16",
+  "method": "k-FP on the clock run, each direction alone and both, against 100 shuffled-label runs each (tools/wf_residual.py; rerun-20261115b/RESIDUAL_clock.json)",
+  "both": {
+   "real": 0.0947,
+   "perm_p95": 0.0739,
+   "perm_max": 0.1158,
+   "p_value": 0.0495
+  },
+  "upstream_only": {
+   "real": 0.0895,
+   "perm_p95": 0.0895,
+   "perm_max": 0.1,
+   "p_value": 0.0792
+  },
+  "downstream_only": {
+   "real": 0.1053,
+   "perm_p95": 0.0737,
+   "perm_max": 0.0947,
+   "p_value": 0.0099
+  },
+  "downstream_top_features": "inter-arrival gaps: all-packet 75th percentile and maximum, downstream 75th percentile, maximum and spread",
+  "reading": "the residual is in the downstream (p = 0.0099: no permutation reached it); the upstream alone is not significant (p = 0.079). The downstream is the relay's, paced in userspace: the relay's wire clock (src/cloak.rs clocked_server_endpoint) addresses it; not yet re-measured."
+ }
 }

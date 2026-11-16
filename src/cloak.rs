@@ -660,6 +660,40 @@ pub async fn serve(
     keys: Vec<[u8; TOKEN_LEN]>,
     stats: Arc<Stats>,
 ) -> Result<()> {
+    serve_clocked(endpoint, wireguard, keys, stats, None).await
+}
+
+/// A relay's wire clock: the clock and the paced socket's slots
+/// ([`clocked_server_endpoint`]).
+#[derive(Clone)]
+pub struct ServerClock {
+    clock: WireClock,
+    slots: Slots,
+}
+
+/// A server endpoint on `listen` whose downstream leaves on the wire clock: every member
+/// session gets its own grid of `clock`'s slots, each filled with one datagram
+/// (WireGuard's reply, or a decoy the client's WireGuard drops), released by the kernel
+/// (`SO_TXTIME`, the `fq` qdisc on the egress link) whatever the relay's threads are doing.
+pub fn clocked_server_endpoint(
+    config: ServerConfig,
+    listen: SocketAddr,
+    clock: WireClock,
+    stats: Arc<Stats>,
+) -> Result<(Endpoint, ServerClock)> {
+    let slots: Slots = Arc::default();
+    let endpoint = paced_endpoint(listen, Some(config), slots.clone(), stats)?;
+    Ok((endpoint, ServerClock { clock, slots }))
+}
+
+/// [`serve`], with the downstream on the wire clock when `clock` is given.
+pub async fn serve_clocked(
+    endpoint: Endpoint,
+    wireguard: SocketAddr,
+    keys: Vec<[u8; TOKEN_LEN]>,
+    stats: Arc<Stats>,
+    clock: Option<ServerClock>,
+) -> Result<()> {
     ensure!(
         !keys.is_empty() && keys.len() <= 256,
         "one to 256 cloak keys"
@@ -667,7 +701,8 @@ pub async fn serve(
     let keys = Arc::new(keys);
     let current: Arc<Mutex<BTreeMap<usize, Connection>>> = Arc::default();
     while let Some(incoming) = endpoint.accept().await {
-        let (keys, current, stats) = (keys.clone(), current.clone(), stats.clone());
+        let (keys, current, stats, clock) =
+            (keys.clone(), current.clone(), stats.clone(), clock.clone());
         tokio::spawn(async move {
             let Ok(c) = incoming.await else {
                 return;
@@ -696,29 +731,79 @@ pub async fn serve(
             stats.connected.store(true, Ordering::Relaxed);
             // WireGuard's replies for this member reach only this session.
             let (replies, stats_down, conn_down) = (udp.clone(), stats.clone(), c.clone());
-            let downlink = tokio::spawn(async move {
-                let mut buf = vec![0u8; 2048];
-                loop {
-                    let Ok(n) = replies.recv(&mut buf).await else {
-                        continue;
-                    };
-                    if conn_down
-                        .send_datagram(Bytes::copy_from_slice(&buf[..n]))
-                        .is_ok()
-                    {
-                        add(&stats_down.sent);
-                        stats_down.note_path(&conn_down, stats_down.sent.load(Ordering::Relaxed));
-                    } else {
-                        add(&stats_down.dropped);
+            let downlink = match clock.clone() {
+                None => tokio::spawn(async move {
+                    let mut buf = vec![0u8; 2048];
+                    loop {
+                        let Ok(n) = replies.recv(&mut buf).await else {
+                            continue;
+                        };
+                        if conn_down
+                            .send_datagram(Bytes::copy_from_slice(&buf[..n]))
+                            .is_ok()
+                        {
+                            add(&stats_down.sent);
+                            stats_down
+                                .note_path(&conn_down, stats_down.sent.load(Ordering::Relaxed));
+                        } else {
+                            add(&stats_down.dropped);
+                        }
                     }
-                }
-            });
+                }),
+                // On the clock: replies queue, and this session's feeder sends one datagram
+                // per slot (a reply, or a decoy).
+                Some(sc) => tokio::spawn(async move {
+                    let queue: Arc<Mutex<std::collections::VecDeque<Bytes>>> = Arc::default();
+                    // Bounded: at most a second of the carrier's own rate waits for the clock.
+                    let cap = (sc.clock.packets_per_second as usize).max(64);
+                    let (q_in, s_in, c_in) = (queue.clone(), stats_down.clone(), conn_down.clone());
+                    let receive = async move {
+                        let mut buf = vec![0u8; 2048];
+                        loop {
+                            let Ok(n) = replies.recv(&mut buf).await else {
+                                continue;
+                            };
+                            {
+                                let mut q = q_in.lock().unwrap();
+                                if q.len() >= cap {
+                                    q.pop_front();
+                                    add(&s_in.dropped);
+                                }
+                                q.push_back(Bytes::copy_from_slice(&buf[..n]));
+                            }
+                            s_in.note_path(&c_in, s_in.sent.load(Ordering::Relaxed));
+                        }
+                    };
+                    let tick = async move {
+                        let (step, ahead) =
+                            (sc.clock.step_ns(), sc.clock.lookahead.as_nanos() as u64);
+                        let mut grid = None;
+                        loop {
+                            feed_step(
+                                &conn_down,
+                                step,
+                                ahead,
+                                &mut grid,
+                                &queue,
+                                &sc.slots,
+                                &stats_down,
+                            );
+                            tokio::time::sleep(Duration::from_millis(2)).await;
+                        }
+                    };
+                    tokio::join!(receive, tick);
+                }),
+            };
             while let Ok(d) = c.read_datagram().await {
                 if udp.send(&d).await.is_ok() {
                     add(&stats.received);
                 }
             }
             downlink.abort();
+            if let Some(sc) = &clock {
+                // The session's grid ends with it: no stale slots for a later one.
+                sc.slots.lock().unwrap().remove(&c.remote_address());
+            }
             let mut cur = current.lock().unwrap();
             if cur
                 .get(&which)
@@ -922,10 +1007,10 @@ async fn connect_clocked(
     let udp = Arc::new(UdpSocket::bind(local).await?);
     // The wire clock (experimental): only on QUIC, never with an I2P front (streams).
     let clock = clock.filter(|_| !front);
-    let slots: Arc<Mutex<std::collections::VecDeque<u64>>> = Arc::default();
+    let slots: Slots = Arc::default();
     let queue: Arc<Mutex<std::collections::VecDeque<Bytes>>> = Arc::default();
     let mut endpoint = match clock {
-        Some(_) => paced_endpoint(slots.clone(), stats.clone())?,
+        Some(_) => paced_endpoint("0.0.0.0:0".parse()?, None, slots.clone(), stats.clone())?,
         None => Endpoint::client("0.0.0.0:0".parse()?)?,
     };
     let mut config = client_config(spki_sha256, cover_name.is_some())?;
@@ -1119,6 +1204,10 @@ fn due_slots(t0: u64, step: u64, mut k: u64, now: u64, horizon: u64) -> (Vec<u64
 const SO_TXTIME: libc::c_int = 61;
 const SCM_TXTIME: libc::c_int = SO_TXTIME;
 
+/// Departure slots by destination: a client has one grid (its first hop), a relay one per
+/// member session it serves.
+type Slots = Arc<Mutex<std::collections::HashMap<SocketAddr, std::collections::VecDeque<u64>>>>;
+
 /// quinn's UDP socket with departure times: every full-size packet (one carrying a
 /// datagram) takes the next slot the feeder queued and leaves at that time; anything
 /// else (an ACK-only packet) goes out at once through quinn's own socket.
@@ -1126,7 +1215,7 @@ const SCM_TXTIME: libc::c_int = SO_TXTIME;
 struct PacedSocket {
     inner: Arc<dyn quinn::AsyncUdpSocket>,
     fd: std::os::fd::OwnedFd,
-    slots: Arc<Mutex<std::collections::VecDeque<u64>>>,
+    slots: Slots,
     stats: Arc<Stats>,
 }
 
@@ -1183,7 +1272,12 @@ impl quinn::AsyncUdpSocket for PacedSocket {
 
     fn try_send(&self, t: &quinn::udp::Transmit) -> std::io::Result<()> {
         if t.contents.len() >= OUTER_MTU as usize {
-            let slot = self.slots.lock().unwrap().pop_front();
+            let slot = self
+                .slots
+                .lock()
+                .unwrap()
+                .get_mut(&t.destination)
+                .and_then(|q| q.pop_front());
             let now = monotonic_ns();
             match slot {
                 Some(at) => {
@@ -1193,7 +1287,12 @@ impl quinn::AsyncUdpSocket for PacedSocket {
                         // it): quinn retries this packet, and it must keep its slot, or every
                         // retry would shift the rest of the grid one slot (measured: one in
                         // five packets then found no slot and left on quinn's timing).
-                        self.slots.lock().unwrap().push_front(at);
+                        self.slots
+                            .lock()
+                            .unwrap()
+                            .entry(t.destination)
+                            .or_default()
+                            .push_front(at);
                     } else if at < now {
                         let us = (now - at) / 1_000;
                         self.stats.clock.record(now, |b| {
@@ -1235,13 +1334,16 @@ impl quinn::AsyncUdpSocket for PacedSocket {
     }
 }
 
-/// A client endpoint whose full-size packets leave at the slots in `slots`.
+/// An endpoint on `bind` whose full-size packets leave at the slots in `slots` (a client's
+/// with `server` None, a relay's with its server configuration).
 fn paced_endpoint(
-    slots: Arc<Mutex<std::collections::VecDeque<u64>>>,
+    bind: SocketAddr,
+    server: Option<ServerConfig>,
+    slots: Slots,
     stats: Arc<Stats>,
 ) -> Result<Endpoint> {
     use std::os::fd::{AsRawFd, OwnedFd};
-    let socket = std::net::UdpSocket::bind("0.0.0.0:0")?;
+    let socket = std::net::UdpSocket::bind(bind)?;
     let txtime = libc::sock_txtime {
         clockid: libc::CLOCK_MONOTONIC,
         flags: 0,
@@ -1275,7 +1377,7 @@ fn paced_endpoint(
     let inner = runtime.wrap_udp_socket(socket)?;
     Ok(Endpoint::new_with_abstract_socket(
         quinn::EndpointConfig::default(),
-        None,
+        server,
         Arc::new(PacedSocket {
             inner,
             fd,
@@ -1293,44 +1395,16 @@ async fn feed(
     clock: WireClock,
     current: Arc<Mutex<Option<ClientSink>>>,
     queue: Arc<Mutex<std::collections::VecDeque<Bytes>>>,
-    slots: Arc<Mutex<std::collections::VecDeque<u64>>>,
+    slots: Slots,
     stats: Arc<Stats>,
 ) {
-    let step = clock.step_ns();
-    let ahead = clock.lookahead.as_nanos() as u64;
+    let (step, ahead) = (clock.step_ns(), clock.lookahead.as_nanos() as u64);
     let mut grid: Option<(u64, u64)> = None; // (t0, next k) of the current session
     loop {
         let sink = current.lock().unwrap().clone();
         match sink {
             Some(ClientSink::Quic(c)) => {
-                let now = monotonic_ns();
-                let (t0, k) = *grid.get_or_insert((now + ahead, 0));
-                let (due, next) = due_slots(t0, step, k, now, now + ahead);
-                let skipped = (next - k).saturating_sub(due.len() as u64);
-                if skipped > 0 {
-                    stats.clock.record(now, |b| b.skipped += skipped);
-                }
-                grid = Some((t0, next));
-                stats.clock.queue(queue.lock().unwrap().len());
-                for at in due {
-                    let d = queue.lock().unwrap().pop_front();
-                    let real = d.is_some();
-                    stats.clock.record(now, |b| {
-                        b.fed += 1;
-                        b.decoys += u64::from(!real);
-                    });
-                    slots.lock().unwrap().push_back(at);
-                    if c.send_datagram(d.unwrap_or_else(decoy)).is_ok() {
-                        if real {
-                            add(&stats.sent);
-                        }
-                    } else {
-                        slots.lock().unwrap().pop_back();
-                        if real {
-                            add(&stats.dropped);
-                        }
-                    }
-                }
+                feed_step(&c, step, ahead, &mut grid, &queue, &slots, &stats)
             }
             _ => {
                 // No QUIC session (connecting, or the TCP fallback): a new session starts
@@ -1340,6 +1414,51 @@ async fn feed(
             }
         }
         tokio::time::sleep(Duration::from_millis(2)).await;
+    }
+}
+
+/// One pass of a feeder for connection `c`: every slot of its grid due before the
+/// look-ahead gets one datagram from `queue` (or a decoy), its slot queued for `c`'s
+/// destination on the paced socket.
+fn feed_step(
+    c: &Connection,
+    step: u64,
+    ahead: u64,
+    grid: &mut Option<(u64, u64)>,
+    queue: &Mutex<std::collections::VecDeque<Bytes>>,
+    slots: &Slots,
+    stats: &Stats,
+) {
+    let dest = c.remote_address();
+    let now = monotonic_ns();
+    let (t0, k) = *grid.get_or_insert((now + ahead, 0));
+    let (due, next) = due_slots(t0, step, k, now, now + ahead);
+    let skipped = (next - k).saturating_sub(due.len() as u64);
+    if skipped > 0 {
+        stats.clock.record(now, |b| b.skipped += skipped);
+    }
+    *grid = Some((t0, next));
+    stats.clock.queue(queue.lock().unwrap().len());
+    for at in due {
+        let d = queue.lock().unwrap().pop_front();
+        let real = d.is_some();
+        stats.clock.record(now, |b| {
+            b.fed += 1;
+            b.decoys += u64::from(!real);
+        });
+        slots.lock().unwrap().entry(dest).or_default().push_back(at);
+        if c.send_datagram(d.unwrap_or_else(decoy)).is_ok() {
+            if real {
+                add(&stats.sent);
+            }
+        } else {
+            if let Some(q) = slots.lock().unwrap().get_mut(&dest) {
+                q.pop_back();
+            }
+            if real {
+                add(&stats.dropped);
+            }
+        }
     }
 }
 
@@ -1756,6 +1875,106 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_clocked_relay_fills_every_downstream_slot_and_still_carries_wireguard() {
+        // The relay's side of the clock: before WireGuard replies at all, the client's
+        // WireGuard already receives one full-size decoy per slot; a reply takes a slot
+        // and arrives intact. The client here is not clocked, so only the relay's clock
+        // can produce these.
+        let (cert, k, pin) = test_cert();
+        let key = [6; 32];
+        let clock = WireClock {
+            packets_per_second: 500.0,
+            lookahead: Duration::from_millis(20),
+        };
+        let ss = Arc::new(Stats::default());
+        let (endpoint, sc) = clocked_server_endpoint(
+            server_config_clocked(cert, k, true).unwrap(),
+            "127.0.0.1:0".parse().unwrap(),
+            clock,
+            ss.clone(),
+        )
+        .unwrap();
+        let addr = endpoint.local_addr().unwrap();
+        let wg = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        tokio::spawn(serve_clocked(
+            endpoint,
+            wg.local_addr().unwrap(),
+            vec![key],
+            ss.clone(),
+            Some(sc),
+        ));
+        let local_wg = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let probe = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let local: SocketAddr = probe.local_addr().unwrap();
+        drop(probe);
+        let cs = Arc::new(Stats::default());
+        tokio::spawn(connect_clocked(
+            local,
+            local_wg.local_addr().unwrap(),
+            addr,
+            Some("cover.example".into()),
+            pin,
+            key,
+            cs.clone(),
+            false,
+            None,
+        ));
+        let mut buf = [0u8; 2048];
+        let first = tokio::time::timeout(Duration::from_secs(5), local_wg.recv_from(&mut buf))
+            .await
+            .expect("the relay's clock sends as soon as the session is up")
+            .unwrap();
+        assert_eq!(
+            (first.0, buf[0]),
+            (CARRIER_DATAGRAM, 0),
+            "a full-size decoy"
+        );
+        let start = std::time::Instant::now();
+        let mut decoys = 0;
+        while start.elapsed() < Duration::from_secs(1) {
+            if let Ok(Ok((n, _))) =
+                tokio::time::timeout(Duration::from_millis(100), local_wg.recv_from(&mut buf)).await
+            {
+                assert_eq!((n, buf[0]), (CARRIER_DATAGRAM, 0));
+                decoys += 1;
+            }
+        }
+        assert!(
+            (400..=600).contains(&decoys),
+            "one decoy per downstream slot, about 500/s: {decoys}"
+        );
+        // Upstream once, so the relay's WireGuard learns this session's socket; its reply
+        // takes the next downstream slot.
+        local_wg.send_to(&[0x01; 148], local).await.unwrap();
+        let (_, session) = tokio::time::timeout(Duration::from_secs(2), wg.recv_from(&mut buf))
+            .await
+            .unwrap()
+            .unwrap();
+        let reply = vec![0x04; CARRIER_DATAGRAM];
+        wg.send_to(&reply, session).await.unwrap();
+        let mut found = false;
+        for _ in 0..200 {
+            let (n, _) = tokio::time::timeout(Duration::from_secs(1), local_wg.recv_from(&mut buf))
+                .await
+                .unwrap()
+                .unwrap();
+            if buf[0] != 0 {
+                assert_eq!(&buf[..n], &reply[..]);
+                found = true;
+                break;
+            }
+        }
+        assert!(found, "WireGuard's reply was carried among the decoys");
+        let c = ss.clock.json().expect("the relay's clock ran");
+        let (fed, decoys) = (c["fed"].as_u64().unwrap(), c["decoys"].as_u64().unwrap());
+        assert!(
+            fed >= 500 && decoys == fed - 1,
+            "fed {fed}, decoys {decoys}"
+        );
+        assert_eq!(ss.sent.load(Ordering::Relaxed), 1);
+    }
+
+    #[tokio::test]
     async fn the_wire_clock_fills_every_slot_and_still_carries_wireguard() {
         let (_, _, pin) = test_cert();
         let key = [5; 32];
@@ -1902,6 +2121,110 @@ mod tests {
             unslotted * 100 < fed,
             "{unslotted} of {fed} packets left without their slot"
         );
+    }
+
+    /// The relay's clock under fq too: client and relay both clocked at the `fast` rate,
+    /// traffic both ways; each end keeps nearly every full-size packet on its slot. Runs
+    /// with the test above (CI's filter is the common prefix).
+    #[tokio::test]
+    #[ignore]
+    async fn the_clock_keeps_every_packet_on_its_slot_under_fq_both_ways() {
+        let (cert, k, pin) = test_cert();
+        let key = [8; 32];
+        let clock = WireClock {
+            packets_per_second: 4080.0,
+            lookahead: Duration::from_millis(30),
+        };
+        let ss = Arc::new(Stats::default());
+        let (endpoint, sc) = clocked_server_endpoint(
+            server_config_clocked(cert, k, true).unwrap(),
+            "127.0.0.1:0".parse().unwrap(),
+            clock,
+            ss.clone(),
+        )
+        .unwrap();
+        let addr = endpoint.local_addr().unwrap();
+        let wg = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        tokio::spawn(serve_clocked(
+            endpoint,
+            wg.local_addr().unwrap(),
+            vec![key],
+            ss.clone(),
+            Some(sc),
+        ));
+        let local_wg = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let probe = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let local: SocketAddr = probe.local_addr().unwrap();
+        drop(probe);
+        let cs = Arc::new(Stats::default());
+        tokio::spawn(connect_clocked(
+            local,
+            local_wg.local_addr().unwrap(),
+            addr,
+            Some("cover.example".into()),
+            pin,
+            key,
+            cs.clone(),
+            false,
+            Some(clock),
+        ));
+        // The client's WireGuard speaks first, so the relay's WireGuard learns the session.
+        let mut buf = [0u8; 2048];
+        let packet = vec![0x04; CARRIER_DATAGRAM];
+        let mut from = None;
+        for _ in 0..100 {
+            local_wg.send_to(&packet, local).await.unwrap();
+            if let Ok(Ok((_, f))) =
+                tokio::time::timeout(Duration::from_millis(100), wg.recv_from(&mut buf)).await
+                && buf[0] != 0
+            {
+                from = Some(f);
+                break;
+            }
+        }
+        let from = from.expect("the session came up");
+        let (wg, local_wg) = (Arc::new(wg), Arc::new(local_wg));
+        let pump = |sock: Arc<UdpSocket>, to: SocketAddr| {
+            tokio::spawn(async move {
+                let mut t = tokio::time::interval(Duration::from_micros(250));
+                let p = vec![0x04; CARRIER_DATAGRAM];
+                loop {
+                    t.tick().await;
+                    let _ = sock.send_to(&p, to).await;
+                }
+            })
+        };
+        let drain = |sock: Arc<UdpSocket>| {
+            tokio::spawn(async move {
+                let mut b = [0u8; 2048];
+                loop {
+                    let _ = sock.recv_from(&mut b).await;
+                }
+            })
+        };
+        let tasks = [
+            pump(wg.clone(), from),
+            pump(local_wg.clone(), local),
+            drain(wg.clone()),
+            drain(local_wg.clone()),
+        ];
+        tokio::time::sleep(Duration::from_secs(4)).await;
+        for t in tasks {
+            t.abort();
+        }
+        for (end, s) in [("client", &cs), ("relay", &ss)] {
+            let c = s.clock.json().unwrap();
+            let (fed, unslotted) = (c["fed"].as_u64().unwrap(), c["unslotted"].as_u64().unwrap());
+            println!(
+                "{end}: fed {fed} unslotted {unslotted} late {} skipped {}",
+                c["late"], c["skipped"]
+            );
+            assert!(fed > 12_000, "{end}: the clock ran at the fast rate: {fed}");
+            assert!(
+                unslotted * 100 < fed,
+                "{end}: {unslotted} of {fed} packets left without their slot"
+            );
+        }
     }
 
     /// Datagrams per second that reach the client's WireGuard while the server side sends

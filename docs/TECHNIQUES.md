@@ -17,7 +17,9 @@ built).
 by a userspace thread. A feeder runs a short look-ahead (30 ms) ahead of the grid and puts one
 full-size datagram in every slot: the next WireGuard datagram, or a decoy the first hop drops
 silently. Each packet carries its departure time (`SO_TXTIME`), and the `fq` qdisc releases it
-then. Slots survive failed sends; a short stall is caught up within the look-ahead.
+then. Slots survive failed sends; a short stall is caught up within the look-ahead. The relay
+clocks its downstream the same way, one grid per member session
+(`clocked_server_endpoint`), so both directions of the client's link leave on slots.
 
 **Why:** with today's constant-rate padding in userspace, a busy CPU delays the sender
 thread, and the gaps it leaves fingerprint what the browser is doing (k-FP 81% in the pilot,
@@ -26,8 +28,9 @@ thread, and the gaps it leaves fingerprint what the browser is doing (k-FP 81% i
 **Prior art:** constant-rate defences (BuFLO, Tamaraw), DAITA/Maybenot, `SO_TXTIME` pacing.
 New here: kernel-paced slot filling as the fix for a CPU-contention side channel.
 
-**Evidence:** real websites, k-FP 34.4% → 9.5% (chance 5%); the residual is the unclocked
-downstream. `src/cloak.rs` (`WireClock`, `PacedSocket`), `docs/evidence/WF_REAL_RERUN.json`,
+**Evidence:** real websites, k-FP 34.4% → 9.5% (chance 5%), client side clocked. With 100
+shuffled-label runs per direction, the residual is in the downstream (10.5%, p = 0.0099), not
+the upstream (9.0%, p = 0.079); the relay's clock addresses it and is not yet re-measured. `src/cloak.rs` (`WireClock`, `PacedSocket`), `docs/evidence/WF_REAL_RERUN.json`,
 `docs/evidence/KERNEL_PACING.json`.
 
 ## 2. Clock-Coupled Window — *experimental*
@@ -190,6 +193,5 @@ accept/status --store`.
 
 ## Designed, not built
 
-- **Downstream Wire Clock:** clock the relay's sends too, to remove the residual 9–10%.
 - **Token-side XOR:** a Nitrokey firmware applet that holds a book's key chain and returns each
   round's body, so pads never reach the host CPU.

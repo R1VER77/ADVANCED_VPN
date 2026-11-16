@@ -85,7 +85,7 @@ jobs:
       - name: Wire clock keeps packets on their slots under fq (own network namespace)
         run: |
           cargo test --locked --lib --no-run
-          unshare -Urn sh -c 'ip link set lo up && tc qdisc replace dev lo root fq flow_limit 10000 limit 20000 && cargo test --locked --offline --lib cloak::tests::the_clock_keeps_every_packet_on_its_slot_under_fq -- --ignored --nocapture'
+          unshare -Urn sh -c 'ip link set lo up && tc qdisc replace dev lo root fq flow_limit 10000 limit 20000 && cargo test --locked --offline --lib cloak::tests::the_clock_keeps_every_packet_on_its_slot -- --ignored --nocapture'
       - name: Build and run isolated routed VPN
         run: |
           cargo build --release --locked

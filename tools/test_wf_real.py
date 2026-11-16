@@ -27,7 +27,9 @@ class PinningTests(unittest.TestCase):
 
     def test_the_wire_clock_gets_fq_and_its_counters_are_kept(self):
         src = inspect.getsource(wf_real.worker)
-        self.assertIn('"qdisc", "replace", "dev", capture_dev, "root", "fq"', src)
+        # fq on both clocked ends: the client's link (upstream) and the relay's (downstream).
+        self.assertIn('for ns, dev in [(capture_ns, capture_dev), ("rel", "cb")]:', src)
+        self.assertIn('"qdisc", "replace", "dev", dev, "root", "fq"', src)
         self.assertIn('"clock.json"', src)
 
     def test_a_failed_load_keeps_the_browsers_reason_and_the_chain_keeps_its_logs(self):

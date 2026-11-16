@@ -606,8 +606,9 @@ def main():
             if k == 0 and os.environ.get("AVPN_WIRE_CLOCK_PPS"):
                 # The wire clock's departure times are honoured by the fq qdisc only.
                 tc = shutil.which("tc") or "/usr/sbin/tc"
-                run("ip", "netns", "exec", "av-" + n1, tc, "qdisc", "replace", "dev", d1, "root", "fq",
-                    "flow_limit", "10000", "limit", "20000")  # fmt: skip
+                for ns, dev in [("av-" + n1, d1), ("av-" + n2, d2)]:  # client upstream, first hop downstream
+                    run("ip", "netns", "exec", ns, tc, "qdisc", "replace", "dev", dev, "root", "fq",
+                        "flow_limit", "10000", "limit", "20000")  # fmt: skip
             if k == 0 and a.underlay_mtu:
                 for ns, dev in [("av-" + n1, d1), ("av-" + n2, d2)]:
                     run("ip", "-n", ns, "link", "set", dev, "mtu", str(a.underlay_mtu))
