@@ -3,8 +3,12 @@
 src/dcnet.rs) + golden-vector generator for the Rust tests.
 
 Construction (DCNET_CONTROL_DESIGN.md §2–§4):
-  seed_ij(cell)  = HKDF-SHA256(ikm=K_ij, salt=zeros32, info="dc-pad"||cell_id_be4)[..32]
-  pad_ij(round)  = PRG(seed_ij, "dc-round-<round decimal>")   # SHA256-CTR expansion
+  book_ij        = one-time pads for the pair in one cell, 64 bytes per round from
+                   first_round (in use: Nitrokey bytes, tools/padbook.py; here: fixed
+                   test bytes, sha256("vec-book-a-b-k") blocks)
+  pad_ij(round)  = book_ij[(round - first_round) * 64 : +64], used once   (in person)
+                 | SHA256("dc-pad-0"||s_r||r_be8) || SHA256("dc-pad-1"||s_r||r_be8),
+                   s_{r+1} = SHA256("dc-next"||s_r), s_first = seed      (over the network)
   body_i         = (event_i?) XOR (XOR over partners j of pad_ij)
   frame          = magic(2)||cell_id(4)||round(8)||flags(1)||body(64)||mac(32)
   group decode   = XOR of all bodies; null => all-zero; CRC-8(poly 0x07) guards
@@ -14,7 +18,6 @@ Outputs vectors.json consumed by the Rust #[cfg(test)] module.
 """
 
 import hashlib
-import hmac as hmac_mod
 import json
 from pathlib import Path
 
@@ -26,23 +29,13 @@ def sha256(b: bytes) -> bytes:
     return hashlib.sha256(b).digest()
 
 
-def prg(seed: bytes, ctx: bytes, n: int) -> bytes:
-    out, ctr = b"", 0
-    while len(out) < n:
-        out += sha256(seed + ctx + ctr.to_bytes(4, "big"))
-        ctr += 1
-    return out[:n]
+FIRST_ROUND = 70  # the test books' first round
+BOOK_ROUNDS = 16  # rounds in each test book
 
 
-def hkdf_sha256(ikm: bytes, info: bytes, n: int) -> bytes:
-    # RFC 5869, salt = 32 zero bytes (the default)
-    prk = hmac_mod.new(b"\x00" * 32, ikm, hashlib.sha256).digest()
-    out, t, ctr = b"", b"", 1
-    while len(out) < n:
-        t = hmac_mod.new(prk, t + info + bytes([ctr]), hashlib.sha256).digest()
-        out += t
-        ctr += 1
-    return out[:n]
+def test_book(a: int, b: int, tag: bytes = b"vec-book") -> bytes:
+    """The pair (a, b)'s test book: fixed, public bytes standing in for Nitrokey output."""
+    return b"".join(sha256(tag + b"-%d-%d-%d" % (a, b, k)) for k in range(BOOK_ROUNDS * BODY_LEN // 32))
 
 
 def crc8(data: bytes) -> int:
@@ -58,26 +51,44 @@ def xor(a: bytes, b: bytes) -> bytes:
     return bytes(x ^ y for x, y in zip(a, b, strict=True))
 
 
+def ratchet_pad(seed: bytes, first_round: int, rnd: int) -> bytes:
+    """Mirrors Rust Ratchet: the pad of `rnd` from a chain seeded at `first_round`."""
+    s = seed
+    for _ in range(rnd - first_round):
+        s = sha256(b"dc-next" + s)
+    r = rnd.to_bytes(8, "big")
+    return sha256(b"dc-pad-0" + s + r) + sha256(b"dc-pad-1" + s + r)
+
+
+class Ratchet:
+    """A pair's chain, as one of CellPads' partners."""
+
+    def __init__(self, seed: bytes, first_round: int = FIRST_ROUND):
+        self.seed, self.first = seed, first_round
+
+
 class CellPads:
-    """Mirrors Rust CellPads: pairwise master keys K_ij indexed by partner
-    (own index skipped), symmetric across members."""
+    """Mirrors Rust CellPads: one pad book per partner (own index skipped), the same
+    bytes at both ends of a pair. (The Rust side also wipes each pad once used.)"""
 
-    def __init__(self, n: int, my_index: int, pairwise: list):
-        assert my_index < n and len(pairwise) == n - 1
-        self.n, self.i, self.pw = n, my_index, pairwise
+    def __init__(self, n: int, my_index: int, books: list, first_round: int = FIRST_ROUND):
+        assert my_index < n and len(books) == n - 1
+        self.n, self.i, self.books, self.first = n, my_index, books, first_round
 
-    def k(self, partner: int) -> bytes:
-        return self.pw[partner if partner < self.i else partner - 1]
-
-    def round_pad(self, partner: int, cell_id: int, rnd: int) -> bytes:
-        seed = hkdf_sha256(self.k(partner), b"dc-pad" + cell_id.to_bytes(4, "big"), 32)
-        return prg(seed, b"dc-round-%d" % rnd, BODY_LEN)
+    def round_pad(self, partner: int, rnd: int) -> bytes:
+        book = self.books[partner if partner < self.i else partner - 1]
+        if isinstance(book, Ratchet):
+            return ratchet_pad(book.seed, book.first, rnd)
+        at = (rnd - self.first) * BODY_LEN
+        if not 0 <= at <= len(book) - BODY_LEN:
+            raise ValueError("no pad for this round")
+        return book[at : at + BODY_LEN]
 
     def body(self, cell_id: int, rnd: int, event: bytes = b"") -> bytes:
         b = b"\x00" * BODY_LEN
         for j in range(self.n):
             if j != self.i:
-                b = xor(b, self.round_pad(j, cell_id, rnd))
+                b = xor(b, self.round_pad(j, rnd))
         if event:
             b = xor(b, event)
         return b
@@ -128,12 +139,8 @@ def group_sum(bodies):
 # ------------------------------------------------------------------
 def gen_vectors():
     n, cell_id, rnd = 4, 0xA17C4D, 77
-    # symmetric pairwise master keys K_ij
-    k = {}
-    for a in range(n):
-        for b in range(n):
-            if a < b:
-                k[(a, b)] = sha256(b"vec-k-%d-%d" % (a, b))[:32]
+    # one test book per pair, the same at both ends
+    k = {(a, b): test_book(a, b) for a in range(n) for b in range(n) if a < b}
 
     def pw(i):  # partner list for member i, own index skipped
         return [k[(min(i, j), max(i, j))] for j in range(n) if j != i]
@@ -153,10 +160,12 @@ def gen_vectors():
         "cell_id": cell_id,
         "round": rnd,
         "sender": sender,
-        "k_01": k[(0, 1)].hex(),
-        "k_23": k[(2, 3)].hex(),
-        "pad_m0_p1": members[0].round_pad(1, cell_id, rnd).hex(),
-        "pad_m2_p3": members[2].round_pad(3, cell_id, rnd).hex(),
+        "first_round": FIRST_ROUND,
+        "book_rounds": BOOK_ROUNDS,
+        "book_01_first_pad": k[(0, 1)][:BODY_LEN].hex(),
+        "book_23_first_pad": k[(2, 3)][:BODY_LEN].hex(),
+        "pad_m0_p1": members[0].round_pad(1, rnd).hex(),
+        "pad_m2_p3": members[2].round_pad(3, rnd).hex(),
         "event_encoding": event.hex(),
         "body_m2_event": bodies[2].hex(),
         "body_m0_silent": bodies[0].hex(),
@@ -186,15 +195,15 @@ def gen_vectors():
     col_same = [members[i].body(cell_id, rnd, event if i in (1, 3) else b"") for i in range(n)]
     checks["identical_collision_null"] = decode_event(group_sum(col_same)) == "null"
     # jam: member 0 xors garbage
-    jam = [xor(members[0].body(cell_id, rnd), prg(b"jam", b"x", 64))] + [
+    jam = [xor(members[0].body(cell_id, rnd), sha256(b"jam") * 2)] + [
         members[i].body(cell_id, rnd, event if i == 2 else b"") for i in (1, 2, 3)
     ]
     checks["jam_garbled"] = decode_event(group_sum(jam)) == "garbled"
     # round binding: pads differ across rounds
-    checks["pads_differ"] = members[0].round_pad(1, cell_id, 76) != members[0].round_pad(1, cell_id, 77)
+    checks["pads_differ"] = members[0].round_pad(1, 76) != members[0].round_pad(1, 77)
     # sender-position independence, n=24
     n24 = 24
-    k24 = {(a, b): sha256(b"vec24-%d-%d" % (a, b))[:32] for a in range(n24) for b in range(n24) if a < b}
+    k24 = {(a, b): test_book(a, b, b"vec24") for a in range(n24) for b in range(n24) if a < b}
     m24 = [CellPads(n24, i, [k24[(min(i, j), max(i, j))] for j in range(n24) if j != i]) for i in range(n24)]
     ok_pos = all(
         decode_event(group_sum([m.body(cell_id, rnd, event if i == s else b"") for i, m in enumerate(m24)]))
@@ -202,6 +211,20 @@ def gen_vectors():
         for s in range(n24)
     )
     checks["all_sender_positions_n24"] = ok_pos
+    # A mixed cell: pairs (0,1) and (2,3) on chains, the rest on books.
+    chains = {(0, 1), (2, 3)}
+    km = {
+        (a, b): Ratchet(sha256(b"vec-ratchet-%d-%d" % (a, b))) if (a, b) in chains else test_book(a, b)
+        for a in range(n)
+        for b in range(n)
+        if a < b
+    }
+    mixed_cell = [CellPads(n, i, [km[(min(i, j), max(i, j))] for j in range(n) if j != i]) for i in range(n)]
+    msum = group_sum([m.body(cell_id, rnd, event if i == 1 else b"") for i, m in enumerate(mixed_cell)])
+    checks["mixed_cell_decodes"] = decode_event(msum) == ev(0x1122334455667788)
+    vec["ratchet_seed_01"] = sha256(b"vec-ratchet-0-1").hex()
+    vec["ratchet_pad_01"] = ratchet_pad(sha256(b"vec-ratchet-0-1"), FIRST_ROUND, rnd).hex()
+    vec["mixed_sum"] = msum.hex()
 
     assert all(checks.values()), checks
     vec["self_checks"] = {k: bool(v) for k, v in checks.items()}

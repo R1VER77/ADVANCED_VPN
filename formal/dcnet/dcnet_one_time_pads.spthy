@@ -1,0 +1,45 @@
+// dcnet_one_time_pads.spthy — every pad of a book is used once, and a learned pad is
+// worth its own round only. Companion to dcnet_collusion.spthy and
+// dcnet_collusion_4.spthy (docs/DCNET_CONTROL_DESIGN.md §2, §6).
+//
+// A pair's book holds one hardware random pad per round (tools/padbook.py, src/dcnet.rs
+// PadBook): modelled as a fresh value per (pair, round) in a linear Book fact, so taking
+// it consumes it. The adversary may learn any pad when it is used (`use_leaked`: what a
+// colluder holds once only two honest members are left), as often as it likes.
+//
+// LEMMAS (proved with Tamarin 1.12.0 / Maude 3.5.1):
+//  - pad_used_once             no pad is ever used twice (in two rounds, or twice in one).
+//  - pad_known_only_if_leaked  a round's pad is known only if that very use leaked it:
+//                              no other round's pad, however many leaked, gives it.
+//  - executable                (exists-trace) a pad is used.
+//
+// Mutation-checked (tools/tamarin_check.py): a persistent book (!Book, so a pad can be
+// taken again) falsifies pad_used_once; an honest use that publishes its pad falsifies
+// pad_known_only_if_leaked.
+
+theory dcnet_one_time_pads
+begin
+
+// The pair's book entry for round $r: one fresh pad.
+rule make_pad:
+  [ Fr(~p) ] --[ Made($pair, $r, ~p) ]-> [ Book($pair, $r, ~p) ]
+
+// An honest member takes the round's pad (it goes into the frame XOR, never out alone).
+rule use:
+  [ Book(pair, r, p) ] --[ Use(pair, r, p) ]-> [ ]
+
+// The same, and the adversary learns the pad.
+rule use_leaked:
+  [ Book(pair, r, p) ] --[ Use(pair, r, p), Leaked(pair, r) ]-> [ Out(p) ]
+
+lemma pad_used_once:
+  "All pair r r2 p #i #j. Use(pair, r, p) @i & Use(pair, r2, p) @j ==> #i = #j"
+
+lemma pad_known_only_if_leaked:
+  "All pair r p #i #j. Use(pair, r, p) @i & K(p) @j ==> Ex #l. Leaked(pair, r) @l"
+
+lemma executable:
+  exists-trace
+  "Ex pair r p #i. Use(pair, r, p) @i"
+
+end

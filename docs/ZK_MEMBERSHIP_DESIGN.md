@@ -53,6 +53,40 @@ one member draws on the same allowance. Member-chosen scopes are only for action
 are not rationed, such as proving membership to a service, where a separate identity per
 profile costs the network nothing.
 
+## Compared to Zcash Orchard and Tornado Cash
+
+Both solve the same problem, one action per secret without saying whose, and both were
+checked against their own sources (Zcash's Orchard book and ZIPs 224 and 2005; Tornado
+Cash's `withdraw.circom` and `merkleTree.circom`). We reference the cryptographic
+construction, which is standard in the literature, not the Tornado Cash service, whose
+sanctions history is a separate matter.
+
+| | Ours (v2, forward-private) | Zcash Orchard | Tornado Cash |
+|---|---|---|---|
+| Commitment | `SHA-256("avpn/member/v2" ‖ H^N(s0))` | Sinsemilla note commitment | `Pedersen(nullifier ‖ secret)` |
+| Tree | SHA-256 Merkle | Sinsemilla Merkle | MiMC Merkle (depth 20) |
+| Nullifier | `SHA-256("avpn/nullifier/v2" ‖ x_k ‖ epoch ‖ scope)` | `Extract([(F_nk(ρ) + ψ)]G + cm)`: keyed, bound to the note commitment | `Pedersen(nullifier)` |
+| Proof | RISC Zero STARK (succinct receipt) | Halo 2 (Pallas/Vesta) | circom/snarkjs, trusted setup |
+| Trusted setup | none | none | yes (a ceremony) |
+| Post-quantum | yes: hashes only | no: ZIP 2005 says its note commitments are "not post-quantum binding" | no: Pedersen and pairing-based proofs rest on discrete log |
+| Forward privacy | yes: a seized device cannot recompute past nullifiers | no: a static key | no: the deposit note is static |
+
+So we keep ours, for two reasons the table makes plain: both references rest on discrete
+logarithms, and Tornado needs a trusted setup. Ours needs neither.
+
+**Taken: bind the proof to the action it authorizes.** Tornado's circuit takes the
+recipient, relayer, fee and refund as public inputs, so a proof cannot be lifted onto a
+different withdrawal; Orchard binds its nullifier to the spent note's commitment. Our v1
+journal, `(root, epoch, scope, nullifier)`, bound nothing of the kind: whoever saw a
+member's proof in flight could attach it to a different action first, spending that
+member's nullifier for the epoch.
+
+The v2 prototype closes it, still hash-based: the guest reads `action = SHA-256(the request
+being authorized)` and commits it in the journal, and the verifier must check it against the
+request it is processing. The prototype's host includes the check that a journal moved to
+another action fails verification; that run (with the forward-private v2 build) is still to
+be measured and recorded in `docs/evidence/ZK_MEMBERSHIP.json`.
+
 ## What it does not do
 
 - **Relays and exits stay public.** Clients need their keys to build paths, and the

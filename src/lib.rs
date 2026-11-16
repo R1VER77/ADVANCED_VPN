@@ -8,7 +8,8 @@ pub mod config;
 /// The DAITA (Maybenot) machines of the WireGuard carrier: strong, on every hop.
 pub mod daita;
 /// DC-net control channel for AVPN/Mesh (library only: no command reaches it yet).
-/// See docs/DCNET_CONTROL_DESIGN.md; its claim is computational, never information-theoretic.
+/// One-time pads only (docs/DCNET_CONTROL_DESIGN.md): information-theoretic among members
+/// joined by pads handed over in person, computational for pads sent over the network.
 pub mod dcnet;
 /// Constant-rate, encrypted links between consecutive servers (per-hop shaping).
 pub mod link;

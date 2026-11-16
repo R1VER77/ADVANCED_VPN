@@ -35,6 +35,10 @@
 // NOT MODELED (documented limits): member churn and epoch re-keying; jamming (§5 accepts
 // DoS); byte-level framing (CRC, flags constant).
 
+// Pads: h(<k, r>) stands for the pair's one-time pad for round r (a hardware random
+// value, one per pair and round; src/dcnet.rs PadBook). In this model it behaves the same:
+// secret, distinct per round, known only to the pair. See dcnet_one_time_pads.spthy.
+
 theory dcnet_round
 begin
 

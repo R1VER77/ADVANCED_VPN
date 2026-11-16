@@ -1,0 +1,63 @@
+{
+ "schema": 1,
+ "name": "DC-net pad book end to end, real hardware",
+ "date": "2026-11-16",
+ "code": "uncommitted DC-net change (tools/padbook.py, tools/elligator.py, src/dcnet.rs)",
+ "hardware": {
+  "nitrokey": "Nitrokey 3, LPC55, firmware v1.9.1",
+  "cpu": "Intel i7-8565U",
+  "power": "mains, idle"
+ },
+ "raw_source": {
+  "source": "jitterentropy raw time deltas, low 8 bits",
+  "tool": "NIST SP 800-90B ea_non_iid (initial, 8 bits per symbol)",
+  "runs_bits_per_sample": [
+   7.257,
+   7.056,
+   7.3
+  ],
+  "h_assessed": 7.056,
+  "h_used": 3.528,
+  "extractor": "Toeplitz, 1,024 samples per block, epsilon 2^-64",
+  "bytes_per_block": 435,
+  "note": "An earlier single run on a busy machine gave 6.64; idle runs 7.06-7.30. The lowest of three counts, then half of it."
+ },
+ "book": {
+  "rounds": 2880,
+  "days": 1,
+  "bytes": 184320,
+  "alice": "kernel XOR Nitrokey XOR extracted jitter, in person",
+  "bob": "kernel XOR Nitrokey, remote"
+ },
+ "timings_seconds": {
+  "alice_contribution": 95.0,
+  "bob_contribution": 78.4
+ },
+ "envelope_bytes": 5534844,
+ "results": {
+  "claims": {
+   "alice": "information-theoretic",
+   "bob": "information-theoretic"
+  },
+  "three_rounds_match": [
+   true,
+   true,
+   true
+  ],
+  "used_and_past_rounds_refused": [
+   true,
+   true
+  ],
+  "rounds_left": 2862,
+  "bytes_inspected": 38735766,
+  "byte_frequency_peak_over_mean": 1.0229,
+  "structured_strings_found": [],
+  "short_needle_note": "The run's leak check flagged 'bob': 2 occurrences of a 3-byte string in 38.7 MB, against 2.31 expected by chance, in random context; quoted and long forms ('\"bob\"', 'pair', 'contributions', 'delivery', '\"alice\"') occur 0 times. The check now uses long or quoted needles only."
+ },
+ "harness_bug": "The first run fixed its starting round before the slow contribution steps; three minutes later that round was past and padbook refused it (the anti-replay rule). The check was finished on the stored books with the next three current rounds.",
+ "verdict": "pass",
+ "limits": [
+  "One machine, one pair, one day's book; both members simulated on one host and one Nitrokey.",
+  "The jitter assessment is SP 800-90B's initial (runtime) estimate; the restart test is not run."
+ ]
+}

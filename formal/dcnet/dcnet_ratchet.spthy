@@ -1,0 +1,61 @@
+// dcnet_ratchet.spthy — the network mode's pad chain is forward-secure.
+// Companion to dcnet_one_time_pads.spthy (docs/DCNET_CONTROL_DESIGN.md §2, §6).
+//
+// A pair that cannot meet derives its pads from a chain (src/dcnet.rs Ratchet): state
+// s(r+1) = SHA-256("dc-next" || s(r)), pad(r) = SHA-256("dc-pad-*" || s(r) || r),
+// modelled with hashing. The seed is fresh (both members' Nitrokey contributions XORed,
+// delivered under ML-KEM-768 + X25519, which this model takes as secure).
+//
+// Unrolled to three rounds. A device is seized at most once: capture consumes the state
+// (the chain ends there; the adversary can compute every later state itself). An
+// unbounded chain with a capture rule that re-emitted the state never terminated, even
+// with induction; consuming captures and a fixed number of rounds terminate at once. So
+// this proves the property for three rounds, the pattern the Rust code repeats.
+//
+// LEMMAS (proved with Tamarin 1.12.0 / Maude 3.5.1):
+//  - forward_secure_round1  round 1's pad is known only if the device was seized in round 1
+//  - forward_secure_round2  round 2's pad is known only if it was seized in round 1 or 2:
+//                           a seizure in round 3 reveals no earlier pad.
+//  - executable             (exists-trace) all three rounds run.
+//
+// Mutation-checked (tools/tamarin_check.py): a seized device that also gives up the seed
+// (it kept s(1)) falsifies forward_secure_round1.
+
+theory dcnet_ratchet
+begin
+
+builtins: hashing
+
+rule seed:
+  [ Fr(~s) ] --[ Seed(~s) ]-> [ St1(~s, ~s) ]
+
+rule use1:
+  [ St1(id, s) ] --[ Use(id, '1', h(<'dc-pad', s>)) ]-> [ St2(id, h(<'dc-next', s>)) ]
+
+rule use2:
+  [ St2(id, s) ] --[ Use(id, '2', h(<'dc-pad', s>)) ]-> [ St3(id, h(<'dc-next', s>)) ]
+
+rule use3:
+  [ St3(id, s) ] --[ Use(id, '3', h(<'dc-pad', s>)) ]-> [ ]
+
+rule capture1:
+  [ St1(id, s) ] --[ Capture(id, '1') ]-> [ Out(s) ]
+
+rule capture2:
+  [ St2(id, s) ] --[ Capture(id, '2') ]-> [ Out(s) ]
+
+rule capture3:
+  [ St3(id, s) ] --[ Capture(id, '3') ]-> [ Out(s) ]
+
+lemma forward_secure_round1:
+  "All id p #i #j. Use(id, '1', p) @i & K(p) @j ==> Ex #c. Capture(id, '1') @c"
+
+lemma forward_secure_round2:
+  "All id p #i #j. Use(id, '2', p) @i & K(p) @j ==>
+     (Ex #c. Capture(id, '1') @c) | (Ex #c. Capture(id, '2') @c)"
+
+lemma executable:
+  exists-trace
+  "Ex id p1 p2 p3 #i #j #k. Use(id, '1', p1) @i & Use(id, '2', p2) @j & Use(id, '3', p3) @k"
+
+end

@@ -6,6 +6,10 @@
 //    pairwise pads is ever derivable, although every frame and the event are public.
 //    (With a colluding member this is false: dcnet_collusion.spthy, collusion_reveals_pad.)
 
+// Pads: h(<k, r>) stands for the pair's one-time pad for round r (a hardware random
+// value, one per pair and round; src/dcnet.rs PadBook). In this model it behaves the same:
+// secret, distinct per round, known only to the pair. See dcnet_one_time_pads.spthy.
+
 theory dcnet_no_collusion
 begin
 builtins: hashing, xor

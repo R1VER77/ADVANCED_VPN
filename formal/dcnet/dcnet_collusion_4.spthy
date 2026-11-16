@@ -1,0 +1,72 @@
+// dcnet_collusion_4.spthy — where a colluder stops learning honest pads.
+// Companion to dcnet_collusion.spthy (3 members, 1 colluder) and
+// docs/DCNET_CONTROL_DESIGN.md §2, §6.
+//
+// A 4-member cell {A, B, C, D}; A sends the event ~m, the others are silent; every frame
+// and the decoded event are public.
+//
+// The colluders' view is modelled directly. A colluder knows every pad it shares, so it can
+// strip them from each honest member's frame itself; Out-putting the frames already
+// stripped gives the adversary exactly the knowledge it would derive from the full frames
+// plus the colluders' keys, with fewer XOR terms for Tamarin. (The full-frame model was
+// still unfinished after 25 minutes; this one proves in about 4.) Frame decoding is
+// covered by dcnet.spthy (cancellation) and dcnet_collusion.spthy (decodes_exactly).
+//
+//  - one colluder (C), three honest: A: m XOR pab XOR pad, B: pab XOR pbd, D: pad XOR pbd.
+//    Over GF(2) these sums have rank 2 in 3 unknowns; no single pad follows. Note the
+//    shape: once C's pads are stripped, this is exactly an honest 3-member cell
+//    (dcnet_no_collusion.spthy, the same proof).
+//  - two colluders (C, D), two honest: A: m XOR pab, B: pab. The pad follows.
+//
+// Pads: h(<k, r>) stands for the pair's pad for round r (a one-time pad from a book, or a
+// chain's pad; src/dcnet.rs PairPads): secret, distinct per round, known only to the pair.
+//
+// LEMMAS (proved with Tamarin 1.12.0 / Maude 3.5.1):
+//  - pads_secret_with_three_honest  no honest-honest pad of the round is derivable.
+//  - keys_secret_with_three_honest  no honest-honest key is derivable.
+//  - pad_derived_with_two_honest    (exists-trace) with C and D colluding, the adversary
+//                                   derives h(<K_AB, r>).
+//
+// Neither changes the anonymity claim (§6): with |H| = 2 the pad is the silent frame
+// whichever honest member sent, so the colluder holds the round's pad only as one of two
+// values that differ by the event, one per possible sender. What a learned pad must not
+// give is anything beyond its round: dcnet_one_time_pads.spthy, dcnet_ratchet.spthy.
+
+theory dcnet_collusion_4
+begin
+
+builtins: hashing, xor
+
+// One colluder (C): the honest frames with C's pads stripped.
+rule round_one_colluder:
+  let pab = h(<~kab, ~r>)
+      pad = h(<~kad, ~r>)
+      pbd = h(<~kbd, ~r>)
+  in
+  [ Fr(~kab), Fr(~kad), Fr(~kbd), Fr(~r), Fr(~m) ]
+  --[ OneColluder(~kab, ~kad, ~kbd, ~r) ]->
+  [ Out(~r), Out(~m),
+    Out(<'A', ~m XOR pab XOR pad>), Out(<'B', pab XOR pbd>), Out(<'D', pad XOR pbd>) ]
+
+// Two colluders (C, D): every pad but the honest pair's stripped.
+rule round_two_colluders:
+  let pab = h(<~kab, ~r>)
+  in
+  [ Fr(~kab), Fr(~r), Fr(~m) ]
+  --[ TwoColluders(~kab, ~r) ]->
+  [ Out(~r), Out(~m), Out(<'A', ~m XOR pab>), Out(<'B', pab>) ]
+
+lemma pad_derived_with_two_honest:
+  exists-trace
+  "Ex k r #i #j. TwoColluders(k, r) @i & K(h(<k, r>)) @j"
+
+lemma pads_secret_with_three_honest:
+  "All kab kad kbd r #i. OneColluder(kab, kad, kbd, r) @i ==>
+     not (Ex #j. K(h(<kab, r>)) @j) & not (Ex #j. K(h(<kad, r>)) @j)
+     & not (Ex #j. K(h(<kbd, r>)) @j)"
+
+lemma keys_secret_with_three_honest:
+  "All kab kad kbd r #i. OneColluder(kab, kad, kbd, r) @i ==>
+     not (Ex #j. K(kab) @j) & not (Ex #j. K(kad) @j) & not (Ex #j. K(kbd) @j)"
+
+end

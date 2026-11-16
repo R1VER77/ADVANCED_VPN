@@ -28,6 +28,22 @@ MODELS = {
         "executable",
         "collusion_reveals_pad",
     ],
+    "formal/dcnet/dcnet_collusion_4.spthy": [
+        "pad_derived_with_two_honest",
+        "pads_secret_with_three_honest",
+        "keys_secret_with_three_honest",
+    ],
+    "formal/dcnet/dcnet_ratchet.spthy": ["forward_secure_round1", "forward_secure_round2", "executable"],
+    "formal/zk/forward_private_nullifiers.spthy": [
+        "forward_private_epoch1",
+        "forward_private_epoch2",
+        "executable",
+    ],
+    "formal/dcnet/dcnet_one_time_pads.spthy": [
+        "pad_used_once",
+        "pad_known_only_if_leaked",
+        "executable",
+    ],
     "crates/avpn-mix-lane/tamarin/pq_sphinx_reblind.spthy": [
         "element_hidden",
         "pad_hidden",
@@ -72,6 +88,42 @@ MUTANTS = [
         "formal/dcnet/dcnet_collusion.spthy",
         [("      fb = h(<~kab, ~r>) XOR h(<~kbc, ~r>)", "      fb = h(<~kbc, ~r>)")],
         "decodes_exactly",
+    ),
+    # A third honest member's key leaked: two honest left, and the pad follows.
+    (
+        "formal/dcnet/dcnet_collusion_4.spthy",
+        [
+            (
+                "  [ Out(~r), Out(~m),\n    Out(<'A', ~m XOR pab XOR pad>)",
+                "  [ Out(~r), Out(~m), Out(~kbd),\n    Out(<'A', ~m XOR pab XOR pad>)",
+            )
+        ],
+        "pads_secret_with_three_honest",
+    ),
+    # A persistent book: a pad can be taken again.
+    ("formal/dcnet/dcnet_one_time_pads.spthy", [("[ Book(", "[ !Book(")], "pad_used_once"),
+    # A seized device that also gives up its seed: earlier pads follow.
+    (
+        "formal/dcnet/dcnet_ratchet.spthy",
+        [
+            (
+                "  [ St3(id, s) ] --[ Capture(id, '3') ]-> [ Out(s) ]",
+                "  [ St3(id, s) ] --[ Capture(id, '3') ]-> [ Out(s), Out(id) ]",
+            )
+        ],
+        "forward_secure_round1",
+    ),
+    # A device that keeps s0: a capture then reveals earlier epochs' secrets.
+    (
+        "formal/zk/forward_private_nullifiers.spthy",
+        [("--[ Capture(id, '2') ]-> [ Out(x) ]", "--[ Capture(id, '2') ]-> [ Out(x), Out(id) ]")],
+        "forward_private_epoch1",
+    ),
+    # An honest use that publishes its pad.
+    (
+        "formal/dcnet/dcnet_one_time_pads.spthy",
+        [("--[ Use(pair, r, p) ]-> [ ]", "--[ Use(pair, r, p) ]-> [ Out(p) ]")],
+        "pad_known_only_if_leaked",
     ),
     (
         "crates/avpn-mix-lane/tamarin/pq_sphinx_reblind.spthy",
@@ -174,7 +226,10 @@ def main():
                         "docs/DCNET_CONTROL_DESIGN.md section 6",
                         "DC-net per-round pad secrecy and an existence trace in the multi-round, "
                         "MAC-authenticated model: did not terminate (single-round versions are proved)",
-                        "A colluder learning only XORs of honest pads in a 4-member cell: did not terminate",
+                        "The 4-member collusion model over full frames (all six pads) did not finish in 25 "
+                        "minutes; the proved model takes the colluders' view, their own pads stripped",
+                        "The network chain's forward secrecy for an unbounded number of rounds did not "
+                        "terminate; it is proved unrolled to three rounds with one seizure",
                         "Re-blinding: secrecy of the KEM secret itself, and unlinkability across hop 1 "
                         "(an equivalence): did not terminate; the construction stays review-pending",
                     ],

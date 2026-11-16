@@ -1,0 +1,137 @@
+{
+ "schema": 1,
+ "name": "Real-website re-run of the busy-CPU leak (plan v2, Phase 1b)",
+ "date": "2026-11-15",
+ "code": "main at 4466516 (wire clock with the relay's fixed window), tools/wf_real.py",
+ "setup": "20 real sites x 2 loads per round x 5 interleaved rounds per variant; headless Firefox and the client data plane on cores 0,1, relay/exit/capture on 2,3; capture on the client link (an ISP's view); fixed 12 s window; on mains; k-FP closed world, 5-fold, via tools/wf_deep.py (the pipeline that reproduces the pilot's 99.16% and 81.31% exactly).",
+ "variants": {
+  "undefended": "kernel WireGuard (validity gate)",
+  "fast": "today's default",
+  "clock": "fast + wire clock 4,000 pps, catch-up 50 ms, fq on the client link"
+ },
+ "loads_ok_per_round": {
+  "undefended": [
+   40,
+   40,
+   40,
+   34,
+   40
+  ],
+  "fast": [
+   37,
+   40,
+   40,
+   40,
+   35
+  ],
+  "clock": [
+   35,
+   28,
+   39,
+   40,
+   38
+  ]
+ },
+ "kfp_closed_world": {
+  "undefended": 0.8528,
+  "fast": 0.3439,
+  "clock": 0.0947
+ },
+ "kfp_loads": {
+  "undefended": 197,
+  "fast": 189,
+  "clock": 190
+ },
+ "chance": 0.05,
+ "shuffled_label_control": {
+  "clock": {
+   "loads": 190,
+   "real": 0.0947,
+   "perm_mean": 0.0445,
+   "perm_max": 0.0842,
+   "p_value": 0.0476,
+   "permutations": 20
+  },
+  "fast": {
+   "loads": 189,
+   "real": 0.3439,
+   "perm_mean": 0.0503,
+   "perm_max": 0.0741,
+   "p_value": 0.0476,
+   "permutations": 20
+  }
+ },
+ "by_direction": {
+  "clock": {
+   "both": 0.0947,
+   "upstream_only": 0.0895,
+   "downstream_only": 0.1053
+  },
+  "fast": {
+   "both": 0.3439,
+   "upstream_only": 0.3704,
+   "downstream_only": 0.0899
+  }
+ },
+ "clock_counters_per_round": [
+  {
+   "fed": 4389233,
+   "decoys": 90652,
+   "late": 164,
+   "late_max_us": 18687,
+   "skipped": 174,
+   "unslotted": 49,
+   "slot_queue_max": 144
+  },
+  {
+   "fed": 4842000,
+   "decoys": 99650,
+   "late": 127,
+   "late_max_us": 11601,
+   "skipped": 166,
+   "unslotted": 57,
+   "slot_queue_max": 168
+  },
+  {
+   "fed": 3899846,
+   "decoys": 81575,
+   "late": 139,
+   "late_max_us": 11651,
+   "skipped": 58,
+   "unslotted": 47,
+   "slot_queue_max": 139
+  },
+  {
+   "fed": 3769150,
+   "decoys": 77744,
+   "late": 38,
+   "late_max_us": 4786,
+   "skipped": 13,
+   "unslotted": 20,
+   "slot_queue_max": 137
+  },
+  {
+   "fed": 4062408,
+   "decoys": 85659,
+   "late": 380,
+   "late_max_us": 28852,
+   "skipped": 350,
+   "unslotted": 45,
+   "slot_queue_max": 158
+  }
+ ],
+ "findings": [
+  "The wire clock cuts k-FP from 34.4% (fast) to 9.5% (chance 5%) on real websites with the browser sharing the data plane's cores.",
+  "The busy-CPU leak is in the upstream: fast scores 37.0% on upstream packets alone and 9.0% on downstream alone; the clock brings upstream to 9.0%.",
+  "A small residual remains: 9.5% beats all 20 shuffled-label runs (mean 4.45%, max 8.42%; p = 0.048, the resolution of 20 permutations). It is about the same in both directions (9.0% up, 10.5% down) and the downstream part matches fast's own downstream (9.0%): the relay's downstream is not clocked.",
+  "fast scored 34.4% here, not the pilot's 81%: the busy-CPU leak's size depends on the setup (here 1 worker, 2 loads per site per round, 5 rounds interleaved). The control is still strongly above chance.",
+  "Cost: the clock's 30 ms look-ahead adds about 28 ms to the upstream round trip; heavy pages time out more often (clock 180 of 200 loads ok, fast 192, undefended 194).",
+  "Every clock pass kept its tunnel up (the relay fix): before it, round-1 and round-2 clock passes had 1 and 0 of 40 loads."
+ ],
+ "next": [
+  "Clock the downstream too (the relay's sends), then re-run.",
+  "More permutations (100+) and more sites/loads for a tighter residual estimate.",
+  "A shorter look-ahead, measured for its busy-CPU cost."
+ ],
+ "status": "Strong evidence for the wire clock, not yet a default: residual downstream leak, a latency cost, and one 20-site closed-world setup."
+}

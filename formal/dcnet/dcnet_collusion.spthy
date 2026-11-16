@@ -20,6 +20,10 @@
 // secrecy. Tamarin's --diff mode with XOR did not terminate on it (see dcnet.spthy), so
 // that step remains the standard one-time-pad argument, stated as such.
 
+// Pads: h(<k, r>) stands for the pair's one-time pad for round r (a hardware random
+// value, one per pair and round; src/dcnet.rs PadBook). In this model it behaves the same:
+// secret, distinct per round, known only to the pair. See dcnet_one_time_pads.spthy.
+
 theory dcnet_collusion
 begin
 

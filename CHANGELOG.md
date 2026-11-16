@@ -31,6 +31,43 @@ measured figure in the docs names the version it was measured on.
   sub-millisecond minimum RTT), so the downstream lost 96% and real pages failed (1 of 8
   loads). A clocked chain's relay now sends with the fixed window too: 8 of 8 loads, no
   reconnects (`docs/evidence/KERNEL_PACING.json`, `downstream_collapse`).
+- DC-net pads come from hardware only, in two kinds: one-time pad books for pairs who met
+  in person and a forward-secure chain for pairs who cannot meet (computational). The
+  derived `PRG(HKDF(K_ij))` pads are gone. A book is information-theoretic only when a
+  contribution mixes in an assessed raw noise source and is handed over in person: raw
+  CPU timing jitter (jitterentropy's recorder), assessed with NIST SP 800-90B `ea_non_iid`,
+  health-tested, and Toeplitz-extracted, XORed with kernel and Nitrokey output drawn before
+  the noise is recorded (defence in depth). The Nitrokey alone is computational: verified in
+  its firmware source, its RNG command returns a ChaCha8 stream seeded once per boot.
+  Contributions are sealed in transit to the partner's ML-KEM-768 + X25519 key and at
+  rest under the Nitrokey's hmac-secret with a per-round key chain, so a seized disk
+  opens no used round; a pad is used once, a used-up book stops the cell.
+  `tools/padbook.py` assesses, makes, seals and combines them; cells are 4–60 members,
+  rounds every 30 s.
+- DC-net pad files and envelopes have nothing in the clear (after TrueCrypt's volume header).
+  A stored book is a random salt plus ciphertext, under a ChaCha20-Poly1305 over
+  AES-256-GCM cascade. An envelope encodes its X25519 ephemeral with Elligator 2 (dirty
+  keys, `tools/elligator.py`, checked against RFC 9380's vectors), so a lost USB stick or
+  a seized disk shows random bytes, not who pairs with whom. Deniable multi-layer storage
+  is designed, not built.
+- `tools/padbook.py` keeps key material in buffers it zeroes in place: per-round chain
+  state after use, the stored book's file key on exit, and every live secret on normal
+  exit and SIGTERM/SIGINT/SIGHUP. The process is also non-dumpable (`PR_SET_DUMPABLE`,
+  after VeraCrypt's RAM key protection and Tails' wipe on shutdown). CPython's own copies
+  cannot be reached, so this reduces exposure; the guarantee is the Rust data plane's
+  `zeroize`.
+- The ZK membership design compares its nullifier with Zcash Orchard and Tornado Cash
+  (both discrete-log, Tornado with a trusted setup). That comparison found a gap: v1's
+  proof did not commit to the action it authorizes, so it could be replayed onto another
+  one. The v2 prototype now commits `SHA-256(request)` (its verification run is pending).
+- DC-net models: pad exposure at the 4-member boundary (one colluder: no honest pad;
+  two: the round's pad, modelled from the colluders' view), one-time pads used once and
+  known only when leaked, and the chain's forward secrecy (unrolled to three rounds), each
+  with mutants Tamarin must falsify; the whole set proves in about 7 minutes. End to end on
+  the real Nitrokey and jitter source: both sides take identical pads, used and past rounds
+  are refused, nothing readable at rest or in transit (`docs/evidence/PADBOOK_E2E.json`). The design doc explains
+  the pads in plain terms and what a cell does not give; its old true-random pad estimate
+  was per day, not per month.
 - Both cloaks' status files report the QUIC path (window, round trip, losses);
   `throughput_bench.py --cpu-probe` records both directions and the client's reconnects;
   `wf_real.py` keeps each failed load's reason and the chain's logs.
