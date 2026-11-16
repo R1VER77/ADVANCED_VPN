@@ -1,0 +1,64 @@
+// forward_private_nullifiers.spthy — a seized device reveals no earlier epoch's nullifier.
+// Companion to research/zk-membership (guest statement) and docs/ZK_MEMBERSHIP_DESIGN.md.
+//
+// A member enrols with a fresh s0 (the leaf commits to the chain's end, outside this
+// model). In epoch k it holds one epoch secret x_k, publishes the nullifier
+// h(<'null', x_k, scope>) for a scope of the adversary's choosing, then steps to
+// x_{k+1} = h(<'step', x_k>) and erases x_k. The adversary sees every nullifier and may
+// capture the device's current state at any epoch. The STARK's soundness and zero
+// knowledge are taken as given: a proof reveals nothing beyond the nullifier.
+//
+// Three epochs, unrolled: the unbounded chain (a looping state fact) made the inductive
+// proof run past 15 minutes without an answer. Each further epoch repeats the same step,
+// so three already show a capture after an earlier epoch, between two, and before any.
+//
+// LEMMAS (proved with Tamarin 1.12.0 / Maude 3.5.1):
+//  - forward_private_epoch1, forward_private_epoch2  epoch k's secret (so its nullifier in
+//                     any other scope) is known only after a capture in epoch k or
+//                     earlier, never a later one. (Epoch 3 is the last: any capture.)
+//  - executable       (exists-trace) a member acts in all three epochs.
+//
+// A capture ends the device (the state is consumed): a seized device does not go on.
+// Mutation-checked: a device that keeps s0 (captured along with the current state)
+// falsifies forward_private_epoch1.
+
+theory forward_private_nullifiers
+begin
+
+builtins: hashing
+
+rule enrol:
+  [ Fr(~s0) ] --[ Enrol(~s0) ]-> [ St1(~s0, ~s0) ]
+
+rule act1:
+  [ St1(id, x) ] --[ Epoch(id, '1', x) ]-> [ St2(id, h(<'step', x>)), Out(h(<'null', x, $scope>)) ]
+
+rule act2:
+  [ St2(id, x) ] --[ Epoch(id, '2', x) ]-> [ St3(id, h(<'step', x>)), Out(h(<'null', x, $scope>)) ]
+
+rule act3:
+  [ St3(id, x) ] --[ Epoch(id, '3', x) ]-> [ Out(h(<'null', x, $scope>)) ]
+
+rule capture1:
+  [ St1(id, x) ] --[ Capture(id, '1') ]-> [ Out(x) ]
+
+rule capture2:
+  [ St2(id, x) ] --[ Capture(id, '2') ]-> [ Out(x) ]
+
+rule capture3:
+  [ St3(id, x) ] --[ Capture(id, '3') ]-> [ Out(x) ]
+
+// Epoch 1's secret is known only after a capture in epoch 1; epoch 2's only after a
+// capture in epoch 1 or 2; epoch 3's needs any capture. Never from a later epoch.
+lemma forward_private_epoch1:
+  "All id x #i #j. Epoch(id, '1', x) @i & K(x) @j ==> Ex #c. Capture(id, '1') @c"
+
+lemma forward_private_epoch2:
+  "All id x #i #j. Epoch(id, '2', x) @i & K(x) @j ==>
+     (Ex #c. Capture(id, '1') @c) | (Ex #c. Capture(id, '2') @c)"
+
+lemma executable:
+  exists-trace
+  "Ex id x1 x2 x3 #i #j #k. Epoch(id, '1', x1) @i & Epoch(id, '2', x2) @j & Epoch(id, '3', x3) @k"
+
+end
