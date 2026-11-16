@@ -81,6 +81,36 @@ explains how the pieces fit together.
 - **Mesh:** `avpn mesh` browses the community directory, contributes nodes and builds chains across members' servers ([`docs/cli/mesh.md`](docs/cli/mesh.md)).
 - **Style:** the layout and colour rules follow the OpenAI Codex CLI's terminal style (Apache-2.0). Only the design rules were followed; no code was copied.
 
+## Three tiers of setup
+
+Pick how far to go. Each tier includes the one before it.
+
+| | **1. General VPN** | **2. Hardened** | **3. Cypherpunk** |
+|---|---|---|---|
+| Who it's for | everyday privacy on any laptop | people a capable observer may target | people who assume the hardware itself may be hostile |
+| Tunnel | post-quantum multi-hop chain, kill switch, Nitrokey unlock | plus a padded rate class (`fast` or higher) and the wire clock (experimental) | plus DC-net cells for control events, with one-time pad books handed over in person |
+| Servers | free cloud hops | hops on different providers and in different countries | hops on AMD (SEV-SNP where offered) or ARM, never all on one CPU vendor |
+| Laptop | any | `avpn doctor` reports the Intel ME / AMD PSP state | Intel ME neutralized or absent (see below), or an AMD or ARM laptop |
+| Randomness | the kernel | the kernel and the Nitrokey | plus assessed raw CPU-jitter entropy, extracted (`tools/padbook.py`) |
+
+**The Intel Management Engine.** Every Intel laptop since 2008 has an always-on coprocessor
+with its own network stack (Intel AMT on vPro models) and full access to memory. AMD's
+equivalent, the PSP, also has full memory access, but no network stack of its own, which
+is why tier 3 prefers AMD. (Some AMD PRO business models offer remote management, DASH,
+but it runs in the network card's firmware, not the PSP: choose a model without it.)
+- The ME cannot be removed, only reduced to running at boot. The proven tool is
+  [me_cleaner](https://github.com/corna/me_cleaner) (with coreboot).
+- me_cleaner lists the firmware it recognises: ME up to 11.x, TXE and SPS. Newer CSME
+  versions (12 and later, about 2019 on) are not recognised.
+- Writing the change normally needs an external SPI programmer: the ME region is usually
+  locked against writes from the running system, and a bad image can brick the machine.
+- `avpn` therefore never touches firmware. `avpn doctor` reports what it finds, read-only:
+  the ME version and operating mode from the MEI driver, whether me_cleaner recognises
+  that version, or AMD's PSP. The change itself is a manual, backed-up step the owner
+  chooses.
+- Simpler routes to tier 3: laptops sold with the ME disabled or coreboot installed
+  (Purism, System76, NovaCustom, Star Labs), or AMD or ARM hardware.
+
 ## Getting started: free servers, one chain
 
 After installing, `avpn` on a device that is not enrolled yet lists free places to

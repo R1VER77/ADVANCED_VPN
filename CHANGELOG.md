@@ -5,6 +5,9 @@ availability or a published claim are in [docs/INCIDENTS.md](docs/INCIDENTS.md).
 measured figure in the docs names the version it was measured on.
 
 ## Unreleased
+- README: three setup tiers (General VPN, Hardened, Cypherpunk) and the Intel ME. `avpn doctor`
+  reports the management coprocessor read-only: the Intel ME version and operating mode,
+  whether me_cleaner recognises that version (it lists ME up to 11.x), or AMD's PSP.
 - **Website fingerprinting on a busy CPU is now in the README**, next to the synthetic
   results: `fast` leaks (81% on 20 real sites) when the browser shares the data plane's CPU.
   `metered` is stated as a messaging class (31 of 900 real page loads completed), and the

@@ -1675,6 +1675,46 @@ def describe(info):
     return "\n".join(lines)
 
 
+# HFSTS1 bits 19:16, the ME operation mode. HAP (set by me_cleaner -S) is not visible here.
+ME_MODES = {
+    0: "normal",
+    2: "debug",
+    3: "soft temporary disable",
+    4: "security override (jumper)",
+    5: "security override (message)",
+}
+
+
+def firmware_coprocessor(sysfs=Path("/sys"), cpuinfo=Path("/proc/cpuinfo")):
+    """What always-on management coprocessor this machine has, read-only (README, "Three
+    tiers"): the Intel ME version and operating mode from the MEI driver, or AMD's PSP.
+    Informational: avpn never changes firmware."""
+    mei = sysfs / "class/mei/mei0"
+    try:
+        vendor = next(
+            (ln.split(":", 1)[1].strip() for ln in cpuinfo.read_text().splitlines() if ln.startswith("vendor_id")),
+            "",
+        )
+    except OSError:
+        vendor = ""
+    if (mei / "fw_ver").exists():
+        try:
+            ver = (mei / "fw_ver").read_text().split()[0].split(":", 1)[-1]
+            hfsts1 = int((mei / "fw_status").read_text().split()[0], 16)
+        except (OSError, ValueError, IndexError):
+            return "Intel ME present (unreadable)"
+        mode = ME_MODES.get(hfsts1 >> 16 & 0xF, "mode %d" % (hfsts1 >> 16 & 0xF))
+        major = int(ver.split(".")[0]) if ver.split(".")[0].isdigit() else 0
+        cleaner = "me_cleaner recognises it" if major <= 11 else "too new for me_cleaner (it lists ME up to 11.x)"
+        advice = "; tier 3 wants it neutralized or AMD/ARM hardware" if mode == "normal" else ""
+        return "Intel ME %s, %s; %s%s" % (ver, mode, cleaner, advice)
+    if vendor == "AuthenticAMD":
+        return "AMD PSP (no network stack, unlike Intel ME): fine for tier 3"
+    if vendor == "GenuineIntel":
+        return "Intel CPU, ME interface not visible (driver not loaded, or disabled)"
+    return "no x86 management coprocessor found"
+
+
 def doctor(state, check_egress=False):
     """Self-checks: (name, ok, detail) for installation, keys, firewall, resolver and units."""
     checks = []
@@ -1701,6 +1741,7 @@ def doctor(state, check_egress=False):
         check("post-quantum crypto library", True, "ML-DSA and ML-KEM available")
     except ImportError:
         check("post-quantum crypto library", False, "install the hash-locked environment")
+    check("management coprocessor (informational)", True, firmware_coprocessor())
     try:
         info = device_info(state)
     except (OSError, ValueError, PermissionError) as e:
