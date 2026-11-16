@@ -62,7 +62,11 @@ measured figure in the docs names the version it was measured on.
 - The ZK membership design compares its nullifier with Zcash Orchard and Tornado Cash
   (both discrete-log, Tornado with a trusted setup). That comparison found a gap: v1's
   proof did not commit to the action it authorizes, so it could be replayed onto another
-  one. The v2 prototype now commits `SHA-256(request)` (its verification run is pending).
+  one. The v2 prototype commits `SHA-256(request)`, and its nullifiers are forward-private:
+  the member's secret walks a hash chain one step per epoch, so a seized device reveals
+  no earlier epoch's nullifier (Tamarin: `formal/zk/forward_private_nullifiers.spthy`).
+  Its run passed all eight checks over 2^20 members; a proof takes 458 s on a 2018
+  laptop, against v1's 120 s (`docs/evidence/ZK_MEMBERSHIP.json`).
 - DC-net models: pad exposure at the 4-member boundary (one colluder: no honest pad;
   two: the round's pad, modelled from the colluders' view), one-time pads used once and
   known only when leaked, and the chain's forward secrecy (unrolled to three rounds), each

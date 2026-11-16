@@ -152,6 +152,19 @@ limit stated (immutable copies cannot be wiped; the Rust data plane `zeroize`s).
 
 **Code:** `Secret`, `harden()` in `tools/padbook.py`.
 
+## 12. Forward-Private Nullifiers — *research prototype*
+
+**What:** a member's anonymous-membership secret walks forward one hash step per epoch and
+the old one is erased; the registered leaf commits to the chain's end, and the STARK proves
+the remaining steps. A device seized in epoch k reveals no earlier epoch's nullifier, so past
+anonymous actions stay unlinkable.
+
+**Prior art:** forward-secure group signatures, hash chains (Lamport, PayWord); Semaphore and
+Zcash nullifiers have no forward privacy.
+
+**Code:** `research/zk-membership` (guest v2), `formal/zk/forward_private_nullifiers.spthy`,
+`docs/ZK_MEMBERSHIP_DESIGN.md`.
+
 ---
 
 ## Designed, not built

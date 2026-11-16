@@ -1,4 +1,5 @@
-//! Prototype measurement: anonymous membership + nullifier as a RISC Zero STARK.
+//! Prototype measurement: anonymous membership + forward-private nullifier as a RISC Zero
+//! STARK (guest statement in methods/guest/src/main.rs).
 //!
 //! Builds a Merkle tree of 2^DEPTH member commitments, proves membership of one member
 //! with a succinct (single-STARK, hash-based) receipt, verifies it, and checks the
@@ -9,7 +10,13 @@ use sha2::{Digest, Sha256};
 use std::time::Instant;
 
 type Path = Vec<([u8; 32], bool)>;
-type Journal = ([u8; 32], u64, [u8; 32], [u8; 32]);
+type Journal = ([u8; 32], u64, u64, u64, [u8; 32], [u8; 32], [u8; 32]);
+
+/// Epochs a tree lives (one a day: a year), and its start epoch.
+const LIFETIME: u64 = 365;
+const START: u64 = 20400;
+/// The request a proof authorizes (here a fixed example), bound into the journal.
+const ACTION: [u8; 32] = [0x5a; 32];
 
 fn h(parts: &[&[u8]]) -> [u8; 32] {
     let mut s = Sha256::new();
@@ -19,8 +26,25 @@ fn h(parts: &[&[u8]]) -> [u8; 32] {
     s.finalize().into()
 }
 
-fn leaf(secret: &[u8; 32]) -> [u8; 32] {
-    h(&[b"avpn/member/v1", secret])
+fn step(x: &[u8; 32]) -> [u8; 32] {
+    h(&[b"avpn/fp-step/v1", x])
+}
+
+fn walk(x: &[u8; 32], n: u64) -> [u8; 32] {
+    let mut y = *x;
+    for _ in 0..n {
+        y = step(&y);
+    }
+    y
+}
+
+/// The member's epoch secret for `epoch`: H^(epoch - START)(s0).
+fn epoch_secret(s0: &[u8; 32], epoch: u64) -> [u8; 32] {
+    walk(s0, epoch - START)
+}
+
+fn leaf(s0: &[u8; 32]) -> [u8; 32] {
+    h(&[b"avpn/member/v2", &walk(s0, LIFETIME)])
 }
 
 /// The tree's levels, leaves first.
@@ -48,15 +72,21 @@ fn path(levels: &[Vec<[u8; 32]>], mut index: usize) -> Path {
     out
 }
 
-fn prove(secret: [u8; 32], p: &Path, epoch: u64, scope: [u8; 32]) -> (Receipt, f64) {
+fn prove(x: [u8; 32], p: &Path, epoch: u64, scope: [u8; 32]) -> (Receipt, f64) {
     let env = ExecutorEnv::builder()
-        .write(&secret)
+        .write(&x)
         .unwrap()
         .write(p)
+        .unwrap()
+        .write(&LIFETIME)
+        .unwrap()
+        .write(&START)
         .unwrap()
         .write(&epoch)
         .unwrap()
         .write(&scope)
+        .unwrap()
+        .write(&ACTION)
         .unwrap()
         .build()
         .unwrap();
@@ -89,7 +119,8 @@ fn main() {
 
     // 1. A member proves; the verifier checks the receipt and the public values.
     let my_path = path(&levels, me);
-    let (receipt, prove_s) = prove(secrets[me], &my_path, epoch, scope);
+    let x_now = epoch_secret(&secrets[me], epoch);
+    let (receipt, prove_s) = prove(x_now, &my_path, epoch, scope);
     assert!(
         matches!(receipt.inner, InnerReceipt::Succinct(_)),
         "not a succinct STARK receipt"
@@ -97,34 +128,49 @@ fn main() {
     let t = Instant::now();
     receipt.verify(MEMBER_ID).expect("verifies");
     let verify_s = t.elapsed().as_secs_f64();
-    let (r, e, sc, null) = journal(&receipt);
-    assert_eq!((r, e, sc), (root, epoch, scope));
+    let (r, life, st, e, sc, null, act) = journal(&receipt);
+    assert_eq!((r, life, st, e, sc, act), (root, LIFETIME, START, epoch, scope, ACTION));
     let size = bincode::serialize(&receipt).unwrap().len();
 
     // 2. Same member, same epoch: the same nullifier (a second use is refused).
-    let (again, _) = prove(secrets[me], &my_path, epoch, scope);
-    assert_eq!(journal(&again).3, null, "nullifier must be stable within an epoch");
-    // 3. Next epoch: a fresh nullifier (epochs are unlinkable to each other).
-    let (later, _) = prove(secrets[me], &my_path, next, scope);
-    assert_ne!(journal(&later).3, null);
-    // 4. Another member: another nullifier, the same root.
+    let (again, _) = prove(x_now, &my_path, epoch, scope);
+    assert_eq!(journal(&again).5, null, "nullifier must be stable within an epoch");
+    // 3. Next epoch, after the member stepped its secret forward: a fresh nullifier
+    //    under the same root.
+    let x_next = step(&x_now);
+    let (later, _) = prove(x_next, &my_path, next, scope);
+    assert_eq!(journal(&later).0, root);
+    assert_ne!(journal(&later).5, null);
+    // 4. Forward privacy: the secret a seizure in the next epoch finds cannot prove the
+    //    earlier epoch (it walks one step too far and misses the root), and the earlier
+    //    nullifier is not the one it would compute.
+    let (stale, _) = prove(x_next, &my_path, epoch, scope);
+    assert_ne!(journal(&stale).0, root, "a later secret proved an earlier epoch");
+    assert_ne!(journal(&stale).5, null);
+    // 5. Another member: another nullifier, the same root.
     let other = me + 1;
-    let (theirs, _) = prove(secrets[other], &path(&levels, other), epoch, scope);
+    let (theirs, _) = prove(epoch_secret(&secrets[other], epoch), &path(&levels, other), epoch, scope);
     assert_eq!(journal(&theirs).0, root);
-    assert_ne!(journal(&theirs).3, null);
-    // 5. An outsider (a secret not in the tree) using a real path: the proof names
+    assert_ne!(journal(&theirs).5, null);
+    // 6. An outsider (a secret not in the tree) using a real path: the proof names
     //    another root, which the verifier refuses.
     let outsider = rand_bytes();
     let (fake, _) = prove(outsider, &my_path, epoch, scope);
     assert_ne!(journal(&fake).0, root, "an outsider produced the members' root");
-    // 6. A tampered journal (claiming the real root) fails verification.
+    // 7. A tampered journal (claiming the real root) fails verification.
     let mut forged = fake.clone();
     let mut j = journal(&fake);
     j.0 = root;
     forged.journal = risc0_zkvm::Journal::new(risc0_zkvm::serde::to_vec(&j).unwrap().iter().flat_map(|w| w.to_le_bytes()).collect());
     assert!(forged.verify(MEMBER_ID).is_err(), "a tampered journal verified");
-    // 7. The journal holds nothing about the member: four public values only.
-    assert!(!receipt.journal.bytes.windows(32).any(|w| w == secrets[me] || w == leaf(&secrets[me])));
+    // 8. The action is bound: a journal claiming another action fails verification.
+    let mut moved = receipt.clone();
+    let mut j = journal(&receipt);
+    j.6 = [0xa5; 32];
+    moved.journal = risc0_zkvm::Journal::new(risc0_zkvm::serde::to_vec(&j).unwrap().iter().flat_map(|w| w.to_le_bytes()).collect());
+    assert!(moved.verify(MEMBER_ID).is_err(), "a proof was moved to another action");
+    // 9. The journal holds nothing about the member.
+    assert!(!receipt.journal.bytes.windows(32).any(|w| w == x_now || w == leaf(&secrets[me]) || w == secrets[me]));
 
     secrets.clear();
     println!(
@@ -138,9 +184,13 @@ fn main() {
             "verify_seconds": (verify_s * 1000.0).round() / 1000.0,
             "receipt_bytes": size,
             "journal_bytes": receipt.journal.bytes.len(),
+            "lifetime_epochs": LIFETIME,
+            "chain_steps_in_proof": LIFETIME - (epoch - START),
             "checks": [
                 "stable nullifier within an epoch",
-                "fresh nullifier next epoch",
+                "fresh nullifier next epoch, after stepping the secret forward",
+                "a later epoch's secret cannot prove an earlier epoch (forward privacy)",
+                "a proof cannot be moved to another action",
                 "distinct members: distinct nullifiers, same root",
                 "outsider cannot produce the members' root",
                 "tampered journal fails verification",
