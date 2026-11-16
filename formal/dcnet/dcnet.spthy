@@ -33,7 +33,8 @@
 //    (docs/DCNET_CONTROL_DESIGN.md §2), not a machine-checked proof.
 //
 // NOT MODELED (documented limits): member churn and epoch re-keying; jamming (§5 accepts
-// DoS); byte-level framing (CRC, flags constant).
+// DoS); byte-level framing (the event tag, flags constant). The tag is tested, not modelled:
+// src/dcnet.rs a_collision_of_two_kinds_never_decodes_as_an_event.
 
 // Pads: h(<k, r>) stands for the pair's one-time pad for round r (a hardware random
 // value, one per pair and round; src/dcnet.rs PadBook). In this model it behaves the same:

@@ -49,6 +49,27 @@ private vulnerability reporting (see [SECURITY.md](../SECURITY.md)).
 
 ## Fixed
 
+### DC-net collisions could decode as an event nobody sent (16 Nov 2026, before use)
+- **What:** an event's check was CRC-8 with a zero start and no final XOR, which is linear:
+  the XOR of two valid events carries a valid CRC, and the zero padding stays zero. When
+  two members sent in the same round with kinds 1 and 2, 1 and 3, or 2 and 3 (37.5% of
+  two-sender collisions with random kinds), the round decoded as a third, plausible event
+  instead of "garbled". For the same reason a disruptive member could XOR in a
+  CRC-consistent difference and turn an honest member's event into another valid one,
+  undetected. `docs/DCNET_CONTROL_DESIGN.md` §4 claimed collisions were detected.
+- **Not affected:** anything deployed. DC-net is a library and a pad tool, reachable from no
+  command (its status line), and no cell has run outside the lab. Sender anonymity does not
+  depend on the check.
+- **How found:** the first end-to-end cell run (`tools/dcnet_cell_lab.py`: four member
+  processes, six pair books, frames over UDP) decoded 3 of 4 collisions as events; its
+  Rust replay agreed, so both implementations shared the flaw. The unit test for collisions
+  had used two events of the same kind, whose kinds XOR to 0, an invalid kind.
+- **Fix:** the check is a 72-bit truncated SHA-256 of the event (`event_tag`, in the 9 bytes
+  that held the CRC and the zero padding). Two events, or an event and a difference chosen
+  without knowing it, now pass with probability 2^-72. New tests reproduce both failures on
+  the old code; the cell lab now decodes every collision as garbled
+  (`docs/evidence/DCNET_CELL_LAB.json`).
+
 ### Phase 0 patch: systemd-creds probe would abort host setup (15 Nov 2026, before release)
 - **What:** the probe for systemd-creds sealing wrote a root-owned file in `/tmp` and removed
   it as the unprivileged user. `/tmp` is sticky, so on hosts where sealing *works*

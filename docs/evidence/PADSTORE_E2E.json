@@ -1,0 +1,74 @@
+{
+ "schema": 1,
+ "name": "Deniable pad store and zk identity store on the real Nitrokey (tools/padstore.py, tools/zkid.py)",
+ "date": "2026-11-16",
+ "hardware": "Nitrokey 3, test vault (one non-resident FIDO2 credential); three PIN + touch unlocks",
+ "result": {
+  "out": "/home/debian/vm/advanced-vpn/jitter/e2e-padstore-20261116-053652",
+  "hardware": {
+   "vault_secret_same_each_time": true,
+   "layer_secret_reopens": true,
+   "layers_differ": true,
+   "layer_differs_from_vault": true
+  },
+  "books": {
+   "decoy-book": {
+    "pad_matches": true,
+    "used_round_refused": true
+   },
+   "hidden-book": {
+    "pad_matches": true,
+    "used_round_refused": true
+   }
+  },
+  "decoy_sees": [
+   "decoy-book/book.bin",
+   "decoy-book/pads.bin"
+  ],
+  "hidden_sees_levels": [
+   0,
+   1
+  ],
+  "hidden_files": [
+   "hidden-book/book.bin",
+   "hidden-book/pads.bin"
+  ],
+  "two_layer_store": {
+   "chi2": 296.6,
+   "bytes": 25198592
+  },
+  "one_layer_store": {
+   "chi2": 242.3,
+   "bytes": 25198592
+  },
+  "chi2_note": "255 degrees of freedom: about 255 +- 22.6 for random bytes",
+  "readable_strings_found": [],
+  "zk_identity": {
+   "held_epoch_is_today": true,
+   "folds_to_the_registered_leaf": true,
+   "earlier_epoch_refused": true,
+   "store_unreadable": true
+  }
+ },
+ "indistinguishability_replicates": {
+  "method": "20 stores of each shape rebuilt with the same operations (software keys; the ciphertext layout is what is tested): 24 MiB, a one-day book in the decoy, and in the two-layer store another in the hidden layer; byte chi-square of the whole file",
+  "one_layer": {
+   "mean": 251.7,
+   "max": 289.9,
+   "ks_vs_chi2_255_p": 0.293
+  },
+  "two_layer": {
+   "mean": 251.4,
+   "max": 289.6,
+   "ks_vs_chi2_255_p": 0.621
+  },
+  "one_vs_two_mann_whitney_p": 0.839,
+  "reading": "both shapes follow the chi-square law of random bytes and cannot be told apart; the hardware run's 296.6 (p = 0.038, one draw) is within that spread"
+ },
+ "limits": [
+  "one seizure only: two images show which blocks changed",
+  "flash wear-levelling and journaling keep old blocks",
+  "the decoy must be used believably",
+  "a lower layer opened alone can overwrite higher ones once its free space meets theirs"
+ ]
+}

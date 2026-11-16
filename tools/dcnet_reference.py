@@ -11,8 +11,11 @@ Construction (DCNET_CONTROL_DESIGN.md §2–§4):
                    s_{r+1} = SHA256("dc-next"||s_r), s_first = seed      (over the network)
   body_i         = (event_i?) XOR (XOR over partners j of pad_ij)
   frame          = magic(2)||cell_id(4)||round(8)||flags(1)||body(64)||mac(32)
-  group decode   = XOR of all bodies; null => all-zero; CRC-8(poly 0x07) guards
-                   event encoding; anything else => Garbled.
+  event          = kind(1)||nonce(8)||payload(46)||tag(9),
+                   tag = SHA256("dc-event/v2"||kind||nonce||payload)[:9]
+  group decode   = XOR of all bodies; null => all-zero; a valid tag and kind => the
+                   event; anything else => Garbled. (v1 used CRC-8, which is linear: the XOR
+                   of two events passed it, so collisions decoded as events.)
 
 Outputs vectors.json consumed by the Rust #[cfg(test)] module.
 """
@@ -38,13 +41,13 @@ def test_book(a: int, b: int, tag: bytes = b"vec-book") -> bytes:
     return b"".join(sha256(tag + b"-%d-%d-%d" % (a, b, k)) for k in range(BOOK_ROUNDS * BODY_LEN // 32))
 
 
-def crc8(data: bytes) -> int:
-    crc = 0
-    for byte in data:
-        crc ^= byte
-        for _ in range(8):
-            crc = ((crc << 1) ^ 0x07) & 0xFF if crc & 0x80 else (crc << 1) & 0xFF
-    return crc
+TAG_LEN = 9
+
+
+def event_tag(head: bytes) -> bytes:
+    """The event check: a truncated SHA-256 (non-linear, so the XOR of two events, or an
+    event XOR a chosen difference, passes with probability 2^-72)."""
+    return hashlib.sha256(b"dc-event/v2" + head).digest()[:TAG_LEN]
 
 
 def xor(a: bytes, b: bytes) -> bytes:
@@ -100,16 +103,14 @@ def encode_event(kind: int, nonce: int, payload: bytes) -> bytes:
     b[0] = kind
     b[1:9] = nonce.to_bytes(8, "big")
     b[9 : 9 + len(payload)] = payload
-    b[55] = crc8(bytes(b[:55]))
+    b[55:64] = event_tag(bytes(b[:55]))
     return bytes(b)
 
 
 def decode_event(slot: bytes):
     if slot == b"\x00" * BODY_LEN:
         return "null"
-    if any(slot[56:64]):
-        return "garbled"
-    if crc8(slot[:55]) != slot[55]:
+    if event_tag(slot[:55]) != slot[55:64]:
         return "garbled"
     if slot[0] not in (1, 2, 3, 4):
         return "garbled"

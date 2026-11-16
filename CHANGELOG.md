@@ -47,6 +47,18 @@ measured figure in the docs names the version it was measured on.
   opens no used round; a pad is used once, a used-up book stops the cell.
   `tools/padbook.py` assesses, makes, seals and combines them; cells are 4–60 members,
   rounds every 30 s.
+- DC-net events are checked with a 72-bit truncated SHA-256 instead of CRC-8. CRC-8 is
+  linear, so a two-sender collision could decode as an event nobody sent and a member could
+  rewrite another's event (`docs/INCIDENTS.md`). Found by the first end-to-end cell run
+  (`tools/dcnet_cell_lab.py`: four member processes, six pair books from padbook, frames
+  over UDP, replayed through the Rust data plane; `docs/evidence/DCNET_CELL_LAB.json`).
+- Deniable pad storage (`tools/padstore.py`): books and chains can live in nested layers of
+  one random-looking store, each layer opened by the Nitrokey and its own passphrase (one
+  touch; `padbook.py accept/status --store`). Under coercion a member opens the decoy, and
+  nothing on disk shows more layers. One seizure is covered, not repeated disk images
+  (`docs/evidence/PADSTORE_E2E.json`).
+- ZK membership: `tools/zkid.py` keeps a member's forward-private secret at rest, only the
+  current epoch's, stepped forward and saved before use; its hashes match the prototype's.
 - DC-net pad files and envelopes have nothing in the clear (after TrueCrypt's volume header).
   A stored book is a random salt plus ciphertext, under a ChaCha20-Poly1305 over
   AES-256-GCM cascade. An envelope encodes its X25519 ephemeral with Elligator 2 (dirty

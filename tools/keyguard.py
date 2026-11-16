@@ -264,9 +264,20 @@ def hardware_secret(vault):
     return secret, meta
 
 
-def hardware_assertion(vault, message=None):
+def hardware_secrets(vault, salt2):
+    """One PIN + touch, two hmac-secrets: the vault's (its stored salt) and one for `salt2`
+    (32 bytes), which a deniable store's layer derives from its passphrase, so nothing on
+    disk counts the layers (tools/padstore.py). Returns (secret, second, meta)."""
+    secret, meta, _, second = hardware_assertion(vault, salt2=salt2)
+    return secret, second, meta
+
+
+def hardware_assertion(vault, message=None, salt2=None):
     """One PIN+touch: the hmac-secret (for sealed keys) and, when `message` is given,
-    a non-exportable credential signature whose challenge is SHA-256(message)."""
+    a non-exportable credential signature whose challenge is SHA-256(message). With
+    `salt2`, a fourth value: the hmac-secret for that salt (see hardware_secrets)."""
+    if salt2 is not None and len(salt2) != 32:
+        raise ValueError("an hmac-secret salt is 32 bytes")
     from fido2.server import Fido2Server
     from fido2.webauthn import AttestedCredentialData
 
@@ -281,7 +292,9 @@ def hardware_assertion(vault, message=None):
             [credential],
             user_verification="required",
             challenge=hashlib.sha256(message).digest() if message is not None else None,
-            extensions={"hmacGetSecret": {"salt1": unb64(meta["salt"])}},
+            extensions={
+                "hmacGetSecret": dict(salt1=unb64(meta["salt"]), **({} if salt2 is None else {"salt2": salt2}))
+            },
         )
         response = c.get_assertion(replace(options.public_key, timeout=90000)).get_response(0)
         s.authenticate_complete(state, [credential], response)
@@ -296,8 +309,12 @@ def hardware_assertion(vault, message=None):
         ext = response.client_extension_results.hmac_get_secret
         if ext is None or len(ext.output1) != 32:
             raise RuntimeError("hardware secret missing")
+        if salt2 is not None and (ext.output2 is None or len(ext.output2) != 32):
+            raise RuntimeError("second hardware secret missing")
         meta["counter"] = counter
         atomic(vault / "credential.json", json.dumps(meta).encode())
+        if salt2 is not None:
+            return ext.output1, meta, assertion, ext.output2
         return ext.output1, meta, assertion
     finally:
         device.close()

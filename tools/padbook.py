@@ -550,16 +550,55 @@ def _nonce(k):
     return k.to_bytes(12, "big")
 
 
+class DirFiles:
+    """A book's files in a plain directory (created 0700): the default store. A layer of a
+    deniable store (tools/padstore.py) offers the same five calls."""
+
+    def __init__(self, path):
+        self.path = Path(path)
+
+    def create(self):
+        """Make the directory; refuses one that exists."""
+        self.path.mkdir(mode=0o700, parents=False, exist_ok=False)
+
+    def read(self, name, limit):
+        """A whole private file, at most `limit` bytes."""
+        return keyguard.read_private(self.path / name, limit)
+
+    def write(self, name, data):
+        """Replace a whole file atomically (0600)."""
+        keyguard.atomic(self.path / name, data)
+
+    def read_at(self, name, offset, n):
+        """`n` bytes at `offset`."""
+        with open(self.path / name, "rb") as f:
+            f.seek(offset)
+            return f.read(n)
+
+    def write_at(self, name, offset, data):
+        """Overwrite bytes in place at `offset`, synced to the disk."""
+        with open(self.path / name, "r+b") as f:
+            f.seek(offset)
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+
+
+def files(where):
+    """`where` as a file store: a directory path, or an object with DirFiles' calls."""
+    return where if hasattr(where, "read_at") else DirFiles(where)
+
+
 def _save(directory, salt, keys, info):
     """book.bin = salt || nonce || cascade(everything): indistinguishable from random bytes."""
     nonce = os.urandom(12)
     blob = json.dumps(info, sort_keys=True).encode()
-    keyguard.atomic(Path(directory) / BOOK_FILE, salt + nonce + cascade_seal(keys, nonce, blob, salt))
+    files(directory).write(BOOK_FILE, salt + nonce + cascade_seal(keys, nonce, blob, salt))
 
 
 def _load(directory, secret, meta):
     """(salt, keys, info) of a book file; fails, as on random data, without this Nitrokey."""
-    data = keyguard.read_private(Path(directory) / BOOK_FILE, 1 << 20)
+    data = files(directory).read(BOOK_FILE, 1 << 20)
     salt, nonce, ciphertext = data[:SALT], data[SALT : SALT + 12], data[SALT + 12 :]
     keys = file_keys(secret, meta, salt)
     return salt, keys, json.loads(cascade_open(keys, nonce, ciphertext, salt))
@@ -573,15 +612,15 @@ def write_book(directory, h, contributions, pads, secret, meta, chain_seed):
     bytes from the Nitrokey, the first link of the per-round key chain."""
     if h["kind"] != "book" or len(pads) != h["rounds"] * PAD or len(chain_seed) != 32:
         raise ValueError("pads or chain seed do not match the book")
-    directory = Path(directory)
-    directory.mkdir(mode=0o700, parents=False, exist_ok=False)
+    directory = files(directory)
+    directory.create()
     salt, chain, records = os.urandom(SALT), chain_seed, bytearray()
     for k in range(h["rounds"]):
         records += cascade_seal(_round_keys(chain), _nonce(k), pads[k * PAD : (k + 1) * PAD], salt + b"|%d" % k)
         chain = _hkdf(chain, b"next")
     bucket = -(-h["rounds"] // BUCKET_ROUNDS) * BUCKET_ROUNDS
     records += os.urandom((bucket - h["rounds"]) * RECORD)  # filler, as random as the rest
-    keyguard.atomic(directory / PADS_FILE, bytes(records))
+    directory.write(PADS_FILE, bytes(records))
     info = dict(book=h, contributions=contributions, state=dict(next=0, chain=chain_seed.hex()))
     _save(directory, salt, file_keys(secret, meta, salt), info)
 
@@ -616,8 +655,8 @@ def write_chain(directory, h, contributions, seed, secret, meta):
     0700), as an opaque book file."""
     if h["kind"] != "chain" or len(seed) != SEED:
         raise ValueError("not a chain seed")
-    directory = Path(directory)
-    directory.mkdir(mode=0o700, parents=False, exist_ok=False)
+    directory = files(directory)
+    directory.create()
     salt = os.urandom(SALT)
     info = dict(book=h, contributions=contributions, state=dict(next=0, chain=seed.hex()))
     _save(directory, salt, file_keys(secret, meta, salt), info)
@@ -629,7 +668,7 @@ class _Stored:
     kind = None
 
     def __init__(self, directory, secret, meta, clock=time.time):
-        self.dir = Path(directory)
+        self.dir = files(directory)
         self.salt, keys, self.info = _load(self.dir, secret, meta)
         self.keys = Secret(keys)  # the book file's cascade key, wiped on exit or `with`
         self.h = self.info["book"]
@@ -699,17 +738,13 @@ class Book(_Stored):
         chain, first = bytearray(self.state["chain"]), self.state["next"]
         for _ in range(first, k):
             chain[:] = _hkdf(chain, b"next")
-        with open(self.dir / PADS_FILE, "r+b") as f:
-            f.seek(k * RECORD)
-            pad = cascade_open(_round_keys(chain), _nonce(k), f.read(RECORD), self.salt + b"|%d" % k)
-            # 1. The chain moves past this round: its keys and every earlier ones are gone.
-            self._advance(k + 1, _hkdf(chain, b"next"))
-            _memzero(chain)
-            # 2. The used and skipped records are zeroed.
-            f.seek(first * RECORD)
-            f.write(bytes((k + 1 - first) * RECORD))
-            f.flush()
-            os.fsync(f.fileno())
+        record = self.dir.read_at(PADS_FILE, k * RECORD, RECORD)
+        pad = cascade_open(_round_keys(chain), _nonce(k), record, self.salt + b"|%d" % k)
+        # 1. The chain moves past this round: its keys and every earlier ones are gone.
+        self._advance(k + 1, _hkdf(chain, b"next"))
+        _memzero(chain)
+        # 2. The used and skipped records are zeroed.
+        self.dir.write_at(PADS_FILE, first * RECORD, bytes((k + 1 - first) * RECORD))
         return pad
 
 
@@ -737,6 +772,20 @@ def harden():
     except (OSError, AttributeError):
         pass
     _install_wipe_on_exit()
+
+
+def _unlock_book(args):
+    """(secret, meta, where the book lives): a directory, or with --store the layer its
+    passphrase opens (one PIN + touch either way)."""
+    if not args.store:
+        secret, meta = keyguard.hardware_secret(args.vault)
+        return secret, meta, args.book
+    import getpass
+
+    import padstore
+
+    secret, meta, layer = padstore.unlock(args.vault, args.store, getpass.getpass("layer passphrase: "))
+    return secret, meta, padstore.LayerFiles(layer, args.book.name)
 
 
 def main():
@@ -773,11 +822,13 @@ def main():
     a.add_argument("--mine", type=Path, required=True, help="your --keep file")
     a.add_argument("--kem-sealed", type=Path, required=True, help="your keygen --sealed file")
     a.add_argument("--vault", type=Path, required=True, help="keyguard vault (Nitrokey hmac-secret)")
-    a.add_argument("--book", type=Path, required=True, help="new directory for the book")
+    a.add_argument("--book", type=Path, required=True, help="new directory for the book (with --store: its name)")
+    a.add_argument("--store", type=Path, help="a deniable store (tools/padstore.py): the book goes in a layer")
     a.add_argument("--nitropy")
     s = sub.add_parser("status", help="rounds and days left, and the edge's claim")
     s.add_argument("--book", type=Path, required=True)
     s.add_argument("--vault", type=Path, required=True)
+    s.add_argument("--store", type=Path, help="the book is in a layer of this deniable store")
     args = p.parse_args()
     harden()
     if args.cmd == "assess":
@@ -834,7 +885,7 @@ def main():
         keyguard.atomic(args.keep, seal_contribution(h, args.me, args.delivery, args.my_key.read_bytes(), mine, raw))
         print(json.dumps(dict(book=book_id(h), kind=h["kind"], first_round=first, bytes=n, raw=bool(raw))))
     elif args.cmd == "accept":
-        secret, meta = keyguard.hardware_secret(args.vault)  # one PIN + touch for the key and the book
+        secret, meta, where = _unlock_book(args)  # one PIN + touch for the key, the book (and the layer)
         private = kem_private(secret, meta, json.loads(keyguard.read_private(args.kem_sealed)))
         h_t, s_t, d_t, r_t, theirs = open_contribution(args.theirs.read_bytes(), args.me, private)
         h, s_m, d_m, r_m, mine = open_contribution(
@@ -845,18 +896,18 @@ def main():
         combined = combine_any(mine, theirs)
         contributions = {s_m: dict(delivery=d_m, raw=r_m), s_t: dict(delivery=d_t, raw=r_t)}
         if h["kind"] == "chain":
-            write_chain(args.book, h, contributions, combined, secret, meta)
+            write_chain(where, h, contributions, combined, secret, meta)
         else:
-            write_book(args.book, h, contributions, combined, secret, meta, nitrokey_bytes(32, args.nitropy))
+            write_book(where, h, contributions, combined, secret, meta, nitrokey_bytes(32, args.nitropy))
         args.mine.unlink()
         print(json.dumps(dict(book=book_id(h), kind=h["kind"], claim=edge_claim(contributions, h["kind"]))))
     else:
-        secret, meta = keyguard.hardware_secret(args.vault)
-        kind = _load(args.book, secret, meta)[2]["book"]["kind"]
+        secret, meta, where = _unlock_book(args)
+        kind = _load(where, secret, meta)[2]["book"]["kind"]
         if kind == "chain":
-            print(json.dumps(dict(kind="chain", rounds_left=None, claim=Chain(args.book, secret, meta).claim())))
+            print(json.dumps(dict(kind="chain", rounds_left=None, claim=Chain(where, secret, meta).claim())))
         else:
-            b = Book(args.book, secret, meta)
+            b = Book(where, secret, meta)
             left = b.rounds_left()
             print(
                 json.dumps(

@@ -51,9 +51,11 @@ prototype therefore uses a secret that only moves forward:
   prototype). The member draws `s0` and registers
   `C = SHA-256("avpn/member/v2" || H^N(s0))` with `H(x) = SHA-256("avpn/fp-step/v1" || x)`.
 - **Hold.** In epoch E0 + k the device holds only `x_k = H^k(s0)`. At each epoch change it
-  computes `x_{k+1} = H(x_k)` and erases `x_k`. A deployment keeps it in the forward-erasing
-  store the DC-net pads use (`tools/padbook.py`); the prototype's host, a test, recomputes
-  each `x_k` from `s0` in memory.
+  computes `x_{k+1} = H(x_k)` and erases `x_k`. `tools/zkid.py` keeps it this way at rest:
+  `s0` from kernel XOR Nitrokey, only the current `x_k` stored, in padbook's opaque file
+  under the Nitrokey's hmac-secret, stepped forward and saved before it is handed out (its
+  hashes are checked against the prototype's, built in Rust). The prototype's host, a
+  test, recomputes each `x_k` from `s0` in memory.
 - **Prove.** The statement becomes: *I know an `x` such that `H^(N-k)(x)` is committed in a
   leaf of the tree with root `R`*, with nullifier `SHA-256("avpn/nullifier/v2" || x || epoch
   || scope)`. E0 and N belong to the tree, so they say nothing about who proves. The

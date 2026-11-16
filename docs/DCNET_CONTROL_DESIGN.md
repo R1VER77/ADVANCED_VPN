@@ -211,22 +211,41 @@ Residual: ML-KEM ciphertext coefficients are near-uniform, not exactly uniform. 
 every pad record and `book.bin` are a cascade: ChaCha20-Poly1305 over AES-256-GCM, with
 separate keys, so one cipher broken alone opens nothing stored.
 
-**Deniable storage, designed, not built.**
+**Deniable storage (`tools/padstore.py`).**
 - **Goal:** under coercion, a member opens a decoy set of books, and nothing shows that more
   exist. That matters most for the events closest to coercion (`MixLaneFallback`).
-- **Design:** one store of random-looking blocks; each layer is opened by its own Nitrokey
-  credential, and the layers are interleaved rather than placed at a fixed offset. This is
-  Shufflecake's approach (2023: any number of nested layers on Linux), which improves on
-  TrueCrypt's single hidden volume, whose fixed location and size field invite "show me the
-  hidden one".
+- **Design:** one fixed-size store of random-looking blocks with 8 header slots. Unused slots
+  and blocks are random bytes, like used ones. A layer's key is the Nitrokey's hmac-secret
+  for a salt derived from that layer's passphrase. It is the second salt of the assertion
+  that also yields the vault secret, so one touch opens the layer and its books.
+  - Unlock tries every slot, so the work does not depend on how many layers exist.
+  - Layers nest, after Shufflecake (2023), which improves on TrueCrypt's single hidden
+    volume: each layer's header holds the slot keys of the layers below it, so the top
+    layer, used day to day, sees every block in use and never overwrites a lower one.
+  - The decoy fills from the front, hidden layers from the back.
+  - padbook's books and chains run inside a layer unchanged (`padbook.py accept/status
+    --store`).
+- **Why one credential, not one per layer** (the first design): a non-resident credential
+  needs its ID stored to be used, so the vault files would count the layers. With one
+  credential and passphrase-derived salts nothing on disk does. The token alone opens no
+  layer, a passphrase alone opens none, and each passphrase guess costs a touch.
+- **Day to day,** one passphrase: the top layer's, which reaches every layer below. More are
+  asked only when a layer is added (the current top's and the new one's), and under coercion
+  the member gives the decoy's.
 - **Limits, to be stated whenever it is claimed:**
   - an adversary who images the disk twice sees which "random" blocks changed, and books
     change every round, so only a single seizure is covered;
-  - flash wear-levelling keeps old blocks;
-  - the decoy layer must be used believably.
-- **What building it takes:** a block allocator across layers, per-layer keys from separate
-  Nitrokey credentials, an unlock that never shows how many layers exist, and tests that a
-  store with one layer and a store with three are indistinguishable.
+  - flash wear-levelling and journaling file systems keep old blocks;
+  - the decoy layer must be used believably (it should hold books in use);
+  - a lower layer opened alone does not know the higher ones: written to, it can overwrite
+    them once its free space meets theirs (the hidden-volume trade-off), so under coercion it
+    is opened for reading.
+- **Checked:** `tools/test_padstore.py`, mutation-checked: a store with one layer and one with
+  three are the same size and both random-looking (byte chi-square), and the decoy key gives
+  the same view of both; an unlock tries all 8 slots whether it finds a layer or not; the top
+  layer fills the store without touching a lower layer's file; a rewritten file's old blocks
+  are scrubbed; a book in a hidden layer gives the same pads as in a directory. On the
+  Nitrokey: `docs/evidence/PADSTORE_E2E.json`.
 
 ### What we took from TrueCrypt
 
@@ -309,7 +328,8 @@ dc_frame := magic(2) || cell_id(4) || round(8) || flags(1) || body(64)
   that is the only thing keeping the sender hidden).
 - `body`: every member's body is a full pad XOR (`⊕ over partners j of
   pad_ij(r)`), with the sender additionally XORing the event encoding
-  `{ event_type(1) || nonce(8) || payload(46) || crc8(1) || zero(8) }`.
+  `{ event_type(1) || nonce(8) || payload(46) || tag(9) }`, with
+  `tag = SHA-256("dc-event/v2" || event_type || nonce || payload)[:9]`.
   A silent member's body is NOT zero — it is indistinguishable random-looking
   bytes; only the *group sum* of a null round is all-zero.
 - `member_mac`: keyed by a *per-round broadcast key* derived from
@@ -334,7 +354,11 @@ compute locally from gossip-synced frames: O(n) frames observed ≈ 24 × 111 B
 - Group XOR of all n frames: null rounds decode to all-zero; a sender's
   event survives cancellation.
 - **Collision** (two senders in one round): XOR of two different event
-  encodings — the CRC-8 check fails and the round decodes as Garbled.
+  encodings — the tag check fails and the round decodes as Garbled, except with
+  probability 2^-72. The check must not be linear: the first version used CRC-8, whose
+  XOR of two valid events is valid, and the first cell run decoded 3 of 4 collisions as
+  events nobody sent (`docs/INCIDENTS.md`). The same property stops a disruptive member
+  from turning an honest event into another by XORing in a chosen difference.
   Policy: both events are lost; each sender re-transmits in a later round
   chosen by exponential backoff keyed to their (private) nonce. Expected
   collision rate at ≤1 event/cell/hour across 24 members: negligible

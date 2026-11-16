@@ -163,14 +163,33 @@ anonymous actions stay unlinkable.
 Zcash nullifiers have no forward privacy.
 
 **Code:** `research/zk-membership` (guest v2), `formal/zk/forward_private_nullifiers.spthy`,
-`docs/ZK_MEMBERSHIP_DESIGN.md`.
+`docs/ZK_MEMBERSHIP_DESIGN.md`; the member's side at rest: `tools/zkid.py` (the epoch secret,
+stepped forward and saved before use, vectors checked against the prototype in Rust).
+
+## 13. Passphrase-Salted Deniable Layers — *library*
+
+**What:** one fixed-size store of random-looking blocks with 8 header slots. A layer's key is
+the Nitrokey's hmac-secret for a salt derived from the layer's passphrase (the second salt of
+the same assertion that yields the vault secret: one touch). Unlock tries every slot, layers
+nest (each header holds the slot keys below it), the decoy fills from the front and hidden
+layers from the back. padbook's books and chains run inside a layer unchanged.
+
+**Why:** under coercion, give the token, PIN and decoy passphrase; nothing on disk shows more
+layers. One credential with per-layer salts, rather than one credential per layer, because
+each credential needs a stored ID that would itself count the layers.
+
+**Prior art:** TrueCrypt hidden volumes, Shufflecake (2023) nested layers. New here: layers
+keyed by a hardware PRF over a passphrase-derived salt, so neither the token nor the
+passphrase alone opens one, and guessing a passphrase costs a touch. Limits: one seizure
+(two images show which blocks changed), flash wear-levelling, the decoy must be used.
+
+**Code:** `tools/padstore.py`, `hardware_secrets` in `tools/keyguard.py`, `padbook.py
+accept/status --store`.
 
 ---
 
 ## Designed, not built
 
 - **Downstream Wire Clock:** clock the relay's sends too, to remove the residual 9–10%.
-- **Layered deniable pad store:** Shufflecake-style interleaved layers, one Nitrokey credential
-  each (`docs/DCNET_CONTROL_DESIGN.md`).
 - **Token-side XOR:** a Nitrokey firmware applet that holds a book's key chain and returns each
   round's body, so pads never reach the host CPU.

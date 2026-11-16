@@ -31,7 +31,7 @@
 //! frame          = magic(2) || cell_id(4) || round(8) || flags(1)
 //!                  || body(64) || member_mac(32)               // 111 bytes
 //! group decode   = XOR of all bodies of one (cell, round):
-//!                  all-zero => Null, valid CRC-8 + encoding => Event,
+//!                  all-zero => Null, valid tag + kind => Event,
 //!                  anything else => Garbled (collision or jam)
 //! ```
 
@@ -123,48 +123,44 @@ pub enum DcOutcome {
     Null,
     /// Exactly one member sent an event; the aggregate decoded cleanly.
     Event(DcEvent),
-    /// CRC/structure failure: collision, jam, or stale replay.
+    /// Tag or structure failure: collision, jam, or stale replay.
     /// Policy (design doc §4–§5): drop, no side channel, no tracing.
     Garbled,
 }
 
-/// CRC-8 (poly 0x07, init 0x00, no reflect, no final xor) over the event
-/// encoding — collision/jam detection input.
-fn crc8(data: &[u8]) -> u8 {
-    let mut crc: u8 = 0;
-    for &byte in data {
-        crc ^= byte;
-        for _ in 0..8 {
-            crc = if crc & 0x80 != 0 {
-                (crc << 1) ^ 0x07
-            } else {
-                crc << 1
-            };
-        }
-    }
-    crc
+/// Bytes of the event check.
+const TAG_LEN: usize = 9;
+
+/// The event check: SHA-256("dc-event/v2" || kind || nonce || payload), truncated to 72
+/// bits. It must not be linear: v1's CRC-8 was, so the XOR of two valid events (a
+/// collision) or an event XOR a chosen difference (a disruptive member) passed as a valid
+/// event. A truncated hash lets either through with probability 2^-72.
+fn event_tag(head: &[u8]) -> [u8; TAG_LEN] {
+    let mut h = Sha256::new();
+    h.update(b"dc-event/v2");
+    h.update(head);
+    h.finalize()[..TAG_LEN].try_into().expect("9 bytes")
 }
 
 impl DcEvent {
-    /// Layout: kind(1) || nonce(8) || payload(46) || crc8(1) || zero(8) = 64.
+    /// Layout: kind(1) || nonce(8) || payload(46) || tag(9) = 64.
     pub fn encode(&self) -> [u8; BODY_LEN] {
         let mut b = [0u8; BODY_LEN];
         b[0] = self.kind as u8;
         b[1..9].copy_from_slice(&self.nonce.to_be_bytes());
         b[9..55].copy_from_slice(&self.payload);
-        b[55] = crc8(&b[..55]);
+        let tag = event_tag(&b[..55]);
+        b[55..].copy_from_slice(&tag);
         b
     }
 
-    /// Decode a group sum: all-zero is a null round, a valid CRC-8 encoding is an event, anything else is garbled (collision or jam).
+    /// Decode a group sum: all-zero is a null round, a valid tag and kind is an event,
+    /// anything else is garbled (a collision, a jam, or a tampered sum).
     pub fn decode(slot: &[u8; BODY_LEN]) -> DcOutcome {
         if slot.iter().all(|&x| x == 0) {
             return DcOutcome::Null;
         }
-        if slot[56..64].iter().any(|&x| x != 0) {
-            return DcOutcome::Garbled;
-        }
-        if crc8(&slot[..55]) != slot[55] {
+        if event_tag(&slot[..55]) != slot[55..] {
             return DcOutcome::Garbled;
         }
         match EventType::from_byte(slot[0]) {
@@ -523,14 +519,14 @@ mod tests {
     const VEC_BOOK_23_FIRST_PAD: &str = "ac14f5da2c9e1fceda7ed8758a27c7c27f0f5c6796fac97aef9d2521fd712c0dac35cc96b3d9ee8f0051faedabb34ce1e43e4c691db8b1245b14b64f3961bcc6";
     const VEC_PAD_M0_P1: &str = "d628641a600c90eb45e9ac5398518a7e4f0ccd2447f59e94edc8c7273816cc3506ff4d0da818480e5aa56fc2aa28d9aa83d6ff191319694eca6c5342102fd212";
     const VEC_PAD_M2_P3: &str = "f119e049fa2a14e5385fa634d70bbe968fb5b4e55878612ed76acd6bf2381afd5dc5fc9fbbaea78b2a15afcab719fb6c7b552ea3a5366066122b839c9f4d9b2a";
-    const VEC_EVENT_ENCODING: &str = "021122334455667788636861696e2d73657475702d636f6d6d69742d7061796c6f61642d30313233343536373839000000000000000000370000000000000000";
-    const VEC_BODY_M2_EVENT: &str = "0d1b4556c70aed4725fdbfe12a26db3f3c8a0bf6ab81a91ee4621dfdaecbd16190ee574912c2819c7706f073d15e38a98c0ecb5f6a792ff14590836fdfa650d7";
+    const VEC_EVENT_ENCODING: &str = "021122334455667788636861696e2d73657475702d636f6d6d69742d7061796c6f61642d3031323334353637383900000000000000000031c166254fa3c81628";
+    const VEC_BODY_M2_EVENT: &str = "0d1b4556c70aed4725fdbfe12a26db3f3c8a0bf6ab81a91ee4621dfdaecbd16190ee574912c2819c7706f073d15e38a98c0ecb5f6a792ff784f6a6207c6e46ff";
     const VEC_BODY_M0_SILENT: &str = "e1f0b46421d74da2b1a0775c06bd1f53a6dbc792918498af6ed097475e32da9a615a7628cd112e6346d7538c3d2c119166f2a7e581810cbd65219b870c7f5b55";
-    const VEC_SUM_BODIES: &str = "021122334455667788636861696e2d73657475702d636f6d6d69742d7061796c6f61642d30313233343536373839000000000000000000370000000000000000";
+    const VEC_SUM_BODIES: &str = "021122334455667788636861696e2d73657475702d636f6d6d69742d7061796c6f61642d3031323334353637383900000000000000000031c166254fa3c81628";
     const VEC_RATCHET_SEED_01: &str =
         "5cda741eb0a3f1f86483dd9365544893abd8322b1133d987cbd6bd98529fd8d3";
     const VEC_RATCHET_PAD_01: &str = "29fd6368b1d12a7da6a1301075033dd77cc6485c2ae28fff59c1049b834b56050e6d7ab7a36eb1d28ecdbac5a1318d9ed686b01e23d933b3023ff525e04cbf76";
-    const VEC_FRAME_M2: &str = "dc4e00a17c4d000000000000004d000d1b4556c70aed4725fdbfe12a26db3f3c8a0bf6ab81a91ee4621dfdaecbd16190ee574912c2819c7706f073d15e38a98c0ecb5f6a792ff14590836fdfa650d70000000000000000000000000000000000000000000000000000000000000000";
+    const VEC_FRAME_M2: &str = "dc4e00a17c4d000000000000004d000d1b4556c70aed4725fdbfe12a26db3f3c8a0bf6ab81a91ee4621dfdaecbd16190ee574912c2819c7706f073d15e38a98c0ecb5f6a792ff784f6a6207c6e46ff0000000000000000000000000000000000000000000000000000000000000000";
 
     fn sha256(data: &[u8]) -> [u8; 32] {
         Sha256::digest(data).into()
@@ -725,6 +721,68 @@ mod tests {
     }
 
     #[test]
+    fn a_collision_of_two_kinds_never_decodes_as_an_event() {
+        // Found by the cell lab (tools/dcnet_cell_lab.py): with a linear check (CRC-8), the
+        // XOR of two valid events is itself valid, and kinds 1 and 3 XOR to kind 2, so a
+        // collision decoded as an event nobody sent.
+        let mut members = cell4();
+        for (round, (ka, kb)) in [
+            (EventType::EnrollIntent, EventType::KeyRotationNotice),
+            (EventType::EnrollIntent, EventType::ChainSetupCommit),
+            (EventType::ChainSetupCommit, EventType::KeyRotationNotice),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let a = DcEvent {
+                kind: ka,
+                nonce: 1,
+                payload: [0; 46],
+            };
+            let b = DcEvent {
+                kind: kb,
+                nonce: 2,
+                payload: [0; 46],
+            };
+            let sum = sum_round(&mut members, VEC_ROUND + round as u64, |i| match i {
+                0 => Some(&a),
+                3 => Some(&b),
+                _ => None,
+            });
+            assert_eq!(
+                DcEvent::decode(&sum),
+                DcOutcome::Garbled,
+                "{ka:?} with {kb:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_member_cannot_turn_an_event_into_another_by_xor() {
+        // A disruptive member XORs, into its body, the difference between two valid
+        // encodings (it does not know the honest event; it bets on one). With a linear
+        // check every such difference passes; with the tag the bet must hit 2^-72.
+        let ev = test_event();
+        let mut other = ev;
+        other.kind = EventType::MixLaneFallback;
+        other.nonce ^= 1;
+        let delta: Vec<u8> = ev
+            .encode()
+            .iter()
+            .zip(other.encode())
+            .map(|(x, y)| x ^ y)
+            .collect();
+        let mut wrong = ev;
+        wrong.nonce ^= 2; // the bet missed: the honest event is not `ev`
+        let mut members = cell4();
+        let mut sum = sum_round(&mut members, VEC_ROUND, |i| (i == 2).then_some(&wrong));
+        for (x, d) in sum.iter_mut().zip(&delta) {
+            *x ^= d;
+        }
+        assert_eq!(DcEvent::decode(&sum), DcOutcome::Garbled);
+    }
+
+    #[test]
     fn jam_detected() {
         let ev = test_event();
         let mut members = cell4();
@@ -863,6 +921,80 @@ mod tests {
             PadBook::new(0, vec![0u8; BODY_LEN + 1]).err(),
             Some(DcError::BadPads)
         ); // ragged
+    }
+
+    /// Replays a recorded cell run (tools/dcnet_cell_lab.py: four member processes, pads
+    /// from padbook's books, frames over UDP) through this module: from the pads each
+    /// member took, `CellPads` must give the body it broadcast, and `group_sum` over the
+    /// round's frames the outcome every member decoded. Run by the lab with
+    /// AVPN_DCNET_TRACE set; ignored otherwise.
+    #[test]
+    #[ignore]
+    fn a_recorded_cell_run_matches_the_rust_cell() {
+        let path = std::env::var("AVPN_DCNET_TRACE").expect("AVPN_DCNET_TRACE: a lab trace");
+        let t: serde_json::Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        let n = t["members"].as_u64().unwrap() as usize;
+        let first = t["first_round"].as_u64().unwrap();
+        let rounds = t["rounds"].as_u64().unwrap() as usize;
+        let cell_id = t["cell"].as_u64().unwrap() as u32;
+        let hex64 = |v: &serde_json::Value| -> [u8; BODY_LEN] {
+            hex::decode(v.as_str().unwrap())
+                .unwrap()
+                .try_into()
+                .unwrap()
+        };
+        let mut bodies = vec![vec![[0u8; BODY_LEN]; n]; rounds];
+        for i in 0..n {
+            let rec = &t["per_member"][i];
+            let books = (0..n)
+                .filter(|&j| j != i)
+                .map(|j| {
+                    let mut pads = Vec::new();
+                    for k in 0..rounds {
+                        pads.extend_from_slice(&hex64(&rec[k]["pads"][j.to_string()]));
+                    }
+                    PairPads::OneTime(PadBook::new(first, pads).unwrap())
+                })
+                .collect();
+            let mut cell = CellPads::new(n, i, books).unwrap();
+            for k in 0..rounds {
+                let event = match &rec[k]["event"] {
+                    serde_json::Value::Null => None,
+                    v => match DcEvent::decode(&hex64(v)) {
+                        DcOutcome::Event(e) => Some(e),
+                        other => panic!("a scheduled event that does not decode: {other:?}"),
+                    },
+                };
+                let body = cell.body(first + k as u64, event.as_ref()).unwrap();
+                assert_eq!(body, hex64(&rec[k]["body"]), "member {i}, round {k}: body");
+                bodies[k][i] = body;
+            }
+            assert_eq!(cell.rounds_left(), 0);
+        }
+        for k in 0..rounds {
+            let frames: Vec<Frame> = (0..n)
+                .map(|i| Frame::build(cell_id, first + k as u64, bodies[k][i]))
+                .collect();
+            let decoded = group_sum(&frames).unwrap();
+            let recorded = &t["per_member"][0][k]["outcome"];
+            match (decoded, recorded.as_str()) {
+                (DcOutcome::Null, Some("null")) | (DcOutcome::Garbled, Some("garbled")) => {}
+                (DcOutcome::Event(e), None) => {
+                    assert_eq!(
+                        recorded[1].as_u64().unwrap(),
+                        e.kind as u64,
+                        "round {k}: kind"
+                    );
+                    assert_eq!(recorded[2].as_u64().unwrap(), e.nonce, "round {k}: nonce");
+                    assert_eq!(
+                        hex::encode(e.payload),
+                        recorded[3].as_str().unwrap(),
+                        "round {k}: payload"
+                    );
+                }
+                (d, _) => panic!("round {k}: Rust decodes {d:?}, the members {recorded}"),
+            }
+        }
     }
 
     #[test]
