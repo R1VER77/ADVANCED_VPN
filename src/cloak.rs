@@ -68,9 +68,11 @@ pub const QUIC_PROBE_INTERVAL: Duration = Duration::from_secs(10);
 /// Length of the cloak key and of a proof.
 pub const TOKEN_LEN: usize = 32;
 /// The HTTP/3 unidirectional stream type that carries the proof: a reserved GREASE type
-/// (0x1f * 3 + 0x21), which a real HTTP/3 server must ignore.
-pub const TOKEN_STREAM: [u8; 2] = [0x40, 0x7e];
-const EXPORTER_LABEL: &[u8] = b"EXPORTER-advanced-vpn-cloak";
+/// (0x1f * 4 + 0x21), which a real HTTP/3 server must ignore.
+pub const TOKEN_STREAM: [u8; 2] = [0x40, 0x9d];
+/// V2 server confirmation on a separate GREASE unidirectional stream.
+pub const SERVER_CONFIRM_STREAM: [u8; 2] = [0x40, 0xbc];
+const EXPORTER_LABEL: &[u8] = b"EXPORTER-advanced-vpn-cloak-v2";
 /// While the client's session connects, WireGuard's datagrams wait (at most this many, for
 /// at most [`HOLD_FOR`]) instead of being lost: the first handshake then gets through at
 /// once, as it would on a direct path, and DAITA's shaping never starts before a session.
@@ -140,7 +142,7 @@ pub fn proof(c: &Connection, key: &[u8; TOKEN_LEN]) -> Result<[u8; TOKEN_LEN]> {
     let mut m = [0u8; 32];
     c.export_keying_material(&mut m, EXPORTER_LABEL, b"")
         .map_err(|_| anyhow!("keying material export failed"))?;
-    Ok(hmac_sha256(key, &m))
+    Ok(role_proof(key, &m, b"client"))
 }
 
 /// The same exporter proof for a `rustls` TCP/TLS 1.3 connection.
@@ -151,7 +153,91 @@ pub fn tls_proof<D>(
     let mut m = [0u8; 32];
     c.export_keying_material(&mut m, EXPORTER_LABEL, Some(b""))
         .map_err(|_| anyhow!("TLS keying material export failed"))?;
-    Ok(hmac_sha256(key, &m))
+    Ok(role_proof(key, &m, b"client"))
+}
+
+fn role_proof(key: &[u8; TOKEN_LEN], exporter: &[u8; 32], role: &[u8]) -> [u8; TOKEN_LEN] {
+    let mut message = b"advanced-vpn/cloak/v2/".to_vec();
+    message.extend_from_slice(role);
+    message.push(0);
+    message.extend_from_slice(exporter);
+    hmac_sha256(key, &message)
+}
+
+fn server_proof(c: &Connection, key: &[u8; TOKEN_LEN]) -> Result<[u8; TOKEN_LEN]> {
+    let mut m = [0u8; 32];
+    c.export_keying_material(&mut m, EXPORTER_LABEL, b"")
+        .map_err(|_| anyhow!("keying material export failed"))?;
+    Ok(role_proof(key, &m, b"server"))
+}
+
+fn tls_server_proof<D>(
+    c: &rustls::ConnectionCommon<D>,
+    key: &[u8; TOKEN_LEN],
+) -> Result<[u8; TOKEN_LEN]> {
+    let mut m = [0u8; 32];
+    c.export_keying_material(&mut m, EXPORTER_LABEL, Some(b""))
+        .map_err(|_| anyhow!("keying material export failed"))?;
+    Ok(role_proof(key, &m, b"server"))
+}
+
+async fn send_confirmation(c: &Connection, key: &[u8; TOKEN_LEN]) -> Result<()> {
+    let mut stream = c.open_uni().await?;
+    let mut message = SERVER_CONFIRM_STREAM.to_vec();
+    message.extend_from_slice(&server_proof(c, key)?);
+    stream.write_all(&message).await?;
+    stream.finish()?;
+    Ok(())
+}
+
+async fn confirm_server(c: &Connection, key: &[u8; TOKEN_LEN]) -> Result<()> {
+    for _ in 0..16 {
+        let mut stream = c.accept_uni().await?;
+        let mut first = [0u8; 1];
+        stream.read_exact(&mut first).await?;
+        let mut typed = false;
+        if first[0] == SERVER_CONFIRM_STREAM[0] {
+            let mut second = [0u8; 1];
+            stream.read_exact(&mut second).await?;
+            typed = second[0] == SERVER_CONFIRM_STREAM[1];
+        }
+        if !typed {
+            // HTTP/3 control/QPACK streams may remain open: never wait for their EOF
+            // on the authentication path. Drains are byte-, time- and count-bounded.
+            tokio::spawn(async move {
+                let _ = tokio::time::timeout(AUTH_WINDOW, stream.read_to_end(4096)).await;
+            });
+            continue;
+        }
+        let body = stream.read_to_end(TOKEN_LEN).await?;
+        ensure!(
+            equal(&body, &server_proof(c, key)?),
+            "server key confirmation failed"
+        );
+        return Ok(());
+    }
+    Err(anyhow!("too many streams before server confirmation"))
+}
+
+fn response_confirmation(header: &[u8]) -> Option<[u8; TOKEN_LEN]> {
+    let text = std::str::from_utf8(header).ok()?;
+    let mut result = None;
+    for line in text.lines().skip(1) {
+        if let Some((name, value)) = line.split_once(':')
+            && name.trim().eq_ignore_ascii_case("etag")
+        {
+            if result.is_some() {
+                return None;
+            }
+            let value = value.trim();
+            if value.len() != 66 || !value.starts_with('"') || !value.ends_with('"') {
+                return None;
+            }
+            result = hex::decode(&value[1..65]).ok()?.try_into().ok();
+            result?;
+        }
+    }
+    result
 }
 
 fn provider() -> Arc<CryptoProvider> {
@@ -248,7 +334,7 @@ fn transport_with(
         .max_ack_delay(Some(Duration::from_millis(100)));
     let mut t = TransportConfig::default();
     t.max_concurrent_bidi_streams(VarInt::from_u32(100))
-        .max_concurrent_uni_streams(VarInt::from_u32(3))
+        .max_concurrent_uni_streams(VarInt::from_u32(4))
         .datagram_receive_buffer_size(Some(4 << 20))
         .datagram_send_buffer_size(4 << 20)
         .receive_window(VarInt::from_u32(4 << 20))
@@ -402,7 +488,7 @@ fn server_config_clocked(cert: Vec<u8>, key: Vec<u8>, clocked: bool) -> Result<S
 /// Server TCP/TLS 1.3 configuration: same certificate and key, ALPN `http/1.1` (or no ALPN).
 pub fn tls_server_config(cert: Vec<u8>, key: Vec<u8>) -> Result<Arc<rustls::ServerConfig>> {
     let mut t = rustls_server(cert, key, ALPN_TCP)?;
-    t.alpn_protocols = vec![ALPN_TCP.to_vec(), b"h2".to_vec()];
+    t.alpn_protocols = vec![ALPN_TCP.to_vec()];
     Ok(Arc::new(t))
 }
 
@@ -716,6 +802,9 @@ pub async fn serve_clocked(
                     return;
                 }
             };
+            if send_confirmation(&c, &keys[which]).await.is_err() {
+                return;
+            }
             add(&stats.sessions);
             // This session's private path to WireGuard.
             let Ok(udp) = UdpSocket::bind("127.0.0.1:0").await else {
@@ -878,11 +967,14 @@ pub async fn serve_tcp(
                 let _ = tls.shutdown().await;
                 return;
             };
-            if tls
-                .write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nCache-Control: no-store\r\n\r\n")
-                .await
-                .is_err()
-            {
+            let Ok(confirmation) = tls_server_proof(tls.get_ref().1, &keys[which]) else {
+                return;
+            };
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nCache-Control: no-store\r\nETag: \"{}\"\r\n\r\n",
+                hex::encode(confirmation)
+            );
+            if tls.write_all(response.as_bytes()).await.is_err() {
                 return;
             }
             add(&stats.sessions);
@@ -1508,6 +1600,9 @@ async fn session(
     msg.extend_from_slice(&proof(c, key)?);
     s.write_all(&msg).await?;
     s.finish()?;
+    tokio::time::timeout(AUTH_WINDOW, confirm_server(c, key))
+        .await
+        .context("server key confirmation timed out")??;
     // The proof stream is reliable and ordered before nothing else: the server reads
     // datagrams only once it has the proof, and keeps early ones in its receive buffer.
     for d in held.lock().unwrap().take() {
@@ -1565,6 +1660,11 @@ async fn tcp_session(
                 .unwrap_or("")
                 .contains("application/octet-stream"),
         "TCP cloak proof rejected"
+    );
+    let confirmation = response_confirmation(&resp).context("server key confirmation missing")?;
+    ensure!(
+        equal(&confirmation, &tls_server_proof(tls.get_ref().1, key)?),
+        "server key confirmation failed"
     );
     let (tx, mut rx) = mpsc::channel::<Bytes>(512);
     for d in held.lock().unwrap().take() {
@@ -2629,5 +2729,298 @@ mod tests {
             late >= 800,
             "only {late} of ~1000 datagrams arrived once the losses had stopped"
         );
+    }
+    #[test]
+    fn audit_v2_proofs_are_role_key_and_exporter_separated() {
+        let key = [7; TOKEN_LEN];
+        let exporter = [8; 32];
+        let c = role_proof(&key, &exporter, b"client");
+        assert_ne!(c, role_proof(&key, &exporter, b"server"));
+        assert_ne!(c, role_proof(&[9; TOKEN_LEN], &exporter, b"client"));
+        assert_ne!(c, role_proof(&key, &[9; 32], b"client"));
+        assert_ne!(
+            TOKEN_STREAM,
+            [0x40, 0x7e],
+            "legacy proof stream must not authenticate"
+        );
+    }
+
+    #[test]
+    fn audit_tcp_requires_one_well_formed_server_confirmation() {
+        let p = [7u8; TOKEN_LEN];
+        let head = format!("HTTP/1.1 200 OK\r\nETag: \"{}\"\r\n\r\n", hex::encode(p));
+        assert_eq!(response_confirmation(head.as_bytes()), Some(p));
+        assert_eq!(response_confirmation(b"HTTP/1.1 200 OK\r\n\r\n"), None);
+        let duplicate = format!(
+            "HTTP/1.1 200 OK\r\nETag: \"{}\"\r\nETag: \"{}\"\r\n\r\n",
+            hex::encode(p),
+            hex::encode(p)
+        );
+        assert_eq!(response_confirmation(duplicate.as_bytes()), None);
+        assert_eq!(
+            response_confirmation(b"HTTP/1.1 200 OK\r\nETag: not-a-tag\r\n\r\n"),
+            None
+        );
+        let (cert, key, _) = test_cert();
+        assert_eq!(
+            tls_server_config(cert, key).unwrap().alpn_protocols,
+            vec![ALPN_TCP.to_vec()]
+        );
+    }
+
+    async fn audit_untrusted_server_confirmation(mode: u8) {
+        let (cert, k, pin) = test_cert();
+        let endpoint = Endpoint::server(
+            server_config(cert, k).unwrap(),
+            "127.0.0.1:0".parse().unwrap(),
+        )
+        .unwrap();
+        let addr = endpoint.local_addr().unwrap();
+        let key = [7; TOKEN_LEN];
+        let fake = tokio::spawn(async move {
+            let c = endpoint.accept().await.unwrap().await.unwrap();
+            // Receive the real client's proof; possessing a TLS identity is insufficient.
+            let mut request = c.accept_uni().await.unwrap();
+            let raw = request.read_to_end(64).await.unwrap();
+            if mode != 0 {
+                let mut stream = c.open_uni().await.unwrap();
+                stream.write_all(&SERVER_CONFIRM_STREAM).await.unwrap();
+                let tag = if mode == 1 {
+                    raw[2..].try_into().unwrap()
+                } else {
+                    server_proof(&c, &[9; TOKEN_LEN]).unwrap()
+                };
+                stream.write_all(&tag).await.unwrap();
+                stream.finish().unwrap();
+            }
+            let leaked = tokio::time::timeout(Duration::from_millis(600), c.read_datagram()).await;
+            assert!(
+                leaked.is_err(),
+                "client leaked a held datagram before server authentication"
+            );
+            endpoint.close(0u32.into(), b"test ended");
+        });
+        let (_client, c) = raw(addr, pin).await.unwrap();
+        let udp = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let wireguard = udp.local_addr().unwrap();
+        let current = Mutex::new(None);
+        let held = Mutex::new(Held::default());
+        held.lock()
+            .unwrap()
+            .push(Bytes::from_static(b"must-not-leak"));
+        let stats = Stats::default();
+        let result = session(&c, &key, &udp, wireguard, &current, &held, &stats).await;
+        assert!(result.is_err());
+        assert!(!stats.connected.load(Ordering::Relaxed));
+        assert_eq!(stats.sessions.load(Ordering::Relaxed), 0);
+        assert!(current.lock().unwrap().is_none());
+        fake.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn audit_missing_server_confirmation_releases_no_payload() {
+        audit_untrusted_server_confirmation(0).await;
+    }
+
+    #[tokio::test]
+    async fn audit_reflected_client_proof_releases_no_payload() {
+        audit_untrusted_server_confirmation(1).await;
+    }
+
+    #[tokio::test]
+    async fn audit_wrong_key_server_confirmation_releases_no_payload() {
+        audit_untrusted_server_confirmation(2).await;
+    }
+
+    #[tokio::test]
+    async fn audit_h3_control_stream_does_not_block_server_confirmation() {
+        let (cert, k, pin) = test_cert();
+        let endpoint = Endpoint::server(
+            server_config(cert, k).unwrap(),
+            "127.0.0.1:0".parse().unwrap(),
+        )
+        .unwrap();
+        let addr = endpoint.local_addr().unwrap();
+        let key = [7; TOKEN_LEN];
+        let task = tokio::spawn(async move {
+            let c = endpoint.accept().await.unwrap().await.unwrap();
+            let mut control = c.open_uni().await.unwrap();
+            control.write_all(&[0, 4, 0]).await.unwrap(); // Deliberately never finish it.
+            send_confirmation(&c, &key).await.unwrap();
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            drop(control);
+            endpoint.close(0u32.into(), b"test ended");
+        });
+        let (_client, c) = raw(addr, pin).await.unwrap();
+        assert!(
+            tokio::time::timeout(Duration::from_millis(400), confirm_server(&c, &key))
+                .await
+                .unwrap()
+                .is_ok()
+        );
+        task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn audit_legacy_proof_never_authenticates() {
+        let (_, _, pin) = test_cert();
+        let (addr, wg, _) = server([7; TOKEN_LEN]).await;
+        let (_client, c) = raw(addr, pin).await.unwrap();
+        let mut old = c.open_uni().await.unwrap();
+        old.write_all(&[0x40, 0x7e]).await.unwrap();
+        old.write_all(&proof(&c, &[7; TOKEN_LEN]).unwrap())
+            .await
+            .unwrap();
+        old.finish().unwrap();
+        c.send_datagram(Bytes::from_static(b"old-peer-payload"))
+            .unwrap();
+        assert!(nothing_arrives(&wg).await);
+    }
+    async fn audit_untrusted_tcp_confirmation(mode: u8) {
+        let (cert, k, pin) = test_cert();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let acceptor = TlsAcceptor::from(tls_server_config(cert, k).unwrap());
+        let key = [7; TOKEN_LEN];
+        let fake = tokio::spawn(async move {
+            let (socket, _) = listener.accept().await.unwrap();
+            let mut tls = acceptor.accept(socket).await.unwrap();
+            let request = read_http_header(&mut tls).await.unwrap();
+            let confirmation = if mode == 0 {
+                String::new()
+            } else if mode == 1 {
+                let request = std::str::from_utf8(&request).unwrap();
+                let reflected = request
+                    .lines()
+                    .find_map(|line| line.strip_prefix("If-None-Match: "))
+                    .unwrap();
+                format!("ETag: {reflected}\r\n")
+            } else {
+                format!(
+                    "ETag: \"{}\"\r\n",
+                    hex::encode(tls_server_proof(tls.get_ref().1, &[9; TOKEN_LEN]).unwrap())
+                )
+            };
+            tls.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\n{confirmation}\r\n").as_bytes()).await.unwrap();
+            let mut byte = [0; 1];
+            // Closing, TLS close errors and timeouts are acceptable; plaintext is not.
+            let leaked =
+                tokio::time::timeout(Duration::from_millis(600), tls.read(&mut byte)).await;
+            if let Ok(Ok(n)) = leaked {
+                assert_eq!(
+                    n, 0,
+                    "client released payload to an unauthenticated TCP server"
+                );
+            }
+        });
+        let connector = TlsConnector::from(tls_client_config(pin, true).unwrap());
+        let udp = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let current = Mutex::new(None);
+        let held = Mutex::new(Held::default());
+        held.lock()
+            .unwrap()
+            .push(Bytes::from_static(b"must-not-leak"));
+        let stats = Stats::default();
+        let result = tokio::time::timeout(
+            Duration::from_secs(3),
+            tcp_session(
+                &connector,
+                None,
+                addr,
+                "cover.example",
+                &key,
+                &udp,
+                udp.local_addr().unwrap(),
+                &current,
+                &held,
+                &stats,
+                Duration::from_secs(2),
+            ),
+        )
+        .await
+        .unwrap();
+        assert!(result.is_err());
+        assert!(!stats.connected.load(Ordering::Relaxed));
+        assert_eq!(stats.sessions.load(Ordering::Relaxed), 0);
+        assert!(current.lock().unwrap().is_none());
+        fake.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn audit_tcp_missing_confirmation_releases_no_payload() {
+        audit_untrusted_tcp_confirmation(0).await;
+    }
+
+    #[tokio::test]
+    async fn audit_tcp_reflected_confirmation_releases_no_payload() {
+        audit_untrusted_tcp_confirmation(1).await;
+    }
+
+    #[tokio::test]
+    async fn audit_tcp_wrong_key_confirmation_releases_no_payload() {
+        audit_untrusted_tcp_confirmation(2).await;
+    }
+
+    #[tokio::test]
+    async fn audit_server_confirmation_cannot_replay_across_tls_sessions() {
+        let (cert, k, pin) = test_cert();
+        let endpoint = Endpoint::server(
+            server_config(cert, k).unwrap(),
+            "127.0.0.1:0".parse().unwrap(),
+        )
+        .unwrap();
+        let addr = endpoint.local_addr().unwrap();
+        let key = [7; TOKEN_LEN];
+        let fake = tokio::spawn(async move {
+            let first = endpoint.accept().await.unwrap().await.unwrap();
+            let mut trigger = first.accept_uni().await.unwrap();
+            trigger.read_to_end(1).await.unwrap();
+            let captured = server_proof(&first, &key).unwrap();
+            let second = endpoint.accept().await.unwrap().await.unwrap();
+            let mut request = second.accept_uni().await.unwrap();
+            request.read_to_end(64).await.unwrap();
+            let mut confirmation = second.open_uni().await.unwrap();
+            confirmation
+                .write_all(&SERVER_CONFIRM_STREAM)
+                .await
+                .unwrap();
+            confirmation.write_all(&captured).await.unwrap();
+            confirmation.finish().unwrap();
+            assert!(
+                tokio::time::timeout(Duration::from_millis(600), second.read_datagram())
+                    .await
+                    .is_err(),
+                "replayed confirmation released payload"
+            );
+            endpoint.close(0u32.into(), b"test ended");
+        });
+        let (_first_endpoint, first) = raw(addr, pin).await.unwrap();
+        let mut trigger = first.open_uni().await.unwrap();
+        trigger.write_all(&[0]).await.unwrap();
+        trigger.finish().unwrap();
+        let (_second_endpoint, second) = raw(addr, pin).await.unwrap();
+        let udp = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let current = Mutex::new(None);
+        let held = Mutex::new(Held::default());
+        held.lock()
+            .unwrap()
+            .push(Bytes::from_static(b"must-not-leak"));
+        let stats = Stats::default();
+        assert!(
+            session(
+                &second,
+                &key,
+                &udp,
+                udp.local_addr().unwrap(),
+                &current,
+                &held,
+                &stats
+            )
+            .await
+            .is_err()
+        );
+        assert!(!stats.connected.load(Ordering::Relaxed));
+        assert!(current.lock().unwrap().is_none());
+        fake.await.unwrap();
     }
 }

@@ -54,6 +54,15 @@ measured figure in the docs names the version it was measured on.
   opens no used round; a pad is used once, a used-up book stops the cell.
   `tools/padbook.py` assesses, makes, seals and combines them; cells are 4–60 members,
   rounds every 30 s.
+- **Breaking: cloak protocol v2.** The relay now proves it holds the member's cloak key too,
+  with an HMAC over the session's TLS exporter, before the client sends anything or reports
+  "connected"; before, the server was authenticated only by its pinned ECDSA certificate,
+  which a quantum-capable attacker could forge to impersonate it. Over the hybrid
+  post-quantum exchange this makes the cloak's authentication post-quantum on both sides
+  (from an independent audit, reviewed here). The TCP fallback no longer offers h2, which
+  it never spoke. v1 and v2 cannot talk: re-sign chains (`avpn cloud chain --apply`, or
+  `avpn init`) and enroll the new bundles with `--replace`; a v1 chain is refused at
+  connect with that instruction instead of failing silently.
 - Pad books, chains and the zk identity can no longer hand out a used pad or move an
   identity back an epoch when two handles or processes use them: every operation locks,
   reloads from disk and commits before returning (found by an independent audit;

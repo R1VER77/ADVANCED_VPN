@@ -160,6 +160,23 @@ class EnrollmentTests(unittest.TestCase):
         with self.assertRaises(ValueError) as e:
             require_current(old)
         self.assertEqual(str(e.exception), CLOAK_REQUIRED)
+        # A chain signed for cloak protocol v1 (schema 1: the server proved itself only with
+        # its classical certificate) still loads, for reset/guard/info, but never connects
+        # or enrolls; schema 2 is what new chains get; anything else is refused outright.
+        from managed_profile import CLOAK_SCHEMA, CLOAK_V2_REQUIRED
+
+        self.assertEqual((CLOAK_SCHEMA, client["cloak"]["schema"], relay["cloak"]["schema"]), (2, 2, 2))
+        for pr in (client, relay):
+            v1 = json.loads(json.dumps(pr))
+            v1["cloak"]["schema"] = 1
+            profile_validate(v1)
+            with self.assertRaises(ValueError) as e:
+                require_current(v1)
+            self.assertEqual(str(e.exception), CLOAK_V2_REQUIRED)
+            v3 = json.loads(json.dumps(pr))
+            v3["cloak"]["schema"] = 3
+            with self.assertRaises(ValueError):
+                profile_validate(v3)
         # The certificate made at each start carries exactly the key the client pins.
         from managed_profile import load_keys
 

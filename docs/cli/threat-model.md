@@ -173,13 +173,18 @@ rides inside `advanced-vpn-cloak` on port 443:
   labels the outer flow `QUIC, category Web`, as it would an HTTP/3 website — not a VPN.
 - **Censorship fallback (TCP 443, HTTP/1.1 over TLS 1.3).** When a network blocks UDP 443,
   the cloak automatically falls back within 2 seconds to TCP/TLS 1.3 on port 443 using the
-  same post-quantum `X25519MLKEM768` + `ML-DSA-65` SPKI pin and TLS exporter proof, framing
-  every packet as a constant 1420-byte cell. While on TCP, the client probes UDP 443 every
+  same `X25519MLKEM768`-only key exchange and the same proofs as QUIC, framing every packet
+  as a constant 1420-byte cell. (The cloak's pinned certificate is ECDSA, a facade for the
+  camouflage; the post-quantum authentication is the proofs below.) While on TCP, the client probes UDP 443 every
   10 seconds and upgrades back to QUIC automatically once UDP is reachable.
 - **Active-probing resistance.** An unauthenticated browser or scanner hitting UDP 443
   (HTTP/3) or TCP 443 (HTTPS) receives a normal `200 OK` static HTML5 status page with
   `Alt-Svc: h3=":443"; ma=86400` and forwards nothing to the VPN carrier; only a peer that
   proves knowledge of the enrolled PSK over the TLS 1.3 exporter is admitted.
+- **Mutual key confirmation (cloak protocol v2).** The server proves the same key back, with
+  a separate role-bound HMAC over the same exporter, before the client sends any tunnel data
+  or reports "connected". Because the exporter comes from the hybrid exchange and the proof
+  is symmetric, impersonating a relay needs the member's key, not a forged ECDSA signature.
 
 What a capable observer can still tell:
 

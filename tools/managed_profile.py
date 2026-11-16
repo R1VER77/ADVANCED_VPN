@@ -67,6 +67,8 @@ def link_fields(rate, outs, ins):
 
 
 CLOAK_REQUIRED = "this chain was signed before the HTTP/3 camouflage, which is now required; re-sign it (avpn cloud chain --apply, or avpn init) and enroll the new bundles with --replace"
+CLOAK_V2_REQUIRED = "this chain was signed for cloak protocol v1, whose server proves itself only with a classical certificate; v2 (mutual key confirmation over the post-quantum key exchange) is now required on both ends: re-sign it (avpn cloud chain --apply, or avpn init) and enroll the new bundles with --replace"
+CLOAK_SCHEMA = 2  # cloak wire v2; schema-1 profiles still load (reset, guard, info) but never connect
 # Fixed cloak and carrier addresses: the client's carrier sends to its local cloak; the
 # first hop's cloak listens on 8443 (its firewall redirects the public port there) and
 # hands datagrams to WireGuard on loopback.
@@ -100,6 +102,8 @@ def require_current(p):
     require_padding(p)
     if p["carrier"] and not p.get("cloak"):
         raise ValueError(CLOAK_REQUIRED)
+    if p.get("cloak") and p["cloak"]["schema"] != CLOAK_SCHEMA:
+        raise ValueError(CLOAK_V2_REQUIRED)
     if p["carrier"] and p["carrier"]["defense"] != "strong":
         raise ValueError(BALANCED_REMOVED)
     if p["role"] != "client" and p["hops"] > 1 and not p["core"].get("link_rate"):
@@ -326,7 +330,7 @@ def profile_validate(p):
                 raise ValueError("cloak front mismatch")
             if (
                 set(c) - {"front"} != CLOAK_FIELDS
-                or c["schema"] != 1
+                or c["schema"] not in (1, CLOAK_SCHEMA)
                 or c["role"] != ("client" if client else "server")
                 or (c["listen"], c["wireguard"]) != (fixed["listen"], fixed["wireguard"])
                 or c["cover_name"] != n["cover_name"]
@@ -952,7 +956,7 @@ def create(
             )
             client = role == "client"
             cloak = dict(
-                schema=1,
+                schema=CLOAK_SCHEMA,
                 role="client" if client else "server",
                 remote=(i2p.CLIENT_TUNNEL if front else carrier_endpoint) if client else None,
                 cover_name=cover_name,
@@ -1378,7 +1382,7 @@ def mesh_bundles(root, mesh, signer, defense="strong", daily_mib=None, dns=None,
                 byte_budget=67_108_864,
             )
             cloak = dict(
-                schema=1,
+                schema=CLOAK_SCHEMA,
                 role="server",
                 remote=None,
                 cover_name=cover_name,
@@ -1500,7 +1504,7 @@ def mesh_bundles(root, mesh, signer, defense="strong", daily_mib=None, dns=None,
             byte_budget=67_108_864,
         )
         cloak = dict(
-            schema=1,
+            schema=CLOAK_SCHEMA,
             role="client",
             remote=first_hop["endpoint"],
             cover_name=cover_name,

@@ -56,7 +56,13 @@ fn fds(items: &[String]) -> Result<BTreeMap<String, i32>> {
 }
 
 fn validate(c: &Config) -> Result<()> {
-    ensure!(c.schema == 1, "wrong cloak schema");
+    // Schema 2 is cloak wire v2 (mutual exporter-bound key confirmation): a schema-1 config
+    // belongs to a chain signed for v1, whose peers cannot speak to this binary.
+    ensure!(
+        c.schema != 1,
+        "cloak schema 1 is protocol v1, which this binary no longer speaks: re-sign the chain (avpn cloud chain --apply, or avpn init) and enroll the new bundles with --replace"
+    );
+    ensure!(c.schema == 2, "wrong cloak schema");
     let local = |a: &SocketAddr, port: u16| a.ip().is_loopback() && a.is_ipv4() && a.port() == port;
     if let Some(name) = &c.cover_name {
         ensure!(
