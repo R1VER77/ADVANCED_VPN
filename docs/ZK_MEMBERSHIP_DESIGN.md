@@ -75,7 +75,10 @@ prototype therefore uses a secret that only moves forward:
   times are an upper bound and the chain's own share is not separated. Members re-enrol into a new tree
   every N epochs; trees overlap so nobody is left without one.
 - **Limits.** Nothing protects epochs after a seizure; the captured state must keep
-  working. The guarantee also depends on the old `x_k` really being erased: on flash, an
+  working. The secret moves forward only when the store is used: a device left off for a
+  week still holds the secret of the epoch it last used, and a restored whole-disk image
+  brings that epoch's secret back. `tools/zkid.py` serializes cooperating processes and
+  refuses to move backward, but it cannot defeat a hostile kernel or a restored snapshot. The guarantee also depends on the old `x_k` really being erased: on flash, an
   old copy can survive wear-levelling, the same caveat as the pad store.
 - **Why SHA-256, not SHA-3.** Both are post-quantum here (Grover leaves about 128 bits of
   preimage strength), and inputs are fixed-length and domain-tagged, so SHA-3's immunity to

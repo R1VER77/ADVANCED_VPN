@@ -36,10 +36,13 @@ measured figure in the docs names the version it was measured on.
   reconnects (`docs/evidence/KERNEL_PACING.json`, `downstream_collapse`).
 - Experimental: the relay clocks its downstream too (with `AVPN_WIRE_CLOCK_PPS` set on the
   relay; its egress link needs the `fq` qdisc): one grid per member session, every slot a
-  WireGuard reply or a decoy the client's WireGuard drops. The real-website re-run had
-  located the clock's residual leak in the downstream (k-FP 10.5% on downstream packets
-  alone, p = 0.0099 over 100 shuffled-label runs; upstream alone 9.0%, not significant).
-  Not yet re-measured with both directions clocked.
+  WireGuard reply or a decoy the client's WireGuard drops. Measured on real websites (600
+  page loads, interleaved, same day): with only the client clocked k-FP still scores 10.4%
+  (p = 0.03, replicating the first re-run's 9.5%); with both directions clocked it scores
+  5.15%, chance, equal to its shuffled-label mean (p = 0.58). Cost: page loads succeed 93.0%
+  instead of 96.5% (heavy sites time out) and take 8.9 s instead of 8.1 s at the median.
+  Caveats: downstream packets alone still score 9.3% (p = 0.03 uncorrected), and where the
+  client-only residual sits did not replicate between runs (`docs/evidence/WF_REAL_RERUN2.json`).
 - DC-net pads come from hardware only, in two kinds: one-time pad books for pairs who met
   in person and a forward-secure chain for pairs who cannot meet (computational). The
   derived `PRG(HKDF(K_ij))` pads are gone. A book is information-theoretic, conditionally
@@ -54,6 +57,24 @@ measured figure in the docs names the version it was measured on.
   opens no used round; a pad is used once, a used-up book stops the cell.
   `tools/padbook.py` assesses, makes, seals and combines them; cells are 4–60 members,
   rounds every 30 s.
+- `avpn status --json` says whether traffic is actually protected, not just whether the
+  supervisor runs: `protection` is "protected" only with fresh evidence of all three of the
+  cloak's v2 key confirmation, a WireGuard handshake, and a probe answered through the whole
+  chain (a DNS query from the app namespace to the exit's resolver every 5 s, retried after
+  1 s when lost); otherwise "blocked", as `lifecycle` "connecting" or "reconnecting", with
+  `stale` naming the missing evidence (`tools/protection.py`). In the lab it read
+  "protected" after every page load through a working chain, and "blocked, reconnecting"
+  within one load of the relay's cloak being frozen, recovering by itself when it resumed.
+  This is what the GUI's "Connected" will show.
+- The exit's DNS answers names under `.invalid` itself with NXDOMAIN and never forwards them
+  (RFC 6761), so the path probe never reaches the upstream resolver.
+- Docs separate key exchange from authentication (from the same independent audit): every
+  layer refuses a classical key exchange, but the exit's DNS upstream still authenticates its
+  resolver with classical WebPKI (a fourth named exception in `docs/PQ_INVENTORY.md`).
+  `SECURITY.md` lists the known boundaries; the threat model says what the wire clock does
+  not cover (the TCP fallback and the I2P front) and that a single owner's exit provider can
+  tie exit activity to its customer; the README's tier 3 says it reduces hardware trust, not
+  removes it.
 - **Breaking: cloak protocol v2.** The relay now proves it holds the member's cloak key too,
   with an HMAC over the session's TLS exporter, before the client sends anything or reports
   "connected"; before, the server was authenticated only by its pinned ECDSA certificate,

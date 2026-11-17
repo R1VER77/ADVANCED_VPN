@@ -14,7 +14,7 @@ flowchart LR
     Exit --> Internet[Destination]
 ```
 
-WireGuard is the outer carrier, implemented by **GotaTun 0.10.2**, with its actual DAITA integration and public **Maybenot 2.2.2** defense machines. Its ChaCha20-Poly1305 encryption and 256-bit PSK supplement the existing **two TLS 1.3 X25519 + ML-KEM-768 / AES-256-GCM layers**. WireGuard alone is not advertised as native ML-KEM. Authentication is post-quantum too: both QUIC layers accept **only ML-DSA-65** (FIPS 204) certificate chains and TLS 1.3 CertificateVerify signatures, and operator enrollment bundles carry a **hybrid Ed25519 + ML-DSA-65** signature pair that must both verify. A correctly pinned classical (ECDSA) deployment is refused; the Rust tests prove this and fail if the restriction is removed. Every layer the system encrypts, authenticates or terminates, including the cloak front, the exit's DNS upstream and the whole mix lane, refuses a classical peer; [docs/PQ_INVENTORY.md](docs/PQ_INVENTORY.md) lists each layer, its enforcing code and test, and the three named exceptions.
+WireGuard is the outer carrier, implemented by **GotaTun 0.10.2**, with its actual DAITA integration and public **Maybenot 2.2.2** defense machines. Its ChaCha20-Poly1305 encryption and 256-bit PSK supplement the existing **two TLS 1.3 X25519 + ML-KEM-768 / AES-256-GCM layers**. WireGuard alone is not advertised as native ML-KEM. Authentication is post-quantum too: both QUIC layers accept **only ML-DSA-65** (FIPS 204) certificate chains and TLS 1.3 CertificateVerify signatures, and operator enrollment bundles carry a **hybrid Ed25519 + ML-DSA-65** signature pair that must both verify. A correctly pinned classical (ECDSA) deployment is refused; the Rust tests prove this and fail if the restriction is removed. Every layer the system encrypts, authenticates or terminates, including the cloak front, the exit's DNS upstream and the whole mix lane, refuses a classical key exchange. Authentication is post-quantum on the inner tunnels (ML-DSA-65) and on the cloak (protocol v2: both ends prove the enrolled key with an HMAC over the hybrid exchange; its browser-facing certificate is an ECDSA facade), but the exit's DNS upstream still authenticates its resolver with classical WebPKI signatures. [docs/PQ_INVENTORY.md](docs/PQ_INVENTORY.md) separates key exchange from authentication for each layer, with its enforcing code, test and named exceptions.
 
 ## What is automatic
 
@@ -46,7 +46,7 @@ Website fingerprinting, against a 500-tree random-forest classifier across 30 sy
 Those are synthetic sites. On **real websites** (pilot, 12–14 Nov 2026, code between v0.8.0 and v0.10.0, whose tick skipping is unchanged since: 20 monitored sites, headless Firefox, k-FP, DF and Tik-Tok; chance 5%; `docs/evidence/WF_REAL_PILOT.json`):
 - Undefended, k-FP recognises **99.2%** (DF 94.6%, Tik-Tok 96.8%): the attacks work.
 - `fast` with the browser off the data plane's CPU: **14.8%** closed world, open-world true positives near zero.
-- **`fast` on a busy CPU leaks: 81%** when the browser shares cores with the client's data plane, as on most laptops. The shaper skips grid ticks it misses, so the missed ticks follow the page's own work. A higher priority gives 75%; a bounded catch-up (`AVPN_CATCH_UP_MS=50`, off by default) about 50%; a dedicated core or `SCHED_FIFO` 27–42%. None reaches the quiet-CPU level.
+- **`fast` on a busy CPU leaks: 81%** when the browser shares cores with the client's data plane, as on most laptops. The shaper skips grid ticks it misses, so the missed ticks follow the page's own work. A higher priority gives 75%; a bounded catch-up (`AVPN_CATCH_UP_MS=50`, off by default) about 50%; a dedicated core or `SCHED_FIFO` 27–42%. None reaches the quiet-CPU level. The experimental **wire clock**, which hands packet departures to the kernel on both ends of your link, brought it to chance on real websites (5.15% against 5%, p = 0.58; the client's clock alone left 10.4%), at a cost of 3.5 points of page-load success and about 0.8 s per load ([docs/evidence/WF_REAL_RERUN2.json](docs/evidence/WF_REAL_RERUN2.json)). One setup so far, so it stays off by default.
 
 Until a fix removes this signal and passes the same run, **do not count on `fast` against website fingerprinting while the device is busy.** Fixing it is the project's first technical priority.
 
@@ -87,17 +87,21 @@ Pick how far to go. Each tier includes the one before it.
 
 | | **1. General VPN** | **2. Hardened** | **3. Cypherpunk** |
 |---|---|---|---|
-| Who it's for | everyday privacy on any laptop | people a capable observer may target | people who assume the hardware itself may be hostile |
-| Tunnel | post-quantum multi-hop chain, kill switch, Nitrokey unlock | plus a padded rate class (`fast` or higher) and the wire clock (experimental) | plus DC-net cells for control events, with one-time pad books handed over in person |
+| Who it's for | everyday privacy on any laptop | people a capable observer may target | people who want to trust as little hardware as they can (it reduces that trust, it cannot remove it) |
+| Tunnel | post-quantum multi-hop chain, kill switch, Nitrokey unlock | plus a padded rate class (`fast` or higher) and the wire clock (experimental) | plus DC-net cells for control events (a library today, not yet in a command), with one-time pad books handed over in person (information-theoretic only under stated source assumptions) |
 | Servers | free cloud hops | hops on different providers and in different countries | hops on AMD (SEV-SNP where offered) or ARM, never all on one CPU vendor |
 | Laptop | any | `avpn doctor` reports the Intel ME / AMD PSP state | Intel ME neutralized or absent (see below), or an AMD or ARM laptop |
 | Randomness | the kernel | the kernel and the Nitrokey | plus assessed raw CPU-jitter entropy, extracted (`tools/padbook.py`) |
 
 **The Intel Management Engine.** Every Intel laptop since 2008 has an always-on coprocessor
-with its own network stack (Intel AMT on vPro models) and full access to memory. AMD's
+with full access to memory; on vPro models with Intel AMT provisioned, it also reaches the
+network on its own (what is enabled depends on the SKU, firmware and provisioning). AMD's
 equivalent, the PSP, also has full memory access, but no network stack of its own, which
 is why tier 3 prefers AMD. (Some AMD PRO business models offer remote management, DASH,
 but it runs in the network card's firmware, not the PSP: choose a model without it.)
+Neither choice makes hostile hardware safe: both coprocessors are privileged, and a
+compromised endpoint (root, or the firmware) is outside this VPN's boundary. Tier 3
+reduces what you must trust; it does not prove the absence of a backdoor.
 - The ME cannot be removed, only reduced to running at boot. The proven tool is
   [me_cleaner](https://github.com/corna/me_cleaner) (with coreboot).
 - me_cleaner lists the firmware it recognises: ME up to 11.x, TXE and SPS. Newer CSME
@@ -110,6 +114,8 @@ but it runs in the network card's firmware, not the PSP: choose a model without 
   chooses.
 - Simpler routes to tier 3: laptops sold with the ME disabled or coreboot installed
   (Purism, System76, NovaCustom, Star Labs), or AMD or ARM hardware.
+- What `avpn doctor` reports about the coprocessor is informational, read from the
+  driver: it is not hardware attestation.
 
 ## Getting started: free servers, one chain
 

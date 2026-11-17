@@ -3,14 +3,19 @@
 Every asymmetric primitive in ADVANCED_VPN, the layer it protects, and what makes the
 post-quantum property hold. "Enforced" means a classical peer is refused, never accepted as
 a fallback, and a test fails if the refusal is removed (mutation-checked). Checked
-13 November 2026.
+16 November 2026.
 
 ## The claim
 
 **Every layer ADVANCED_VPN encrypts, authenticates or terminates uses hybrid post-quantum
-key exchange (ML-KEM-768 with X25519) and post-quantum or hybrid signatures, and refuses a
-classical peer rather than falling back.** The three exceptions below are named, with what
-each one exposes. The claim never says "post-quantum throughout" while one of them stands.
+key exchange (ML-KEM-768 with X25519) and refuses a classical key exchange rather than
+falling back. Authentication is a separate property:** post-quantum on the inner tunnels
+(ML-DSA-65 certificates) and on the cloak (protocol v2: both ends prove the enrolled
+symmetric key with a role-separated HMAC over the hybrid exporter; the ECDSA certificate is
+a facade), but classical on the exit's DNS upstream (WebPKI). Enrolment bundles carry both
+an Ed25519 and an ML-DSA-65 signature. The four exceptions below are named, with what each
+one exposes. The claim never says "post-quantum throughout" while one of them stands, and
+the cloak v2 composition is this project's own, tested but not independently reviewed.
 
 ## Layers
 
@@ -20,7 +25,7 @@ each one exposes. The claim never says "post-quantum throughout" while one of th
 | WireGuard carrier (GotaTun) | X25519 Noise IK, plus a 256-bit PSK sealed to each device by hybrid KEM | WireGuard keys + the PSK | `tools/keyguard.py` `kem_seal` (X25519 + ML-KEM-768) | a supplement: both QUIC layers inside carry the PQ claim on their own |
 | Links between servers | an ephemeral X25519 + ML-KEM-768 exchange inside the cells every 120 s (forward secret: ephemerals erased); AES-256-GCM | the link PSK (sealed by `kem_seal`) authenticates the exchange | `src/link.rs` (`Initiator`, `respond`, `session_keys`); packets only under exchanged keys | `a_recorded_link_reveals_no_packet_to_a_later_stolen_psk`, `a_packet_under_a_psk_only_key_is_never_forwarded` |
 | Cloak front (HTTP/3 and TCP/TLS camouflage) | browser-like offer; **a tunnel only over X25519MLKEM768** | protocol v2: both ends prove the member's 32-byte cloak key with a role-separated HMAC over the TLS exporter before any tunnel data or "connected" state (post-quantum: the exporter comes from the hybrid exchange, the proof is symmetric); the pinned ECDSA certificate is kept only as the camouflage's facade. v1 authenticated the server by that certificate alone | `src/cloak.rs` `role_proof`, `confirm_server`, `quic_hybrid`, `tls_hybrid`; schema-1 chains refused at connect (`CLOAK_V2_REQUIRED`) | `a_classical_key_exchange_never_becomes_a_tunnel`, `audit_v2_proofs_are_role_key_and_exporter_separated`, `audit_tcp_requires_one_well_formed_server_confirmation` |
-| Exit DNS upstream (DNS over TLS) | X25519MLKEM768 only; DNS fails closed otherwise | WebPKI | `advanced-vpn-dns` `upstream_tls` | `the_upstream_must_offer_hybrid_post_quantum_tls`; live: Cloudflare and Google answer, Quad9 does not |
+| Exit DNS upstream (DNS over TLS) | X25519MLKEM768 only; DNS fails closed otherwise | classical WebPKI (exception 4) | `advanced-vpn-dns` `upstream_tls` | `the_upstream_must_offer_hybrid_post_quantum_tls`; live: Cloudflare and Google answer, Quad9 does not |
 | Oblivious control plane | HPKE ML-KEM-768 + X25519 (`0x647A`) | gateway key | `tools/ohttp.py` | `test_ohttp.py` |
 | Enrollment and signed bundles | hybrid KEM sealing | Ed25519 (FIDO2) **and** ML-DSA-65, both required | `tools/managed_profile.py` | `test_managed.py` |
 | Mix lane: Sphinx packets | X-Wing (ML-KEM-768 + X25519) per hop | | `tools/mix.py` `check_config` | `test_mix.py` (classical Sphinx refused) |
@@ -33,10 +38,13 @@ each one exposes. The claim never says "post-quantum throughout" while one of th
 A broken classical primitive fails in one of two ways. A **silent** failure gives an
 adversary something without anyone noticing: a recording decrypted later, a sender
 linked. Those must be post-quantum today, because harvest-now-decrypt-later cannot be
-undone; every row above is such a layer. A **loud** failure costs money or availability
+undone; every row above protects such data with a hybrid key exchange. (Authentication is
+different: forging a signature needs a quantum computer at the time of the connection,
+not later, so a classical signature is an active-attack exposure, named below.) A **loud** failure costs money or availability
 and shows itself: forged credits make more spends than were issued. Those may stay
 classical for now if they are contained: detected, bounded in time, and revocable. The
-credits below are the one loud exception; the other two are outside this project's code.
+credits below are the one loud exception; exceptions 2 and 3 are outside this project's code, and 4 is a
+classical authentication that only an active, quantum-capable attacker could exploit.
 
 ## Exceptions (stated wherever the claim is made)
 
@@ -68,6 +76,11 @@ credits below are the one loud exception; the other two are outside this project
 3. **Fast-lane traffic past the exit.** The exit forwards your own connections; their TLS to
    the website is your browser's choice, as with any VPN. (The mix lane is different: its
    fetch service terminates TLS itself, so it enforces post-quantum TLS.)
+4. **The exit's DNS upstream authentication.** Its key exchange is hybrid and enforced, so a
+   recorded DNS session cannot be decrypted later. But the resolver is authenticated by
+   classical WebPKI certificates: an attacker who can forge their signatures at the time,
+   which needs a quantum computer then, could impersonate the resolver and answer falsely.
+   Closing it needs a post-quantum-authenticated resolver or gateway, not yet built.
 
 ## Not in the product
 

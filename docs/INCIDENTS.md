@@ -42,10 +42,16 @@ private vulnerability reporting (see [SECURITY.md](../SECURITY.md)).
     failed sends), the probe finds **no leak in 3 of 3 runs** (count flat at 3,256–3,270 per
     window, loaded or idle). A consistent but not significant lean in the timing features
     remains, as the power-state effect would leave.
-  - **Not yet a fix to claim:** the clock stays off by default until the real-website run
-    confirms it, and `fast` is still not claimed while the device is busy.
+  - **Real websites (15–16 Nov 2026):** the client-side clock alone left 9.5% and then 10.4%
+    (chance 5%, significant both times). Clocking the relay's downstream too brought k-FP to
+    5.15%, equal to its shuffled-label mean (p = 0.58), in the same interleaved run. Cost:
+    page loads succeed 93.0% instead of 96.5% and take about 0.8 s longer.
+  - **Not yet a fix to claim:** one 20-site closed world on one machine and network; downstream
+    packets alone still score 9.3% (p = 0.03 uncorrected); heavy sites time out more. The clock
+    stays off by default, and `fast` is still not claimed while the device is busy.
 - **Evidence:** `docs/evidence/WF_REAL_PILOT.json`, `docs/evidence/CPU_LEAK_PROBE.json`,
-  `docs/evidence/KERNEL_PACING.json`.
+  `docs/evidence/KERNEL_PACING.json`, `docs/evidence/WF_REAL_RERUN.json`,
+  `docs/evidence/WF_REAL_RERUN2.json`.
 
 ## Fixed
 

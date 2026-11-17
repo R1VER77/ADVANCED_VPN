@@ -163,6 +163,7 @@ def worker(a):
                 client_cpus=a.client_cpus,
                 server_cpus=a.server_cpus,
                 wire_clock_pps=clock,
+                wire_clock_downstream=os.environ.get("AVPN_WIRE_CLOCK_DOWNSTREAM", "1") != "0" if clock else None,
                 catch_up_ms=os.environ.get("AVPN_CATCH_UP_MS"),
                 **host_power(),
             )
@@ -333,6 +334,17 @@ def worker(a):
                 )
                 health = dict(tmp_used_mb=round((st.f_blocks - st.f_bfree) * st.f_frsize / 2**20),
                               mem_available_mb=int(mem["MemAvailable"].split()[0]) // 1024)  # fmt: skip
+                if a.config != "undefended":
+                    # The controller's verdict right after the load (what the GUI would show).
+                    from avpnctl import runtime_dir
+
+                    try:
+                        st = json.loads((runtime_dir(out / "chain/client", create=False) / "status.json").read_text())
+                        health.update(
+                            protection=st.get("protection"), lifecycle=st.get("lifecycle"), stale=st.get("stale")
+                        )
+                    except (OSError, ValueError, RuntimeError):
+                        health.update(protection=None, lifecycle=None)
                 log.write(json.dumps(dict(site=site, label=label, **row, **health)) + "\n")
                 log.flush()
     finally:

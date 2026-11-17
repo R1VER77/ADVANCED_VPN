@@ -14,7 +14,15 @@ proofs (they prove statements about data; they do not rewrite IP headers). See
 `avpn help privacy`.
 
 So the goal is not to hide your address from everyone. It is to make sure that **no
-single party sees both who you are and what you do.**
+single party sees both who you are and what you do.** That holds only among parties that do
+not collude, and only for what each hop sees on the wire: in a single-owner deployment the
+exit's provider knows its customer, so it can tie exit activity to the owner by billing.
+
+**What the wire clock does not cover.** The clock (experimental) paces QUIC on both ends of
+the client's link. The TCP/TLS fallback and the I2P front carry no clock, so on a network
+that blocks UDP the busy-CPU timing protection does not apply. Its real-website results are
+one 20-site closed world on one machine and network (`docs/evidence/WF_REAL_RERUN.json`);
+held-out sites, days, networks and devices are not yet measured.
 
 ## Where this design sits
 

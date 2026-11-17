@@ -27,6 +27,22 @@ own measurements, not an independent evaluation. Review README.md, docs/DEPLOYME
 and the current docs/MANAGED_VALIDATION.md before use. The old docs/VALIDATION.md
 records v0.1.
 
+Known boundaries, stated so nothing is read into the absence of a claim:
+- The cloak's server authentication (protocol v2: mutual key confirmation with a
+  role-separated HMAC over the hybrid TLS exporter) is this project's composition, with
+  regression and mutation tests, not an independent review. Its pinned ECDSA certificate
+  is only the camouflage's facade.
+- The exit's DNS upstream negotiates a hybrid post-quantum key exchange but authenticates
+  the resolver with classical WebPKI signatures (docs/PQ_INVENTORY.md).
+- One owner running every hop can correlate the chain end to end; more hops under one
+  operator are not anonymity from that operator.
+- The pad and identity tools serialize cooperating processes and erase used state, but do
+  not defeat a restored whole-disk snapshot, a hostile kernel, flash remanence or
+  CPython's immutable copies; their "information-theoretic" label is conditional on
+  stated source assumptions (docs/DCNET_CONTROL_DESIGN.md §2).
+- The website-fingerprinting results are one 20-site closed world on one machine and
+  network; held-out sites, days, networks and devices are not yet measured.
+
 Do not publish private keys, credential handles, recovery identities, provider
 tokens, production packet captures or raw operational logs in issues.
 

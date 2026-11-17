@@ -1,0 +1,112 @@
+{
+ "schema": 1,
+ "name": "Real-website re-run 2: the relay's downstream clock (client-only clock vs both directions clocked)",
+ "date": "2026-11-16",
+ "code": "main at bf80b62 (cloak protocol v2) with the lab-only AVPN_WIRE_CLOCK_DOWNSTREAM switch; run rerun2b-20261116 (~/vm/advanced-vpn/wf-real/rerun2.sh)",
+ "setup": {
+  "variants": {
+   "undefended": "kernel WireGuard (validity gate)",
+   "clockup": "fast + the client's wire clock only (AVPN_WIRE_CLOCK_DOWNSTREAM=0): the first re-run's 'clock'",
+   "clockboth": "fast + the wire clock on the client and the relay"
+  },
+  "rounds": "5 interleaved rounds x 3 variants x 20 sites x 2 loads = 600 loads, same day, same sites",
+  "cpu": "browser and client data plane share cores 0,1 (the busy-CPU case); relay, exit and capture on 2,3; on mains power",
+  "attack": "k-FP closed world, 20 sites, chance 5% (tools/wf_deep.py); per direction against 100 shuffled-label runs (tools/wf_residual.py)",
+  "note": "A first attempt the same day failed: another job exhausted memory, the lab froze 6.2 h and its network never recovered (13 of 40 loads); discarded. This run had that job paused."
+ },
+ "kfp_closed_world": {
+  "undefended": 0.905,
+  "clockup": 0.1036,
+  "clockboth": 0.0515
+ },
+ "kfp_loads": {
+  "undefended": 200,
+  "clockup": 193,
+  "clockboth": 194
+ },
+ "by_direction_100_permutations": {
+  "clockup": {
+   "both": {
+    "real": 0.1036,
+    "perm_mean": 0.0525,
+    "perm_p95": 0.0829,
+    "perm_max": 0.1192,
+    "p_value": 0.0297
+   },
+   "upstream_only": {
+    "real": 0.0881,
+    "perm_mean": 0.0497,
+    "perm_p95": 0.0829,
+    "perm_max": 0.114,
+    "p_value": 0.0396
+   },
+   "downstream_only": {
+    "real": 0.0518,
+    "perm_mean": 0.0533,
+    "perm_p95": 0.0933,
+    "perm_max": 0.1347,
+    "p_value": 0.4851
+   }
+  },
+  "clockboth": {
+   "both": {
+    "real": 0.0515,
+    "perm_mean": 0.0515,
+    "perm_p95": 0.0773,
+    "perm_max": 0.0876,
+    "p_value": 0.5842
+   },
+   "upstream_only": {
+    "real": 0.0258,
+    "perm_mean": 0.0524,
+    "perm_p95": 0.0776,
+    "perm_max": 0.1082,
+    "p_value": 0.9802
+   },
+   "downstream_only": {
+    "real": 0.0928,
+    "perm_mean": 0.0514,
+    "perm_p95": 0.0825,
+    "perm_max": 0.1082,
+    "p_value": 0.0297
+   }
+  }
+ },
+ "cost": {
+  "undefended": {
+   "loads": 200,
+   "ok": 196,
+   "ok_rate": 0.98,
+   "load_seconds_median": 6.2,
+   "load_seconds_p90": 13.4
+  },
+  "clockup": {
+   "loads": 200,
+   "ok": 193,
+   "ok_rate": 0.965,
+   "load_seconds_median": 8.1,
+   "load_seconds_p90": 19.3
+  },
+  "clockboth": {
+   "loads": 200,
+   "ok": 186,
+   "ok_rate": 0.93,
+   "load_seconds_median": 8.9,
+   "load_seconds_p90": 20.3
+  }
+ },
+ "findings": [
+  "Undefended k-FP 90.5%: the attack works on this collection.",
+  "Client-only clock: 10.4% (p = 0.030 over 100 shuffled-label runs), replicating the first re-run's 9.5% (p = 0.048). A residual leak under the client-only clock is established across two runs.",
+  "Both directions clocked: 5.15%, equal to the shuffled-label mean (p = 0.58). The full k-FP attack finds nothing.",
+  "Per direction, the client-only clock's residual sat in the upstream here (8.8%, p = 0.040; downstream 5.2%, p = 0.49), the opposite of the first re-run (downstream p = 0.0099, upstream p = 0.079). Its location is not stable across runs; the earlier statement that it is in the downstream over-read one run.",
+  "With both clocked, downstream packets alone still score 9.3% (p = 0.030; about 0.09 corrected for the three views), while the full attack is at chance. A weak downstream signal may remain; more loads are needed to settle it.",
+  "Cost of the relay clock over the client-only clock: page-load success 93.0% vs 96.5% (the extra failures are TikTok and Netflix timing out at 30 s) and median load 8.9 s vs 8.1 s (undefended 6.2 s)."
+ ],
+ "status": "The relay's clock brings the full real-website attack to chance at a modest cost. Not yet a default: one 20-site closed world on one machine and network, a possible weak downstream signal, and the heavy-site timeouts.",
+ "next": [
+  "More loads per site (and open world) to settle the downstream-only signal.",
+  "Look at the heavy-site timeouts: the clock's rate against the site's demand.",
+  "Held-out days, networks and devices."
+ ]
+}

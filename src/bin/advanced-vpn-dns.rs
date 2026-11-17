@@ -394,11 +394,17 @@ impl Resolver {
             b.len() >= 12 && b.len() <= 4096 && b[2] & 0x80 == 0,
             "bad DNS request"
         );
-        if let Ok((qname, q_end)) = parse_question(b)
-            && self.blocklist.is_blocked(&qname)
-        {
-            self.blocked.fetch_add(1, Ordering::Relaxed);
-            return Ok(nxdomain_response(b, q_end));
+        if let Ok((qname, q_end)) = parse_question(b) {
+            // RFC 6761 §6.4: names under .invalid never resolve, so a resolver answers
+            // them itself. Never forwarding them also keeps the client's path probe
+            // (tools/protection.py) inside the chain, unseen by the upstream resolver.
+            if qname == "invalid" || qname.ends_with(".invalid") {
+                return Ok(nxdomain_response(b, q_end));
+            }
+            if self.blocklist.is_blocked(&qname) {
+                self.blocked.fetch_add(1, Ordering::Relaxed);
+                return Ok(nxdomain_response(b, q_end));
+            }
         }
         let answer = self.ask(b).await?;
         self.count.fetch_add(1, Ordering::Relaxed);
@@ -734,6 +740,33 @@ mod tests {
             idle: std::sync::Mutex::new(Vec::new()),
             connects: AtomicU64::new(0),
         }
+    }
+
+    #[tokio::test]
+    async fn invalid_names_are_answered_here_and_never_forwarded() {
+        let (addr, accepted) =
+            upstream_serving(rustls::crypto::aws_lc_rs::kx_group::X25519MLKEM768, false).await;
+        let r = resolver_to(addr);
+        for (i, name) in ["probe.avpn.invalid", "invalid", "x.INVALID"]
+            .into_iter()
+            .enumerate()
+        {
+            let q = make_query([3, i as u8], name);
+            let a = r.query(&q).await.unwrap();
+            assert_eq!(&a[..2], &q[..2], "{name}: the same id");
+            assert_eq!(a[3] & 0x0f, 3, "{name}: NXDOMAIN");
+        }
+        assert_eq!(
+            r.connects.load(Ordering::Relaxed),
+            0,
+            "nothing went upstream"
+        );
+        assert_eq!(accepted.load(Ordering::Relaxed), 0);
+        // A name that merely contains "invalid" is an ordinary name.
+        r.query(&make_query([5, 6], "invalid.example.org"))
+            .await
+            .unwrap();
+        assert_eq!(r.connects.load(Ordering::Relaxed), 1);
     }
 
     #[tokio::test]

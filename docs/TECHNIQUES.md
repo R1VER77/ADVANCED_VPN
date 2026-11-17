@@ -23,14 +23,18 @@ clocks its downstream the same way, one grid per member session
 
 **Why:** with today's constant-rate padding in userspace, a busy CPU delays the sender
 thread, and the gaps it leaves fingerprint what the browser is doing (k-FP 81% in the pilot,
-34% in the re-run). Moving departure timing into the kernel takes the CPU out of the timing.
+34% in the re-run). Moving departure timing into the kernel removes the userspace sender thread
+from it; a feeder starved for longer than the look-ahead still skips slots, and other timing
+channels still need measuring.
 
 **Prior art:** constant-rate defences (BuFLO, Tamaraw), DAITA/Maybenot, `SO_TXTIME` pacing.
 New here: kernel-paced slot filling as the fix for a CPU-contention side channel.
 
-**Evidence:** real websites, k-FP 34.4% → 9.5% (chance 5%), client side clocked. With 100
-shuffled-label runs per direction, the residual is in the downstream (10.5%, p = 0.0099), not
-the upstream (9.0%, p = 0.079); the relay's clock addresses it and is not yet re-measured. `src/cloak.rs` (`WireClock`, `PacedSocket`), `docs/evidence/WF_REAL_RERUN.json`,
+**Evidence:** real websites, k-FP 34.4% → 9.5% (chance 5%) with the client clocked, and 5.15%
+with both directions clocked: equal to the shuffled-label mean (p = 0.58), against 10.4%
+(p = 0.03) for the client-only clock in the same interleaved run. A weak downstream-only
+signal may remain (9.3%, p = 0.03 uncorrected); the cost is 3.5 points of page-load success
+and about 0.8 s per load (`docs/evidence/WF_REAL_RERUN2.json`). `src/cloak.rs` (`WireClock`, `PacedSocket`), `docs/evidence/WF_REAL_RERUN.json`,
 `docs/evidence/KERNEL_PACING.json`.
 
 ## 2. Clock-Coupled Window — *experimental*
@@ -94,11 +98,13 @@ stays conditional on that assumption.
 **What:** raw CPU-timing deltas from jitterentropy's recorder (low 8 bits), assessed per
 machine with NIST SP 800-90B `ea_non_iid` (minimum of three runs, half counted), health-tested
 continuously (SP 800-90B RCT/APT with cutoffs from that estimate), and Toeplitz-extracted to
-within 2⁻⁶⁴ of uniform per block.
+within 2⁻⁶⁴ of uniform per block, if the estimate holds and the extractor's seed is uniform
+(it is the Nitrokey's ChaCha8 output: `docs/DCNET_CONTROL_DESIGN.md` §2).
 
 **Why:** a security key's RNG is not raw noise (the Nitrokey 3's is ChaCha8 seeded per boot,
 read from its firmware source), and closed tokens cannot be checked at all. This gives a
-measured, open, provable source on any laptop.
+measured, open source on any laptop: an assessment, not a proof of its entropy, and the
+extractor's bound is conditional on that estimate and on a uniform seed.
 
 **Evidence:** this laptop: 6.64 and 7.16 bits/sample. `tools/padbook.py` (`assess`,
 `extract`).

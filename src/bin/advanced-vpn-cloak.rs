@@ -160,7 +160,10 @@ async fn work() -> Result<()> {
         }
         // The relay's downstream on the wire clock when the chain is clocked (experimental:
         // AVPN_WIRE_CLOCK_PPS, as on the client; the egress link needs the fq qdisc).
-        let (endpoint, clock) = match cloak::WireClock::from_env() {
+        // AVPN_WIRE_CLOCK_DOWNSTREAM=0 keeps the relay unclocked: a measurement control only
+        // (the client-only clock of the first real-website re-run).
+        let downstream = std::env::var("AVPN_WIRE_CLOCK_DOWNSTREAM").as_deref() != Ok("0");
+        let (endpoint, clock) = match cloak::WireClock::from_env().filter(|_| downstream) {
             Some(clock) => {
                 let (e, sc) =
                     cloak::clocked_server_endpoint(config, c.listen, clock, stats.clone())?;

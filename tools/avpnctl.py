@@ -842,6 +842,22 @@ class CarrierWatch:
         return now - self.since >= self.window
 
 
+def verdict_fields(evidence, probe, rt, supervising, now=None):
+    """The status fields of the protection verdict: what the cloak and the carrier report
+    (counted only while their status files are fresh) and when the probe last got through.
+    The kill switch is in force whenever the supervisor runs."""
+    now = time.time() if now is None else now
+    seen = {}
+    for name in ("cloak", "carrier"):
+        path = rt / (name + "-status.json")
+        try:
+            seen[name] = (json.loads(path.read_text()), path.stat().st_mtime)
+        except (OSError, ValueError):
+            seen[name] = (None, None)
+    evidence.observe(now, *seen["cloak"], *seen["carrier"], probe.ok_at if probe else None)
+    return evidence.verdict(now, supervising=supervising, kill_switch=True)
+
+
 def carrier_rx(state):
     """The client carrier's received data bytes, decoys excluded (the far end's DAITA keeps
     sending decoys even when this carrier is stuck), or None when unreadable."""
@@ -1142,6 +1158,15 @@ def supervise(state, bin_dir, lab=False, whole=False):
     backoff = {}
     last_refresh = time.monotonic()
     stop_reason = "disconnected"
+    # The verdict a client's status carries (the GUI's "Connected"): fresh cloak and carrier
+    # status plus a probe answered through the whole chain (tools/protection.py).
+    probe = evidence = None
+    if profile["role"] == "client":
+        import protection
+
+        evidence = protection.Evidence()
+        probe = protection.PathProbe(None if whole else "/run/netns/" + APP)
+        probe.start()
     last_meter = 0
     # The optional daily cap is client-only: a server never stores byte counts.
     allowance = Allowance(
@@ -1298,13 +1323,20 @@ def supervise(state, bin_dir, lab=False, whole=False):
                 )
                 if budget_blocked:
                     row["reason"] = "privacy_budget"
+                if evidence is not None:
+                    row.update(verdict_fields(evidence, probe, rt, supervising=not budget_blocked))
                 save(rt / "status.json", row)
             time.sleep(0.25)
     finally:
+        if probe is not None:
+            probe.stop.set()
         for p in children.values():
             stop(p)
         settle_grant()
-        save(rt / "status.json", dict(schema=1, state="blocked", kill_switch=True, reason=stop_reason))
+        final = dict(schema=1, state="blocked", kill_switch=True, reason=stop_reason)
+        if evidence is not None:
+            final.update(protection="blocked", lifecycle="blocked", evidence=None, since=round(time.time(), 3))
+        save(rt / "status.json", final)
         # Persistent nftables, TUN and namespace are deliberately retained on exit/crash.
         os.close(lock)
         os.close(global_lock)
@@ -1672,6 +1704,8 @@ def describe(info):
         limit = info["daily_limit_bytes"]
         lines.append("daily limit: " + ("none" if limit is None else "%d MiB" % (limit // (1 << 20))))
     lines.append("status: " + info["status"].get("state", "unknown"))
+    if info["status"].get("protection"):
+        lines.append("protection: %s (%s)" % (info["status"]["protection"], info["status"].get("lifecycle")))
     return "\n".join(lines)
 
 

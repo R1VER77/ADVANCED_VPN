@@ -34,7 +34,12 @@ AWS project on 2026-11-09; OCI's are from its documentation.
 | Legal requests | the provider, under its jurisdiction | — | Use providers under different jurisdictions for the entry and the exit. |
 
 So no single provider can tie your address to your destinations, but each can see its
-own hop. That is the limit of any VPN on rented machines.
+own hop. That limits what each hop observes; it is not anonymity. The exit's provider knows
+who rents the exit (billing identity, stable credentials) and sees its traffic, so in a
+single-owner deployment exit activity can be tied to the owner. Hiding among other people
+needs shared exits run by independent operators, unlinkable admission and a stated
+collusion model: the mesh's design, not built yet. That is the limit of any VPN on rented
+machines.
 
 ## Identity
 
