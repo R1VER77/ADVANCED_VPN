@@ -3,7 +3,7 @@ name = "advanced-vpn"
 version = "0.10.2"
 edition = "2024"
 rust-version = "1.95"
-license = "Apache-2.0"
+license = "AGPL-3.0-or-later"
 description = "Experimental nested hybrid-PQ tunnel with a ciphertext-only cloud relay"
 default-run = "advanced-vpn"
 
@@ -52,7 +52,7 @@ undocumented_unsafe_blocks = "deny"
 # Members: the mix lane's PQ-Sphinx option E on audited crates, and its std-only reference
 # implementation, kept only as the byte-identity oracle for tests (crates/*/IMPLEMENTATION_NOTES.md).
 [workspace]
-members = ["crates/avpn-mix-lane", "crates/avpn-pq-sphinx"]
+members = ["crates/avpn-mix-lane", "crates/avpn-pq-sphinx", "crates/cypherpunk-preflight", "crates/cypherpunk-controller", "crates/cypherpunk-bootguard"]
 # research/zk-membership is its own RISC Zero workspace (rzup toolchain), never built here.
 exclude = ["research"]
 resolver = "3"
