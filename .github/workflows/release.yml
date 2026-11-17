@@ -40,21 +40,27 @@ jobs:
           cargo build --release --locked
       - name: Package
         run: |
+          python3 - <<'PY'
+          import sys, urllib.request
+          sys.path.insert(0, 'tools')
+          import bundled_runtime
+          urllib.request.urlretrieve(bundled_runtime.ARCHIVE_URL, 'cpython.tar.gz')
+          PY
+          python3 tools/bundled_runtime.py --archive cpython.tar.gz --out offline-runtime
           mkdir dist
           name=advanced-vpn-$TAG-x86_64-linux-gnu.tar.gz
-          python3 tools/install.py --pack "dist/$name"
+          python3 tools/install.py --pack "dist/$name" --runtime offline-runtime
           (cd dist && sha256sum "$name" > SHA256SUMS)
       - name: Smoke-test the package's own user installation
         run: |
-          sudo apt-get install -y -qq python3-venv >/dev/null
-          home=$RUNNER_TEMP/home; mkdir -p "$home" "$RUNNER_TEMP/pkg"
+          mkdir -p "$RUNNER_TEMP/pkg"
           tar -C "$RUNNER_TEMP/pkg" -xzf dist/*.tar.gz
-          (cd "$RUNNER_TEMP/pkg" && HOME=$home XDG_DATA_HOME="" python3 tools/install.py --user)
-          avpn="$home/.local/bin/avpn"
-          HOME=$home "$avpn" --version | grep -qx "avpn ${TAG#v}"
-          HOME=$home "$avpn" help privacy | head -1 | grep -q "Privacy and your source address"
-          HOME=$home "$avpn" --json --state "$RUNNER_TEMP/none" hops | python3 -c 'import json,sys; assert json.load(sys.stdin)["ok"]'
-          HOME=$home "$avpn" --json cloud status | python3 -c 'import json,sys; assert json.load(sys.stdin)["ok"]'
+          docker pull ubuntu:22.04
+          docker image inspect ubuntu:22.04 --format '{{json .RepoDigests}}'
+          docker run --rm --network none --user "$(id -u):$(id -g)" \
+            --mount "type=bind,src=$RUNNER_TEMP/pkg,dst=/package,readonly" \
+            --tmpfs /tmp:rw,exec,mode=1777 -e HOME=/tmp/offline-home -e XDG_DATA_HOME= \
+            --entrypoint /bin/sh ubuntu:22.04 /package/tools/offline_user_test.sh
       - name: Smoke-test the one-step system installation as root
         run: |
           # Hosted runners leave /opt writable by the runner user; the installer rightly
@@ -62,15 +68,23 @@ jobs:
           # throwaway machine a normal system's /opt first, and show what it was.
           echo "runner /opt before: $(stat -c '%U:%G %a' /opt)"
           sudo chown root:root /opt && sudo chmod 755 /opt
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq nftables iproute2 kmod >/dev/null
+          sudo modprobe tun
+          sudo modprobe nf_tables
           cd "$RUNNER_TEMP/pkg"
-          sudo python3 tools/install.py --apply --role client --protect none --insecure-plaintext-keys
+          sudo unshare -n ./install.sh --apply --role client --protect none --insecure-plaintext-keys
           sudo avpn --version | grep -qx "avpn ${TAG#v}"
           test "$(readlink -f "$(sudo sh -c 'command -v avpn')")" = /opt/advanced-vpn/bin/avpn
           # The public request is handed to the user who ran sudo, in their home.
           test "$(stat -c %U "$HOME/advanced-vpn-client.req")" = "$(id -un)"
           sudo avpn --json info | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["info"]["role"] == "client", d'
           test "$(systemctl is-enabled advanced-vpn.service || true)" = disabled
-          sudo python3 tools/install.py --apply --role client --protect none --insecure-plaintext-keys | grep -q "already has keys"
+          sudo unshare -n ./install.sh --apply --role client --protect none --insecure-plaintext-keys | grep -q "already has keys"
+          # Removing this inactive test installation preserves the device's private state.
+          sudo ./install.sh --apply --uninstall
+          test ! -e /opt/advanced-vpn
+          sudo test -e /etc/advanced-vpn/enrolled/request.json
       - name: Attest build provenance
         uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
         with:
@@ -112,10 +126,12 @@ jobs:
 
           Check the download: \`sha256sum -c SHA256SUMS\`. Then unpack it, and either
           install the command line for yourself (an operator machine) with
-          \`python3 tools/install.py --user\`, or install the VPN system-wide (client or
-          server) with \`sudo python3 tools/install.py --apply --role client --protect nitrokey\`
+          \`./install.sh --user\`, or install the VPN system-wide (client or
+          server) with \`sudo ./install.sh --apply --role client --protect nitrokey\`
           (servers: \`--protect systemd-creds\`). That also puts \`avpn\` on root's PATH,
           creates the device's Nitrokey vault and generates its keys. The service is never
-          enabled by the installer.
+          enabled by the installer. The pinned Python runtime and hash-locked dependencies
+          are bundled; installation needs neither host Python nor PyPI access. Verify the
+          release provenance before executing the bundled interpreter or installer.
           NOTES
           gh release create "$TAG" dist/* --verify-tag --title "ADVANCED_VPN $TAG" --notes-file notes.md

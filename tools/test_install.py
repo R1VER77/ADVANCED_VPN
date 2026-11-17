@@ -64,6 +64,35 @@ class UserInstallTests(unittest.TestCase):
         self.assertEqual(sorted(p.name for p in self.data.iterdir()), ["app"])
         self.assertEqual(self.avpn("--version").returncode, 0)
 
+    def test_swap_failure_restores_the_previous_application(self):
+        app = self.install()
+        before = (app / "bin/avpnctl").read_bytes()
+        rename = Path.rename
+
+        def refuse_stage(path, destination):
+            if path.name.startswith("app.new-"):
+                raise OSError("injected final rename failure")
+            return rename(path, destination)
+
+        with mock.patch.object(Path, "rename", refuse_stage):
+            with self.assertRaisesRegex(OSError, "final rename"):
+                self.install()
+        self.assertEqual((app / "bin/avpnctl").read_bytes(), before)
+        self.assertEqual(sorted(p.name for p in self.data.iterdir()), ["app"])
+        self.assertEqual(self.avpn("--version").returncode, 0)
+
+    def test_failed_dependency_upgrade_preserves_the_old_runtime(self):
+        app = self.install()
+        venv = app / "venv"
+        venv.mkdir()
+        (venv / ".advanced-vpn-requirements.sha256").write_text("previous lock")
+        (venv / "preserve").write_text("previous working runtime")
+        with mock.patch.object(install.subprocess, "run", side_effect=subprocess.CalledProcessError(1, "pip")):
+            with self.assertRaises(subprocess.CalledProcessError):
+                install.install_user(self.data, self.bin)
+        self.assertEqual((venv / "preserve").read_text(), "previous working runtime")
+        self.assertEqual(sorted(p.name for p in self.data.iterdir()), ["app"])
+
     def test_failed_install_leaves_the_old_one_and_no_leftovers(self):
         self.install()
         before = (self.data / "app" / "bin" / "avpnctl").read_text()

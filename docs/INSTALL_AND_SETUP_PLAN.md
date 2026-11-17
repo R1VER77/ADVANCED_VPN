@@ -1,10 +1,13 @@
 # Installation, preflight, cloud and security-key plan
 
-Status: agreed with the owner on 16 Nov 2026; implementation update 17 Nov. Branch `feat/install-preflight`.
+Status: agreed with the owner on 16 Nov 2026; implementation update 17 Nov. Phase 1
+source was integrated into `main`; the offline-runtime work is not yet a tagged release.
 Phase 1 Python/setup paths are implemented and physically tested. After the CPU-sensitive
 measurement finished, Python/Rust validation passed and verified source was integrated
-into the main local tree. Installed binaries/services were not upgraded. Packaging, OpenTofu
-and vendor-library migration below remain planned.
+into the main local tree. Installed host binaries/services were not upgraded. Pinned
+offline runtime tarballs and guarded inactive removal are now implemented; clean-VM
+evidence and limits are linked from [offline installation](OFFLINE_INSTALLATION.md).
+Native packages, the apt repository, OpenTofu and vendor-library migration remain open.
 Names follow the CYPHERPUNK_VPN rename when it lands (`avpn` becomes `cypherpunk`);
 nothing here depends on the old name.
 
@@ -23,10 +26,10 @@ nothing here depends on the old name.
 |---|---|---|
 | Data plane, `avpn` command | Rust, `src/` | Release tarball, x86_64, glibc ≥ 2.35 (built on Ubuntu 22.04) |
 | Controller, cloud, enrollment | Python, `tools/` | Runs in a hash-locked venv at `/opt/advanced-vpn/venv` |
-| Installer | `tools/install.py` | Needs the host's Python ≥ 3.10 with `venv`, and fetches packages from PyPI at install time |
+| Installer | `tools/install.py` | Runtime-bearing tarballs use bundled Python and offline dependencies; source/legacy installation still needs host Python ≥ 3.10 with `venv` and may fetch PyPI packages |
 | Post-install self-check | `avpnctl.doctor()` (`avpn doctor`) | Checks `ip`, `nft`, `mount` and `systemctl`, the PQ library, keys, enrollment, units and the kill-switch table |
 | Cloud | `tools/cloud.py`, `providers.py` | Creates servers on AWS and OCI through their CLIs; Azure, GCP and own servers are joined over SSH (`cloud host add/setup`) |
-| Security keys | `tools/hwkey.py`, `tools/setup_flow.py`, `tools/setup_cli.py` | Implemented in this branch, not released: typed diagnostics, confirmed repairs and current-evidence resumable setup; physical four-device evidence in `docs/evidence/SETUP_HARDWARE_20261117.json` |
+| Security keys | `tools/hwkey.py`, `tools/setup_flow.py`, `tools/setup_cli.py` | Implemented and integrated: typed diagnostics, confirmed repairs and current-evidence resumable setup; physical four-device evidence in `docs/evidence/SETUP_HARDWARE_20261117.json` |
 
 What the host must actually provide, read from the code rather than assumed:
 - `/dev/net/tun` (`src/tun.rs`). WireGuard runs in user space (GotaTun), so no kernel module.
@@ -42,8 +45,10 @@ What the host must actually provide, read from the code rather than assumed:
 ## Decisions
 
 - **Language:** keep the split.
-  - Rust: the `avpn` command and everything privileged or on the network.
-  - Python: orchestration, shipped with its own interpreter (python-build-standalone, pinned by sha256, as CI already does), so the host's Python version stops mattering.
+  - Rust: the `avpn` command and network data plane.
+  - Python: orchestration and the privileged controller, shipped with its own interpreter
+    (python-build-standalone, pinned by sha256). The runtime-bearing package removes the
+    host-Python dependency; Python remains part of the privileged trusted code base.
   - Not C, for memory safety and because it adds no compatibility over static Rust.
   - Go stays an option only if a native multi-cloud SDK layer is ever needed.
 - **No gdebi.** It only resolves a local `.deb`'s `Depends` from apt, which
@@ -93,7 +98,9 @@ Checks:
   - `hwkey.py`, implemented alongside this phase;
   - `providers.readiness`.
 - **Code rules:** standard library only, and it must run on Python 3.8+ (older hosts must still be able to *say* what's missing).
-- **Phase 1b:** the same checks compiled into a static (musl) binary, for hosts with no Python at all. Deferred while a CPU-sensitive measurement runs on the build host.
+- **Phase 1b:** the same checks compiled into a static (musl) binary remains open. The
+  offline bootstrap can run without host Python by shipping its own interpreter; this
+  is not completion of a static native checker.
 
 Acceptance:
 - unit tests against a simulated system tree (os-release, /proc, /sys, `PATH`) for every finding;
@@ -101,6 +108,14 @@ Acceptance:
 - a run on this machine whose findings match reality.
 
 ### Phase 2: packages and an apt repository
+
+Implemented subset: a checksum-pinned runtime builder, hash-locked wheels, content
+verification, a host-Python-free tarball bootstrap, offline user/system installation
+and upgrades, state-preserving removal with active-guard/process refusal, and CI smoke
+coverage. The [offline guide](OFFLINE_INSTALLATION.md) separates this from native
+package-manager distribution and records remaining recovery limits.
+
+Remaining package distribution:
 - **The `.deb`:** built from the tree `install.py --out` already stages, with `dpkg-deb` (no new build tool).
   - `Depends` computed from the binaries' glibc need plus `nftables`, `iproute2` and `systemd`.
   - `Recommends: systemd-resolved`.

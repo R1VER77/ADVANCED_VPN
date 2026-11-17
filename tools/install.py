@@ -32,7 +32,8 @@ from sysexec import trusted_exe  # noqa: E402  (standard library only)
 # What a built checkout must provide; the VM harness and `avpn cloud host setup` pack
 # exactly these, so the three never disagree.
 BINARIES = ["advanced-vpn", "advanced-vpn-wireguard", "advanced-vpn-dns", "advanced-vpn-cloak", "avpn"]
-SOURCES = ["tools", "deploy", "third_party", "docs/cli", "README.md", "LICENSE", "NOTICE", "SECURITY.md"]
+SOURCES = ["tools", "deploy", "third_party", "docs/cli", "docs/OFFLINE_INSTALLATION.md", "docs/SUPPORT_MATRIX.md",
+           "docs/NAME_MIGRATION.md", "README.md", "LICENSE", "NOTICE", "SECURITY.md"]  # fmt: skip
 
 
 # Slow or flaky links must not abort an install halfway: wait longer per read and retry.
@@ -69,10 +70,14 @@ def next_servers_step(home=None):
     return HAVE_SERVERS if resources else SUGGEST
 
 
-def pack(root, out):
+def pack(root, out, runtime=None):
     """Write the release package: SOURCES plus target/release/BINARIES, no caches."""
     import tarfile
 
+    if runtime is not None:
+        import bundled_runtime
+
+        bundled_runtime.verify(runtime, root / "tools/hardware-requirements.txt")
     for name in BINARIES:
         if not (root / "target/release" / name).is_file():
             raise FileNotFoundError("build first: %s/target/release/%s is missing" % (root, name))
@@ -81,7 +86,22 @@ def pack(root, out):
             tar.add(root / name, arcname=name, filter=lambda i: None if "__pycache__" in i.name else i)
         for name in BINARIES:
             tar.add(root / "target/release" / name, arcname="target/release/" + name)
+        if runtime is not None:
+            tar.add(runtime, arcname="runtime", filter=lambda i: None if "__pycache__" in i.name else i)
+            bootstrap = root / "tools/install-offline.sh"
+            tar.add(bootstrap, arcname="install.sh")
     return out
+
+
+def available_runtime():
+    """Return the verified packaged runtime, or None for a legacy/source install."""
+    runtime = ROOT / "runtime"
+    if runtime.exists() or runtime.is_symlink():
+        import bundled_runtime
+
+        bundled_runtime.verify(runtime, ROOT / "tools/hardware-requirements.txt")
+        return runtime
+    return None
 
 
 def user_paths():
@@ -97,11 +117,12 @@ def launcher(path, body):
 
 
 def install_user(data, bin_dir, python=None):
-    """Install the command line for this user: the package in DATA/app, a hash-locked
-    venv in DATA/venv (reused while the lock is unchanged), and `avpn` in BIN_DIR.
-    The new version is staged beside the old one and swapped in by one rename."""
+    """Install commands and runtime in DATA/app and `avpn` in BIN_DIR.
+    Stage beside the live application and restore it on a final rename failure;
+    a synchronous dependency failure never removes its working runtime."""
     if os.geteuid() == 0:
         raise RuntimeError("--user installs for a normal user; use --out/--apply for the system")
+    available_runtime()  # Verify before creating the installation directory.
     data.mkdir(mode=0o700, parents=True, exist_ok=True)
     stage = data / ("app.new-%d" % os.getpid())
     try:
@@ -121,13 +142,27 @@ def _install_user(data, bin_dir, python, stage):
             shutil.copytree(src, stage / name, ignore=shutil.ignore_patterns("__pycache__"))
         else:
             shutil.copy2(src, stage / name)
+    runtime = available_runtime()
     lock = (ROOT / "tools/hardware-requirements.txt").read_bytes()
-    if python is None:
-        venv = data / "venv"
+    if runtime is not None:
+        shutil.copytree(runtime, stage / "venv", symlinks=True)
+        import bundled_runtime
+
+        bundled_runtime.verify(stage / "venv", stage / "tools/hardware-requirements.txt")
+        python = data / "app/venv/bin/python3"
+    elif python is None:
+        # Keep the live environment intact while a new dependency set is built.
+        # Venv's interpreter works after relocation (launchers never run its pip
+        # entry-point script, whose shebang would name the staging directory).
+        venv = stage / "venv"
         marker = venv / ".advanced-vpn-requirements.sha256"
         digest = hashlib.sha256(lock).hexdigest()
-        if not (marker.exists() and marker.read_text().strip() == digest):
-            shutil.rmtree(venv, ignore_errors=True)
+        candidates = [data / "app/venv", data / "venv"]
+        previous = next((p for p in candidates if (p / marker.name).is_file()
+                         and (p / marker.name).read_text().strip() == digest and (p / "bin/python").is_file()), None)  # fmt: skip
+        if previous is not None:
+            shutil.copytree(previous, venv, symlinks=True)
+        else:
             subprocess.run([sys.executable, "-m", "venv", str(venv)], check=True)
             subprocess.run(
                 [str(venv / "bin/python"), "-m", "pip", "install", "-q", *PIP_PATIENCE, "--require-hashes", "-r",
@@ -135,21 +170,27 @@ def _install_user(data, bin_dir, python, stage):
                 check=True,
             )  # fmt: skip
             marker.write_text(digest + "\n")
-        python = venv / "bin/python"
+        python = data / "app/venv/bin/python"
     app = data / "app"
     q = shlex.quote
     launcher(
         stage / "bin/avpnctl",
-        'exec %s -E -s %s --bin-dir %s "$@"' % (q(str(python)), q(str(app / "tools/avpnctl.py")), q(str(app / "bin"))),
+        'exec %s -B -E -s %s --bin-dir %s "$@"'
+        % (q(str(python)), q(str(app / "tools/avpnctl.py")), q(str(app / "bin"))),
     )
-    launcher(stage / "bin/avpn-cloud", 'exec %s -E -s %s "$@"' % (q(sys.executable), q(str(app / "tools/cloud.py"))))
+    launcher(stage / "bin/avpn-cloud", 'exec %s -B -E -s %s "$@"' % (q(str(python)), q(str(app / "tools/cloud.py"))))
     # avpn-mesh signs and verifies ML-DSA descriptors, so it runs in the
     # hash-locked venv (like avpnctl), not the bare interpreter avpn-cloud uses.
-    launcher(stage / "bin/avpn-mesh", 'exec %s -E -s %s "$@"' % (q(str(python)), q(str(app / "tools/mesh.py"))))
+    launcher(stage / "bin/avpn-mesh", 'exec %s -B -E -s %s "$@"' % (q(str(python)), q(str(app / "tools/mesh.py"))))
     old = data / ("app.old-%d" % os.getpid())
     if app.exists():
         app.rename(old)
-    stage.rename(app)
+    try:
+        stage.rename(app)
+    except OSError:
+        if old.exists() and not app.exists():
+            old.rename(app)
+        raise
     shutil.rmtree(old, ignore_errors=True)
     bin_dir.mkdir(parents=True, exist_ok=True)
     launcher(
@@ -190,17 +231,26 @@ def install_system(package, target):
 
 def _install_system(package, target, new):
     """The body of install_system, staging into NEW."""
-    shutil.copytree(package, new)
+    bundled = (package / "venv").exists() or (package / "venv").is_symlink()
+    if bundled:
+        import bundled_runtime
+
+        bundled_runtime.verify(package / "venv", package / "tools/hardware-requirements.txt")
+    shutil.copytree(package, new, symlinks=True)
     for f in [new, *new.rglob("*")]:
         os.chown(f, 0, 0, follow_symlinks=False)
-        if not f.is_symlink():
+        if not f.is_symlink() and not (bundled and f.is_relative_to(new / "venv")):
             f.chmod(0o755 if f.is_dir() or f.parent.name == "bin" else 0o644)
     lock = (new / "tools/hardware-requirements.txt").read_bytes()
     digest = hashlib.sha256(lock).hexdigest()
     marker = ".advanced-vpn-requirements.sha256"
     old_venv = target / "venv"
-    if old_venv.is_dir() and (old_venv / marker).exists() and (old_venv / marker).read_text().strip() == digest:
-        old_venv.rename(new / "venv")
+    if bundled:
+        # All dependency resolution happened during the ordinary-user build.
+        # Never run pip, use a host interpreter, or reuse an older runtime here.
+        bundled_runtime.verify(new / "venv", new / "tools/hardware-requirements.txt")
+    elif old_venv.is_dir() and (old_venv / marker).exists() and (old_venv / marker).read_text().strip() == digest:
+        shutil.copytree(old_venv, new / "venv", symlinks=True)
     else:
         subprocess.run([sys.executable, "-m", "venv", str(new / "venv")], check=True)
         subprocess.run(
@@ -213,7 +263,12 @@ def _install_system(package, target, new):
     old = target.with_name(target.name + ".old-%d" % os.getpid())
     if upgraded:
         target.rename(old)
-    new.rename(target)
+    try:
+        new.rename(target)
+    except OSError:
+        if upgraded and old.exists() and not target.exists():
+            old.rename(target)
+        raise
     shutil.rmtree(old, ignore_errors=True)
     return upgraded
 
@@ -232,6 +287,88 @@ def link_commands(target, bin_dir=Path("/usr/local/bin")):
             continue
         link.symlink_to(dest)
     return ok
+
+
+def removal_checks(target=Path("/opt/advanced-vpn"), proc=Path("/proc")):
+    """Read-only, fail-closed removal gate: retain every guard and running program."""
+    for unit in ("advanced-vpn.service", "advanced-vpn-guard.service"):
+        r = subprocess.run([trusted_exe("systemctl"), "show", unit, "--property=LoadState",
+                            "--property=ActiveState", "--property=UnitFileState"],
+                           capture_output=True, text=True, check=True, timeout=15)  # fmt: skip
+        fields = dict(line.split("=", 1) for line in r.stdout.splitlines() if "=" in line)
+        absent = fields.get("LoadState") == "not-found"
+        if fields.get("ActiveState") not in ("inactive", "failed") or (
+            fields.get("UnitFileState") not in ("disabled", "static", "masked")
+            and not (absent and fields.get("UnitFileState", "") == "")
+        ):
+            raise RuntimeError(
+                "Removal refused: %s is active, enabled or unverified. "
+                "Use documented disconnect/recovery first; removal never disables a guard." % unit
+            )
+    r = subprocess.run([trusted_exe("nft"), "-j", "list", "tables"],
+                       capture_output=True, text=True, check=True, timeout=15)  # fmt: skip
+    tables = json.loads(r.stdout)["nftables"]
+    if not isinstance(tables, list):
+        raise ValueError("cannot verify firewall state")
+    for item in tables:
+        if not isinstance(item, dict):
+            raise ValueError("cannot verify firewall state")
+        if "table" in item and item["table"]["name"].startswith("advanced_vpn"):
+            raise RuntimeError("Removal refused: a VPN firewall table is still present; its guard is retained.")
+    for command, field, value in [(["ip", "-j", "netns", "list"], "name", "avpn-app"),
+                                  (["ip", "-j", "link", "show"], "ifalias", "advanced-vpn-managed")]:  # fmt: skip
+        command[0] = trusted_exe(command[0])
+        r = subprocess.run(command, capture_output=True, text=True, check=True, timeout=15)
+        # iproute2 emits no output for an empty namespace list, even with -j.
+        rows = [] if field == "name" and not r.stdout.strip() else json.loads(r.stdout)
+        if not isinstance(rows, list) or not all(isinstance(row, dict) for row in rows):
+            raise ValueError("cannot verify network state")
+        if any(row.get(field) == value for row in rows):
+            raise RuntimeError("Removal refused: a VPN namespace or interface still exists; recover explicitly first.")
+    prefix = str(target.resolve()) + "/"
+    for entry in proc.iterdir():
+        if not entry.name.isdigit() or int(entry.name) == os.getpid():
+            continue
+        try:
+            executable = os.readlink(entry / "exe")
+        except (FileNotFoundError, ProcessLookupError):
+            continue  # Exited process or kernel thread.
+        if executable.startswith(prefix):
+            raise RuntimeError("Removal refused: an installed program is still running (PID %s)." % entry.name)
+
+
+def uninstall_system(
+    target=Path("/opt/advanced-vpn"), units=Path("/etc/systemd/system"), bin_dir=Path("/usr/local/bin")
+):
+    """Remove inactive owned application files; never clear networking or private state."""
+    if os.geteuid() != 0:
+        raise RuntimeError("system removal requires root")
+    if target.is_symlink() or target.parent.stat().st_uid != 0 or target.parent.stat().st_mode & 0o022:
+        raise RuntimeError("unsafe installation parent or target")
+    if target.exists() and (target.stat().st_uid != 0 or target.stat().st_mode & 0o022):
+        raise RuntimeError("existing installation is not root-owned and protected")
+    removal_checks(target)
+    owned_units = []
+    for name in ("advanced-vpn.service", "advanced-vpn-guard.service"):
+        path = units / name
+        if path.exists() or path.is_symlink():
+            if path.is_symlink() or path.read_bytes() != (ROOT / "deploy" / name).read_bytes():
+                raise RuntimeError("Removal refused: modified/foreign unit %s; review it before removal." % path)
+            owned_units.append(path)
+    # Check again after reading ownership and unit data, before the first mutation.
+    # Concurrent privileged administration is outside this gate; do not connect or
+    # reconfigure another instance while uninstalling it.
+    removal_checks(target)
+    for path in owned_units:
+        path.unlink()
+    for name in ("avpn", "avpnctl"):
+        path = bin_dir / name
+        if path.is_symlink() and os.readlink(path) == str(target / "bin" / name):
+            path.unlink()
+    if target.exists():
+        shutil.rmtree(target)
+    subprocess.run([trusted_exe("systemctl"), "daemon-reload"], check=True, timeout=15)
+    print("Removed inactive application and owned units; private state, keys, users and network settings are kept.")
 
 
 def prepare_device(target, role, protect, vault=None, insecure=False):
@@ -262,6 +399,7 @@ def installation_preflight(protect=None, operator_target=None):
     from types import SimpleNamespace
     import preflight
 
+    available_runtime()
     options = SimpleNamespace(
         package=ROOT / "target/release",
         target=operator_target or "/opt",
@@ -289,7 +427,8 @@ def main():
     mode.add_argument("--user", action="store_true", help="install the command line for this user only")
     mode.add_argument("--pack", type=Path, help="write the release package to this .tar.gz")
     p.add_argument("--apply", action="store_true", help="install or upgrade /opt/advanced-vpn (root)")
-    p.add_argument("--uninstall", action="store_true", help="with --user: remove the user installation")
+    p.add_argument("--runtime", type=Path, help="with --pack: include this verified pinned offline runtime")
+    p.add_argument("--uninstall", action="store_true", help="with --user or --apply: remove an inactive installation")
     p.add_argument(
         "--role", choices=["client", "relay", "middle", "exit"], help="with --apply: also generate this device's keys"
     )
@@ -303,18 +442,28 @@ def main():
     a = p.parse_args()
     if not (a.out or a.user or a.pack or a.apply):
         p.error("choose --apply (system), --user (command line only), --out (stage) or --pack")
+    if a.runtime and not a.pack:
+        p.error("--runtime is only for --pack")
+    if a.uninstall and not (a.user or a.apply):
+        p.error("--uninstall needs --user or --apply")
+    if a.uninstall and (a.role or a.protect or a.out):
+        p.error("--uninstall cannot stage a package or create device keys")
     if a.apply:
         if a.user or a.pack:
             p.error("--apply is for a system installation, not --user or --pack")
         if os.geteuid() != 0:
             raise RuntimeError("--apply requires root")
+        if a.uninstall:
+            available_runtime()
+            uninstall_system()
+            return
         if a.role and not a.protect:
             raise ValueError("--role needs --protect (nitrokey, systemd-creds or none)")
         if a.protect == "none" and not a.insecure_plaintext_keys:
             raise ValueError("--protect none stores private keys as plain files; it needs --insecure-plaintext-keys")
         installation_preflight(a.protect)
     if a.pack:
-        print(pack(ROOT, a.pack))
+        print(pack(ROOT, a.pack, runtime=a.runtime))
         return
     if a.user:
         data, bin_dir = user_paths()
@@ -338,6 +487,7 @@ def main():
         if os.geteuid() != 0:
             raise RuntimeError("--apply requires root")
         a.out = Path(tempfile.mkdtemp(prefix="advanced-vpn-stage-")) / "stage"
+    runtime = available_runtime()
     a.out.mkdir(mode=0o700, parents=False, exist_ok=False)
     package = a.out / "opt/advanced-vpn"
     (package / "bin").mkdir(parents=True)
@@ -350,6 +500,8 @@ def main():
     for name in ["README.md", "LICENSE", "NOTICE", "SECURITY.md"]:
         shutil.copy2(ROOT / name, package / name)
     shutil.copytree(ROOT / "third_party", package / "third_party")
+    if runtime is not None:
+        shutil.copytree(runtime, package / "venv", symlinks=True)
     # -E -s, not -I: ignore PYTHON* variables and the user site directory, but keep the
     # (root-owned) script directory on sys.path, which -I drops on Python 3.11+.
     # `avpn` is the Rust front end. It runs `avpnctl` (the privileged controller,
@@ -357,16 +509,19 @@ def main():
     # own provider sign-in it uses) and `avpn-mesh` (the mesh tool; the venv again,
     # for ML-DSA descriptor signing and verification).
     launchers = {
-        "avpnctl": "exec /opt/advanced-vpn/venv/bin/python -E -s /opt/advanced-vpn/tools/avpnctl.py"
+        "avpnctl": "exec /opt/advanced-vpn/venv/bin/python -B -E -s /opt/advanced-vpn/tools/avpnctl.py"
         ' --bin-dir /opt/advanced-vpn/bin "$@"',
-        "avpn-cloud": 'exec /usr/bin/python3 -E -s /opt/advanced-vpn/tools/cloud.py "$@"',
-        "avpn-mesh": 'exec /opt/advanced-vpn/venv/bin/python -E -s /opt/advanced-vpn/tools/mesh.py "$@"',
+        "avpn-cloud": 'exec /opt/advanced-vpn/venv/bin/python -B -E -s /opt/advanced-vpn/tools/cloud.py "$@"',
+        "avpn-mesh": 'exec /opt/advanced-vpn/venv/bin/python -B -E -s /opt/advanced-vpn/tools/mesh.py "$@"',
     }
     for name, body in launchers.items():
         (package / "bin" / name).write_text("#!/bin/sh\n" + body + "\n")
         (package / "bin" / name).chmod(0o755)
     (package / "docs").mkdir()
     shutil.copytree(ROOT / "docs/cli", package / "docs/cli")
+    for name in SOURCES:
+        if name.startswith("docs/") and (ROOT / name).is_file():
+            shutil.copy2(ROOT / name, package / name)
     units = a.out / "etc/systemd/system"
     units.mkdir(parents=True)
     for name in ["advanced-vpn.service", "advanced-vpn-guard.service"]:

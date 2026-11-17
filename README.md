@@ -86,6 +86,13 @@ Sources: `docs/evidence/DAITA_LAB.json`, `avpn help threat-model`. The 100-site 
 
 ## Installation checks and resumable setup
 
+Offline packaging now includes a pinned Python runtime and hash-locked dependencies.
+From a verified runtime-bearing tarball, use `./install.sh --user` or
+`sudo ./install.sh --apply`; installation never activates the VPN. Inactive system
+removal refuses to dismantle a retained guard and preserves keys/state. See
+[offline installation](docs/OFFLINE_INSTALLATION.md) for authentication, validation and
+the remaining package-manager work. This has not yet been published as a tagged release.
+
 Project participation follows the [principles](docs/PRINCIPLES.md),
 [conduct policy](CODE_OF_CONDUCT.md) and [governance](docs/GOVERNANCE.md).
 The [voluntary funding record](docs/FUNDING.md) and [decision log](docs/DECISIONS.md)
@@ -117,6 +124,10 @@ OTP slots, guesses a PIN or updates firmware. PIN and signing prompts stay in tr
 See [preflight](docs/cli/preflight.md) and [setup](docs/cli/setup.md) for options, limits
 and recovery, and the [installation plan](docs/INSTALL_AND_SETUP_PLAN.md) for later packaging,
 cloud-engine and vendor-library phases.
+
+The [support matrix](docs/SUPPORT_MATRIX.md) distinguishes tested hardware from protocol
+compatibility and planned platforms. The [name migration](docs/NAME_MIGRATION.md) keeps
+current `avpn` commands, state paths and signed protocol identifiers recoverable.
 
 ## Command line
 

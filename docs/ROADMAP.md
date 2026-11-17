@@ -18,7 +18,8 @@ validation documents remain the technical references.
   intervals, negative results and load failures reported alongside positive results.
 - [ ] Expand beyond the current small closed-world experiment to larger monitored and
   open-world sets and cross-link correlation attacks.
-- [ ] Keep experimental controls opt-in until their acceptance gates pass.
+- [x] Keep experimental controls opt-in. This remains a release constraint until their
+  acceptance gates pass; the latest measurements did not authorize promotion.
 
 See the [README measurements](../README.md), [verification plan](VERIFICATION_PLAN.md)
 and [security scope](../SECURITY.md). More hops under one operator do not establish
@@ -66,17 +67,22 @@ These governance items are not complete merely because this roadmap lists them.
 
 - [x] Deliver shared read-only preflight, current-evidence setup progress and confirmed,
   narrowly scoped hardware repairs. A command succeeding is not proof a repair worked.
-- [ ] Test Nitrokey, YubiKey, Trezor and Ledger: detection, capability limitations,
-  multiple devices, unavailable/locked apps, missing device access, repair and rollback.
-  Use isolated test vaults; never reset credentials or use wallet recovery material.
-  On 17 November all four connected units passed fresh-assertion vault round trips,
+- [x] Physically test the four connected Nitrokey, YubiKey, Trezor and Ledger units
+  using isolated test vaults, without resets or wallet material. On 17 November all
+  four passed capability checks, fresh-assertion vault round trips,
   missing-access detection, confirmed udev repair and baseline restoration
   ([evidence](evidence/SETUP_HARDWARE_20261117.json)). YubiKey disabled-USB-FIDO2 recovery
-  also passed, preserving the same credential and USB/NFC settings. Locked-app, additional
-  firmware/model and complete installation scenarios still need coverage.
-- [ ] Package a pinned runtime and offline dependencies; validate install, upgrade,
-  removal and recovery in clean supported-distribution VMs. Do not silently enable VPN
-  services during installation.
+  also passed, preserving the same credential and USB/NFC settings.
+- [ ] Complete physical multiple-device, locked/unavailable-app, additional model/firmware
+  and full enrolled-installation scenarios. Synthetic ambiguity checks do not close these.
+- [x] Package a pinned runtime and offline core dependencies. Validate system/user
+  install, in-place replacement, guarded removal, corruption refusal and preserved state
+  in clean Debian 12/13 and Ubuntu 22.04/24.04 VMs. Installation never enables services.
+  [Evidence](evidence/OFFLINE_PACKAGE_20261117.json) includes Python 3.13.18/OpenSSL 3.5.9,
+  604 tests on both Python 3.10 and 3.13, and explicit limits.
+- [ ] Finish static musl preflight, native `.deb`/`.rpm` and signed apt distribution,
+  cross-release/protocol migrations, interrupted-upgrade recovery and current-release
+  reboot/protection testing. Same-bundle replacement is not a rolling live upgrade.
 - [ ] Add a GUI driven by the same typed controller checks, with honest progress,
   actionable failure states and explicit review of privileged or billable changes.
 - [ ] Evaluate an optional local Gemma assistant against the deterministic setup engine.
@@ -88,8 +94,11 @@ These governance items are not complete merely because this roadmap lists them.
 
 ## 4. Assurance, decentralization and anonymity sets
 
-- [ ] Extend formal models, fuzz parsers, review secret handling and commission an
-  independent audit covering the shaping fix and enrollment/control boundaries.
+- [x] Prepare a scoped [review package](INDEPENDENT_REVIEW.md) that supports unpaid
+  independent review without making development depend on funding.
+- [ ] Extend formal models, fuzz parsers, review secret handling and obtain actual
+  independent review covering shaping and enrollment/control boundaries. Self-review
+  and CI are not independent review.
 - [ ] Remove the central public DNS dependency through a self-run resolver at the exit,
   preserving the documented post-quantum transport policy and explaining resolver limits.
 - [ ] Measure operator/provider independence, correlation exposure and actual anonymity
@@ -104,11 +113,13 @@ and the [post-quantum inventory](PQ_INVENTORY.md).
 ## 5. Name migration and reach
 
 - [x] Use `cypherpunk_vpn` as the project name in the README.
-- [ ] Plan the repository, binary, package, service, state and signed-chain migration;
+- [x] [Plan](NAME_MIGRATION.md) the repository, binary, package, service, state and signed-chain migration;
   preserve recovery and avoid breaking existing installations through a cosmetic rename.
+- [ ] Implement and validate the compatibility migration before changing canonical
+  services, state paths or signed protocol domains.
 - [ ] Expand to aarch64 Linux, then additional desktop/mobile platforms, with
   platform-specific protection tests before marking each supported.
-- [ ] Publish a device/platform matrix distinguishing protocol compatibility,
+- [x] Publish a [device/platform matrix](SUPPORT_MATRIX.md) distinguishing protocol compatibility,
   physically tested models/firmware and planned targets.
 
 ## Release gates
