@@ -259,7 +259,10 @@ pub fn status_rows(st: &Value) -> Vec<Row> {
 /// Turn a controller result into cells.
 pub fn from_outcome(action: &str, o: &Outcome) -> Vec<Cell> {
     let v = &o.value;
-    if !o.ok() {
+    let structured_assessment = (action == "preflight"
+        && v.get("preflight").is_some_and(Value::is_object))
+        || (action == "setup" && v.get("repair").is_some_and(Value::is_object));
+    if !o.ok() && !structured_assessment {
         let error = s(v, "error").unwrap_or_else(|| "failed".into());
         let mut h = hints(action, o);
         if let Some(m) = s(v, "message").filter(|m| !o.stderr.contains(m.as_str())) {
@@ -271,6 +274,88 @@ pub fn from_outcome(action: &str, o: &Outcome) -> Vec<Cell> {
         }];
     }
     match action {
+        "preflight" => {
+            let p = &v["preflight"];
+            let mut rows: Vec<Row> = p["findings"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|f| {
+                    let label = s(f, "code").unwrap_or_default();
+                    let detail = s(f, "message").unwrap_or_default();
+                    match s(f, "severity").as_deref() {
+                        Some("blocker") => Row::check(false, label, detail),
+                        Some("ok") => Row::check(true, label, detail),
+                        _ => Row::pair(label, detail),
+                    }
+                })
+                .collect();
+            for finding in p["findings"].as_array().into_iter().flatten() {
+                if let Some(fix) = s(finding, "fix") {
+                    rows.push(Row::pair("Suggested fix", fix));
+                }
+            }
+            if let Some(command) = s(p, "install") {
+                rows.push(Row::pair("Suggested packages", command));
+            }
+            vec![Cell::Result {
+                title: "Preflight".into(),
+                summary: s(v, "message"),
+                rows,
+            }]
+        }
+        "setup" if v.get("setup").is_some_and(Value::is_object) => {
+            let setup = &v["setup"];
+            let rows = setup["steps"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|step| {
+                    let title = s(step, "title").unwrap_or_default();
+                    let state = s(step, "state").unwrap_or_else(|| "unknown".into());
+                    let detail = format!("{state}: {}", s(step, "say").unwrap_or_default());
+                    match state.as_str() {
+                        "complete" => Row::check(true, title, detail),
+                        "failed" | "blocked" => Row::check(false, title, detail),
+                        _ => Row::pair(title, detail),
+                    }
+                })
+                .collect();
+            vec![Cell::Result {
+                title: "Setup".into(),
+                summary: s(v, "message"),
+                rows,
+            }]
+        }
+        "setup" if v.get("repair").is_some_and(Value::is_object) => {
+            let repair = &v["repair"];
+            let plan = &repair["plan"];
+            let mut rows = vec![
+                Row::detail(s(plan, "changes").unwrap_or_default()),
+                Row::pair("Undo", s(plan, "undo").unwrap_or_default()),
+            ];
+            if repair["applied"] != true {
+                rows.push(Row::pair(
+                    "Confirmation token",
+                    s(repair, "confirmation").unwrap_or_default(),
+                ));
+                rows.push(Row::detail(
+                    "Review this plan, then re-run with --apply --confirm TOKEN.",
+                ));
+            } else {
+                for finding in repair["findings"].as_array().into_iter().flatten() {
+                    rows.push(Row::pair(
+                        s(finding, "code").unwrap_or_default(),
+                        s(finding, "message").unwrap_or_default(),
+                    ));
+                }
+            }
+            vec![Cell::Result {
+                title: "Repair plan".into(),
+                summary: s(v, "message"),
+                rows,
+            }]
+        }
         "hops" => {
             let chain = v.get("chain").cloned().unwrap_or(Value::Null);
             match chain_text(&chain) {
@@ -410,6 +495,35 @@ mod tests {
             value,
             stderr: String::new(),
         }
+    }
+
+    #[test]
+    fn preflight_blockers_keep_the_findings_visible_on_nonzero_exit() {
+        let out = Outcome {
+            code: 1,
+            value: json!({"ok":false,"message":"Not ready","preflight":{
+                "findings":[{"code":"tun_missing","severity":"blocker","message":"TUN is missing"}],
+                "install":null}}),
+            stderr: String::new(),
+        };
+        let rendered = plain(&from_outcome("preflight", &out));
+        assert!(rendered.contains("✗ tun_missing"), "{rendered}");
+        assert!(rendered.contains("TUN is missing"), "{rendered}");
+        assert!(!out.ok());
+    }
+
+    #[test]
+    fn setup_waiting_steps_never_get_a_success_mark() {
+        let out = ok(
+            json!({"ok":true,"message":"1 of 2 checks complete","setup":{"steps":[
+            {"title":"Host","state":"complete","say":"Checked"},
+            {"title":"Credential","state":"waiting_for_user","say":"Use the trusted prompt"}]}}),
+        );
+        let rendered = plain(&from_outcome("setup", &out));
+        assert!(rendered.contains("✓ Host"), "{rendered}");
+        assert!(!rendered.contains("✓ Credential"), "{rendered}");
+        assert!(rendered.contains("waiting_for_user"), "{rendered}");
+        assert!(!rendered.contains("Connected"), "{rendered}");
     }
 
     fn plain(cells: &[Cell]) -> String {

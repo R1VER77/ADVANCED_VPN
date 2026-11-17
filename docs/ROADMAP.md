@@ -54,11 +54,16 @@ These governance items are not complete merely because this roadmap lists them.
 
 ## 3. Installation and guided setup
 
-- [ ] Deliver shared read-only preflight, current-evidence setup progress and confirmed,
+- [x] Deliver shared read-only preflight, current-evidence setup progress and confirmed,
   narrowly scoped hardware repairs. A command succeeding is not proof a repair worked.
 - [ ] Test Nitrokey, YubiKey, Trezor and Ledger: detection, capability limitations,
   multiple devices, unavailable/locked apps, missing device access, repair and rollback.
   Use isolated test vaults; never reset credentials or use wallet recovery material.
+  On 17 November all four connected units passed fresh-assertion vault round trips,
+  missing-access detection, confirmed udev repair and baseline restoration
+  ([evidence](evidence/SETUP_HARDWARE_20261117.json)). YubiKey disabled-USB-FIDO2 recovery
+  also passed, preserving the same credential and USB/NFC settings. Locked-app, additional
+  firmware/model and complete installation scenarios still need coverage.
 - [ ] Package a pinned runtime and offline dependencies; validate install, upgrade,
   removal and recovery in clean supported-distribution VMs. Do not silently enable VPN
   services during installation.

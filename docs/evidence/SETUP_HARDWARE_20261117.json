@@ -1,0 +1,136 @@
+{
+  "schema": 1,
+  "date_utc": "2026-11-17",
+  "source_state": "installation worktree, not a tagged release",
+  "scope": "physical FIDO setup and local device-access repair, not full VPN/cloud installation or hardware attestation",
+  "devices": [
+    {
+      "family": "nitrokey",
+      "physical": true,
+      "capability_check": true,
+      "credential_record_valid": true,
+      "fresh_assertion_unseal": true,
+      "corrupted_envelope_refused": true,
+      "vendor_rules_removed": true,
+      "generic_rules_still_granted_access": true,
+      "actual_missing_access_detected": true,
+      "confirmed_setup_cli_udev_repair": true,
+      "original_rules_restored": true,
+      "post_restore_probe_passed": true,
+      "device_capabilities": null,
+      "source_sha256": null,
+      "private_evidence_sha256": {
+        "vault": "a8775cafb5b7b46ef5ac64bd8047629a39babc33fff6cbc2e3c6082b2813fde0",
+        "udev": "9f7364137c8cfb67fec1ab169f1bf82bd891713b19fb0b4d719aad66960c6764"
+      }
+    },
+    {
+      "family": "yubikey",
+      "physical": true,
+      "capability_check": true,
+      "credential_record_valid": true,
+      "fresh_assertion_unseal": true,
+      "corrupted_envelope_refused": true,
+      "vendor_rules_removed": true,
+      "generic_rules_still_granted_access": true,
+      "actual_missing_access_detected": true,
+      "confirmed_setup_cli_udev_repair": true,
+      "original_rules_restored": true,
+      "post_restore_probe_passed": true,
+      "device_capabilities": null,
+      "source_sha256": null,
+      "private_evidence_sha256": {
+        "vault": "f2bc36f6fe91e82b750b799303a662672af629241910c25e4c98dc14f1c4aabd",
+        "udev": "c38a67b0f59a8dcdbadf1226c1c65447b51aa07b8eb242198d8479027e342b88"
+      },
+      "firmware_from_vendor_readonly_probe": "5.2.7"
+    },
+    {
+      "family": "trezor",
+      "physical": true,
+      "capability_check": true,
+      "credential_record_valid": true,
+      "fresh_assertion_unseal": true,
+      "corrupted_envelope_refused": true,
+      "vendor_rules_removed": true,
+      "generic_rules_still_granted_access": true,
+      "actual_missing_access_detected": true,
+      "confirmed_setup_cli_udev_repair": true,
+      "original_rules_restored": true,
+      "post_restore_probe_passed": true,
+      "device_capabilities": {
+        "vendor": "1209",
+        "product": "53C1",
+        "firmware": 0,
+        "verification": "on_device",
+        "algorithms": []
+      },
+      "source_sha256": {
+        "hwkey.py": "27d3d635dceca9e2a65279897a1567235c92ac1a448167200fbfaedf6eca2623",
+        "setup_cli.py": "92e0a5d5d1b755e85950549190a5cb734c21865bc0fc83e5b525e1566e274372",
+        "avpnctl.py": "0814d67b9631ac32343fdac64d7db175a3178e72a4603b4a93629c6d68376db7"
+      },
+      "private_evidence_sha256": {
+        "vault": "ca228955b9473259531e3b808dca2aedd59867aae501b1f3c3029c29240d1150",
+        "udev": "ad5b584256fe1351c0680e2bdb198ea22003a4980ebf9e1632fe86fde35a91be"
+      }
+    },
+    {
+      "family": "ledger",
+      "physical": true,
+      "capability_check": true,
+      "credential_record_valid": true,
+      "fresh_assertion_unseal": true,
+      "corrupted_envelope_refused": true,
+      "vendor_rules_removed": true,
+      "generic_rules_still_granted_access": true,
+      "actual_missing_access_detected": true,
+      "confirmed_setup_cli_udev_repair": true,
+      "original_rules_restored": true,
+      "post_restore_probe_passed": true,
+      "device_capabilities": {
+        "vendor": "2C97",
+        "product": "5000",
+        "firmware": 0,
+        "verification": "on_device",
+        "algorithms": []
+      },
+      "source_sha256": {
+        "hwkey.py": "27d3d635dceca9e2a65279897a1567235c92ac1a448167200fbfaedf6eca2623",
+        "setup_cli.py": "92e0a5d5d1b755e85950549190a5cb734c21865bc0fc83e5b525e1566e274372",
+        "avpnctl.py": "0814d67b9631ac32343fdac64d7db175a3178e72a4603b4a93629c6d68376db7"
+      },
+      "private_evidence_sha256": {
+        "vault": "8a235fc26d84863de22a74469ebc771254aff68c4e00be502086c117d85f25ff",
+        "udev": "c44f00722a036e5360ff7907b4677ea99a88da503495413d49c9303d176a6e04"
+      }
+    }
+  ],
+  "observed_failures": [
+    {
+      "issue": "Historical uaccess tag survived removal in the udev event database",
+      "resolution": "Prefer CURRENT_TAGS when present; regression and physical retry passed",
+      "baseline_restored_after_failure": true
+    },
+    {
+      "issue": "Ledger connected for a Trezor-specific test",
+      "resolution": "Wrong-family guard refused before creating a credential; both subsequently passed their own tests"
+    }
+  ],
+  "limitations": [
+    "Tests cover these connected units, not every model/firmware in each family.",
+    "No FIDO reset, firmware update, wallet recovery material or existing vault was used.",
+    "Initial Nitrokey/YubiKey records predate automatic source-hash/capability metadata capture; their checks are evidenced by retained private result hashes."
+  ],
+  "yubikey_disabled_usb_fido2_trial": {
+    "schema": 1,
+    "firmware": "5.2.7",
+    "passed": true,
+    "restored": true,
+    "disabled_state_detected": true,
+    "actual_setup_cli_enable_verified": true,
+    "same_credential_preserved": true,
+    "other_apps_unchanged": true,
+    "private_evidence_sha256": "f8dd304cb27045dd3e1b0c67c902059e3c7c9f6981f229b90714aaba49bf1493"
+  }
+}

@@ -1756,6 +1756,15 @@ def doctor(state, check_egress=False):
     def check(name, ok, detail):
         checks.append(dict(check=name, ok=bool(ok), detail=detail))
 
+    import preflight
+
+    for finding in preflight.inspect_host()["findings"]:
+        check(
+            "host: " + finding["code"],
+            finding["severity"] != "blocker",
+            finding["severity"] + ": " + finding["message"],
+        )
+
     def probe(*args):
         """Run a read-only command; None when the tool itself is missing (reported separately)."""
         try:
@@ -1883,6 +1892,13 @@ def build_parser():
     p.add_argument("--lab", action="store_true", help="tests only; requires an unprivileged user namespace")
     p.add_argument("--json", action="store_true", help="print one JSON object per command (used by the avpn CLI)")
     s = p.add_subparsers(dest="action", required=True)
+    import preflight
+    import setup_cli
+
+    preflight.add_arguments(s.add_parser("preflight", help="check host requirements without changing the system"))
+    setup_cli.add_arguments(
+        s.add_parser("setup", help="check resumable client setup or review an exact hardware repair")
+    )
     rq = s.add_parser("request", help="generate this device's keys locally; prints the public request")
     rq.add_argument(
         "--role",
@@ -2116,6 +2132,18 @@ def main():
     """Command-line entry point: harden the process, parse arguments, run one action."""
     harden_process()
     a = build_parser().parse_args()
+    if a.action in ("preflight", "setup"):
+        import setup_cli
+
+        try:
+            result = setup_cli.preflight_result(a) if a.action == "preflight" else setup_cli.setup(a)
+        except (setup_cli.RequestError, setup_cli.ConfirmationRequired) as error:
+            # These exception classes carry fixed public messages, never raw tool output.
+            result = dict(ok=False, action=a.action, error=type(error).__name__, message=str(error))
+        setup_cli.print_result(a, result)
+        if not result["ok"]:
+            raise SystemExit(1)
+        return
     if a.action == "request":
         if a.protect == "none" and not (a.lab or a.insecure_plaintext_keys):
             raise SystemExit(

@@ -75,6 +75,12 @@ enum Cmd {
     /// Self-checks; --check-egress shows the address your first hop sees.
     #[command(disable_help_flag = true)]
     Doctor(Rest),
+    /// Check installation requirements without changing this system.
+    #[command(disable_help_flag = true)]
+    Preflight(Rest),
+    /// Recheck resumable setup or review a confirmed hardware repair.
+    #[command(disable_help_flag = true)]
+    Setup(Rest),
     /// Start the VPN service (or --foreground).
     #[command(disable_help_flag = true)]
     Connect(Rest),
@@ -131,6 +137,8 @@ impl Cmd {
             Cmd::Info(r) => ("info", r.args),
             Cmd::Hops(r) => ("hops", r.args),
             Cmd::Doctor(r) => ("doctor", r.args),
+            Cmd::Preflight(r) => ("preflight", r.args),
+            Cmd::Setup(r) => ("setup", r.args),
             Cmd::Connect(r) => ("connect", r.args),
             Cmd::Disconnect(r) => ("disconnect", r.args),
             Cmd::Run(r) => ("run", r.args),
@@ -189,7 +197,7 @@ fn help(topic: Option<&str>, theme: Theme) -> i32 {
 /// terminal; run through the captured `--json` path they see no terminal, fall back to
 /// the desktop dialog, and under sudo that dialog cannot open ("PIN dialog stopped").
 fn takes_terminal(action: &str, json: bool, stdin_is_terminal: bool) -> bool {
-    matches!(action, "request" | "init" | "enroll") && !json && stdin_is_terminal
+    matches!(action, "request" | "init" | "enroll" | "setup") && !json && stdin_is_terminal
 }
 
 fn exec(ctrl: &Controller, action: &str, args: &[String]) -> i32 {
@@ -280,13 +288,33 @@ fn run(cli: Cli, theme: Theme) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use super::takes_terminal;
+    use super::{Cli, takes_terminal};
+    use clap::Parser;
+
+    #[test]
+    fn setup_and_preflight_forward_their_typed_options_to_the_controller() {
+        for (argv, expected) in [
+            (
+                vec!["avpn", "--json", "preflight", "--hardware"],
+                ("preflight", vec!["--hardware"]),
+            ),
+            (
+                vec!["avpn", "setup", "--repair", "install_udev_rule"],
+                ("setup", vec!["--repair", "install_udev_rule"]),
+            ),
+        ] {
+            let parsed = Cli::try_parse_from(argv).expect("new command parses");
+            let (name, args) = parsed.command.expect("command").split();
+            assert_eq!(name, expected.0);
+            assert_eq!(args, expected.1);
+        }
+    }
 
     #[test]
     fn pin_actions_get_the_terminal_only_when_typed_at_one() {
         // Live regression (14 Nov 2026): `sudo avpn enroll` ran the controller with no
         // terminal, so the Nitrokey PIN went to a desktop dialog that root cannot open.
-        for action in ["request", "init", "enroll"] {
+        for action in ["request", "init", "enroll", "setup"] {
             assert!(takes_terminal(action, false, true), "{action}");
             assert!(
                 !takes_terminal(action, true, true),

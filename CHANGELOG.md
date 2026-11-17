@@ -5,6 +5,22 @@ availability or a published claim are in [docs/INCIDENTS.md](docs/INCIDENTS.md).
 measured figure in the docs names the version it was measured on.
 
 ## Unreleased
+
+- Installation/setup: `avpn preflight` checks host requirements with a Python 3.8+
+  standalone bootstrap; doctor shares its host checks. Optional provider checks stay
+  unprivileged and opt-in. Missing or failed required checks block readiness.
+- `avpn setup`: private, locked and durable checkpoints; every step is rechecked. Guard
+  and protection completion require a live supervisor and fresh route evidence. Saved
+  public credentials are not described as proof of possession.
+- Typed hardware diagnostics and individually confirmed repair plans. On-device user
+  verification is supported, probes have a deadline, and vendor evidence plus an exact
+  target are required before enabling USB FIDO2. No reset or credential deletion is
+  offered. GUI/model integration and the remaining installation-plan phases are pending.
+- Physical setup validation: Nitrokey, YubiKey, Trezor and Ledger passed fresh-assertion
+  vault round trips and actual missing-access/confirmed-udev-repair/restoration trials.
+  Wallet rules are restricted to FIDO interfaces. Use current udev event tags rather
+  than historical tags after a rule change; keep vendor output out of JSON results.
+  See [hardware setup evidence](docs/evidence/SETUP_HARDWARE_20261117.json).
 - README: three setup tiers (General VPN, Hardened, Cypherpunk) and the Intel ME. `avpn doctor`
   reports the management coprocessor read-only: the Intel ME version and operating mode,
   whether me_cleaner recognises that version (it lists ME up to 11.x), or AMD's PSP.

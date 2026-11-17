@@ -257,6 +257,30 @@ def prepare_device(target, role, protect, vault=None, insecure=False):
         print(next_servers_step())
 
 
+def installation_preflight(protect=None, operator_target=None):
+    """Refuse a system install before staging when the shared host checks report blockers."""
+    from types import SimpleNamespace
+    import preflight
+
+    options = SimpleNamespace(
+        package=ROOT / "target/release",
+        target=operator_target or "/opt",
+        protect=protect,
+        hardware=False,
+        provider=[],
+        operator_only=operator_target is not None,
+    )
+    report = preflight.inspect_host(options)
+    if not report["ready"]:
+        reasons = "\n".join(f["message"] for f in report["findings"] if f["severity"] == "blocker")
+        packages = "\nSuggested package command: " + report["install"] if report["install"] else ""
+        raise RuntimeError("Installation preflight blocked; no installation was started.\n" + reasons + packages)
+    for finding in report["findings"]:
+        if finding["severity"] == "warning":
+            print("Preflight warning: " + finding["message"], file=sys.stderr)
+    return report
+
+
 def main():
     """Command-line entry point: stage, install system-wide, install for the user, or pack."""
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -279,6 +303,16 @@ def main():
     a = p.parse_args()
     if not (a.out or a.user or a.pack or a.apply):
         p.error("choose --apply (system), --user (command line only), --out (stage) or --pack")
+    if a.apply:
+        if a.user or a.pack:
+            p.error("--apply is for a system installation, not --user or --pack")
+        if os.geteuid() != 0:
+            raise RuntimeError("--apply requires root")
+        if a.role and not a.protect:
+            raise ValueError("--role needs --protect (nitrokey, systemd-creds or none)")
+        if a.protect == "none" and not a.insecure_plaintext_keys:
+            raise ValueError("--protect none stores private keys as plain files; it needs --insecure-plaintext-keys")
+        installation_preflight(a.protect)
     if a.pack:
         print(pack(ROOT, a.pack))
         return
@@ -288,6 +322,9 @@ def main():
             uninstall_user(data, bin_dir)
             print("Removed the user installation; ~/.config/advanced-vpn (cloud inventory, SSH keys) is kept.")
             return
+        if os.geteuid() == 0:
+            raise RuntimeError("--user installs for an ordinary user, not root")
+        installation_preflight(operator_target=data)
         app = install_user(data, bin_dir)
         version = subprocess.run([str(app / "bin/avpn"), "--version"], capture_output=True, text=True).stdout.strip()
         print("Installed %s for this user: %s (command: %s)" % (version, app, bin_dir / "avpn"))
@@ -353,10 +390,6 @@ def main():
         return
     if os.geteuid() != 0:
         raise RuntimeError("--apply requires root")
-    if a.role and not a.protect:
-        raise ValueError("--role needs --protect (nitrokey, systemd-creds or none)")
-    if a.protect == "none" and not a.insecure_plaintext_keys:
-        raise ValueError("--protect none stores private keys as plain files; it needs --insecure-plaintext-keys")
     target = Path("/opt/advanced-vpn")
     # An unprivileged-writable parent would permit replacing root-executed code.
     if Path("/opt").stat().st_uid != 0 or Path("/opt").stat().st_mode & 0o022:

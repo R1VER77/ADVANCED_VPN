@@ -21,6 +21,16 @@ pub struct Topic {
 /// Every page, commands first, then concepts.
 pub const TOPICS: &[Topic] = &[
     Topic {
+        name: "preflight",
+        summary: "check host requirements before installation",
+        body: include_str!("../../../docs/cli/preflight.md"),
+    },
+    Topic {
+        name: "setup",
+        summary: "resumable evidence-driven setup and hardware repair plans",
+        body: include_str!("../../../docs/cli/setup.md"),
+    },
+    Topic {
         name: "overview",
         summary: "what avpn is, global options and every command",
         body: include_str!("../../../docs/cli/overview.md"),

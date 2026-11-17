@@ -74,6 +74,34 @@ Until a fix removes this signal and passes the same run, **do not count on `fast
 
 Sources: `docs/evidence/DAITA_LAB.json`, `avpn help threat-model`. The 100-site exit-vantage simulation is in `tools/mesh_wf_sim.py` (`docs/evidence/MESH_WF_SIM.json`), the mesh design is in [docs/MESH_DESIGN.md](docs/MESH_DESIGN.md), and a side-by-side comparison with Mullvad and IVPN is in [docs/COMPARISON.md](docs/COMPARISON.md).
 
+## Installation checks and resumable setup
+
+Before installation, `python3 tools/preflight.py` checks host requirements without changing
+anything; its standard-library bootstrap runs on Python 3.8+. The installed command is
+`avpn preflight`, with machine-readable output from `avpn --json preflight`. It lists
+blockers and suggests the appropriate package-manager command. `avpn doctor` shares the
+same host checks. System installation runs this preflight before staging or host changes;
+command-line-only user installation keeps its separate requirements. Optional hardware
+and provider checks are explicit; provider sign-ins
+stay with the ordinary user's existing CLI credentials.
+
+`sudo avpn setup` rechecks a private, resumable client checklist: host, FIDO2 capabilities,
+public credential record, enrolled route, configured endpoints, traffic guard and fresh
+end-to-end protection. A saved checkpoint cannot certify a connection. The command uses
+existing enrollment/provisioning workflows; it does not create servers, enroll a key or
+connect on its own. It is the deterministic foundation for a future wizard and optional
+local assistant, not a shipped Gemma agent or a live GUI integration.
+
+Hardware repairs are separate, exact plans: `avpn setup --repair ID` diagnoses and shows
+an available fix. Applying it requires approval of the current plan and fresh verification
+afterwards. A missing YubiKey HID interface alone never proves FIDO2 is disabled. The vendor
+must identify the target and disabled application first. No repair resets FIDO, overwrites
+OTP slots, guesses a PIN or updates firmware. PIN and signing prompts stay in trusted UI.
+
+See [preflight](docs/cli/preflight.md) and [setup](docs/cli/setup.md) for options, limits
+and recovery, and the [installation plan](docs/INSTALL_AND_SETUP_PLAN.md) for later packaging,
+cloud-engine and vendor-library phases.
+
 ## Command line
 
 `avpn` is the front end. Run it with no arguments in a terminal for the interactive
@@ -235,7 +263,7 @@ The managed test exercises actual WireGuard/DAITA, both PQ layers, system DNS ov
 
 ## Hardware keys
 
-The Nitrokey is an example, not a requirement. `--protect nitrokey` works with **any FIDO2 (CTAP2) security key that supports the `hmac-secret` extension and verifies you**, with a PIN typed on the computer or on the key's own screen (as on a Trezor): the key releases a secret only after that and a touch, and the secret seals the device's VPN keys. Only one such key may be plugged in while you unlock. cypherpunk_vpn asks the key for nothing about itself (no attestation, so no make, model or batch) and keeps only its credential's public key.
+The Nitrokey is an example, not a requirement. `--protect nitrokey` works with **any FIDO2 (CTAP2) security key that supports the `hmac-secret` extension and verifies you**, with a PIN typed on the computer or on the key's own screen (as on a Trezor): the key releases a secret only after that and a touch, and the secret seals the device's VPN keys. Only one such key may be plugged in while you unlock. Enrollment requests no attestation and publishes only the credential's public key. The private local vault also retains the credential handle, salt and counter needed to unlock. Setup diagnostics read USB identification and protocol capabilities for compatibility checks; these are not hardware attestation.
 
 Fully open source first: firmware and hardware designs you can read, build and check.
 
@@ -256,6 +284,13 @@ Closed firmware, and still usable:
 **Curve.** In this release the key chooses its credential's curve, and most choose P-256. Choosing the curve at enrollment, with Ed25519 (which passes [SafeCurves](https://safecurves.cr.yp.to/)) as the default, comes in the next release.
 
 **Not usable:** U2F-only keys (the first Google Titan, YubiKey 4 and NEO, many older keys), and any key that verifies no one (no PIN, no on-device check).
+
+**Setup validation (17 November 2026):** the connected Nitrokey, YubiKey, Trezor and
+Ledger units passed a disposable vault round trip using a fresh hardware assertion,
+real missing-access detection, the confirmed udev repair and restoration of original
+rules/access. This validates those setup paths on those units, not every model/firmware
+or a complete VPN deployment. See the [physical results](docs/evidence/SETUP_HARDWARE_20261117.json)
+and [test procedure](docs/HARDWARE_SETUP_TESTS.md). The YubiKey also passed disabled-USB-FIDO2 detection and the enable-only repair, with the same test credential and original USB/NFC application settings preserved.
 
 **Check any key** before relying on it (libfido2's tools): `fido2-token -I /dev/hidrawN` must list `hmac-secret` under extensions, and either `clientPin` as set or `uv` (on-device verification). `avpn request --protect nitrokey` refuses a key that lacks them.
 

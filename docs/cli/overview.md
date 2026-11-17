@@ -30,6 +30,9 @@ Everyday:
 
 Setup:
 
+- `preflight`: check installation requirements without changing the host
+- `setup`: resume verified setup checks and review hardware repair plans
+
 - `request`: generate this device's keys and a public request
 - `init`: operator only; sign a chain from the requests
 - `enroll`: install this device's signed bundle

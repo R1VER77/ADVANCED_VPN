@@ -31,3 +31,6 @@ Nothing. `--check-egress` makes one HTTPS request outside the tunnel.
 ## Exit status
 
 0 when the controller ran. Use `--json` and the `healthy` field in scripts.
+
+Host requirements use the same checks as `avpn preflight`; warnings remain informational,
+while blockers fail their host check. See `avpn help setup` for resumable setup and repairs.
