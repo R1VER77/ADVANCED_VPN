@@ -66,6 +66,10 @@ class FeatureLoading(unittest.TestCase):
             (root / "r2-relay30/w0/settings.json").write_text(json.dumps(dict(wire_clock_relay_ms="5")))
             with self.assertRaisesRegex(ValueError, "look-ahead"):
                 wf_ab.load_features(root, "relay30")
+            (root / "r2-relay30/w0/settings.json").write_text(json.dumps(dict(wire_clock_relay_ms="30")))
+            (root / "r2-relay30/w1").mkdir()
+            with self.assertRaisesRegex(ValueError, "single-worker"):
+                wf_ab.load_features(root, "relay30")
 
     def test_label_permutations_preserve_repeats_within_each_round(self):
         import numpy as np

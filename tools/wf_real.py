@@ -163,8 +163,10 @@ def worker(a):
                 client_cpus=a.client_cpus,
                 server_cpus=a.server_cpus,
                 wire_clock_pps=clock,
+                wire_clock_ms=os.environ.get("AVPN_WIRE_CLOCK_MS", "30") if clock else None,
                 wire_clock_downstream=os.environ.get("AVPN_WIRE_CLOCK_DOWNSTREAM", "1") != "0" if clock else None,
                 wire_clock_relay_ms=os.environ.get("AVPN_WIRE_CLOCK_RELAY_MS"),
+                load_order_seed=a.seed,
                 catch_up_ms=os.environ.get("AVPN_CATCH_UP_MS"),
                 **host_power(),
             )
@@ -379,12 +381,27 @@ def worker(a):
                     p.kill()
 
 
+def collection_plan(sites, seed=7):
+    """Reproduce a recorded load order; vary the seed across experimental rounds."""
+    plan = [(s, i) for i, s in enumerate(sites["monitored"]) for _ in range(sites["loads"])]
+    plan += [(s, -1) for s in sites.get("open_world", [])]
+    random.Random(seed).shuffle(plan)
+    return plan
+
+
+def wait_workers(workers):
+    """Join every collection worker and propagate failures to the parent command."""
+    if not workers:
+        raise ValueError("a collection needs at least one worker")
+    failed = sum(p.wait() != 0 for p in workers)
+    if failed:
+        raise RuntimeError(f"{failed} collection workers failed; inspect their private logs")
+
+
 def collect(a):
     """Spread the loads over workers, give each live internet, wait for all."""
     sites = json.loads(a.sites.read_text())
-    plan = [(s, i) for i, s in enumerate(sites["monitored"]) for _ in range(sites["loads"])]
-    plan += [(s, -1) for s in sites.get("open_world", [])]
-    random.Random(7).shuffle(plan)
+    plan = collection_plan(sites, a.seed)
     out = a.out.resolve()
     out.mkdir(parents=True, exist_ok=False)
     workers = []
@@ -396,15 +413,14 @@ def collect(a):
             ["unshare", "--user", "--map-root-user", "--map-auto", "--net", "--mount", sys.executable, __file__,
              "worker", "--config", a.config, "--loads", str(part), "--out", str(out / ("w%d" % w)), "--bin-dir",
              str(a.bin_dir), "--geckodriver", str(a.geckodriver), "--python", str(a.python), "--ethtool",
-             str(a.ethtool), "--client-cpus", a.client_cpus, "--server-cpus", a.server_cpus],
+             str(a.ethtool), "--client-cpus", a.client_cpus, "--server-cpus", a.server_cpus, "--seed", str(a.seed)],
             stdout=log, stderr=subprocess.STDOUT,
         )  # fmt: skip
         time.sleep(0.5)
         sh(a.pasta, "--config-net", "--quiet", p.pid)
         workers.append(p)
         time.sleep(5)
-    for p in workers:
-        p.wait()
+    wait_workers(workers)
     print(json.dumps(dict(config=a.config, workers=a.workers, loads=len(plan), out=str(out))))
 
 
@@ -422,6 +438,7 @@ def main():
         x.add_argument("--ethtool", type=Path, default=Path("/usr/sbin/ethtool"))
         x.add_argument("--client-cpus", default="", help="cores for the browser and the client (e.g. 0,1)")
         x.add_argument("--server-cpus", default="", help="cores for the relay, exit and capture (e.g. 2,3)")
+        x.add_argument("--seed", type=int, default=7, help="recorded load-order seed; vary it across rounds")
         if name == "collect":
             x.add_argument("--sites", type=Path, required=True)
             x.add_argument("--workers", type=int, default=4)

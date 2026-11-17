@@ -70,6 +70,16 @@ Those are synthetic sites. On **real websites** (pilot, 12–14 Nov 2026, code b
 - `fast` with the browser off the data plane's CPU: **14.8%** closed world, open-world true positives near zero.
 - **`fast` on a busy CPU leaks: 81%** when the browser shares cores with the client's data plane, as on most laptops. The shaper skips grid ticks it misses, so the missed ticks follow the page's own work. A higher priority gives 75%; a bounded catch-up (`AVPN_CATCH_UP_MS=50`, off by default) about 50%; a dedicated core or `SCHED_FIFO` 27–42%. None reaches the quiet-CPU level. The experimental **wire clock**, which hands packet departures to the kernel on both ends of your link, brought it to chance on real websites (5.15% against 5%, p = 0.58; the client's clock alone left 10.4%), at a cost of 3.5 points of page-load success and about 0.8 s per load ([docs/evidence/WF_REAL_RERUN2.json](docs/evidence/WF_REAL_RERUN2.json)). One setup so far, so it stays off by default.
 
+A later **400-load relay-look-ahead A/B** (16–17 Nov) gave full-trace random-fold scores
+of **8.85% at 30 ms** and **10.61% at 5 ms**; holding out whole rounds gave **10.94%** and
+**15.15%** (nominal chance 5%). The 5 ms setting completed 193/200 loads versus 182/200,
+and improved paired successful-load latency by about 0.51 s, but the relay skipped
+**0.572%** of clock slots versus **0.00145%** at 30 ms. Repeated site order, fixed variant
+order, five non-protected final snapshots and no fresh undefended control limit the
+interpretation. Defaults remain unchanged; this does not establish a general privacy
+guarantee. See the [analysis](docs/WF_REAL_RERUN3.md) and
+[aggregate evidence](docs/evidence/WF_REAL_RERUN3.json).
+
 Until a fix removes this signal and passes the same run, **do not count on `fast` against website fingerprinting while the device is busy.** Fixing it is the project's first technical priority.
 
 Sources: `docs/evidence/DAITA_LAB.json`, `avpn help threat-model`. The 100-site exit-vantage simulation is in `tools/mesh_wf_sim.py` (`docs/evidence/MESH_WF_SIM.json`), the mesh design is in [docs/MESH_DESIGN.md](docs/MESH_DESIGN.md), and a side-by-side comparison with Mullvad and IVPN is in [docs/COMPARISON.md](docs/COMPARISON.md).

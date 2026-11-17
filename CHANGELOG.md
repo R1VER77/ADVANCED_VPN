@@ -6,6 +6,10 @@ measured figure in the docs names the version it was measured on.
 
 ## Unreleased
 
+- Traffic-analysis research: record relay-only wire-clock look-ahead, add fixed-window
+  A/B scoring with whole-round holdouts and block-label permutation checks, and publish
+  the 30 ms versus 5 ms result with its collection limitations. No defense default changes.
+  The collector accepts a recorded `--seed` and propagates failed worker exits.
 - Installation/setup: `avpn preflight` checks host requirements with a Python 3.8+
   standalone bootstrap; doctor shares its host checks. Optional provider checks stay
   unprivileged and opt-in. Missing or failed required checks block readiness.

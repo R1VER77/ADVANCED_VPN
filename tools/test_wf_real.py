@@ -12,6 +12,39 @@ import wf_real
 
 
 class PinningTests(unittest.TestCase):
+    def test_a_failed_worker_cannot_be_reported_as_a_successful_collection(self):
+        from types import SimpleNamespace
+
+        waited = []
+
+        def worker(code):
+            def wait():
+                waited.append(code)
+                return code
+
+            return SimpleNamespace(wait=wait)
+
+        wf_real.wait_workers([worker(0)])
+        with self.assertRaisesRegex(ValueError, "at least one worker"):
+            wf_real.wait_workers([])
+        with self.assertRaisesRegex(RuntimeError, "2 collection workers failed"):
+            wf_real.wait_workers([worker(1), worker(0), worker(-9)])
+        self.assertEqual(waited, [0, 1, 0, -9])
+
+    def test_load_order_is_reproducible_but_can_vary_between_rounds(self):
+        import random
+
+        sites = dict(monitored=[f"s{i}.test" for i in range(10)], loads=2, open_world=["u.test"])
+        legacy = [(s, i) for i, s in enumerate(sites["monitored"]) for _ in range(2)] + [("u.test", -1)]
+        random.Random(7).shuffle(legacy)  # noqa: S311  (reproduce the original experiment order)
+        self.assertEqual(wf_real.collection_plan(sites), legacy)
+        changed = wf_real.collection_plan(sites, 8)
+        self.assertNotEqual(changed, legacy)
+        self.assertCountEqual(changed, legacy)
+        self.assertEqual(changed, wf_real.collection_plan(sites, 8))
+        self.assertIn('"--seed", str(a.seed)', inspect.getsource(wf_real.collect))
+        self.assertIn("load_order_seed=a.seed", inspect.getsource(wf_real.worker))
+
     def test_cores_are_applied_with_taskset_or_not_at_all(self):
         self.assertEqual(wf_real.pinned("0,1", ["python", "x"]), ["/usr/bin/taskset", "-c", "0,1", "python", "x"])
         self.assertEqual(wf_real.pinned("", ["python", "x"]), ["python", "x"])

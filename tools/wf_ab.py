@@ -80,6 +80,8 @@ def load_features(root, variant):
     if len(directories) < 2:
         raise ValueError("at least two rounds required")
     for directory in directories:
+        if any(path.is_dir() and path.name != "w0" for path in directory.glob("w[0-9]*")):
+            raise ValueError("this A/B analyzer requires single-worker collections; refusing to omit other workers")
         worker = directory / "w0"
         settings = json.loads((worker / "settings.json").read_text())
         if settings.get("wire_clock_relay_ms") != variant.removeprefix("relay"):
