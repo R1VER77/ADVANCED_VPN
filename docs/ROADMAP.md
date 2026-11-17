@@ -5,6 +5,10 @@ unless explicitly marked complete; implementation, a passing laboratory test and
 production security claim are separate milestones. The existing detailed design and
 validation documents remain the technical references.
 
+The agreed [implementation plan for tasks 1–7](IMPLEMENTATION_PLAN_20261117.md) records
+the sequence, interfaces, code sketches, selected defaults and acceptance gates. It was
+saved at the owner's request before implementation; planned work is not completion.
+
 ## 1. Traffic-analysis resistance: first technical priority
 
 - [x] Complete the interleaved relay-clock look-ahead measurement, comparing page-load
