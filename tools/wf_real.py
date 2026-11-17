@@ -164,6 +164,7 @@ def worker(a):
                 server_cpus=a.server_cpus,
                 wire_clock_pps=clock,
                 wire_clock_downstream=os.environ.get("AVPN_WIRE_CLOCK_DOWNSTREAM", "1") != "0" if clock else None,
+                wire_clock_relay_ms=os.environ.get("AVPN_WIRE_CLOCK_RELAY_MS"),
                 catch_up_ms=os.environ.get("AVPN_CATCH_UP_MS"),
                 **host_power(),
             )

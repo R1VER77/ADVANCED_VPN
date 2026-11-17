@@ -163,7 +163,20 @@ async fn work() -> Result<()> {
         // AVPN_WIRE_CLOCK_DOWNSTREAM=0 keeps the relay unclocked: a measurement control only
         // (the client-only clock of the first real-website re-run).
         let downstream = std::env::var("AVPN_WIRE_CLOCK_DOWNSTREAM").as_deref() != Ok("0");
-        let (endpoint, clock) = match cloak::WireClock::from_env().filter(|_| downstream) {
+        // The relay's own look-ahead (AVPN_WIRE_CLOCK_RELAY_MS, 1-500 ms): the client's 30 ms
+        // rides out stalls on a busy laptop CPU, but every millisecond of it on the relay is
+        // added to the tunnel's round trip (re-run 2: 28 -> 56 ms).
+        let relay_ms = std::env::var("AVPN_WIRE_CLOCK_RELAY_MS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .filter(|ms| (1..=500).contains(ms));
+        let relay_clock = cloak::WireClock::from_env().map(|mut c| {
+            if let Some(ms) = relay_ms {
+                c.lookahead = Duration::from_millis(ms);
+            }
+            c
+        });
+        let (endpoint, clock) = match relay_clock.filter(|_| downstream) {
             Some(clock) => {
                 let (e, sc) =
                     cloak::clocked_server_endpoint(config, c.listen, clock, stats.clone())?;
