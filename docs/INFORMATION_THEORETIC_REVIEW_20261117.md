@@ -67,8 +67,9 @@ For a fixed event `e`, member `i` broadcasts
 c_i = (e if i is the sender else 0) XOR XOR_j p_ij.
 ```
 
-If the retained edge pads are jointly uniform and secret, conditional on the
-observer's prior information, their vertex sums are uniform on the zero-XOR
+Assume the retained edge pads are jointly uniform and secret conditional on the
+observer's prior information, and independent of sender/event selection. Their
+vertex sums are then uniform on the zero-XOR
 subspace of a connected graph. Adding `e` at any vertex produces the same
 distribution on the affine subspace whose total XOR is `e`.
 
@@ -90,8 +91,9 @@ knowledge. It does not make a nonuniform prior uniform. An event containing its
 author's identity can identify them despite this conditional property. For a
 uniform prior on `h` eligible senders, the posterior remains `1/h`.
 
-If the **joint** real pad/side-information distribution is within total variation
-`epsilon_total` of that ideal, data processing gives at most `epsilon_total` distance
+If, for each candidate sender, the **joint** real pad/event/side-information law is
+within total variation `epsilon_total` of its corresponding ideal, data processing
+gives at most `epsilon_total` distance
 per sender experiment from its ideal transcript; two sender experiments are within
 `2 * epsilon_total` by the triangle inequality. Do not replace this approximate
 statement with exact zero mutual information. Derive `epsilon_total` for all relevant
@@ -126,6 +128,9 @@ The leftover-hash lemma permits a public seed; secrecy of the seed is unnecessar
 Its independence and distribution, conditional source entropy, and output length
 matter. The current `k - 128` output budget targets a conservative `2^-64` **single
 block** distance when the relevant hypotheses hold. It is not a whole-book bound.
+The seed gap is not proof that the actual pads are predictable: a particular source
+and seed distribution might admit a different statistical argument. That argument
+has not been established here.
 Repeated-source or source-adaptive seed reuse needs its own treatment; changing to
 a physical seed alone does not resolve that issue.
 [Extractor definitions and bounds](https://cs.nyu.edu/~dodis/ps/ent-survey.pdf),

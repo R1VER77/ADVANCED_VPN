@@ -18,6 +18,9 @@ saved at the owner's request before implementation; planned work is not completi
 - [ ] Repeat with a fresh undefended positive control, counterbalanced variant order,
   varied recorded site-order seeds and clear snapshot/failed-load reporting. The
   six-round, 720-attempt plan is prepared but has not been started.
+  [Fresh-control analysis tooling](WF_REPLICATION.md) now retains complete failed-load
+  windows and fits secondary resource references on training rounds only. Recorder,
+  protection and counterbalanced-runner evidence still need implementation.
 - [ ] Validate the busy-CPU fix on held-out days, networks and devices, with confidence
   intervals, negative results and load failures reported alongside positive results.
 - [ ] Expand beyond the current small closed-world experiment to larger monitored and
