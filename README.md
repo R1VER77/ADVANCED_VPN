@@ -2,7 +2,7 @@
   <img src="docs/assets/cypherpunk-vpn-logo.png" alt="Cypherpunk VPN" width="520" />
 </p>
 
-# ADVANCED_VPN — managed Linux client
+# cypherpunk_vpn — managed Linux client
 
 A Rust VPN data plane with signed enrollment, automatic networking, a persistent kill switch, DNS isolation, real GotaTun/Maybenot DAITA on your link to the first hop and paced, encrypted constant-rate links between every pair of servers behind it, and the original two hybrid post-quantum QUIC layers. The cloud relay never holds the inner tunnel keys. No existing VPN is automatically replaced during build or installation.
 
@@ -15,6 +15,28 @@ flowchart LR
 ```
 
 WireGuard is the outer carrier, implemented by **GotaTun 0.10.2**, with its actual DAITA integration and public **Maybenot 2.2.2** defense machines. Its ChaCha20-Poly1305 encryption and 256-bit PSK supplement the existing **two TLS 1.3 X25519 + ML-KEM-768 / AES-256-GCM layers**. WireGuard alone is not advertised as native ML-KEM. Authentication is post-quantum too: both QUIC layers accept **only ML-DSA-65** (FIPS 204) certificate chains and TLS 1.3 CertificateVerify signatures, and operator enrollment bundles carry a **hybrid Ed25519 + ML-DSA-65** signature pair that must both verify. A correctly pinned classical (ECDSA) deployment is refused; the Rust tests prove this and fail if the restriction is removed. Every layer the system encrypts, authenticates or terminates, including the cloak front, the exit's DNS upstream and the whole mix lane, refuses a classical key exchange. Authentication is post-quantum on the inner tunnels (ML-DSA-65) and on the cloak (protocol v2: both ends prove the enrolled key with an HMAC over the hybrid exchange; its browser-facing certificate is an ECDSA facade), but the exit's DNS upstream still authenticates its resolver with classical WebPKI signatures. [docs/PQ_INVENTORY.md](docs/PQ_INVENTORY.md) separates key exchange from authentication for each layer, with its enforcing code, test and named exceptions.
+
+## Principles and roadmap
+
+`cypherpunk_vpn` aims to make verifiable private communication practical: open source,
+user-controlled keys, independently operated infrastructure and clear evidence of what
+is protected. The current repository, executable names and installation paths retain
+`ADVANCED_VPN` / `avpn` / `advanced-vpn` for compatibility; the complete rename is a
+separate migration task.
+
+The [project roadmap](docs/ROADMAP.md) includes commitments informed by the CCC's
+[Hacker Ethics](https://www.ccc.de/en/hackerethik),
+[statutes](https://www.ccc.de/en/satzung) and
+[incompatibility declaration](https://www.ccc.de/en/club/unvereinbarkeitserklaerung-des-ccc):
+protect private data, promote decentralization and accessible knowledge, and make the
+project's rejection of racism, fascism and the trivialization of violence explicit in
+community governance. These are project commitments, not CCC affiliation or endorsement.
+
+Work remains on a public conduct and reporting process, transparent funding and
+partnership decisions, accessible consent-based setup, and reproducible security and
+resource-use evidence. Community governance must preserve users' privacy; it is not a
+reason to inspect traffic or collect identities. Technical progress and remaining
+limitations are tracked separately in the roadmap and [security scope](SECURITY.md).
 
 ## What is automatic
 
@@ -213,7 +235,7 @@ The managed test exercises actual WireGuard/DAITA, both PQ layers, system DNS ov
 
 ## Hardware keys
 
-The Nitrokey is an example, not a requirement. `--protect nitrokey` works with **any FIDO2 (CTAP2) security key that supports the `hmac-secret` extension and verifies you**, with a PIN typed on the computer or on the key's own screen (as on a Trezor): the key releases a secret only after that and a touch, and the secret seals the device's VPN keys. Only one such key may be plugged in while you unlock. ADVANCED_VPN asks the key for nothing about itself (no attestation, so no make, model or batch) and keeps only its credential's public key.
+The Nitrokey is an example, not a requirement. `--protect nitrokey` works with **any FIDO2 (CTAP2) security key that supports the `hmac-secret` extension and verifies you**, with a PIN typed on the computer or on the key's own screen (as on a Trezor): the key releases a secret only after that and a touch, and the secret seals the device's VPN keys. Only one such key may be plugged in while you unlock. cypherpunk_vpn asks the key for nothing about itself (no attestation, so no make, model or batch) and keeps only its credential's public key.
 
 Fully open source first: firmware and hardware designs you can read, build and check.
 
@@ -360,7 +382,7 @@ Every run also proves two things on the wire. Raw packet observers on each serve
 
 ## The community mesh (AVPN/Mesh)
 
-ADVANCED_VPN is becoming a community mesh: every member contributes at least one server — an always-free cloud VM is enough, and `avpn mesh offer --guided` ranks the options (Oracle Cloud Always Free first, ~10 TiB/month egress) and provisions through the existing cloud machinery — and in return can build chains across nodes contributed by other members, browsable and selectable from the CLI:
+cypherpunk_vpn is becoming a community mesh: every member contributes at least one server — an always-free cloud VM is enough, and `avpn mesh offer --guided` ranks the options (Oracle Cloud Always Free first, ~10 TiB/month egress) and provisions through the existing cloud machinery — and in return can build chains across nodes contributed by other members, browsable and selectable from the CLI:
 
 ```
 avpn mesh nodes --fetch          # the directory: roles, providers, latency, uptime
