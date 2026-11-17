@@ -505,6 +505,10 @@ not qualification. Network-seeded hash chains remain computational. See the
 the precise passive-round claim and remaining work. This does not qualify the VPN
 as information-theoretically secure.
 
+The [pad exposure validation guide](docs/PAD_EXPOSURE_VALIDATION.md) distinguishes
+one-pad leakage, state/book compromise and future recovery, with reproduction
+commands, test snippets and the remaining qualification gates.
+
 The data plane is Linux/IPv4 only. **IPv6 is deliberately blocked** in every mode, so it can't escape around the tunnel. The managed profile uses inner MTU 1100 and WireGuard MTU 1340, requiring an IPv4 underlay MTU of at least 1420. A native desktop GUI, multi-user fleet control and a statistically evaluated defense dataset are not included. The standalone v0.1 QUIC interface remains available; see [historical interface](docs/LEGACY_QUIC.md).
 
 Our original files are Apache-2.0. Unmodified GotaTun is an MPL-2.0 dependency; Maybenot components are MIT/Apache-2.0. See [provenance](docs/PROVENANCE.md) and [upstream source/notice information](third_party/SOURCES.json). No VP.NET implementation was copied or ported; this is not represented as a clean-room project.

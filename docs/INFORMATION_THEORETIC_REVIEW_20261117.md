@@ -197,6 +197,10 @@ For extracted, approximately uniform pads, replace the ideal claim with the deri
 statistical-distance bound once its complete source and composition evidence exists.
 Do not advertise “the VPN is information-theoretically secure.”
 
+For one-pad exposure, current-state compromise and future recovery, see the
+[assessment and validation guide](PAD_EXPOSURE_VALIDATION.md). It includes existing
+evidence, reproducible checks, code sketches and the remaining qualification gates.
+
 ## Local validation
 
 - `cargo test --locked --lib dcnet::tests -- --nocapture`: 26 passed, one existing

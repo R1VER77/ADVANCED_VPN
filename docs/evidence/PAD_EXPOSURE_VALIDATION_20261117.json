@@ -1,0 +1,168 @@
+{
+  "schema": 1,
+  "date": "2026-11-17",
+  "code_revision": "43996adb9f62d5ad691a6ef7811af19a6441c083",
+  "scope": "Existing pad/control library and models plus documentation examples; no new protocol or runtime implementation",
+  "source_sha256": {
+    "src/dcnet.rs": "b9fba8226029e6e8d42f9ccd295624a1535bcb12728c58fc8cbf4c1358b37afe",
+    "tools/padbook.py": "d1fd865eb6b616da831fef2b1c6c4307bfa2d8f37ede8613ef232fb970b82091",
+    "tools/padstore.py": "10a8febeaccc0dd2bf415f5eadaa74732df549007decd003ec5889cd3624fbe2",
+    "tools/state_transaction.py": "8739ba887d9ff186197039b999daca2a6624098aa2c9f90abd7df71d7b90af3e",
+    "tools/tamarin_check.py": "957e40a4c98d0e5b27aa5b7db3e1627ef88015620cc1a67574b1143ae29b3bf2",
+    "tools/test_padbook.py": "b4a53fd9b2b42446a5b98fede5d9c6f73c64e3edd08c7828f9e4993d9974ac74",
+    "tools/test_padstore.py": "06113fbc7ebe9a40b9d74da30c6b9d4991b83f5455b94743f0e62507164aa3cc",
+    "tools/test_audit_state.py": "c0270e73cdef3c903b4a9224ed0832205630ebcdbefe7653fb3c7ed15611a65e",
+    "formal/dcnet/dcnet_collusion_4.spthy": "03a170a7beb3b36ac97ae5a168e1a75e5a45d519d2d4798d8510d4efc078c342",
+    "formal/dcnet/dcnet_ratchet.spthy": "5564951ffce2d0f22f838859787650be85ac63bbd0722633c6d6f4bdd5362dc7",
+    "formal/dcnet/dcnet_one_time_pads.spthy": "07939a8d0e9e314c60b8ceecab8423ca0fdb349692cbe884d92e3568873c058d"
+  },
+  "tools": {
+    "rustc": "rustc 1.95.0 (59807616e 2026-04-14)",
+    "python": "Python 3.12.13"
+  },
+  "checks": {
+    "rust_dcnet": {
+      "command": "cargo test --locked --lib dcnet::tests -- --nocapture",
+      "passed": 26,
+      "ignored": 1
+    },
+    "python": [
+      {
+        "pattern": "test_padbook.py",
+        "passed": 36
+      },
+      {
+        "pattern": "test_padstore.py",
+        "passed": 17
+      },
+      {
+        "pattern": "test_audit_state.py",
+        "passed": 15
+      }
+    ],
+    "reference_vectors": "match",
+    "examples": {
+      "exhaustive_python": {
+        "result": "ideal conditional distributions agree; correlated counterexample rejected",
+        "sha256": "30465f783ca6f29c6d77b0b4f0ede74a822ae3002ef68d5649c6b50794a95f32"
+      },
+      "rust_public_api": {
+        "passed": 1,
+        "compiled_against_existing_built_library": true,
+        "sha256": "37634c565ff63d553485f5dc81d0a5bd54cdce861c2a584f5c04c29be5fa4956"
+      }
+    }
+  },
+  "formal": {
+    "schema": 1,
+    "tool": "tamarin-prover 1.12.0, (C) David Basin, Cas Cremers, Jannik Dreier, Simon Meier, Ralf Sasse, Benedikt Schmidt, 2010-2023",
+    "maude": "3.5.1",
+    "date": "2026-11-17",
+    "models": {
+      "formal/dcnet/dcnet_collusion_4.spthy": {
+        "seconds": 46.4,
+        "lemmas": {
+          "pad_derived_with_two_honest": {
+            "kind": "exists-trace",
+            "result": "verified",
+            "steps": 4
+          },
+          "pads_secret_with_three_honest": {
+            "kind": "all-traces",
+            "result": "verified",
+            "steps": 2788
+          },
+          "keys_secret_with_three_honest": {
+            "kind": "all-traces",
+            "result": "verified",
+            "steps": 5
+          }
+        }
+      },
+      "formal/dcnet/dcnet_ratchet.spthy": {
+        "seconds": 0.3,
+        "lemmas": {
+          "forward_secure_round1": {
+            "kind": "all-traces",
+            "result": "verified",
+            "steps": 5
+          },
+          "forward_secure_round2": {
+            "kind": "all-traces",
+            "result": "verified",
+            "steps": 6
+          },
+          "executable": {
+            "kind": "exists-trace",
+            "result": "verified",
+            "steps": 8
+          }
+        }
+      },
+      "formal/dcnet/dcnet_one_time_pads.spthy": {
+        "seconds": 0.3,
+        "lemmas": {
+          "pad_used_once": {
+            "kind": "all-traces",
+            "result": "verified",
+            "steps": 24
+          },
+          "pad_known_only_if_leaked": {
+            "kind": "all-traces",
+            "result": "verified",
+            "steps": 5
+          },
+          "executable": {
+            "kind": "exists-trace",
+            "result": "verified",
+            "steps": 4
+          }
+        }
+      }
+    },
+    "mutants": [
+      {
+        "model": "formal/dcnet/dcnet_collusion_4.spthy",
+        "lemma": "pads_secret_with_three_honest",
+        "edits": 1,
+        "result": "falsified - found trace",
+        "seconds": 2.8
+      },
+      {
+        "model": "formal/dcnet/dcnet_one_time_pads.spthy",
+        "lemma": "pad_used_once",
+        "edits": 1,
+        "result": "falsified - found trace",
+        "seconds": 0.3
+      },
+      {
+        "model": "formal/dcnet/dcnet_ratchet.spthy",
+        "lemma": "forward_secure_round1",
+        "edits": 1,
+        "result": "falsified - found trace",
+        "seconds": 0.4
+      },
+      {
+        "model": "formal/dcnet/dcnet_one_time_pads.spthy",
+        "lemma": "pad_known_only_if_leaked",
+        "edits": 1,
+        "result": "falsified - found trace",
+        "seconds": 0.3
+      }
+    ],
+    "not_proved": [
+      "DC-net sender anonymity as observational equivalence: --diff with XOR did not terminate, even on the two-party core; the argument is the hand proof in docs/DCNET_CONTROL_DESIGN.md section 6",
+      "DC-net per-round pad secrecy and an existence trace in the multi-round, MAC-authenticated model: did not terminate (single-round versions are proved)",
+      "The 4-member collusion model over full frames (all six pads) did not finish in 25 minutes; the proved model takes the colluders' view, their own pads stripped",
+      "The network chain's forward secrecy for an unbounded number of rounds did not terminate; it is proved unrolled to three rounds with one seizure",
+      "Re-blinding: secrecy of the KEM secret itself, and unlinkability across hop 1 (an equivalence): did not terminate; the construction stays review-pending"
+    ]
+  },
+  "not_established": [
+    "Real-source joint conditional entropy and extractor seed/reuse/composition bounds",
+    "Information-theoretic protection of observed encrypted envelopes or book snapshots",
+    "Forensic erasure, hostile-host security or whole-snapshot rollback resistance",
+    "Full authenticated multi-round sender observational equivalence",
+    "Post-compromise recovery, integration qualification or novelty of the complete system"
+  ]
+}

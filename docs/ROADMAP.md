@@ -114,6 +114,11 @@ These governance items are not complete merely because this roadmap lists them.
   independent extractor seed, seed reuse and joint error budgets, secret custody,
   non-reuse and actual honest-edge connectivity. Resolve event authorization before
   DC-net integration; the public event hash is not authentication.
+- [ ] Validate pad exposure containment and forward-secrecy boundaries against the
+  [assessment and engineering guide](PAD_EXPOSURE_VALIDATION.md): independent-pad
+  assumptions, adaptive exposure, durable consumption, complete-book compromise,
+  erasure limits and integration. Treat post-compromise recovery as separate new
+  work; existing symbolic proofs do not qualify that stronger claim.
 - [ ] Remove the central public DNS dependency through a self-run resolver at the exit,
   preserving the documented post-quantum transport policy and explaining resolver limits.
 - [ ] Measure operator/provider independence, correlation exposure and actual anonymity
