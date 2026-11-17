@@ -86,6 +86,12 @@ Sources: `docs/evidence/DAITA_LAB.json`, `avpn help threat-model`. The 100-site 
 
 ## Installation checks and resumable setup
 
+Project participation follows the [principles](docs/PRINCIPLES.md),
+[conduct policy](CODE_OF_CONDUCT.md) and [governance](docs/GOVERNANCE.md).
+The [voluntary funding record](docs/FUNDING.md) and [decision log](docs/DECISIONS.md)
+make current responsibilities and limitations explicit. Contributions and unpaid
+independent review are welcome through the [contribution guide](CONTRIBUTING.md).
+
 Before installation, `python3 tools/preflight.py` checks host requirements without changing
 anything; its standard-library bootstrap runs on Python 3.8+. The installed command is
 `avpn preflight`, with machine-readable output from `avpn --json preflight`. It lists

@@ -153,7 +153,9 @@ Acceptance:
 - **`hwkey.py`, `setup_flow.py` and `setup_cli.py`** are consolidated in this branch. The
   preflight registry and controller use the same diagnostics; no separate session handoff
   or model is required for their operation.
-- **Commits** are signed (hardware key touch) and pushed only on the owner's go-ahead.
+- **Commits** are signed (hardware key touch). Since 17 Nov the owner has given standing
+  authorization to automatically push and integrate verified signed commits into GitHub
+  `main`, following required checks and branch protections, without another confirmation.
 
 ## Physical validation completed 17 Nov
 

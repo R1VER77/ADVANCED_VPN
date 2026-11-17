@@ -32,25 +32,30 @@ This work draws on the CCC's [Hacker Ethics](https://www.ccc.de/en/hackerethik),
 It does not claim CCC approval, affiliation or certification. The CCC association's
 organizational and nonprofit provisions are not automatically this project's structure.
 
-- [ ] Publish a concise principles statement: privacy, decentralization, free software,
+- [x] Publish a concise [principles statement](PRINCIPLES.md): privacy, decentralization, free software,
   public technical knowledge, user autonomy and attention to social consequences.
-- [ ] Publish community conduct rules explicitly rejecting racism, fascism,
+- [x] Publish [community conduct rules](../CODE_OF_CONDUCT.md) explicitly rejecting racism, fascism,
   harassment and the trivialization of historical or current violence, with a private
   reporting route, named responsibility and a fair response/appeal process. Apply these
-  rules to project participation and partnerships without surveilling VPN users.
-- [ ] Publish funding, sponsorship, material conflicts and partnership decisions, while
-  protecting donor and contributor information that need not be public. Do not present
-  unknown or undisclosed funding as evidence of independence.
-- [ ] Record important design and governance decisions, their reasons and review paths;
+  rules to project participation and partnerships without surveilling VPN users. The
+  single-maintainer project has no independent appeal panel; conflicted appeals await
+  an agreed uninvolved reviewer rather than inventing independence.
+- [x] Publish a [voluntary funding and partnership record](FUNDING.md), reflecting the
+  owner's current report and intention to disclose future funding, with private donor
+  information protected. No new paid services or audit budget is authorized. Unknown
+  or undisclosed relationships are not evidence of independence.
+- [x] Record important [design and governance decisions](DECISIONS.md), their reasons and [review paths](GOVERNANCE.md);
   evaluate contributions by their merits and conduct rather than credentials or status.
-- [ ] Preserve Apache-2.0 software freedoms. Community conduct rules must not become
+- [x] Preserve Apache-2.0 software freedoms. Community conduct rules must not become
   additional license restrictions, traffic inspection or identity collection.
 - [ ] Document hardware, server, accessibility and connectivity costs; test the setup
   with people who do not already administer servers. Report cover-traffic bandwidth,
   energy/battery costs and trade-offs without silently weakening protection.
-- [ ] Keep security limitations prominent, distinguish implemented/tested/planned claims,
-  publish reproducible evidence and incidents, and seek independent review before
-  making broad anonymity or production-readiness claims.
+- [x] Keep security limitations prominent, distinguish implemented/tested/planned claims,
+  and publish reproducible evidence and incidents. An [independent review package](INDEPENDENT_REVIEW.md)
+  is prepared and supports unpaid review; it is not a completed audit.
+- [ ] Obtain and publish scoped independent review and closure evidence before broad
+  anonymity or production-readiness claims. Funding is not a prerequisite for review.
 
 Acceptance: linked public policies and reporting instructions; a visible decision and
 funding record; a documented accessibility evaluation; reproducible measurements; and

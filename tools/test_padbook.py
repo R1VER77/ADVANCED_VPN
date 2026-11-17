@@ -254,12 +254,26 @@ class OpaqueAtRestTests(unittest.TestCase):
         counts = [blob.count(bytes([v])) for v in range(256)]
         self.assertLess(max(counts) / (len(blob) / 256), 1.3)
 
-    def test_two_identical_books_share_no_bytes_on_disk(self):
-        a, b = self.make(), self.make()
+    def test_identical_books_use_fresh_salts_nonces_and_ciphertext(self):
+        # Exercise the randomness inputs deterministically. Byte-match percentages
+        # on the small encrypted header fluctuate by chance and cannot establish
+        # ciphertext indistinguishability (or the quality of the random source).
+        with mock.patch.object(padbook.os, "urandom", side_effect=lambda n: b"a" * n):
+            a = self.make()
+        with mock.patch.object(padbook.os, "urandom", side_effect=lambda n: b"b" * n):
+            b = self.make()
+        header_a, header_b = [(d / padbook.BOOK_FILE).read_bytes() for d in (a, b)]
+        self.assertEqual(header_a[: padbook.SALT + 12], b"a" * (padbook.SALT + 12))
+        self.assertEqual(header_b[: padbook.SALT + 12], b"b" * (padbook.SALT + 12))
+        self.assertNotEqual(header_a[padbook.SALT + 12 :], header_b[padbook.SALT + 12 :])
+        self.assertEqual(padbook._load(a, SECRET, META)[2], padbook._load(b, SECRET, META)[2])
         for name in (padbook.BOOK_FILE, padbook.PADS_FILE):
             x, y = (a / name).read_bytes(), (b / name).read_bytes()
-            same = sum(1 for p, q in zip(x, y, strict=False) if p == q)
-            self.assertLess(same / len(x), 0.01)
+            self.assertEqual(len(x), len(y))
+            self.assertNotEqual(x, y)
+        for d in (a, b):
+            with padbook.Book(d, SECRET, META, clock=lambda: NOW) as book:
+                self.assertEqual(book.take(ROUND), bytes(padbook.PAD))
 
     def test_the_pad_file_grows_in_30_day_buckets(self):
         d = self.make(rounds=8)
