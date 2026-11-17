@@ -103,6 +103,14 @@ These governance items are not complete merely because this roadmap lists them.
 - [ ] Extend formal models, fuzz parsers, review secret handling and obtain actual
   independent review covering shaping and enrollment/control boundaries. Self-review
   and CI are not independent review.
+- [x] Review the owner-supplied Maurer and Ahlswede–Csiszár papers against the DC-net
+  construction and pad tools. The [review](INFORMATION_THEORETIC_REVIEW_20261117.md)
+  supports conditional construction-level sender anonymity and records the current
+  generator's proof gaps; it does not qualify an operational VPN claim.
+- [ ] Qualify a strict information-theoretic pad profile: conditional source entropy,
+  independent extractor seed, seed reuse and joint error budgets, secret custody,
+  non-reuse and actual honest-edge connectivity. Resolve event authorization before
+  DC-net integration; the public event hash is not authentication.
 - [ ] Remove the central public DNS dependency through a self-run resolver at the exit,
   preserving the documented post-quantum transport policy and explaining resolver limits.
 - [ ] Measure operator/provider independence, correlation exposure and actual anonymity

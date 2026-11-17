@@ -39,7 +39,12 @@ Known boundaries, stated so nothing is read into the absence of a claim:
 - The pad and identity tools serialize cooperating processes and erase used state, but do
   not defeat a restored whole-disk snapshot, a hostile kernel, flash remanence or
   CPython's immutable copies; their "information-theoretic" label is conditional on
-  stated source assumptions (docs/DCNET_CONTROL_DESIGN.md §2).
+  stated source assumptions (docs/DCNET_CONTROL_DESIGN.md §2). The current generator
+  has not established a joint statistical pad bound. The narrow passive-round
+  construction claim and remaining work are in
+  [the paper review](docs/INFORMATION_THEORETIC_REVIEW_20261117.md). The public DC-net
+  event hash is not event authorization, including against a participating member;
+  no VPN command integrates this reference core yet.
 - The website-fingerprinting results are one 20-site closed world on one machine and
   network; held-out sites, days, networks and devices are not yet measured.
 

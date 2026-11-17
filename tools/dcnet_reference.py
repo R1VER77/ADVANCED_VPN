@@ -45,8 +45,8 @@ TAG_LEN = 9
 
 
 def event_tag(head: bytes) -> bytes:
-    """The event check: a truncated SHA-256 (non-linear, so the XOR of two events, or an
-    event XOR a chosen difference, passes with probability 2^-72)."""
+    """Public truncated SHA-256 check, not event authentication. A member knowing an
+    event can XOR its encoding with a replacement's encoding to substitute it."""
     return hashlib.sha256(b"dc-event/v2" + head).digest()[:TAG_LEN]
 
 

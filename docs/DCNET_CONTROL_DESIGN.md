@@ -1,4 +1,4 @@
-> **Status (November 2026):** reference design. Adopted as a library and a pad tool only (src/dcnet.rs, tools/padbook.py, tools/dcnet_reference.py, formal/dcnet/), not reachable from any command until the mesh has members. Pads come from hardware only, never a software generator: one-time pads for pairs who met in person (information-theoretic among them when made with an assessed raw noise source), a forward-secure chain for pairs who cannot meet (computational). §2.
+> **Status (17 November 2026):** reference library and pad tools only; no VPN command calls the DC-net core. Its one-time-pad construction admits conditional information-theoretic sender anonymity, but the current generator does not establish the required joint entropy, seed and custody assumptions. Remote hash chains remain computational. See the [paper and implementation review](INFORMATION_THEORETIC_REVIEW_20261117.md).
 
 # DCNET_CONTROL_DESIGN.md — DC-net control channel for AVPN/Mesh
 
@@ -45,7 +45,8 @@ MIX_LANE_FALLBACK). Everything below is the v2 design.
 
 Non-goals, stated up front: no attempt to carry bulk or interactive traffic;
 no accountable-tracing mechanism (see §5 — the jam policy is accept-DoS);
-no information-theoretic claim (see §2 — the pads are PRG-derived).
+no whole-VPN information-theoretic claim. The narrow passive-round construction claim
+and unresolved pad-generation assumptions are in §2 and the linked review.
 
 ## 1. Architecture
 
@@ -112,7 +113,8 @@ nobody else does.
 
 ### Where a pair's pads come from
 
-From hardware only, never a software random source. Each pair uses one of two kinds
+Generation combines hardware-derived and software-processed streams; only a qualified
+fresh physical source can support the proposed statistical argument. Each pair uses one of two kinds
 (`src/dcnet.rs` `PairPads`, `tools/padbook.py`):
 
 | | **Met in person: one-time pads** | **Cannot meet: a forward-secure chain** |
@@ -128,8 +130,8 @@ Mixing is allowed within a cell. Anonymity is information-theoretic among the ho
 members joined by in-person books **if those books' source assumptions hold** (below), and
 computational beyond them (§6).
 
-**The source assumptions** (an independent audit, 16 Nov 2026, corrected our earlier
-wording, which treated them as established):
+**The source assumptions** (project review corrected earlier wording that treated
+them as established; no external independent audit is claimed):
 1. The extracted jitter block has at least the counted min-entropy, conditioned on
    everything else the adversary knows. `ea_non_iid` and the health tests are evidence for
    this, not a proof: SP 800-90B estimates entropy from samples, it does not certify it.
@@ -140,8 +142,11 @@ wording, which treated them as established):
 3. The kernel and Nitrokey bytes XORed in do not depend on the noise. Drawing them first
    establishes order, not independence: it stops either source adapting to noise it has
    not seen, but a shared CPU, kernel or environment can still correlate them.
-The software therefore reports `conditional-information-theoretic`, never more: it records
-provenance, it cannot verify these physical assumptions.
+The software reports `conditional-information-theoretic` for declared provenance. It
+cannot verify these physical assumptions, and the present default seed path does not
+establish the statistical bound. A qualified profile also needs joint cross-block and
+cross-edge entropy, a justified seed-reuse argument and a composed error budget. See
+the [17 November review](INFORMATION_THEORETIC_REVIEW_20261117.md).
 
 - **Why the Nitrokey alone is not enough.** Its `rng` command (`nitropy nk3 rng`,
   admin-app command 0x60) returns 57 bytes of Trussed's `random_bytes`, which is a
@@ -191,13 +196,14 @@ provenance, it cannot verify these physical assumptions.
   Nitrokey's FIDO2 hmac-secret (PIN and touch, once per session; never stored). The
   hmac-secret is deterministic, which is right for a wrapping key and never used as a
   pad.
-  - Taking a round moves the chain first and then zeroes the used records. A seized
-    disk, even with the Nitrokey and its PIN, then opens no round already used (short of
-    an old copy of the small state file that flash wear-levelling kept; full-disk
-    encryption is still recommended).
-  - Rounds follow the clock, so a past round is refused, and a restored old state cannot
-    replay pads. The hybrid private key that receives contributions is sealed under the
-    same hmac-secret.
+  - Taking a round persists advanced state and zeroes the used records before returning.
+    The current API state no longer opens used rounds. This is not an unconditional
+    secrecy guarantee against an observer of sealed storage: wrapping and ratchets are
+    computational, and snapshots, flash remnants and host compromise are outside it.
+  - With a trustworthy clock a past round is refused. Whole-disk rollback and hostile
+    clocks are not defeated. The receiving hybrid private key is sealed under the same
+    hmac-secret. In-person envelopes must remain outside Eve's observation boundary
+    for the proposed information-theoretic pad-secrecy claim.
 - **Pads are used once.** A round's pad is handed out once and wiped, skipped rounds
   are burned, and a refused round consumes nothing (`PadBook`, `Ratchet`, and
   `dcnet_one_time_pads.spthy`).
@@ -209,7 +215,8 @@ provenance, it cannot verify these physical assumptions.
   and zeroes its live key buffers on exit and on SIGTERM, SIGINT or SIGHUP (after Tails'
   wipe on shutdown and VeraCrypt's RAM key protection). CPython's own immutable copies
   cannot be wiped, so in `padbook.py` this reduces exposure rather than removing it; the
-  Rust data plane's `zeroize` is the guarantee.
+  Rust core uses `zeroize` for its tracked pad/state buffers; this is not proof that
+  every compiler, stack, kernel or hardware copy is erased.
   - Malware on the member's own laptop is out of scope either way: the event starts
     there.
   - Keeping pads away from the CPU altogether needs the Nitrokey to compute the XOR
@@ -388,10 +395,14 @@ compute locally from gossip-synced frames: O(n) frames observed ≈ 24 × 111 B
   event survives cancellation.
 - **Collision** (two senders in one round): XOR of two different event
   encodings — the tag check fails and the round decodes as Garbled, except with
-  probability 2^-72. The check must not be linear: the first version used CRC-8, whose
+  an idealized random-check false-acceptance probability of about 2^-72; this is not
+  an active-adversary bound. The first version used a linear CRC-8, whose
   XOR of two valid events is valid, and the first cell run decoded 3 of 4 collisions as
-  events nobody sent (`docs/INCIDENTS.md`). The same property stops a disruptive member
-  from turning an honest event into another by XORing in a chosen difference.
+  events nobody sent (`docs/INCIDENTS.md`). The public hash does **not** prevent a
+  member who knows or guesses an event from substituting another: XOR the two valid
+  encodings into its own body, then authenticate its own frame normally. Event-level
+  authorization must be resolved before integration; a valid check is not authority.
+  The regression demonstrates this boundary. See the linked review.
   Policy: both events are lost; each sender re-transmits in a later round
   chosen by exponential backoff keyed to their (private) nonce. Expected
   collision rate at ≤1 event/cell/hour across 24 members: negligible
@@ -474,11 +485,14 @@ Hooks into `VERIFICATION_PLAN.md` (extend its priority list):
    colluding members (it knows their pads), sees every frame and the decoded event m,
    and H = M \ C are the honest members, |H| ≥ 2. Let I be the honest pairs joined by
    an in-person book, and suppose the graph (H, I) is connected.
-   1. Assume the source assumptions (§2) for the in-person books. Then their honest-honest
-      pads are (within 2⁻⁶⁴ per block) independent uniform strings: each is the XOR of
-      two contributions, at least
-      one of them extracted from an assessed raw source and handed over in person, so
-      secret and uniform, never on a network. Pads from network chains are
+   1. In the ideal model, assume the honest-honest book pads are jointly uniform
+      and secret conditional on the observer's prior information. This is stronger
+      than a marginal entropy estimate; the present generator has not established it.
+      Extracted near-uniform pads need the composed statistical-distance argument in
+      the linked review, rather than an exact indistinguishability conclusion. The
+      intended source is at least one qualified raw contribution per retained edge,
+      with secret in-person custody and the independent mixing assumptions in §2.
+      Pads from network chains are
       computationally indistinguishable from uniform (ML-KEM-768 + X25519 and
       SHA-256). For the information-theoretic statement, give the adversary those
       outright, as if the pair colluded on that edge.
@@ -503,8 +517,9 @@ Hooks into `VERIFICATION_PLAN.md` (extend its priority list):
 9. **Pad handling** — `src/dcnet.rs` tests and `tools/test_padbook.py`: a pad is
    handed out once and wiped, skipped rounds are burned, a refused round consumes
    nothing, a used-up book stops the cell; at rest, no pad is on disk in the clear,
-   used records are zeroed after the chain moves, a restored old state opens no used
-   round, and only the Nitrokey's secret opens a book.
+   used records are zeroed after state advances, and hardware-derived wrapping keys
+   protect the book computationally. Whole snapshots, hostile clocks and flash
+   remnants remain outside the normal-API non-reuse guarantee.
 
 Statistical/empirical harness (`mix_lane_test_harness.py`, section F,
 currently 5/5 passing):
@@ -538,8 +553,8 @@ state the K).
    **authored** — inline `#[cfg(test)]` module in `src/dcnet.rs` (14 tests,
    golden-vector based) + `dcnet.spthy`. Remaining: run `cargo test` and
    `tamarin-prover --prove` in CI (extend `.github/workflows/verify.yml`).
-4. ~~Opt-in true-random pad mode~~ **done, and the only kind of pad**: in-person
-   one-time books (Nitrokey XOR an assessed raw jitter source) and network chains
+4. **Pad modes implemented; statistical qualification remains open**: in-person
+   one-time books (mixed contributions with optional assessed raw jitter) and network chains
    (`tools/padbook.py`). Remaining: the integration layer's book and chain store,
    re-keying on churn, and (hardened, later) a Nitrokey firmware applet that
    computes each round's body, so pads never reach the laptop's CPU.
@@ -548,10 +563,10 @@ state the K).
 
 > The DC-net control channel provides sender unlinkability for a fixed set
 > of control events within a cell of concurrently online members, under the
-> assumption that at least one pairwise pad per event is uncompromised. Pads come
-> only from hardware. Among members joined by one-time pads made with an assessed
-> raw noise source and handed over in person, the guarantee is information-theoretic
-> under the stated source assumptions (min-entropy, extractor seed, independence);
+> assumption that jointly secret uniform one-time-pad edges connect the claimed
+> honest anonymity set. In that ideal passive-round model sender anonymity is
+> information-theoretic. The current generator has not established these assumptions;
+> approximately uniform pads require a derived joint statistical error bound;
 > over Nitrokey-only books or pads seeded across the network, it is computational
 > (the chains forward-secure). The channel is intentionally narrow: it does
 > not carry bulk traffic, it is disabled in single-operator mode, and it

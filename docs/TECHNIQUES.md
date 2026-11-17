@@ -73,7 +73,9 @@ independence: `docs/DCNET_CONTROL_DESIGN.md` §2); otherwise it is labelled comp
 `padbook.py status`.
 
 **Why:** a pad is secret if either half is, so no single member's device or delivery has to be
-trusted; and the label can never say more than the provenance supports.
+trusted; and the label records declared provenance rather than verified entropy. The current
+generator's statistical proof gaps are recorded in
+[the paper review](INFORMATION_THEORETIC_REVIEW_20261117.md).
 
 **Code:** `tools/padbook.py` (`edge_claim`), `src/dcnet.rs` (`PadBook`).
 
@@ -125,8 +127,9 @@ a round saves the advanced chain state first, then zeroes the used records; the 
 wrapped by a key derived from the Nitrokey's hmac-secret. Rounds follow the clock, so a past
 round is refused even if an old state is restored.
 
-**Why:** a disk seized with the Nitrokey and its PIN still opens no used round, crash order
-never leaves a pad readable twice, and backups cannot replay pads.
+**Why:** the ordinary API burns used/skipped rounds and serializes cooperating
+processes. Whole snapshots, hostile clocks, flash remnants and CPython copies remain
+outside that guarantee. Storage wrapping and hash ratchets are computational.
 
 **Code:** `Book.take` in `tools/padbook.py`, tests in `tools/test_padbook.py`.
 
