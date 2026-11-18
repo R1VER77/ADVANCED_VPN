@@ -1,7 +1,7 @@
 {
   "repository": "R1VER77/ADVANCED_VPN",
   "path": "docs/assets/cypherpunk-vpn-logo.png",
-  "blob_sha": "5c1e1e46b5a75da76f68846cd6ea1b651ba04ad5",
+  "source": "docs/assets/cypherpunks-vpn-logo.source.jpg",
   "url": "https://github.com/R1VER77/ADVANCED_VPN/blob/main/docs/assets/cypherpunk-vpn-logo.png",
-  "usage": "Unmodified original PNG. Transparent padding is clipped with CSS; dark theme uses a CSS brightness/invert filter."
+  "usage": "Transparent PNG generated from user-provided cypherpunks VPN logo. Transparent padding is clipped with CSS; dark theme uses a CSS brightness/invert filter."
 }

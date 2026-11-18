@@ -1,5 +1,9 @@
 <p align="center">
-  <img src="docs/assets/cypherpunk-vpn-logo.png" alt="Cypherpunk VPN" width="520" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/cypherpunk-vpn-logo-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="docs/assets/cypherpunk-vpn-logo.png">
+    <img src="docs/assets/cypherpunk-vpn-logo.png" alt="Cypherpunks VPN" width="520" />
+  </picture>
 </p>
 
 # cypherpunk_vpn — managed Linux client
