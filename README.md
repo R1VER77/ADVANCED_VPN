@@ -503,7 +503,9 @@ not qualification. Network-seeded hash chains remain computational. See the
 [design](docs/DCNET_CONTROL_DESIGN.md) and
 [paper and implementation review](docs/INFORMATION_THEORETIC_REVIEW_20261117.md) for
 the precise passive-round claim and remaining work. This does not qualify the VPN
-as information-theoretically secure.
+as information-theoretically secure. The novel multi-plane architecture combining
+information-theoretic control, pathless PIR/ZK allocation, and line-rate constant-rate
+transport is specified in the [CYPHERPUNKS protocol specification](docs/CYPHERPUNKS_PROTOCOL_SPECIFICATION.md).
 
 The [pad exposure validation guide](docs/PAD_EXPOSURE_VALIDATION.md) distinguishes
 one-pad leakage, state/book compromise and future recovery, with reproduction
