@@ -1,0 +1,5 @@
+[D-BUS Service]
+Name=org.cypherpunk_vpn.Controller1
+Exec=/opt/advanced-vpn/bin/cypherpunk-controller
+User=root
+SystemdService=cypherpunk-vpn-controller.service

@@ -11,3 +11,8 @@ credential.json
 *.bin
 __pycache__/
 .venv/
+/apps/cypherpunk-vpn/node_modules/
+/apps/cypherpunk-vpn/dist/
+/apps/cypherpunk-vpn/dist-demo/
+/apps/cypherpunk-vpn/src-tauri/target/
+/apps/cypherpunk-vpn/src-tauri/gen/

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN" "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<policyconfig>
+  <vendor>cypherpunk_vpn</vendor>
+  <action id="org.cypherpunk_vpn.observe">
+    <description>Read local VPN protection and setup checks</description>
+    <message>Authenticate to inspect this device's VPN status</message>
+    <defaults><allow_any>no</allow_any><allow_inactive>no</allow_inactive><allow_active>yes</allow_active></defaults>
+  </action>
+  <action id="org.cypherpunk_vpn.manage">
+    <description>Apply one reviewed local VPN setup or connection action</description>
+    <message>Authenticate to apply the reviewed cypherpunk_vpn action</message>
+    <defaults><allow_any>no</allow_any><allow_inactive>no</allow_inactive><allow_active>auth_admin</allow_active></defaults>
+  </action>
+</policyconfig>

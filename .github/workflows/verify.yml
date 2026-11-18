@@ -32,7 +32,7 @@ jobs:
       - name: Install namespace test dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends iproute2 iputils-ping nftables cmake build-essential uidmap
+          sudo apt-get install -y --no-install-recommends iproute2 iputils-ping nftables cmake build-essential uidmap libpcap0.8t64
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           python - <<'PY'
           import os,pwd,subprocess
@@ -66,9 +66,16 @@ jobs:
           # cleanly), so scope the test run to the targets that actually have tests.
           cargo test --locked --lib --bin advanced-vpn --bin advanced-vpn-dns
           cargo build --release --locked
+          sh tools/build-bootstrap.sh
+          cargo clippy --locked -p cypherpunk-preflight -p cypherpunk-bootguard -p cypherpunk-controller --all-targets -- -D warnings
+          cargo test --locked -p cypherpunk-preflight -p cypherpunk-bootguard -p cypherpunk-controller
           python -m unittest discover -s tools -p 'test_*.py' -v
       - name: DC-net reference construction (Python mirror == committed vectors == Rust tests)
         run: python tools/dcnet_reference.py --check
+      - name: Metadata recorder kernel timestamps and interface boundary
+        run: unshare --user --map-root-user --net python tools/wf_capture_smoke.py --out /tmp/cypherpunk-wf-capture
+      - name: IPv4 and IPv6 output and forwarding guard boundaries
+        run: unshare --user --map-root-user --net --mount python tools/guard_network_test.py --out /tmp/cypherpunk-guard-network
       - name: Mix lane option E (audited-primitives crate, reference oracle, byte identity)
         run: |
           cargo clippy --locked -p avpn-mix-lane -p avpn-pq-sphinx --all-targets -- -D warnings
@@ -144,6 +151,7 @@ jobs:
           python -m pip install --require-hashes -r tools/hardware-requirements.txt
           rustup toolchain install 1.95.0 --profile minimal
           cargo build --release --locked
+          sh tools/build-bootstrap.sh
           python -m unittest discover -s tools -p 'test_*.py' -v
       - name: Build pinned offline package as an ordinary user
         run: |
@@ -191,3 +199,36 @@ jobs:
           echo "$HOME/bin" >> "$GITHUB_PATH"
       - name: Prove every model
         run: python3 tools/tamarin_check.py --timeout 900
+  linux-desktop:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      CARGO_BUILD_JOBS: 2
+    defaults:
+      run:
+        working-directory: apps/cypherpunk-vpn
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Pinned Node and native WebKit dependencies
+        run: |
+          curl -fsSLo "$RUNNER_TEMP/node.tar.xz" https://nodejs.org/dist/v22.23.5/node-v22.23.5-linux-x64.tar.xz
+          printf '%s  %s\n' cdeb8670a0c81f51b4dc4ac61919f9b1ad917b304bf8221eb939570663d240f8 "$RUNNER_TEMP/node.tar.xz" | sha256sum -c -
+          tar -xJf "$RUNNER_TEMP/node.tar.xz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/node-v22.23.5-linux-x64/bin" >> "$GITHUB_PATH"
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+          rustup toolchain install 1.95.0 --profile minimal --component clippy --component rustfmt
+      - name: Locked production and isolated demo builds
+        run: |
+          npm ci --ignore-scripts
+          npm run build
+          npm run build:demo
+          npm audit --omit=dev --audit-level=low
+      - name: Native boundary format and lint
+        run: |
+          cargo fmt --manifest-path src-tauri/Cargo.toml --check
+          cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets -- -D warnings
+      - name: Build dependency security gate
+        # Build-only advisories are still a release gate; do not silently omit or
+        # waive GHSA-fc5q-39xc-vjpf while upstream has no patched picomatch release.
+        run: npm audit --audit-level=high

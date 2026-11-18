@@ -1,0 +1,34 @@
+{
+  "schema": 1,
+  "base": {
+    "os_id": "debian", "os_version": "13", "os_like": [], "machine": "x86_64",
+    "glibc": [2, 41], "glibc_need": [2, 35], "tun": true,
+    "programs": ["ip", "nft", "mount", "systemctl"], "nf_tables": true,
+    "seccomp": true, "landlock": true, "systemd": 257,
+    "free_mb": 20000, "package_mb": 0, "vpn_interfaces": [], "errors": []
+  },
+  "baseline": [["arch", "ok"], ["glibc", "ok"], ["landlock", "ok"], ["nf_tables", "ok"], ["os_tested", "ok"], ["programs", "ok"], ["seccomp", "ok"], ["space", "ok"], ["systemd", "ok"], ["tun", "ok"]],
+  "cases": [
+    {"name": "healthy", "set": {}, "remove": [], "add": []},
+    {"name": "ubuntu22", "set": {"os_id": "ubuntu", "os_version": "22.04"}, "remove": [], "add": []},
+    {"name": "known-family", "set": {"os_id": "linuxmint", "os_version": "22", "os_like": ["ubuntu", "debian"]}, "remove": ["os_tested"], "add": [["os_untested", "warning"]]},
+    {"name": "unsupported-os", "set": {"os_id": "haiku", "os_version": "1"}, "remove": ["os_tested"], "add": [["os_unknown", "blocker"]]},
+    {"name": "unsupported-architecture", "set": {"machine": "aarch64"}, "remove": ["arch"], "add": [["arch_unsupported", "blocker"]]},
+    {"name": "old-glibc", "set": {"glibc": [2, 31]}, "remove": ["glibc"], "add": [["glibc_old", "blocker"]]},
+    {"name": "unknown-glibc", "set": {"glibc": null}, "remove": ["glibc"], "add": [["glibc_unknown", "blocker"]]},
+    {"name": "new-package-abi", "set": {"glibc_need": [2, 42]}, "remove": ["glibc"], "add": [["glibc_old", "blocker"]]},
+    {"name": "no-tun", "set": {"tun": false}, "remove": ["tun"], "add": [["tun_missing", "blocker"]]},
+    {"name": "missing-ip-nft", "set": {"programs": ["mount", "systemctl"]}, "remove": ["programs"], "add": [["program_missing", "blocker"], ["program_missing", "blocker"]]},
+    {"name": "no-firewall", "set": {"nf_tables": false}, "remove": ["nf_tables"], "add": [["nf_tables_missing", "blocker"]]},
+    {"name": "no-seccomp", "set": {"seccomp": false}, "remove": ["seccomp"], "add": [["seccomp_missing", "blocker"]]},
+    {"name": "unconfirmed-landlock", "set": {"landlock": false}, "remove": ["landlock"], "add": [["landlock_off", "warning"]]},
+    {"name": "old-systemd", "set": {"systemd": 249}, "remove": ["systemd"], "add": [["systemd_old", "info"]]},
+    {"name": "old-systemd-creds", "set": {"systemd": 249}, "options": {"systemd_creds": true}, "remove": ["systemd"], "add": [["systemd_old", "warning"]]},
+    {"name": "unconfirmed-systemd", "set": {"systemd": null}, "remove": ["systemd"], "add": [["systemd_unknown", "info"]]},
+    {"name": "storage-below-floor", "set": {"free_mb": 499}, "remove": ["space"], "add": [["space_low", "blocker"]]},
+    {"name": "storage-at-floor", "set": {"free_mb": 500}, "remove": [], "add": []},
+    {"name": "replacement-storage", "set": {"free_mb": 600, "package_mb": 101}, "remove": ["space"], "add": [["space_low", "blocker"]]},
+    {"name": "vpn-interfaces", "set": {"vpn_interfaces": ["ivpn0", "wg0"]}, "remove": [], "add": [["other_vpns", "info"]]},
+    {"name": "operator-only", "set": {"tun": false, "seccomp": false, "nf_tables": false}, "options": {"operator_only": true}, "remove": ["tun", "programs", "nf_tables", "seccomp", "landlock", "systemd"], "add": []}
+  ]
+}

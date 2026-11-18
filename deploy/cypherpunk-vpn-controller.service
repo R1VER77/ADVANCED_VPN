@@ -1,0 +1,30 @@
+[Unit]
+Description=cypherpunk_vpn local desktop controller boundary
+After=dbus.service
+
+[Service]
+Type=dbus
+BusName=org.cypherpunk_vpn.Controller1
+ExecStart=/opt/advanced-vpn/bin/cypherpunk-controller
+UMask=0077
+NoNewPrivileges=yes
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_SETPCAP CAP_SETUID CAP_SETGID CAP_CHOWN CAP_DAC_OVERRIDE CAP_KILL
+PrivateMounts=no
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+SystemCallFilter=~@clock @cpu-emulation @debug @module @obsolete @raw-io @reboot @swap
+SystemCallErrorNumber=EPERM
+RestrictNamespaces=yes
+ProtectHostname=yes
+KeyringMode=private
+MemoryMax=256M
+MemorySwapMax=0
+TasksMax=32
+LimitNOFILE=128
+LimitCORE=0
+StandardOutput=null
+StandardError=null
+LogLevelMax=emerg

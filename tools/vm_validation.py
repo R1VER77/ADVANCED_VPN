@@ -144,11 +144,22 @@ def network_config(name):
     return {"version": 2, "ethernets": eth}
 
 
-def seed(work, name):
+def seed(work, name, minimal_indexes=False):
     d = work / (name + "-seed")
     d.mkdir(exist_ok=True)
     (d / "meta-data").write_text("instance-id: avpn-%s-%s\nlocal-hostname: avpn-%s\n" % (name, work.name, name))
     user = ["#cloud-config"]
+    if minimal_indexes:
+        # Lifecycle tests need current binary package indexes; translation and
+        # source indexes add downloads without changing those installed packages.
+        user += [
+            "write_files:",
+            "  - path: /etc/apt/apt.conf.d/99-cypherpunk-validation-indexes",
+            "    permissions: '0644'",
+            "    content: |",
+            '      Acquire::Languages "none";',
+            '      Acquire::IndexTargets::deb-src::Sources::DefaultEnabled "false";',
+        ]
     if name != "client":
         # Servers boot exactly as avpn cloud creates them: every log in RAM from the start.
         import retention

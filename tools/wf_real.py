@@ -39,16 +39,6 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 
 WINDOW = 12.0  # seconds of trace kept per load, from its start (the same for every config)
-SNIFF = r"""
-import socket,struct,sys,time
-s=socket.socket(socket.AF_PACKET,socket.SOCK_RAW,socket.htons(3));s.bind((sys.argv[1],0))
-out=open(sys.argv[2],'ab',buffering=0);rec=struct.Struct('<di')
-while True:
-    b,a=s.recvfrom(65535);t=time.time()
-    if len(b)<34 or b[12:14]!=b'\x08\x00':continue
-    n=struct.unpack('!H',b[16:18])[0]
-    out.write(rec.pack(t, n if a[2]==socket.PACKET_OUTGOING else -n))
-"""
 BROWSE = r"""
 import json,shutil,sys,tempfile,time
 from selenium import webdriver
@@ -64,6 +54,7 @@ PREFS={"browser.cache.disk.enable":False,"browser.cache.memory.enable":False,"ne
 "services.settings.server":"http://127.0.0.1:1/","security.OCSP.enabled":0,"dom.push.enabled":False}
 gecko,site,out=sys.argv[1],sys.argv[2],sys.argv[3]
 o=Options();o.add_argument("-headless")
+if len(sys.argv)>4:o.binary_location=sys.argv[4]
 for k,v in PREFS.items():o.set_preference(k,v)
 profile=tempfile.mkdtemp();o.add_argument("-profile");o.add_argument(profile)
 d=webdriver.Firefox(options=o,service=Service(gecko));d.set_page_load_timeout(30)
@@ -95,11 +86,9 @@ def nsexec(ns, *args, **k):
 def in_netns(ns, args, **k):
     """Start `args` in network namespace `ns` only, keeping this worker's mount namespace
     (so a namespace the child creates, such as the client's avpn-app, stays visible)."""
-    fd = os.open("/run/netns/" + ns, os.O_RDONLY)
-    try:
-        return subprocess.Popen(list(map(str, args)), preexec_fn=lambda: os.setns(fd, os.CLONE_NEWNET), **k)
-    finally:
-        os.close(fd)
+    # The observer makes this process multithreaded. nsenter performs the namespace
+    # transition after exec; Python preexec_fn is unsafe in a multithreaded parent.
+    return subprocess.Popen(["/usr/bin/nsenter", "--net=/run/netns/" + ns, "--", *map(str, args)], **k)
 
 
 def link(a, b, a_ip, b_ip, name):
@@ -140,6 +129,11 @@ def worker(a):
     from lab_resolver import private_resolver
 
     lab_guard()
+
+    def interrupted(*_):
+        raise SystemExit("collection interrupted")
+
+    signal.signal(signal.SIGTERM, interrupted)
     out = a.out.resolve()
     out.mkdir(parents=True, exist_ok=True)
     sh("mount", "--make-rprivate", "/")
@@ -162,6 +156,7 @@ def worker(a):
                 config=a.config,
                 client_cpus=a.client_cpus,
                 server_cpus=a.server_cpus,
+                capture_cpus=a.capture_cpus or a.server_cpus,
                 wire_clock_pps=clock,
                 wire_clock_ms=os.environ.get("AVPN_WIRE_CLOCK_MS", "30") if clock else None,
                 wire_clock_downstream=os.environ.get("AVPN_WIRE_CLOCK_DOWNSTREAM", "1") != "0" if clock else None,
@@ -274,6 +269,11 @@ def worker(a):
                 os.killpg(p.pid, signal.SIGKILL)
                 o, e = p.communicate()
                 o = (o or "") + "\n" + json.dumps(dict(status="browser_hung"))
+            except BaseException:
+                if p.poll() is None:
+                    os.killpg(p.pid, signal.SIGKILL)
+                p.communicate(timeout=5)
+                raise
             return subprocess.CompletedProcess(p.args, p.returncode, o, e)
 
         # Up when the browser's namespace reaches the internet through the tunnel.
@@ -321,11 +321,38 @@ def worker(a):
                 if r.returncode:
                     raise RuntimeError("cannot put fq on %s/%s: %s" % (ns, dev, r.stderr.strip()[:200]))
         packets = out / "packets.bin"
-        sniff = ["/usr/sbin/ip", "netns", "exec", capture_ns, sys.executable, "-c", SNIFF, capture_dev, str(packets)]
-        procs.append(subprocess.Popen(pinned(a.server_cpus, sniff)))
-        with (out / "loads.jsonl").open("a") as log:
+        sniff = [
+            "/usr/sbin/ip",
+            "netns",
+            "exec",
+            capture_ns,
+            sys.executable,
+            str(ROOT / "tools/wf_capture.py"),
+            capture_dev,
+            str(packets),
+            "--peer",
+            "192.0.2.1",
+            "--port",
+            "51820" if a.config == "undefended" else "443",
+        ]
+        procs.append(subprocess.Popen(pinned(a.capture_cpus or a.server_cpus, sniff)))
+        for _ in range(100):
+            if procs[-1].poll() is not None:
+                raise RuntimeError("metadata recorder exited before readiness")
+            if (out / "capture.json").exists():
+                break
+            time.sleep(0.05)
+        else:
+            raise RuntimeError("metadata recorder did not become ready")
+        from wf_observer import Observer
+        from avpnctl import runtime_dir
+
+        observed_runtime = None if a.config == "undefended" else runtime_dir(out / "chain/client", create=False)
+        with Observer(out / "protection.jsonl", observed_runtime), (out / "loads.jsonl").open("x") as log:
             for site, label in loads:
-                r = in_browser_ns("env", "HOME=/tmp", a.python, "-c", BROWSE, a.geckodriver, site, out,
+                if procs[-1].poll() is not None:
+                    raise RuntimeError("metadata recorder died during collection")
+                r = in_browser_ns("env", "HOME=/tmp", a.python, "-c", BROWSE, a.geckodriver, site, out, a.firefox,
                                   timeout=WINDOW + 90)  # fmt: skip
                 try:
                     row = json.loads(r.stdout.strip().splitlines()[-1])
@@ -350,6 +377,14 @@ def worker(a):
                         health.update(protection=None, lifecycle=None)
                 log.write(json.dumps(dict(site=site, label=label, **row, **health)) + "\n")
                 log.flush()
+        procs[-1].terminate()
+        if procs[-1].wait(timeout=5) != 0:
+            raise RuntimeError("metadata recorder failed at shutdown")
+        captured = json.loads((out / "capture.json").read_text())
+        if not captured.get("clean_stop") or captured.get("drops") or captured.get("malformed"):
+            raise RuntimeError("incomplete or dropped capture; preserve the failed arm")
+        if captured.get("unexpected_outgoing"):
+            raise RuntimeError("underlay metadata escape audit found unexpected outgoing traffic")
     finally:
         if clock and a.config != "undefended":
             from avpnctl import runtime_dir
@@ -413,7 +448,8 @@ def collect(a):
             ["unshare", "--user", "--map-root-user", "--map-auto", "--net", "--mount", sys.executable, __file__,
              "worker", "--config", a.config, "--loads", str(part), "--out", str(out / ("w%d" % w)), "--bin-dir",
              str(a.bin_dir), "--geckodriver", str(a.geckodriver), "--python", str(a.python), "--ethtool",
-             str(a.ethtool), "--client-cpus", a.client_cpus, "--server-cpus", a.server_cpus, "--seed", str(a.seed)],
+             str(a.ethtool), "--client-cpus", a.client_cpus, "--server-cpus", a.server_cpus, "--seed", str(a.seed),
+             "--firefox", str(a.firefox), "--capture-cpus", a.capture_cpus],
             stdout=log, stderr=subprocess.STDOUT,
         )  # fmt: skip
         time.sleep(0.5)
@@ -435,9 +471,11 @@ def main():
         x.add_argument("--bin-dir", type=Path, default=ROOT / "target/release")
         x.add_argument("--geckodriver", type=Path, required=True)
         x.add_argument("--python", type=Path, required=True)
+        x.add_argument("--firefox", type=Path, default=Path("/usr/bin/firefox-esr"))
         x.add_argument("--ethtool", type=Path, default=Path("/usr/sbin/ethtool"))
         x.add_argument("--client-cpus", default="", help="cores for the browser and the client (e.g. 0,1)")
-        x.add_argument("--server-cpus", default="", help="cores for the relay, exit and capture (e.g. 2,3)")
+        x.add_argument("--server-cpus", default="", help="cores for the relay and exit (e.g. 2,3)")
+        x.add_argument("--capture-cpus", default="", help="dedicated recorder core; otherwise the server CPU set")
         x.add_argument("--seed", type=int, default=7, help="recorded load-order seed; vary it across rounds")
         if name == "collect":
             x.add_argument("--sites", type=Path, required=True)
@@ -446,7 +484,7 @@ def main():
         else:
             x.add_argument("--loads", type=Path, required=True)
     a = p.parse_args()
-    os.umask(0o022)
+    os.umask(0o077)
     (collect if a.cmd == "collect" else worker)(a)
 
 

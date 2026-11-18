@@ -1,0 +1,6 @@
+{
+  "schema": 1,
+  "managers": ["NetworkManager.service", "systemd-networkd.service", "networking.service", "dhcpcd.service", "connman.service"],
+  "dropin": "70-cypherpunk-vpn-guard.conf",
+  "requires": "[Unit]\nRequires=advanced-vpn-guard.service\nAfter=advanced-vpn-guard.service\n"
+}

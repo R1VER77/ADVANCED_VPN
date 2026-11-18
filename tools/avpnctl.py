@@ -280,6 +280,8 @@ def whole_firewall(profile, service_uid=None, front_uid=None):
   ip daddr != 10.77.0.1 tcp dport {53,853} drop
   meta nfproto ipv4 oifname "avpn0" accept
  }
+ chain forward { type filter hook forward priority -100; policy drop;
+ }
 }\n"""
     )
 
@@ -1082,6 +1084,10 @@ def supervise(state, bin_dir, lab=False, whole=False):
     fcntl.flock(global_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     save(rt / "controller.json", dict(pid=os.getpid(), identity=identity_of(os.getpid())))
     early = read_json_private(state / "preferences.json", {}) if profile["role"] == "client" else {}
+    if whole and not lab:
+        import guard_policy
+
+        guard_policy.arm(apply=True, state=state)
     ensure_network(
         profile,
         state,
@@ -1315,6 +1321,7 @@ def supervise(state, bin_dir, lab=False, whole=False):
                     state="blocked" if budget_blocked else "supervising",
                     kill_switch=True,
                     role=profile["role"],
+                    scope=("whole-device" if whole else "applications") if profile["role"] == "client" else "server",
                     daily_limit_bytes=allowance.limit,
                     children={
                         k: dict(pid=v.pid, identity=identity_of(v.pid), alive=v.poll() is None)
@@ -1477,6 +1484,11 @@ def run_app(state, argv, uid, gid, lab=False):
 def reset(state, lab=False):
     """Remove the kill switch and restore the saved routes; refuses while the supervisor or protected apps run."""
     root_guard(lab)
+    if not lab:
+        import guard_policy
+
+        if Path(state).resolve() != guard_policy.STATE:
+            raise ValueError("a different state cannot reset the installed device's networking")
     rt = runtime_dir(state)
     profile = load_profile(state)
     keep = restore_dir(state, profile)
@@ -1508,6 +1520,15 @@ def reset(state, lab=False):
             cmd(*args)
         if (keep / "resolv.before").exists():
             Path("/etc/resolv.conf").resolve().write_bytes(read_private(keep / "resolv.before"))
+    if not lab:
+        import guard_policy
+
+        if Path(state).resolve() != guard_policy.STATE:
+            raise ValueError("a different state cannot disarm the installed device's guard")
+        preferences = read_json_private(state / "preferences.json", {})
+        preferences["mode"] = "applications"
+        save(state / "preferences.json", preferences)
+        guard_policy.disarm(state)
     for name in [WG, TUN]:
         if link_exists(name):
             row = json.loads(cmd("ip", "-j", "link", "show", "dev", name).stdout)[0]
@@ -2132,6 +2153,17 @@ def main():
     """Command-line entry point: harden the process, parse arguments, run one action."""
     harden_process()
     a = build_parser().parse_args()
+    if a.action in ("request", "enroll", "preferences", "reset") or (a.action == "setup" and a.apply):
+        from controller_mutation import locked
+
+        with locked(a.state):
+            dispatch(a)
+    else:
+        dispatch(a)
+
+
+def dispatch(a):
+    """Execute already parsed controller arguments; callers retain their mutation lock."""
     if a.action in ("preflight", "setup"):
         import setup_cli
 
@@ -2270,6 +2302,10 @@ def main():
         root_guard(a.lab)
         old = json.loads(read_private(a.state / "preferences.json")) if (a.state / "preferences.json").exists() else {}
         if a.mode:
+            if a.mode == "whole-device" and not a.lab:
+                import guard_policy
+
+                guard_policy.arm(state=a.state)
             old["mode"] = a.mode
         # A "defense" key left by an older release is ignored: every chain runs the stream.
         old.pop("defense", None)

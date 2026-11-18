@@ -12,6 +12,15 @@ import wf_real
 
 
 class PinningTests(unittest.TestCase):
+    def test_observed_workers_enter_namespaces_without_a_python_preexec_hook(self):
+        from unittest import mock
+
+        with mock.patch.object(wf_real.subprocess, "Popen") as spawn:
+            wf_real.in_netns("cli", ["/usr/bin/true"], start_new_session=True)
+        spawn.assert_called_once_with(
+            ["/usr/bin/nsenter", "--net=/run/netns/cli", "--", "/usr/bin/true"], start_new_session=True
+        )
+
     def test_a_failed_worker_cannot_be_reported_as_a_successful_collection(self):
         from types import SimpleNamespace
 
@@ -55,8 +64,9 @@ class PinningTests(unittest.TestCase):
         self.assertIn('cpus = a.client_cpus if role == "client" else a.server_cpus', src)
         # Every page load (browser and driver) on the client cores.
         self.assertIn("pinned(a.client_cpus, run + list(argv))", src)
-        # The capture never competes with the browser.
-        self.assertIn("subprocess.Popen(pinned(a.server_cpus, sniff))", src)
+        # A dedicated recorder CPU is preferred; old standalone invocations
+        # retain their explicit server-CPU fallback.
+        self.assertIn("subprocess.Popen(pinned(a.capture_cpus or a.server_cpus, sniff))", src)
 
     def test_the_wire_clock_gets_fq_and_its_counters_are_kept(self):
         src = inspect.getsource(wf_real.worker)

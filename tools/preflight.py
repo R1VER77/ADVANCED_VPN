@@ -30,19 +30,16 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 SEVERITIES = ("blocker", "warning", "info", "ok")
 # Distributions the release is tested on (docs/INSTALL_AND_SETUP_PLAN.md, phase 2).
-TESTED = {("debian", "12"), ("debian", "13"), ("ubuntu", "22.04"), ("ubuntu", "24.04")}
-FAMILIES = ("debian", "ubuntu", "fedora", "rhel", "centos", "arch", "suse", "opensuse")
-RELEASE_GLIBC = (2, 35)  # the release binaries are built on Ubuntu 22.04
-SYSTEMD_CREDS = 250  # systemd-creds sealing (`--protect systemd-creds`)
-NEED_MB = 500  # binaries, the Python environment and room to upgrade
-PROGRAMS = ("ip", "nft", "mount", "systemctl")
-PACKAGES = {  # program (or capability) -> package name per package manager
-    "nft": dict(apt="nftables", dnf="nftables", pacman="nftables", zypper="nftables"),
-    "ip": dict(apt="iproute2", dnf="iproute", pacman="iproute2", zypper="iproute2"),
-    "mount": dict(apt="mount", dnf="util-linux", pacman="util-linux", zypper="util-linux"),
-    "systemctl": dict(apt="systemd", dnf="systemd", pacman="systemd", zypper="systemd"),
-    "venv": dict(apt="python3-venv", dnf="python3", pacman="python", zypper="python3"),
-}
+POLICY = json.loads(Path(__file__).with_name("preflight-policy.json").read_text())
+if POLICY.get("schema") != 1:
+    raise ValueError("unknown preflight policy schema")
+TESTED = {tuple(pair) for pair in POLICY["tested"]}
+FAMILIES = tuple(POLICY["families"])
+RELEASE_GLIBC = tuple(POLICY["release_glibc"])
+SYSTEMD_CREDS = POLICY["systemd_creds"]
+NEED_MB = POLICY["need_mb"]
+PROGRAMS = tuple(POLICY["programs"])
+PACKAGES = POLICY["packages"]
 INSTALL = dict(
     apt="sudo apt-get install -y",
     dnf="sudo dnf install -y",
@@ -108,15 +105,19 @@ class Host:
         """Where `program` is installed, or None."""
         # The system directories too: the controller runs these as root, and an ordinary
         # user's PATH on Debian leaves out /usr/sbin (where nft lives).
-        system = ["/usr/local/sbin", "/usr/local/bin", "/usr/sbin", "/sbin", "/usr/bin", "/bin"]
-        privileged = os.geteuid() == 0 and self.root == Path("/")
-        dirs = system if privileged else self.path.split(os.pathsep) + system
+        system = POLICY["system_paths"]
+        real_host = self.root == Path("/")
+        dirs = system if real_host else self.path.split(os.pathsep) + system
         for d in dict.fromkeys(dirs):
             p = self.file(d) / program
             if p.is_file() and os.access(str(p), os.X_OK):
-                if privileged:
+                if real_host:
                     m = p.resolve().stat()
                     if not stat.S_ISREG(m.st_mode) or m.st_uid != 0 or m.st_mode & 0o022:
+                        continue
+                    if any(
+                        parent.stat().st_uid != 0 or parent.stat().st_mode & 0o022 for parent in p.resolve().parents
+                    ):
                         continue
                 return str(p)
         return None
@@ -161,7 +162,7 @@ def check_os(host: Host, opts) -> List[Finding]:
 
 def check_arch(host: Host, opts) -> List[Finding]:
     """The release is built for 64-bit x86 only."""
-    if host.machine in ("x86_64", "amd64"):
+    if host.machine in POLICY["architectures"]:
         return [Finding("arch", "ok", "64-bit x86: the release build runs here.")]
     return [Finding("arch_unsupported", "blocker", f"This is {host.machine}; the release is built for 64-bit x86 only for now.",
                     dict(machine=host.machine))]  # fmt: skip

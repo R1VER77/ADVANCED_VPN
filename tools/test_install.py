@@ -51,34 +51,42 @@ class UserInstallTests(unittest.TestCase):
         r = self.avpn("--version")
         version = re.search(r'^version = "([^"]+)"', (install.ROOT / "Cargo.toml").read_text(), re.M).group(1)
         self.assertEqual((r.returncode, r.stdout.strip()), (0, "avpn " + version))
+        alias = subprocess.run([str(self.bin / "cypherpunk"), "--version"], capture_output=True, text=True, check=True)
+        self.assertEqual(alias.stdout, r.stdout)
         # End to end through the installed controller: JSON from a real (empty) state.
         r = self.avpn("--json", "--state", str(self.home / "no-state"), "hops")
         self.assertEqual(json.loads(r.stdout)["chain"], [], r.stderr)
         self.assertIn("• Chain  not enrolled", self.avpn("--state", str(self.home / "no-state"), "hops").stdout)
 
-    def test_upgrade_replaces_in_place_without_leftovers(self):
+    def assert_no_preparation_leftovers(self):
+        self.assertFalse(list((self.data / "releases").glob(".prepare-*")))
+        self.assertFalse(list(self.data.glob(".current-*")))
+
+    def test_upgrade_retains_the_previous_verified_slot(self):
         self.install()
-        (self.data / "app" / "stale-file").write_text("old version")
+        previous = (self.data / "app").resolve()
         self.install()
-        self.assertFalse((self.data / "app" / "stale-file").exists())
-        self.assertEqual(sorted(p.name for p in self.data.iterdir()), ["app"])
+        self.assertTrue(previous.exists())
+        self.assertNotEqual(previous, (self.data / "app").resolve())
+        self.assertEqual(len(list((self.data / "releases").iterdir())), 2)
+        self.assert_no_preparation_leftovers()
         self.assertEqual(self.avpn("--version").returncode, 0)
 
     def test_swap_failure_restores_the_previous_application(self):
         app = self.install()
         before = (app / "bin/avpnctl").read_bytes()
-        rename = Path.rename
+        replace = os.replace
 
         def refuse_stage(path, destination):
-            if path.name.startswith("app.new-"):
+            if Path(destination).name == "current":
                 raise OSError("injected final rename failure")
-            return rename(path, destination)
+            return replace(path, destination)
 
-        with mock.patch.object(Path, "rename", refuse_stage):
+        with mock.patch.object(os, "replace", refuse_stage):
             with self.assertRaisesRegex(OSError, "final rename"):
                 self.install()
         self.assertEqual((app / "bin/avpnctl").read_bytes(), before)
-        self.assertEqual(sorted(p.name for p in self.data.iterdir()), ["app"])
+        self.assert_no_preparation_leftovers()
         self.assertEqual(self.avpn("--version").returncode, 0)
 
     def test_failed_dependency_upgrade_preserves_the_old_runtime(self):
@@ -91,7 +99,7 @@ class UserInstallTests(unittest.TestCase):
             with self.assertRaises(subprocess.CalledProcessError):
                 install.install_user(self.data, self.bin)
         self.assertEqual((venv / "preserve").read_text(), "previous working runtime")
-        self.assertEqual(sorted(p.name for p in self.data.iterdir()), ["app"])
+        self.assert_no_preparation_leftovers()
 
     def test_failed_install_leaves_the_old_one_and_no_leftovers(self):
         self.install()
@@ -103,7 +111,7 @@ class UserInstallTests(unittest.TestCase):
         with mock.patch.object(install.subprocess, "run", network_down):
             with self.assertRaises(subprocess.CalledProcessError):
                 install.install_user(self.data, self.bin)  # needs a venv build, which fails
-        self.assertEqual(sorted(p.name for p in self.data.iterdir()), ["app"])
+        self.assert_no_preparation_leftovers()
         self.assertEqual((self.data / "app" / "bin" / "avpnctl").read_text(), before)
         self.assertEqual(self.avpn("--version").returncode, 0)
 
@@ -111,7 +119,8 @@ class UserInstallTests(unittest.TestCase):
         app = self.install()
         wrapper = (self.bin / "avpn").read_text()
         self.assertIn("AVPN_MESH=", wrapper)
-        self.assertIn(str(app / "bin/avpn-mesh"), wrapper)
+        self.assertIn('AVPN_MESH="$slot/bin/avpn-mesh"', wrapper)
+        self.assertIn(str(app), wrapper)
         mesh_launcher = (app / "bin" / "avpn-mesh").read_text()
         self.assertIn("tools/mesh.py", mesh_launcher)
 
@@ -135,6 +144,15 @@ class UserInstallTests(unittest.TestCase):
         (self.bin / "avpn").write_text("#!/bin/sh\necho someone else's avpn\n")
         install.uninstall_user(self.data, self.bin)
         self.assertTrue((self.bin / "avpn").exists())
+
+    def test_install_refuses_a_foreign_avpn_without_staging_or_overwriting(self):
+        self.bin.mkdir(parents=True)
+        foreign = b"#!/bin/sh\nprintf unrelated\\n\n"
+        (self.bin / "avpn").write_bytes(foreign)
+        with self.assertRaisesRegex(ValueError, "foreign avpn"):
+            self.install()
+        self.assertEqual((self.bin / "avpn").read_bytes(), foreign)
+        self.assertFalse(self.data.exists())
 
     def test_pack_holds_exactly_the_package(self):
         with tempfile.TemporaryDirectory() as d:

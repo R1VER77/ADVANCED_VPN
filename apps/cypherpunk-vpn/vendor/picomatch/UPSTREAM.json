@@ -1,0 +1,36 @@
+{
+  "schema": 1,
+  "upstream": "https://github.com/micromatch/picomatch",
+  "version": "4.0.7",
+  "git_head": "6bb40679c218cefba5d4e9662408c5fdf699a8bb",
+  "dist": {
+    "shasum": "6313360034ccb36b3dc61ecbdff78121f90fe21f",
+    "tarball": "https://registry.npmjs.org/picomatch/-/picomatch-4.0.7.tgz",
+    "fileCount": 10,
+    "integrity": "sha512-qcJu88Q2IWqJsDD529JKMdwGm/dvInW4HvQnRwiH9JtihJvzGOscDtHE3x1pBKeUOTysQ8kVmLnJ2kJu7yhcGA==",
+    "signatures": [
+      {
+        "sig": "MEQCIDeMRsq78AZoXJyPEawvv8JPPk7eIeoZRHU3VVnx4FUFAiAtcTcxKUlp2um5SNhGRRFGN8v1oGVjwBoiQBVBFbkk3A==",
+        "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U"
+      },
+      {
+        "sig": "MEUCIFTk5VYWLeXAIebu2UWpaOQ5z72vxnbIe1t8ICKz/cuAAiEAp9RKfBDmwsNgt/m6Rs5cwKMCDQPoDAQTy408DJpDhVs=",
+        "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U"
+      }
+    ],
+    "unpackedSize": 93759
+  },
+  "original_sha256": {
+    "LICENSE": "d0cd141b0c322fded5dfad1d4645bb2fedfc05b7321fe1009469638190d59ef9",
+    "README.md": "a69b87120fe2b9cb8f9057eaef6b9f9887f803e02185ca2f431e8162f6312220",
+    "index.js": "02ae26406508e28f9ba0865be16cf77f0b33de6c4d4d49c212c4176df1d5625a",
+    "lib/constants.js": "c28f952d2758261fe5428a121add485cc25b03e0193633f649de903dc0e5e222",
+    "lib/parse.js": "4e1e05447668aa1e94366c5516a2bcd8f5fff800cc92b1d0cd7d77703b8618c4",
+    "lib/picomatch.js": "fdd249d7ffff853f3bb1c77eafc8baa1a437bea85a94c35877b83c6a40d9ca94",
+    "lib/scan.js": "6457a1764e5c2e543cc3a0c00ce12ebb3764097628868198370b64d4e642aaae",
+    "lib/utils.js": "f04604f70cd1a3f6ace80b84766468674ff38b4bb83818d2ef1d81fc6355f935",
+    "package.json": "479b70b87aa7b44344d62c8a459ae7e53dd2bca6c61f1396bd55e63e9de73fc6",
+    "posix.js": "5695ff5dfcd5a338a40630bd506056f2950bcb08fe1cc068519cbbfe60add480"
+  },
+  "change": "Reject every +( or *( substring at the glob parser and fastpath entry, including escaped/quoted occurrences. Build-tool-only restriction; no compatibility or all-ReDoS claim."
+}

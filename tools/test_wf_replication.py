@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 
 import wf_replication as replication
 
@@ -12,6 +13,71 @@ HAVE = all(importlib.util.find_spec(name) is not None for name in ("numpy", "skl
 
 
 class Metadata(unittest.TestCase):
+    def test_a_strong_classifier_or_unobserved_protection_cannot_pass_local_acceptance(self):
+        def variant(control=False):
+            view = dict(
+                accuracy=0.95 if control else 0.05,
+                ci95_round_bootstrap=[0.9, 1.0] if control else [0.03, 0.08],
+                p_holm_all_nine_primary_views=0.001 if control else 0.9,
+            )
+            return dict(
+                chance=0.05,
+                excluded=[],
+                sources=[dict(capture=dict(unexpected_outgoing=0))],
+                window_evidence=[
+                    dict(protection_observations=dict(all_samples_protected=not control, control_samples_valid=control))
+                ],
+                views=dict(both=dict(primary=view)),
+            )
+
+        variants = {name: variant(name == "undefended") for name in replication.VARIANTS}
+        paired = {name: dict(success_difference_two_way_cluster_ci95=[-0.02, 0.01]) for name in ["relay30", "relay5"]}
+        self.assertEqual(replication.local_acceptance(variants, paired)["status"], "passed_local_only")
+        variants["relay5"]["views"]["both"]["primary"]["ci95_round_bootstrap"] = [0.2, 0.4]
+        self.assertEqual(replication.local_acceptance(variants, paired)["status"], "failed")
+        variants["relay5"] = variant()
+        variants["relay30"]["window_evidence"][0]["protection_observations"]["all_samples_protected"] = False
+        self.assertEqual(replication.local_acceptance(variants, paired)["status"], "failed")
+
+    def test_frozen_analysis_and_actual_variant_order_must_match(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            expected = [
+                dict(round=i, seed=seed, variant=variant)
+                for i, (seed, order) in enumerate(zip(replication.ROUND_SEEDS, replication.ORDERS, strict=True), 1)
+                for variant in order
+            ]
+            names = ("wf_replication.py", "wf_ab.py", "wf_deep.py", "wf_attack.py", "wf_validity.py", "wf_protocol.py")
+            manifest = dict(
+                schedule=expected, capture_cpus="4", files={"frozen/tools/" + name: "hash" for name in names}
+            )
+            run = dict(
+                status="complete",
+                manifest_sha256="hash",
+                arms=[
+                    dict(arm, status="complete", exit_code=0, attempts=40, started=2 * i + 1, stopped=2 * i + 2)
+                    for i, arm in enumerate(expected)
+                ],
+            )
+            (root / "manifest.json").write_text(json.dumps(manifest))
+            (root / "RUN.json").write_text(json.dumps(run))
+            for arm in expected:
+                (root / f"r{arm['round']}-{arm['variant']}.host.jsonl").write_text(
+                    json.dumps(dict(power=dict(on_mains=True), concurrent_build_or_inference=[])) + "\n"
+                )
+            with mock.patch.object(replication.wf_ab, "sha256", return_value="hash"):
+                replication.validate_protocol(root, {})
+                first = root / "r1-relay30.host.jsonl"
+                saved = first.read_text()
+                first.write_text(json.dumps(dict(power=dict(on_mains=False), concurrent_build_or_inference=[])) + "\n")
+                with self.assertRaisesRegex(ValueError, "power"):
+                    replication.validate_protocol(root, {})
+                first.write_text(saved)
+                run["arms"][0], run["arms"][1] = run["arms"][1], run["arms"][0]
+                (root / "RUN.json").write_text(json.dumps(run))
+                with self.assertRaisesRegex(ValueError, "actual arm order"):
+                    replication.validate_protocol(root, {})
+
     def test_a_positive_control_with_an_active_clock_is_refused(self):
         replication.validate_settings(dict(config="undefended", wire_clock_pps=None), "undefended")
         with self.assertRaisesRegex(ValueError, "positive control"):
@@ -49,6 +115,53 @@ class Metadata(unittest.TestCase):
 
 @unittest.skipUnless(HAVE, "needs optional numpy and scikit-learn")
 class CaptureAndScores(unittest.TestCase):
+    def test_shared_round_failures_widen_control_relative_availability_uncertainty(self):
+        control = [
+            dict(site=site, round=round_id, status="ok", start=0, loaded=1)
+            for round_id in (1, 2)
+            for site in ("a", "b")
+        ]
+        defended = [dict(row, status="TimeoutException" if row["round"] == 1 else "ok", loaded=2) for row in control]
+        result = replication.paired_outcomes(control, defended)
+        self.assertEqual(result["success_difference"], -0.5)
+        self.assertEqual(result["success_difference_site_cluster_ci95"], [-0.5, -0.5])
+        self.assertEqual(result["success_difference_two_way_cluster_ci95"], [-1.0, 0.0])
+        self.assertEqual(result["paired_success_latency_difference_median"], 1)
+
+    def test_silent_window_with_recorder_evidence_stays_in_the_primary_dataset(self):
+        import numpy as np
+        import wf_deep
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            worker = root / "r1-undefended/w0"
+            worker.mkdir(parents=True)
+            (worker / "settings.json").write_text(json.dumps(dict(config="undefended", wire_clock_pps=None)))
+            (worker / "loads.jsonl").write_text(
+                json.dumps(dict(label=0, site="s", status="TimeoutException", start=10)) + "\n"
+            )
+            np.empty(0, wf_deep.RECORD).tofile(worker / "packets.bin")
+            (worker / "capture.json").write_text(
+                json.dumps(
+                    dict(
+                        schema=1,
+                        timestamp_source="kernel_time64",
+                        clean_stop=True,
+                        drops=0,
+                        malformed=0,
+                        unexpected_outgoing=0,
+                    )
+                )
+            )
+            records = [dict(time=9 + n / 2, monotonic=20 + n / 2, drops=0, protection="control") for n in range(29)]
+            for name in ("capture-heartbeats.jsonl", "protection.jsonl"):
+                (worker / name).write_text("".join(json.dumps(row) + "\n" for row in records))
+            features, labels, _, kept, _, excluded, _ = replication.load(root, "undefended")
+            self.assertEqual(labels.tolist(), [0])
+            self.assertFalse(features["both"].any())
+            self.assertEqual(excluded, [])
+            self.assertTrue(kept[0]["capture_validity"]["valid"])
+
     def test_complete_failed_load_and_empty_direction_are_retained_without_fake_packets(self):
         import numpy as np
         import wf_deep

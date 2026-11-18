@@ -7,7 +7,7 @@ Wants=network-pre.target
 
 [Service]
 Type=oneshot
-ExecStart=/opt/advanced-vpn/bin/avpnctl guard
+ExecStart=/usr/libexec/cypherpunk-vpn-bootguard
 RemainAfterExit=yes
 UMask=0077
 NoNewPrivileges=yes

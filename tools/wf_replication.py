@@ -16,9 +16,10 @@ import statistics
 import time
 
 import wf_ab
+import wf_validity
+from wf_protocol import ORDERS, ROUND_SEEDS
 
 VARIANTS = ("undefended", "relay30", "relay5")
-ROUND_SEEDS = (1475067252, 929854378, 1997314573, 3200583649, 1259733358, 1713829992)
 
 
 def validate_settings(settings, variant):
@@ -82,6 +83,14 @@ def score(x, y, groups, rows, filtered=False):
         evaluated=int(evaluated.sum()),
         excluded=int((~evaluated).sum()),
         by_round=by_round,
+        by_site={
+            str(label): dict(
+                correct=int(correct[y == label].sum()),
+                evaluated=int(evaluated[y == label].sum()),
+                available=int((y == label).sum()),
+            )
+            for label in sorted(set(y))
+        },
         folds=folds,
     )
 
@@ -99,10 +108,9 @@ def accuracy_interval(by_round, seed=0):
 def load(root, variant):
     """Read one metadata-only capture at a time; retain failed browser attempts.
 
-    Coverage presently requires observed packets bracketing each window. This is
-    conservative for sparse/idle captures: excluded attempts remain in all-attempt
-    costs and exclusion counts. Collector-level readiness/stop evidence is still
-    needed to distinguish a genuinely silent interval from a stopped recorder.
+    Fresh collections use recorder readiness, heartbeat/drop evidence and a clean
+    stop, including genuinely silent windows. Legacy loading retains conservative
+    packet bracketing but cannot qualify the new experiment's acceptance gates.
     """
     import numpy as np
     import wf_deep
@@ -123,12 +131,29 @@ def load(root, variant):
             for line in (worker / "loads.jsonl").read_text().splitlines()
         ]
         attempts.extend(rows)
+        capture_report = (
+            json.loads((worker / "capture.json").read_text()) if (worker / "capture.json").exists() else None
+        )
+        heartbeats = (
+            [json.loads(line) for line in (worker / "capture-heartbeats.jsonl").read_text().splitlines()]
+            if capture_report
+            else []
+        )
+        observations = (
+            [json.loads(line) for line in (worker / "protection.jsonl").read_text().splitlines()]
+            if capture_report
+            else []
+        )
         sources.append(
             dict(
                 round=wf_ab.round_number(directory),
                 settings=settings,
                 loads_sha256=wf_ab.sha256(worker / "loads.jsonl"),
                 packets_sha256=wf_ab.sha256(worker / "packets.bin"),
+                capture=capture_report,
+                capture_sha256=wf_ab.sha256(worker / "capture.json") if capture_report else None,
+                observations_sha256=wf_ab.sha256(worker / "protection.jsonl") if capture_report else None,
+                heartbeats_sha256=wf_ab.sha256(worker / "capture-heartbeats.jsonl") if capture_report else None,
             )
         )
         path = worker / "packets.bin"
@@ -152,6 +177,16 @@ def load(root, variant):
                 reason = "unmonitored"
             elif not isinstance(row.get("start"), (int, float)) or not math.isfinite(row["start"]):
                 reason = "no_valid_browser_start"
+            elif capture_report:
+                validity = wf_validity.capture_window(
+                    capture_report, heartbeats, row["start"], row["start"] + wf_deep.WINDOW
+                )
+                row["capture_validity"] = validity
+                row["protection_observations"] = wf_validity.protection_window(
+                    observations, row["start"], row["start"] + wf_deep.WINDOW, variant != "undefended"
+                )
+                if not validity["valid"]:
+                    reason = validity["reason"]
             elif not len(capture) or capture["t"][0] > row["start"] or capture["t"][-1] < row["start"] + wf_deep.WINDOW:
                 reason = "capture_does_not_bracket_fixed_window"
             if reason:
@@ -216,6 +251,145 @@ def validate_matching(arms):
         raise ValueError("each round needs a distinct integer site-order seed")
 
 
+def validate_protocol(root, data):
+    """Bind the analysis to its frozen specification and actual non-overlapping arm times."""
+    manifest = json.loads((root / "manifest.json").read_text())
+    run = json.loads((root / "RUN.json").read_text())
+    expected = [
+        dict(round=i, seed=seed, variant=variant)
+        for i, (seed, order) in enumerate(zip(ROUND_SEEDS, ORDERS, strict=True), 1)
+        for variant in order
+    ]
+    if manifest.get("schedule") != expected or run.get("status") != "complete":
+        raise ValueError("the frozen schedule or collection completion evidence is invalid")
+    if run.get("manifest_sha256") != wf_ab.sha256(root / "manifest.json"):
+        raise ValueError("the experiment manifest changed after collection started")
+    arms = run.get("arms", [])
+    if len(arms) != len(expected):
+        raise ValueError("missing collection arms")
+    previous = -math.inf
+    for arm, planned in zip(arms, expected, strict=True):
+        if any(arm.get(key) != value for key, value in planned.items()) or arm.get("status") != "complete":
+            raise ValueError("actual arm order differs from the prespecified order")
+        if (
+            arm.get("exit_code") != 0
+            or arm.get("attempts") != 40
+            or arm.get("started", -math.inf) < previous
+            or arm.get("stopped", -math.inf) <= arm.get("started", math.inf)
+        ):
+            raise ValueError("overlapping, incomplete or failed collection arm")
+        previous = arm["stopped"]
+        telemetry = root / f"r{arm['round']}-{arm['variant']}.host.jsonl"
+        samples = [json.loads(line) for line in telemetry.read_text().splitlines()]
+        if not samples or any(
+            s.get("power", {}).get("on_mains") is False or s.get("concurrent_build_or_inference") for s in samples
+        ):
+            raise ValueError("collection power or concurrent-load conditions changed")
+    for name in ("wf_replication.py", "wf_ab.py", "wf_deep.py", "wf_attack.py", "wf_validity.py", "wf_protocol.py"):
+        if manifest["files"].get("frozen/tools/" + name) != wf_ab.sha256(Path(__file__).with_name(name)):
+            raise ValueError("analysis source differs from its frozen specification: " + name)
+    for item in data.values():
+        for source in item[6]:
+            settings = source["settings"]
+            if (
+                settings.get("client_cpus") != "0,1"
+                or settings.get("server_cpus") != "2,3"
+                or settings.get("capture_cpus") != manifest.get("capture_cpus")
+                or manifest.get("capture_cpus") != "4"
+            ):
+                raise ValueError("CPU placement differs from the saved protocol")
+    return dict(manifest_sha256=wf_ab.sha256(root / "manifest.json"), run_sha256=wf_ab.sha256(root / "RUN.json"))
+
+
+def paired_outcomes(control, defended):
+    """Control-relative availability with site-cluster uncertainty; every attempted load counts."""
+    import numpy as np
+
+    pairs = wf_ab.paired_rows(control, defended)
+    by_site = collections.defaultdict(list)
+    by_cell = collections.defaultdict(list)
+    latency = []
+    for left, right in pairs:
+        difference = int(right["status"] == "ok") - int(left["status"] == "ok")
+        by_site[left["site"]].append(difference)
+        by_cell[left["round"], left["site"]].append(difference)
+        if left["status"] == right["status"] == "ok" and all("loaded" in r and "start" in r for r in (left, right)):
+            latency.append((right["loaded"] - right["start"]) - (left["loaded"] - left["start"]))
+    sites = sorted(by_site)
+    rng = np.random.default_rng(0)
+    bootstrap = [
+        np.mean([v for site in rng.choice(sites, len(sites), replace=True) for v in by_site[site]])
+        for _ in range(10000)
+    ]
+    rounds = sorted({key[0] for key in by_cell})
+    total = np.array([[sum(by_cell[r, site]) for site in sites] for r in rounds])
+    count = np.array([[len(by_cell[r, site]) for site in sites] for r in rounds])
+    crossed = []
+    for _ in range(10000):
+        r = rng.integers(len(rounds), size=len(rounds))
+        s = rng.integers(len(sites), size=len(sites))
+        cells = np.ix_(r, s)
+        crossed.append(total[cells].sum() / count[cells].sum())
+    return dict(
+        pairs=len(pairs),
+        success_difference=float(np.mean([v for values in by_site.values() for v in values])),
+        success_difference_site_cluster_ci95=list(map(float, np.percentile(bootstrap, [2.5, 97.5]))),
+        success_difference_two_way_cluster_ci95=list(map(float, np.percentile(crossed, [2.5, 97.5]))),
+        both_successful_pairs=len(latency),
+        paired_success_latency_difference_median=statistics.median(latency) if latency else None,
+    )
+
+
+def local_acceptance(variants, paired):
+    """Evaluate the frozen single-host thresholds; external replication remains a separate gate."""
+    control = variants["undefended"]["views"]["both"]["primary"]["accuracy"] >= 0.8
+    baseline = variants["undefended"]
+    control_views = all(
+        view["primary"]["accuracy"] > baseline["chance"] + 0.05
+        and view["primary"]["p_holm_all_nine_primary_views"] <= 0.05
+        for view in baseline["views"].values()
+    )
+    control_valid = (
+        all(r["reason"] in ("no_valid_browser_start", "unmonitored") for r in baseline["excluded"])
+        and all(s["capture"].get("unexpected_outgoing") == 0 for s in baseline["sources"])
+        and all(r.get("protection_observations", {}).get("control_samples_valid") for r in baseline["window_evidence"])
+    )
+    checks = dict(
+        positive_control=control, control_views_attackable=control_views, control_collection_valid=control_valid
+    )
+    for name in ("relay30", "relay5"):
+        variant = variants[name]
+        checks[name] = dict(
+            classifier_upper_bounds=all(
+                v["primary"]["ci95_round_bootstrap"][1] <= variant["chance"] + 0.05 for v in variant["views"].values()
+            ),
+            no_unresolved_corrected_signal=all(
+                v["primary"]["p_holm_all_nine_primary_views"] > 0.05 for v in variant["views"].values()
+            ),
+            success_noninferiority=paired[name]["success_difference_two_way_cluster_ci95"][0] >= -0.05,
+            no_invalid_capture_windows=all(
+                r["reason"] in ("no_valid_browser_start", "unmonitored") for r in variant["excluded"]
+            ),
+            underlay_metadata_audit=all(s["capture"].get("unexpected_outgoing") == 0 for s in variant["sources"]),
+            all_sampled_protection_valid=all(
+                r.get("protection_observations", {}).get("all_samples_protected") for r in variant["window_evidence"]
+            ),
+        )
+    passed = (
+        control
+        and control_views
+        and control_valid
+        and all(all(checks[name].values()) for name in ("relay30", "relay5"))
+    )
+    return dict(
+        status="passed_local_only" if passed else "failed",
+        checks=checks,
+        external_replication="not_qualified",
+        promotes_default=False,
+        interpretation="Sampled protection and one closed-world host/network experiment are not a general anonymity proof",
+    )
+
+
 def main():
     """Analyze the prespecified six-round experiment without overwriting prior results."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -235,7 +409,10 @@ def main():
 
     data = {variant: load(args.run, variant) for variant in VARIANTS}
     validate_matching([(item[4], item[6]) for item in data.values()])
+    protocol = validate_protocol(args.run, data)
     for _, y, groups, _, attempts, _, sources in data.values():
+        if any(not s.get("capture") for s in sources):
+            raise ValueError("fresh replication requires recorder coverage and protection observation evidence")
         counts = collections.Counter((r["round"], r["label"]) for r in attempts)
         if (
             len(attempts) != 240
@@ -253,10 +430,18 @@ def main():
         status="running",
         analysis="fresh-control replication",
         variants={},
+        protocol=protocol,
         versions=dict(numpy=np.__version__, sklearn=sklearn.__version__),
         analysis_sources={
             name: wf_ab.sha256(Path(__file__).with_name(name))
-            for name in ("wf_replication.py", "wf_ab.py", "wf_deep.py", "wf_attack.py")
+            for name in (
+                "wf_replication.py",
+                "wf_ab.py",
+                "wf_deep.py",
+                "wf_attack.py",
+                "wf_validity.py",
+                "wf_protocol.py",
+            )
         },
         method=dict(
             primary="all bracketed monitored windows, including browser failures",
@@ -265,9 +450,8 @@ def main():
         ),
         limitations=[
             "Single host/network; round-bootstrap interval has few clusters",
-            "Packet bracketing is conservative; no recorder liveness proof",
-            "Final protection snapshots do not prove a continuously protected interval",
-            "Counterbalanced arm timing/provenance must also be verified before interpreting results",
+            "Protection observations are sampled and do not prove continuous protection between samples",
+            "The underlay audit checks metadata allowlists rather than application-payload confidentiality",
         ],
     )
 
@@ -281,6 +465,10 @@ def main():
             windows=len(rows),
             excluded=excluded,
             sources=sources,
+            window_evidence=[
+                {k: r[k] for k in ("round", "site", "status", "capture_validity", "protection_observations") if k in r}
+                for r in rows
+            ],
             sites=len(set(y)),
             chance=1 / len(set(y)),
             views={},
@@ -309,6 +497,10 @@ def main():
             print(variant, name, primary["accuracy"], flush=True)
     for view, p in zip(primary_views, wf_ab.holm([v["p_value"] for v in primary_views]), strict=True):
         view["p_holm_all_nine_primary_views"] = p
+    result["paired_against_control"] = {
+        name: paired_outcomes(data["undefended"][4], data[name][4]) for name in ("relay30", "relay5")
+    }
+    result["local_acceptance"] = local_acceptance(result["variants"], result["paired_against_control"])
     result["status"] = "complete"
     save()
 

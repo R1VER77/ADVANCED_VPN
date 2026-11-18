@@ -1,0 +1,136 @@
+// The controller's status object (CONTROLLER_CONTRACT.md). The GUI renders it; it never
+// decides on its own whether traffic is protected.
+
+export type State =
+  | 'unknown'
+  | 'not_enrolled'
+  | 'locked'
+  | 'disconnected'
+  | 'connecting'
+  | 'connected'
+  | 'reconnecting'
+  | 'failed'
+  | 'cleartext_allowed'
+
+export type Protection = 'protected' | 'blocked' | 'unprotected' | 'unknown'
+
+export type Reason =
+  | 'network_down'
+  | 'relay_unreachable'
+  | 'server_auth_failed'
+  | 'chain_outdated'
+  | 'nitrokey_pin_rejected'
+  | 'nitrokey_missing'
+  | 'firewall_tampering'
+  | 'privacy_budget'
+  | 'service_stopped'
+
+export type Next =
+  | 'wait'
+  | 'retry'
+  | 'resign_chain'
+  | 'unlock'
+  | 'insert_key'
+  | 'restart_service'
+  | 'wait_or_raise_limit'
+  | 'start_service'
+
+export type Rate = 'metered' | 'standard' | 'fast' | 'line'
+
+export interface Hop {
+  hop: 'relay' | 'middle' | 'exit'
+  provider: string
+  region: string
+  country: string // ISO 3166 alpha-2
+  city: string
+  lat: number // the region's location (from the profile, never looked up)
+  lon: number
+}
+
+export interface Evidence {
+  cloak_confirmed_at: number
+  carrier_handshake_at: number
+  path_probe_at: number
+}
+
+export interface Status {
+  schema: 1
+  observed_at: number
+  scope: 'applications' | 'whole-device' | 'none' | 'unknown'
+  enrolled: boolean
+  state: State
+  protection: Protection
+  since: number
+  reason: Reason | null
+  next: Next | null
+  detail?: string
+  evidence?: Evidence
+  chain: Hop[]
+  rate: Rate | null
+  kill_switch: 'active' | 'none' | 'unknown'
+  unlock: 'nitrokey' | 'hardware' | 'systemd-creds' | 'none'
+  crypto: { kex: string; auth: string; cloak: string } | null
+  exit_ip: string | null
+}
+
+export type EnrollError = 'bundle_invalid' | 'bundle_wrong_operator' | 'bundle_expired'
+
+export type CommandResult = { ok: true; status: Status } | { ok: false; reason: string; detail?: string }
+
+/** What the GUI may ask of the controller. The kill switch has no "off", by design. */
+export interface Controller {
+  status(): Promise<Status>
+  connect(): Promise<CommandResult>
+  disconnect(): Promise<CommandResult>
+  retry(): Promise<CommandResult>
+  enroll(bundle: string): Promise<CommandResult>
+  setRate(rate: Rate): Promise<CommandResult>
+  startService(): Promise<CommandResult>
+  readonly kind: 'mock' | 'real'
+}
+
+/** The GUI-side state when the controller cannot be read at all. */
+export const UNAVAILABLE = 'controller_unavailable' as const
+
+/** Evidence older than this means the controller must not say "protected". */
+export const EVIDENCE_MAX_AGE = { cloak_confirmed_at: 3, carrier_handshake_at: 3, path_probe_at: 15 }
+
+export type SetupBranch = 'create' | 'join'
+export type StepState = 'pending' | 'running' | 'waiting_for_user' | 'waiting_for_hardware' | 'blocked' | 'failed' | 'complete' | 'skipped'
+export interface SetupStep {
+  id: string
+  title: string
+  state: StepState
+  say: string
+  actions: ActionRequest[]
+}
+export interface SetupSnapshot {
+  schema: 1
+  branch: SetupBranch
+  complete: number
+  total: number
+  current: string | null
+  finished: boolean
+  steps: SetupStep[]
+  device_request?: { text: string; sha256: string } | null
+}
+export type ActionRequest =
+  | { action: 'connect'; scope: 'applications' | 'whole-device' }
+  | { action: 'disconnect' | 'retry' | 'unlock' | 'request_device' }
+  | { action: 'repair'; repair: 'install_udev_rule' | 'yubikey_enable_fido2'; selector: string | null }
+  | { action: 'import_bundle'; bundle_base64: string; operator_key_base64: string; replace: boolean }
+export interface ActionPlan {
+  schema: 1
+  id: string
+  input_digest: string
+  generation: string
+  expires_at: number
+  summary: string
+  effects: string[]
+}
+export interface Operation {
+  schema: 1
+  id: string
+  state: 'running' | 'waiting_for_user' | 'waiting_for_hardware' | 'complete' | 'failed' | 'cancelled'
+  message: string
+}

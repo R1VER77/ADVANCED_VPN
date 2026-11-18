@@ -36,6 +36,7 @@ class RuntimeManifest(unittest.TestCase):
                  entries=runtime.inventory(self.bundle))  # fmt: skip
         m.update(overrides)
         (self.bundle / runtime.MANIFEST).write_text(json.dumps(m))
+        (self.bundle / runtime.MANIFEST).chmod(0o644)
 
     def test_complete_runtime_and_internal_symlinks_are_verified_without_execution(self):
         with mock.patch.object(runtime.subprocess, "run", side_effect=AssertionError("executed runtime")):
@@ -96,19 +97,22 @@ class RuntimeManifest(unittest.TestCase):
 
     def test_system_install_uses_bundle_offline_and_does_not_reuse_old_venv(self):
         package = self.root / "package"
+        (package / "bin").mkdir(parents=True)
         (package / "tools").mkdir(parents=True)
         (package / "tools/hardware-requirements.txt").write_bytes(self.lock.read_bytes())
         self.bundle.rename(package / "venv")
         target = self.root / "installed"
         (target / "venv").mkdir(parents=True)
         (target / "venv/old-runtime").write_text("old environment")
+        target.chmod(0o755)
         with (
             mock.patch.object(install.os, "chown"),
+            mock.patch.object(install, "check_application"),
             mock.patch.object(install.subprocess, "run", side_effect=AssertionError("pip/network during install")),
         ):
-            self.assertTrue(install.install_system(package, target))
+            self.assertTrue(install.install_system(package, target, adopt_legacy=True))
         self.assertFalse((target / "venv/old-runtime").exists())
-        runtime.verify(target / "venv", target / "tools/hardware-requirements.txt")
+        runtime.verify((target / "venv").resolve(), target / "tools/hardware-requirements.txt")
         self.assertTrue((target / "venv/bin/python3").is_symlink())
 
     def test_invalid_bundle_preserves_previous_installation(self):
@@ -129,25 +133,32 @@ class RuntimeManifest(unittest.TestCase):
 
     def test_final_swap_failure_restores_the_previous_system_runtime(self):
         package = self.root / "package"
+        (package / "bin").mkdir(parents=True)
         (package / "tools").mkdir(parents=True)
         (package / "tools/hardware-requirements.txt").write_bytes(self.lock.read_bytes())
         self.bundle.rename(package / "venv")
         target = self.root / "installed"
-        (target / "venv").mkdir(parents=True)
-        (target / "venv/preserve").write_text("previous working runtime")
-        rename = Path.rename
+        with mock.patch.object(install.os, "chown"), mock.patch.object(install, "check_application"):
+            install.install_system(package, target)
+        previous = (target / "venv").resolve()
+        before = (previous / "lib/dependency.py").read_bytes()
+        replace = os.replace
 
         def refuse_stage(path, destination):
-            if path.name.startswith("installed.new-"):
+            if Path(destination).name == "current":
                 raise OSError("injected final rename failure")
-            return rename(path, destination)
+            return replace(path, destination)
 
-        with mock.patch.object(install.os, "chown"), mock.patch.object(Path, "rename", refuse_stage):
+        with (
+            mock.patch.object(install.os, "chown"),
+            mock.patch.object(os, "replace", refuse_stage),
+            mock.patch.object(install, "check_application"),
+        ):
             with self.assertRaisesRegex(OSError, "final rename"):
                 install.install_system(package, target)
-        self.assertEqual((target / "venv/preserve").read_text(), "previous working runtime")
-        self.assertFalse(list(self.root.glob("installed.new-*")))
-        self.assertFalse(list(self.root.glob("installed.old-*")))
+        self.assertEqual((target / "venv").resolve(), previous)
+        self.assertEqual((previous / "lib/dependency.py").read_bytes(), before)
+        self.assertFalse(list((target / "releases").glob(".prepare-*")))
 
 
 if __name__ == "__main__":

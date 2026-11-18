@@ -1,0 +1,18 @@
+{
+  "schema": 1,
+  "tested": [["debian", "12"], ["debian", "13"], ["ubuntu", "22.04"], ["ubuntu", "24.04"]],
+  "families": ["debian", "ubuntu", "fedora", "rhel", "centos", "arch", "suse", "opensuse"],
+  "architectures": ["x86_64", "amd64"],
+  "release_glibc": [2, 35],
+  "systemd_creds": 250,
+  "need_mb": 500,
+  "programs": ["ip", "nft", "mount", "systemctl"],
+  "system_paths": ["/usr/local/sbin", "/usr/local/bin", "/usr/sbin", "/sbin", "/usr/bin", "/bin"],
+  "packages": {
+    "nft": {"apt": "nftables", "dnf": "nftables", "pacman": "nftables", "zypper": "nftables"},
+    "ip": {"apt": "iproute2", "dnf": "iproute", "pacman": "iproute2", "zypper": "iproute2"},
+    "mount": {"apt": "mount", "dnf": "util-linux", "pacman": "util-linux", "zypper": "util-linux"},
+    "systemctl": {"apt": "systemd", "dnf": "systemd", "pacman": "systemd", "zypper": "systemd"},
+    "venv": {"apt": "python3-venv", "dnf": "python3", "pacman": "python", "zypper": "python3"}
+  }
+}

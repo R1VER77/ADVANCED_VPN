@@ -1600,11 +1600,8 @@ ENROLLMENT_FILES = [
 ] + [l + "-ca.der" for l in ["outer", "middle", "inner"]]
 
 
-def enroll(bundle, operator_public, state, replace=False):
-    """Device: verify the hybrid operator signature and that the bundle names this
-    device's own keys, then decrypt the PSK and re-protect the WireGuard key.
-    replace=True swaps in a new chain (e.g. another hop count) keeping device keys;
-    the caller must have stopped the controller."""
+def inspect_enrollment_bundle(bundle, operator_public, state, replace=False):
+    """Verify public signatures, bounds and device binding without unsealing or mutation."""
     raw_operator, operator = read_operator(operator_public)
     request_doc = json.loads(read_private(state / "request.json"))
     if (state / "profile.json").exists() and not replace:
@@ -1673,6 +1670,30 @@ def enroll(bundle, operator_public, state, replace=False):
             or b["peer_public_hex"] != profile["carrier"]["peer_public_hex"]
         ):
             raise ValueError("bundle is for another device")
+    return dict(
+        raw_operator=raw_operator,
+        raw=raw,
+        profile=profile,
+        contents=contents,
+        role=role,
+        mesh_carrier=mesh_carrier,
+        links=links,
+    )
+
+
+def enroll(bundle, operator_public, state, replace=False):
+    """Device: verify the hybrid operator signature and that the bundle names this
+    device's own keys, then decrypt the PSK and re-protect the WireGuard key.
+    replace=True swaps in a new chain (e.g. another hop count) keeping device keys;
+    the caller must have stopped the controller."""
+    checked = inspect_enrollment_bundle(bundle, operator_public, state, replace)
+    raw_operator = checked["raw_operator"]
+    raw = checked["raw"]
+    profile = checked["profile"]
+    contents = checked["contents"]
+    role = checked["role"]
+    mesh_carrier = checked["mesh_carrier"]
+    links = checked["links"]
     secret = meta = None
     protection = json.loads(read_private(state / "protection.json"))
     link_blob = None

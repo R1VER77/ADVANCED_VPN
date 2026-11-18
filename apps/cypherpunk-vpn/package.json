@@ -1,0 +1,36 @@
+{
+  "name": "cypherpunk-vpn-gui",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc -b && vite build",
+    "preview": "vite preview",
+    "build:demo": "vue-tsc -b && vite build --mode demo --outDir dist-demo",
+    "dev:demo": "vite --open /demo.html",
+    "test:glob-guard": "node scripts/check-glob-guard.mjs"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "2.12.5",
+    "d3-geo": "3.1.2",
+    "topojson-client": "3.1.0",
+    "vue": "3.5.45",
+    "world-atlas": "2.0.2"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.12.5",
+    "@types/d3-geo": "3.1.1",
+    "@types/node": "26.6.6",
+    "@types/topojson-client": "3.1.5",
+    "@vitejs/plugin-vue": "6.0.11",
+    "@vue/tsconfig": "0.7.0",
+    "typescript": "5.8.3",
+    "vite": "8.3.8",
+    "vue-tsc": "3.3.14",
+    "picomatch": "file:vendor/picomatch"
+  },
+  "overrides": {
+    "picomatch": "$picomatch"
+  }
+}

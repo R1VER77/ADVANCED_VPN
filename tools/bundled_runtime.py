@@ -72,7 +72,12 @@ def verify(root, requirements):
     """Verify content and lock pin; authenticate the package before its bootstrap runs."""
     root = Path(root)
     marker = root / MANIFEST
-    if marker.is_symlink() or not marker.is_file() or marker.stat().st_size > 4 << 20:
+    if (
+        marker.is_symlink()
+        or not marker.is_file()
+        or marker.stat().st_size > 4 << 20
+        or marker.stat().st_mode & (0o022 | 0o7000)
+    ):
         raise ValueError("missing or unsafe bundled runtime manifest")
     m = json.loads(marker.read_text())
     expected = dict(schema=1, python=VERSION, platform="x86_64-linux-gnu", archive_sha256=ARCHIVE_SHA256)

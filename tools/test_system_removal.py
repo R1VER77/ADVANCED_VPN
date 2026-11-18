@@ -8,6 +8,7 @@ import unittest
 from unittest import mock
 
 import install
+import guard_policy
 
 
 class RemovalGate(unittest.TestCase):
@@ -20,6 +21,13 @@ class RemovalGate(unittest.TestCase):
         self.states = {}
         self.tables, self.namespaces, self.links = [], [], []
         self.calls = []
+        for name, path in (
+            ("MARKER", Path(self.temp.name) / "whole-device.guard"),
+            ("UNITS", Path(self.temp.name) / "units"),
+        ):
+            patcher = mock.patch.object(guard_policy, name, path)
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     def command(self, argv, **kwargs):
         self.calls.append(argv)
@@ -45,10 +53,10 @@ class RemovalGate(unittest.TestCase):
 
     def test_inactive_disabled_empty_host_passes_with_only_read_operations(self):
         self.check()
-        self.assertEqual(len(self.calls), 5)
+        self.assertEqual(len(self.calls), 6)
 
     def test_each_active_or_enabled_unit_blocks_before_network_queries(self):
-        for unit in ("advanced-vpn.service", "advanced-vpn-guard.service"):
+        for unit in ("advanced-vpn.service", "advanced-vpn-guard.service", "cypherpunk-vpn-controller.service"):
             for update in (dict(ActiveState="active"), dict(ActiveState="activating"),
                            dict(UnitFileState="enabled"), dict(UnitFileState="enabled-runtime"),
                            dict(ActiveState="unknown"), dict(UnitFileState="unknown")):  # fmt: skip
@@ -67,6 +75,18 @@ class RemovalGate(unittest.TestCase):
                 self.tables = [dict(table=dict(family="inet", name=name))]
                 with self.assertRaisesRegex(RuntimeError, "guard is retained"):
                     self.check()
+
+    def test_persistent_intent_and_manager_dependency_block_removal_without_queries(self):
+        guard_policy.MARKER.write_bytes(b"intent")
+        with self.assertRaisesRegex(RuntimeError, "persistent whole-device"):
+            self.check()
+        guard_policy.MARKER.unlink()
+        dependency = guard_policy.UNITS / (guard_policy.MANAGERS[0] + ".d") / guard_policy.DROPIN
+        dependency.parent.mkdir(parents=True)
+        dependency.write_bytes(guard_policy.REQUIRE)
+        with self.assertRaisesRegex(RuntimeError, "network manager"):
+            self.check()
+        self.assertEqual(self.calls, [])
 
     def test_protected_namespace_and_owned_interface_block_removal(self):
         self.namespaces = [dict(name="avpn-app")]

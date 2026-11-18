@@ -7,6 +7,8 @@ preconfigured FIDO2 PIN. Keeps long-lived private material off the relay host.
 
 import argparse
 import base64
+import contextlib
+import contextvars
 from dataclasses import replace
 import fcntl
 import hashlib
@@ -18,6 +20,7 @@ import secrets
 import stat
 import subprocess
 import sys
+import time
 from urllib.parse import unquote_to_bytes
 
 from cryptography.hazmat.primitives import hashes
@@ -71,6 +74,22 @@ def atomic(path, data):
 ASK_PASSWORD = "/usr/bin/systemd-ask-password"
 PINENTRY = "/usr/bin/pinentry-gnome3"
 PIN_PROMPT = "ADVANCED VPN: FIDO2 PIN, then touch the Nitrokey when it flashes"
+_PROMPT_CALLER = contextvars.ContextVar("cypherpunk_authenticated_prompt_caller", default=None)
+_PROMPT_CANCEL = contextvars.ContextVar("cypherpunk_prompt_cancellation", default=None)
+
+
+@contextlib.contextmanager
+def authenticated_prompt(uid, cancel=None):
+    """Root broker's authenticated bus caller; thread-local and never a WebView PIN."""
+    if os.geteuid() != 0 or type(uid) is not int or uid <= 0:
+        raise ValueError("a trusted non-root desktop caller is required")
+    token = _PROMPT_CALLER.set(uid)
+    cancellation = _PROMPT_CANCEL.set(cancel)
+    try:
+        yield
+    finally:
+        _PROMPT_CANCEL.reset(cancellation)
+        _PROMPT_CALLER.reset(token)
 
 
 class DialogUnavailable(RuntimeError):
@@ -86,13 +105,20 @@ def desktop_session():
     if os.environ.get("SSH_CONNECTION") or os.environ.get("AVPN_PIN_DIALOG") == "0":
         return None
     uid, gid = os.environ.get("SUDO_UID", ""), os.environ.get("SUDO_GID", "")
+    home = os.environ.get("HOME", "/")
+    caller = _PROMPT_CALLER.get()
+    if caller is not None:
+        import pwd
+
+        person = pwd.getpwuid(caller)
+        uid, gid, home = str(person.pw_uid), str(person.pw_gid), person.pw_dir
     if os.geteuid() != 0 or not (uid.isdigit() and gid.isdigit()) or int(uid) == 0:
         # Not through sudo (yourself, or root with a display of its own): this session.
         if os.environ.get("WAYLAND_DISPLAY") or os.environ.get("DISPLAY"):
             return None, None, dict(os.environ)
         return None
     runtime = Path("/run/user") / uid
-    env = {"PATH": "/usr/bin:/bin", "XDG_RUNTIME_DIR": str(runtime), "HOME": os.environ.get("HOME", "/")}
+    env = {"PATH": "/usr/bin:/bin", "XDG_RUNTIME_DIR": str(runtime), "HOME": home}
     try:
         wayland = sorted(p.name for p in runtime.glob("wayland-[0-9]*") if not p.name.endswith(".lock"))
     except OSError:
@@ -126,6 +152,8 @@ def pinentry():
             return desktop_pinentry(session)
         except DialogUnavailable:
             pass
+    if _PROMPT_CALLER.get() is not None:
+        raise RuntimeError("trusted desktop prompt unavailable; use the local terminal unlock command")
     if sys.stdin.isatty():
         import getpass
 
@@ -162,7 +190,39 @@ def desktop_pinentry(session=None):
     message = "SETTITLE ADVANCED VPN\nSETDESC Enter your Nitrokey PIN, then touch the key when it flashes.\nThis cannot reset or change the PIN.\nSETPROMPT PIN:\nGETPIN\nBYE\n"
     kw = dict(user=uid, group=gid, extra_groups=[]) if uid is not None else {}
     try:
-        r = subprocess.run([PINENTRY], input=message.encode(), capture_output=True, timeout=180, env=env, **kw)
+        cancel = _PROMPT_CANCEL.get()
+        if cancel is None:
+            r = subprocess.run([PINENTRY], input=message.encode(), capture_output=True, timeout=180, env=env, **kw)
+        else:
+            # Own only this native prompt process. Cancellation never signals a
+            # token-management service or unrelated PIN dialog.
+            with subprocess.Popen(
+                [PINENTRY], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, **kw
+            ) as process:
+                deadline = time.monotonic() + 180
+                first = True
+                try:
+                    while True:
+                        if cancel.is_set():
+                            raise InterruptedError("native prompt cancelled")
+                        if time.monotonic() >= deadline:
+                            raise subprocess.TimeoutExpired(PINENTRY, 180)
+                        data = message.encode() if first else None
+                        first = False
+                        try:
+                            stdout, stderr = process.communicate(input=data, timeout=0.1)
+                            r = subprocess.CompletedProcess([PINENTRY], process.returncode, stdout, stderr)
+                            break
+                        except subprocess.TimeoutExpired:
+                            continue
+                finally:
+                    if process.poll() is None:
+                        process.terminate()
+                        try:
+                            process.wait(timeout=2)
+                        except subprocess.TimeoutExpired:
+                            process.kill()
+                            process.wait(timeout=2)
     except (OSError, subprocess.TimeoutExpired) as e:
         raise DialogUnavailable(str(e)) from e
     errors = [v for v in r.stdout.splitlines() if v.startswith(b"ERR ")]
@@ -246,7 +306,10 @@ def enroll(vault):
             user_verification="required",
             extensions={"hmacCreateSecret": True},
         )
-        response = c.make_credential(replace(options.public_key, timeout=90000))
+        if _PROMPT_CANCEL.get() is None:
+            response = c.make_credential(replace(options.public_key, timeout=90000))
+        else:
+            response = c.make_credential(replace(options.public_key, timeout=90000), event=_PROMPT_CANCEL.get())
         auth = s.register_complete(state, response)
         if response.client_extension_results.hmac_create_secret is not True:
             raise RuntimeError("extension unavailable")
@@ -301,7 +364,12 @@ def hardware_assertion(vault, message=None, salt2=None):
                 "hmacGetSecret": dict(salt1=unb64(meta["salt"]), **({} if salt2 is None else {"salt2": salt2}))
             },
         )
-        response = c.get_assertion(replace(options.public_key, timeout=90000)).get_response(0)
+        if _PROMPT_CANCEL.get() is None:
+            response = c.get_assertion(replace(options.public_key, timeout=90000)).get_response(0)
+        else:
+            response = c.get_assertion(
+                replace(options.public_key, timeout=90000), event=_PROMPT_CANCEL.get()
+            ).get_response(0)
         s.authenticate_complete(state, [credential], response)
         assertion = dict(
             authenticator_data=b64(bytes(response.response.authenticator_data)),

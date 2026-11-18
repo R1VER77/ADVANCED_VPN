@@ -19,16 +19,27 @@ def trusted_exe(name):
     namespace) and not writable by group or others."""
     if "/" in name or not name:
         raise ValueError("bare executable name required")
+    owners = {0}
     try:
-        overflow = int(Path("/proc/sys/kernel/overflowuid").read_text())
+        mappings = [tuple(map(int, line.split())) for line in Path("/proc/self/uid_map").read_text().splitlines()]
+        # Unmapped host root is trusted only inside an actual unprivileged test
+        # namespace. A real root process must never trust a nobody-owned program.
+        if os.geteuid() == 0 and mappings and not any(start == 0 for _, start, count in mappings if count):
+            owners.add(int(Path("/proc/sys/kernel/overflowuid").read_text()))
     except (OSError, ValueError):
-        overflow = -1
+        pass
     for d in TRUSTED_DIRS:
         p = Path(d) / name
         if not p.exists():
             continue
         real = p.resolve()
         m = real.stat()
-        if stat.S_ISREG(m.st_mode) and m.st_uid in (0, overflow) and not m.st_mode & 0o022 and os.access(real, os.X_OK):
+        if (
+            stat.S_ISREG(m.st_mode)
+            and m.st_uid in owners
+            and not m.st_mode & 0o022
+            and os.access(real, os.X_OK)
+            and all(parent.stat().st_uid in owners and not parent.stat().st_mode & 0o022 for parent in real.parents)
+        ):
             return str(real)
     raise FileNotFoundError("trusted executable not found: " + name)
