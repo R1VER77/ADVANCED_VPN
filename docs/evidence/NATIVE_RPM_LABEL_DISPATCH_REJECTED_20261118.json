@@ -1,0 +1,97 @@
+{
+  "schema": 1,
+  "status": "failed_native_rpm_label_dispatch",
+  "scope": "preserved_corrective_candidate_d_failures_not_qualification",
+  "cause": "trusted_exe resolved restorecon symlink to setfiles and changed its argv[0] dispatch mode",
+  "correction": "execute the ownership-checked resolved binary with fixed restorecon argv[0]",
+  "trials": [
+    {
+      "distribution": "fedora45",
+      "result_sha256": "adbbabfe7b2b69e07ac6ded7df5ce017327770889ba68c103a0ef3bbbec27c55",
+      "result": {
+        "schema": 1,
+        "status": "failed",
+        "scope": "local_native_rpm_lifecycle_only",
+        "started": 1795041763.7909968,
+        "base_sha256": "50bdc5e70f6a24f540932d15411c1c6ae9fcfa40fb990d876d83c5cc823b2ad0",
+        "package_sha256": "baf91f3feebe05ae2ec801e5a21ca8ad851cb136a8c306e5bb0b5f44e3913c98",
+        "harness_sha256": "e19114701536ffd1fda3bfb54ef5e72d6ac59bac41b9faa7062edad539ffb851",
+        "controller_client_sha256": "910c1acd12396072afb05aabebef5d7f164d65c5f6a107e2d5dc64df0bd947f0",
+        "downgrade_package_sha256": "c2838b195f1f8b09c04690997d9abe0c8bae080dfe0aa5f834ce946363c9d2c6",
+        "phases": {
+          "dependency_preparation": {
+            "status": "passed",
+            "networkless_install_phases": true,
+            "package_downloads_disabled": true
+          },
+          "package_signature": {
+            "status": "verified",
+            "production_key_qualified": false
+          }
+        },
+        "test_signing_key": {
+          "fingerprint": "A81D81DDF212E466F7A69D7C2D268CCC8C17D827",
+          "sha256": "bf206e78d81076860741d8b362de8fdb58e0238d9325d91aaa7aa163046040c4",
+          "scope": "explicit_testing_key_import_in_this_guest_only_not_production_signing"
+        },
+        "os_release": "NAME=\"Fedora Linux\"\nVERSION=\"45 (Cloud Edition)\"\nRELEASE_TYPE=stable\nID=fedora\nVERSION_ID=45\nVERSION_CODENAME=\"\"\nPRETTY_NAME=\"Fedora Linux 45 (Cloud Edition)\"\nANSI_COLOR=\"0;38;2;60;110;180\"\nLOGO=fedora-logo-icon\nCPE_NAME=\"cpe:/o:fedoraproject:fedora:45\"\nHOME_URL=\"https://fedoraproject.org/\"\nDOCUMENTATION_URL=\"https://docs.fedoraproject.org/en-US/fedora/f45/\"\nSUPPORT_URL=\"https://ask.fedoraproject.org/\"\nBUG_REPORT_URL=\"https://bugzilla.redhat.com/\"\nREDHAT_BUGZILLA_PRODUCT=\"Fedora\"\nREDHAT_BUGZILLA_PRODUCT_VERSION=45\nREDHAT_SUPPORT_PRODUCT=\"Fedora\"\nREDHAT_SUPPORT_PRODUCT_VERSION=45\nSUPPORT_END=2027-11-24\nVARIANT=\"Cloud Edition\"\nVARIANT_ID=cloud\n",
+        "selinux_enforcing": true,
+        "administration_fixture": {
+          "hook": "/usr/libexec/qemu-ga/fsfreeze-hook.d/cypherpunk-validation-exec",
+          "context": "system_u:system_r:virt_qemu_ga_unconfined_t:s0",
+          "virt_qemu_ga_run_unconfined": true,
+          "scope": "trusted_vm_administration_only_not_a_product_policy",
+          "commands": "trusted_guest_agent_hook_with_fixed_system_environment",
+          "package_administration": "transient_root_systemd_services_product_units_unchanged"
+        },
+        "error": "RuntimeError: native installation failed; see install.log",
+        "stopped": 1795041856.1470654,
+        "guest_retained_for_diagnostics": false
+      }
+    },
+    {
+      "distribution": "rocky103",
+      "result_sha256": "b9b5a0e81af19c97e9a34794341f89846d2e87d27ba7360706d5dc4559ddab17",
+      "result": {
+        "schema": 1,
+        "status": "failed",
+        "scope": "local_native_rpm_lifecycle_only",
+        "started": 1795041763.79401,
+        "base_sha256": "68eae06d402c8b19e7dca06e85bdc43a3476089afa3ee20d93d0d43cf9871e9e",
+        "package_sha256": "baf91f3feebe05ae2ec801e5a21ca8ad851cb136a8c306e5bb0b5f44e3913c98",
+        "harness_sha256": "e19114701536ffd1fda3bfb54ef5e72d6ac59bac41b9faa7062edad539ffb851",
+        "controller_client_sha256": "910c1acd12396072afb05aabebef5d7f164d65c5f6a107e2d5dc64df0bd947f0",
+        "downgrade_package_sha256": "c2838b195f1f8b09c04690997d9abe0c8bae080dfe0aa5f834ce946363c9d2c6",
+        "phases": {
+          "dependency_preparation": {
+            "status": "passed",
+            "networkless_install_phases": true,
+            "package_downloads_disabled": true
+          },
+          "package_signature": {
+            "status": "verified",
+            "production_key_qualified": false
+          }
+        },
+        "test_signing_key": {
+          "fingerprint": "A81D81DDF212E466F7A69D7C2D268CCC8C17D827",
+          "sha256": "bf206e78d81076860741d8b362de8fdb58e0238d9325d91aaa7aa163046040c4",
+          "scope": "explicit_testing_key_import_in_this_guest_only_not_production_signing"
+        },
+        "os_release": "NAME=\"Rocky Linux\"\nVERSION=\"10.3 (Red Quartz)\"\nRELEASE_TYPE=\"stable\"\nID=\"rocky\"\nID_LIKE=\"rhel centos fedora\"\nVERSION_ID=\"10.3\"\nPLATFORM_ID=\"platform:el10\"\nPRETTY_NAME=\"Rocky Linux 10.3 (Red Quartz)\"\nANSI_COLOR=\"0;32\"\nLOGO=\"fedora-logo-icon\"\nCPE_NAME=\"cpe:/o:rocky:rocky:10::baseos\"\nHOME_URL=\"https://rockylinux.org/\"\nVENDOR_NAME=\"RESF\"\nVENDOR_URL=\"https://resf.org/\"\nBUG_REPORT_URL=\"https://bugs.rockylinux.org/\"\nSUPPORT_END=\"2035-05-31\"\nROCKY_SUPPORT_PRODUCT=\"Rocky-Linux-10\"\nROCKY_SUPPORT_PRODUCT_VERSION=\"10.3\"\nREDHAT_SUPPORT_PRODUCT=\"Rocky Linux\"\nREDHAT_SUPPORT_PRODUCT_VERSION=\"10.3\"\n",
+        "selinux_enforcing": true,
+        "administration_fixture": {
+          "hook": "/usr/libexec/qemu-ga/fsfreeze-hook.d/cypherpunk-validation-exec",
+          "context": "system_u:system_r:virt_qemu_ga_unconfined_t:s0",
+          "virt_qemu_ga_run_unconfined": true,
+          "scope": "trusted_vm_administration_only_not_a_product_policy",
+          "commands": "trusted_guest_agent_hook_with_fixed_system_environment",
+          "package_administration": "transient_root_systemd_services_product_units_unchanged"
+        },
+        "error": "RuntimeError: guest command failed (1): /usr/libexec/qemu-ga/fsfreeze-hook.d/cypherpunk-validation-exec /usr/bin/readlink /opt/advanced-vpn/current\n\n",
+        "stopped": 1795041845.4998095,
+        "guest_retained_for_diagnostics": false
+      }
+    }
+  ]
+}

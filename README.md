@@ -18,7 +18,7 @@ flowchart LR
     Exit --> Internet[Destination]
 ```
 
-WireGuard is the outer carrier, implemented by **GotaTun 0.10.2**, with its actual DAITA integration and public **Maybenot 2.2.2** defense machines. Its ChaCha20-Poly1305 encryption and 256-bit PSK supplement the existing **two TLS 1.3 X25519 + ML-KEM-768 / AES-256-GCM layers**. WireGuard alone is not advertised as native ML-KEM. Authentication is post-quantum too: both QUIC layers accept **only ML-DSA-65** (FIPS 204) certificate chains and TLS 1.3 CertificateVerify signatures, and operator enrollment bundles carry a **hybrid Ed25519 + ML-DSA-65** signature pair that must both verify. A correctly pinned classical (ECDSA) deployment is refused; the Rust tests prove this and fail if the restriction is removed. Every layer the system encrypts, authenticates or terminates, including the cloak front, the exit's DNS upstream and the whole mix lane, refuses a classical key exchange. Authentication is post-quantum on the inner tunnels (ML-DSA-65) and on the cloak (protocol v2: both ends prove the enrolled key with an HMAC over the hybrid exchange; its browser-facing certificate is an ECDSA facade), but the exit's DNS upstream still authenticates its resolver with classical WebPKI signatures. [docs/PQ_INVENTORY.md](docs/PQ_INVENTORY.md) separates key exchange from authentication for each layer, with its enforcing code, test and named exceptions.
+WireGuard is the outer carrier, implemented by **GotaTun 0.10.2**, with its actual DAITA integration and public **Maybenot 2.2.2** defense machines. Its ChaCha20-Poly1305 encryption and 256-bit PSK supplement the existing **two TLS 1.3 X25519 + ML-KEM-768 / AES-256-GCM layers**. WireGuard alone is not advertised as native ML-KEM. Authentication is post-quantum too: both QUIC layers accept **only ML-DSA-65** (FIPS 204) certificate chains and TLS 1.3 CertificateVerify signatures, and operator enrollment bundles require **both the classical operator signature and ML-DSA-65**. The hardware path uses the enrolled FIDO2 credential’s COSE algorithm; the software laboratory signer uses Ed25519. A correctly pinned classical (ECDSA) deployment is refused; the Rust tests prove this and fail if the restriction is removed. The listed VPN network layers enforce their hybrid key-exchange policy; compatibility dependencies and exceptions are named in the inventory. Authentication is post-quantum on the inner tunnels (ML-DSA-65) and on the cloak (protocol v2: both ends prove the enrolled key with an HMAC over the hybrid exchange; its browser-facing certificate is an ECDSA facade), but the exit's DNS upstream still authenticates its resolver with classical WebPKI signatures. [docs/PQ_INVENTORY.md](docs/PQ_INVENTORY.md) separates key exchange from authentication for each layer, with enforcing code, tests and named exceptions. The local FIDO PIN/secret channel still uses P-256, and generic credential creation does not require Ed25519; the full-stack PQ/SafeCurves mandate is a migration target, not a qualification of that hardware boundary.
 
 ## Principles and roadmap
 
@@ -95,7 +95,7 @@ From a verified runtime-bearing tarball, use `./install.sh --user` or
 `sudo ./install.sh --apply`; installation never activates the VPN. Inactive system
 removal refuses to dismantle a retained guard and preserves keys/state. See
 [offline installation](docs/OFFLINE_INSTALLATION.md) for authentication, validation and
-the remaining package-manager work. This has not yet been published as a tagged release.
+the remaining distribution/signing work. Native candidates passed local package lifecycle trials on [Debian 12/13 and Ubuntu 22.04/24.04](docs/evidence/NATIVE_PACKAGE_MATRIX_20261118.json), and on [Fedora 45 and Rocky Linux 10.3](docs/evidence/NATIVE_RPM_MATRIX_20261118.json) with SELinux enforcing. Those records retain exact hashes, test authorization/signing fixtures and limitations. This has not yet been published as a tagged release.
 
 Project participation follows the [principles](docs/PRINCIPLES.md),
 [conduct policy](CODE_OF_CONDUCT.md) and [governance](docs/GOVERNANCE.md).
@@ -117,7 +117,7 @@ public credential record, enrolled route, configured endpoints, traffic guard an
 end-to-end protection. A saved checkpoint cannot certify a connection. The command uses
 existing enrollment/provisioning workflows; it does not create servers, enroll a key or
 connect on its own. It is the deterministic foundation for a future wizard and optional
-local assistant, not a shipped Gemma agent or a live GUI integration.
+local assistant. An [experimental Vue/Tauri Linux GUI](apps/cypherpunk-vpn/README.md) now exists with a native D-Bus adapter and tested unknown-state rendering. Full owner/provider onboarding, native authentication-agent validation and the optional Gemma assistant remain unfinished.
 
 Hardware repairs are separate, exact plans: `avpn setup --repair ID` diagnoses and shows
 an available fix. Applying it requires approval of the current plan and fresh verification
@@ -132,6 +132,12 @@ cloud-engine and vendor-library phases.
 The [support matrix](docs/SUPPORT_MATRIX.md) distinguishes tested hardware from protocol
 compatibility and planned platforms. The [name migration](docs/NAME_MIGRATION.md) keeps
 current `avpn` commands, state paths and signed protocol identifiers recoverable.
+
+The [hardware emulation and cloud-installer plan](docs/HARDWARE_EMULATION_AND_CLOUD_INSTALLER_PLAN_20261118.md)
+adds vendor software-authenticator tests first, then searchable whole-registry
+OpenTofu onboarding. Registry listings and simulated passes do not establish live
+provider or physical-device qualification. Strict hardware policy remains blocking
+where the actual interface does not meet the PQ/SafeCurves target.
 
 ## Command line
 
@@ -507,14 +513,19 @@ not qualification. Network-seeded hash chains remain computational. See the
 [design](docs/DCNET_CONTROL_DESIGN.md) and
 [paper and implementation review](docs/INFORMATION_THEORETIC_REVIEW_20261117.md) for
 the precise passive-round claim and remaining work. This does not qualify the VPN
-as information-theoretically secure. The novel multi-plane architecture combining
-information-theoretic control, pathless PIR/ZK allocation, and line-rate constant-rate
-transport is specified in the [CYPHERPUNKS protocol specification](docs/CYPHERPUNKS_PROTOCOL_SPECIFICATION.md).
+as information-theoretically secure. The proposed multi-plane architecture is documented in the
+[CYPHERPUNKS research specification](docs/CYPHERPUNKS_PROTOCOL_SPECIFICATION.md).
+Its synthetic/reference benchmarks do not qualify live traffic immunity, PQ voucher
+unlinkability, novelty or production throughput. See the
+[18 November artifact review](docs/RESEARCH_REVIEW_20261118.md) for incorporation
+decisions and the required corrections.
 
 The [pad exposure validation guide](docs/PAD_EXPOSURE_VALIDATION.md) distinguishes
 one-pad leakage, state/book compromise and future recovery, with reproduction
 commands, test snippets and the remaining qualification gates.
 
-The data plane is Linux/IPv4 only. **IPv6 is deliberately blocked** in every mode, so it can't escape around the tunnel. The managed profile uses inner MTU 1100 and WireGuard MTU 1340, requiring an IPv4 underlay MTU of at least 1420. A native desktop GUI, multi-user fleet control and a statistically evaluated defense dataset are not included. The standalone v0.1 QUIC interface remains available; see [historical interface](docs/LEGACY_QUIC.md).
+The data plane is Linux/IPv4 only. **IPv6 is deliberately blocked** in every mode, so it can't escape around the tunnel. The managed profile uses inner MTU 1100 and WireGuard MTU 1340, requiring an IPv4 underlay MTU of at least 1420. The experimental native Linux GUI still needs packaged-release and full-onboarding qualification. Multi-user fleet control and the final statistically evaluated defense dataset remain unfinished. The standalone v0.1 QUIC interface remains available; see [historical interface](docs/LEGACY_QUIC.md).
 
-Our original files are Apache-2.0. Unmodified GotaTun is an MPL-2.0 dependency; Maybenot components are MIT/Apache-2.0. See [provenance](docs/PROVENANCE.md) and [upstream source/notice information](third_party/SOURCES.json). No VP.NET implementation was copied or ported; this is not represented as a clean-room project.
+Current project terms are in [LICENSE](LICENSE), including the AGPL declaration
+and project exception. Historical file provenance remains documented separately.
+Unmodified GotaTun is an MPL-2.0 dependency; Maybenot components are MIT/Apache-2.0. See [provenance](docs/PROVENANCE.md) and [upstream source/notice information](third_party/SOURCES.json). No VP.NET implementation was copied or ported; this is not represented as a clean-room project.

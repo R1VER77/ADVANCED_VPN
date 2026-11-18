@@ -42,7 +42,10 @@ impl Bridge {
                 // Only a genuinely closed connection requires a new name.
                 if connection.is_closed() {
                     let mut slot = self.connection.lock().await;
-                    if slot.as_ref().is_some_and(|current| current.unique_name() == connection.unique_name()) {
+                    if slot
+                        .as_ref()
+                        .is_some_and(|current| current.unique_name() == connection.unique_name())
+                    {
                         *slot = None;
                     }
                 }

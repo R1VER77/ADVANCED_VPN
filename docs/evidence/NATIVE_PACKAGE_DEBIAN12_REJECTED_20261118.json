@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "status": "failed",
+  "scope": "local_native_deb_lifecycle_only",
+  "started": 1794997090.0185947,
+  "base_sha256": "d8533680bab71d55bb181c95d60a1f394614aac761b73f1a6930938ecc0f9f54",
+  "package_sha256": "953c9969d01eea47e017d868c7ae98529da846778f28658ce622a92f37ff7311",
+  "harness_sha256": "ad33afa652d2e48828f6f5d9bd519ad0b4d0b2f4954d4c365bba47ce3ed6bce6",
+  "controller_client_sha256": "910c1acd12396072afb05aabebef5d7f164d65c5f6a107e2d5dc64df0bd947f0",
+  "downgrade_package_sha256": "346b8cfe1c28f0f6d8037b09b6e1c70d5b2ed48dcd21ad8c404961ee2c9dc8b9",
+  "phases": {},
+  "os_release": "PRETTY_NAME=\"Debian GNU/Linux 12 (bookworm)\"\nNAME=\"Debian GNU/Linux\"\nVERSION_ID=\"12\"\nVERSION=\"12 (bookworm)\"\nVERSION_CODENAME=bookworm\nID=debian\nHOME_URL=\"https://www.debian.org/\"\nSUPPORT_URL=\"https://www.debian.org/support\"\nBUG_REPORT_URL=\"https://bugs.debian.org/\"\n",
+  "error": "RuntimeError: native installation failed; see install.log",
+  "stopped": 1794997135.670211
+}

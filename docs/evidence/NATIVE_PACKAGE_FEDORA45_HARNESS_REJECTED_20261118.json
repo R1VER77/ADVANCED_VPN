@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "status": "failed",
+  "scope": "local_native_rpm_lifecycle_only",
+  "started": 1795039212.9795387,
+  "base_sha256": "50bdc5e70f6a24f540932d15411c1c6ae9fcfa40fb990d876d83c5cc823b2ad0",
+  "package_sha256": "28311b5aa01320125c5703a770cc683fad7e8ace1f3b9d0b95409ae5204457e9",
+  "harness_sha256": "9212e9c838bcfe6f6ddc38053ef3ff3115ba7882746f5fe624b0be37f0a6e856",
+  "controller_client_sha256": "910c1acd12396072afb05aabebef5d7f164d65c5f6a107e2d5dc64df0bd947f0",
+  "downgrade_package_sha256": "1f37c87fc0e7a13f2a98a1b566645b83fe301ab60ca5830dcc00b72bf8b6e00d",
+  "phases": {},
+  "error": "RuntimeError: guest-exec: {\"class\": \"GenericError\", \"desc\": \"Failed to execute child process \\u201c/usr/bin/cloud-init\\u201d (Permission denied)\"}",
+  "failure_diagnostics": "guest unavailable; preserve console and existing phase logs",
+  "stopped": 1795039265.9894707
+}

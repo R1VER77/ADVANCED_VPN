@@ -50,8 +50,10 @@ Source-only and legacy tarball installation remains available through `tools/ins
 and may still create a venv using network access. The offline promise applies to a
 complete runtime-bearing package using `install.sh`. Existing cloud SSH bootstrap
 scripts are not yet converted to this offline package path; do not infer that server
-provisioning is offline. Static musl preflight, `.deb`, `.rpm` and a signed apt repository
-remain separate roadmap items. An SSH hardware commit key is not an apt OpenPGP key.
+provisioning is offline. Static musl preflight and `.deb` packages exist today; RPM
+qualification and repository publication follow
+[the signed repository procedure](SIGNED_REPOSITORY.md). An SSH hardware commit key
+is not an apt OpenPGP key.
 
 ## Upgrade, removal and recovery limits
 
@@ -61,11 +63,24 @@ inventory and persistent private state are kept. An upgrade does not activate se
 or remove a traffic guard. This is not a rolling multi-host protocol upgrade; all
 peers still need compatible signed enrollment and release versions.
 
-Failed dependency builds leave the live runtime intact. A synchronous final-rename
-failure restores the previous application. A host crash during the short two-rename
-replacement window may leave an `.old-PID` directory beside the target; use the recovery
-console to inspect and restore that complete tree before restarting services. This
-change does not claim a crash-atomic filesystem exchange or a live upgrade validation.
+Native packages refuse downgrades: `preinst` uses dpkg's native version comparison;
+RPM `%pre` queries the installed database and compares epoch, version and release
+with native RPM ordering. Its scriptlet argument is a package count, not an installed
+version. Both guards abort when installed code is newer than the candidate. Reinstalling the same
+version stays allowed — that is the package-managed replacement path — and an
+installed version the guard cannot compare against is refused rather than guessed.
+Rolling back application code is the slot system's transaction, which retains the
+verified previous release; it never touches keys, counters or profiles. Do not
+use `dpkg -i`/`dnf downgrade` with an older archive to work around this.
+
+Failed staging leaves the selected runtime intact. System installations use verified
+versioned slots, a durable journal and an atomic `current` symlink replacement.
+Legacy directory adoption uses a separately journaled Linux atomic exchange and
+requires explicit approval while stopped. Recover using the verified installer's
+transaction record; do not choose a damaged slot or roll back private security state.
+Unit fault tests and local guest lifecycle results do not qualify physical power loss
+or every live upgrade failure point. User-only installation has its own replacement
+path; the system-slot guarantee does not extend to that path.
 
 User removal is `./install.sh --user --uninstall`; it preserves
 `~/.config/advanced-vpn`, including cloud inventory and SSH material. System removal is
@@ -124,3 +139,118 @@ The [aggregate record](evidence/OFFLINE_PACKAGE_20261117.json) contains package/
 hashes, environment and negative results. All 604 Python tests passed on both 3.10 and
 3.13, with 19 environment-dependent skips per suite. The older Python/OpenSSL artifact's
 functional passes were superseded by the security-refreshed package before publication.
+
+## Native package trials
+
+Build unsigned candidates as an ordinary user (the pinned runtime section above
+explains `NEW_RUNTIME`; `--format rpm` additionally requires `rpmbuild`):
+
+```sh
+python3 tools/native_package.py --runtime NEW_RUNTIME --out NEW_PACKAGE_DIR \
+  --format deb --epoch SOURCE_COMMIT_TIMESTAMP
+```
+
+Build the GNU core on the declared glibc 2.35 baseline, rather than the development
+host's newer glibc, and build the bootstrap helpers statically with musl. The builder
+checks the staged ELF requirements before emitting an archive and refuses a candidate
+whose required glibc exceeds the shared release baseline. Package dependencies and
+preflight use that same baseline. A core built on Debian 13 can otherwise require
+glibc 2.38 even if its metadata says 2.35: the 18 November Debian 12 trial caught and
+refused exactly that mismatch. Keep this failed candidate distinct from any rebuilt
+and requalified one.
+
+The lifecycle trial runs inside one disposable KVM guest per distribution; it
+installs, replaces, repairs damaged code, reboots without activation, refuses
+armed removal and verifies state-preserving removal, with external probe
+witnesses. Feed it a publisher-verified clean cloud image of each declared
+distribution and a fresh work directory:
+
+```sh
+python3 tools/package_vm_test.py --base CLEAN_IMAGE.qcow2 \
+  --package cypherpunk-vpn_VERSION-1_amd64.deb --work NEW_VM_WORK_DIRECTORY \
+  --downgrade-package cypherpunk-vpn_OLDER_VERSION-1_amd64.deb
+```
+
+`--downgrade-package` is an older built candidate (check out the older release
+tag and build it the same way): its `dpkg -i` installation must be refused by
+the package's own guard before anything is unpacked, with the selected slot
+unchanged. Preserve each trial's `RESULT.json`; report each distribution
+separately, including failed runs. A trial that has not run on a distribution
+does not qualify it, and a local VM result is not physical-device validation.
+
+The [18 November native Debian matrix](evidence/NATIVE_PACKAGE_MATRIX_20261118.json)
+passed all four declared Debian/Ubuntu distributions with rebuilt candidate B. Preserve
+the earlier ABI and harness failures. Its downgrade archive is a
+[metadata-only fixture](evidence/NATIVE_PACKAGE_DOWNGRADE_FIXTURE_20261118.json), not
+a historical release; real cross-release protocol compatibility remains separate.
+The current harness prepares system dependencies first, then runs local dpkg or RPM
+installation/replacement/repair inside an isolated network namespace. It supplies a
+fixed system PATH to guest-exec; an explicit environment replaces guest defaults.
+Ubuntu 24.04 exposed apt's local-file `--no-download` behavior and the missing-PATH
+harness fault before the final dpkg-based trial passed. Timeouts remain bounded;
+failed trials retain package/process diagnostics when the guest is reachable.
+
+The harness now accepts `--family rpm` for `dnf` dependency preparation and native
+RPM transactions. Local lifecycle trials now pass on Fedora 45/Rocky Linux 10.3;
+full release/protection qualification is still open.
+Use publisher-signature/hash-verified images. An unsigned archive
+[builds and passes scriptlet/file inspection](evidence/NATIVE_RPM_BUILD_20261118.json)
+in an ordinary-user Ubuntu container. The recipe disables automatic global build-ID
+links so the archive contains only its declared payload and aliases. Earlier failed
+build/inspection results remain preserved. This does not qualify Fedora/Rocky or an
+RPM VPN lifecycle.
+
+Fedora's confined QEMU guest agent refused administrative execution before the first
+trial reached VPN installation. The RPM-only VM fixture enables the distribution's
+`virt_qemu_ga_run_unconfined` boolean and uses a root-only hook in its predefined
+QGA hook directory for trusted test administration. This follows the
+[Fedora SELinux transition](https://github.com/fedora-selinux/selinux-policy/blob/9d23da6917bb69fc423ab5771c42aed0a13b9e71/policy/modules/contrib/virt_supplementary.te).
+The harness verifies that administration context and SELinux enforcing mode; it never
+uses permissive mode or installs an extra product allow rule. This grant exists
+only in the disposable guest and is recorded as a fixture, not a production setup
+recommendation or proof that every product process has a dedicated SELinux domain.
+
+The fixture explicitly enables only the guest-agent RPCs needed for this local
+test: ping, delimited synchronization, execution/status and shutdown. RPM/DNF run
+as transient root systemd services, the normal administrative execution context;
+the VPN's own units and sandbox remain unchanged. RPM trials require an explicitly
+pinned public test key and signed test copies; they never bypass package signatures.
+Ephemeral software test keys are destroyed after signing and are not production
+trust roots.
+
+Both distributions reached install/replace/repair/reboot but initially failed the
+authorized controller test. [Fedora diagnostics](evidence/NATIVE_RPM_SELINUX_DIAGNOSTIC_20261118.json)
+identified copied `lib_t` labels on application executables instead of the host's
+configured `bin_t`. Correcting the application-tree labels let the same bus check
+pass with enforcing mode still enabled. The installer now applies `restorecon` to
+each newly prepared system slot, using the host's installed mappings, and fsyncs it
+before activation. Failure preserves the previous selection. No private state is
+relabelled, no allow rule is installed and no enforcement setting changes.
+
+The diagnostic controller used Fedora's default `unconfined_service_t` service
+domain. This is a functional label correction, not qualification of a dedicated
+confined VPN domain. Such a policy and its full hardware/network-operation tests
+remain assurance work. Fresh corrected RPM lifecycle trials are required; the
+earlier failed trials remain failed.
+
+The [fresh corrected-candidate trials](evidence/NATIVE_RPM_MATRIX_20261118.json)
+subsequently passed on both distributions: signature verification, installation,
+downgrade refusal, replacement with previous-slot retention, damaged-code repair,
+reboot without activation, real-bus denial and test-authorized operations, armed
+removal refusal with zero external probe markers, recovered removal preserving
+the private fixture, and reboot with a working positive control. SELinux remained
+enforcing. The failed intermediate candidate also exposed `restorecon`'s dispatch
+through a `setfiles` symlink; the installer now preserves `restorecon` as argv[0]
+while executing the resolved, ownership-checked binary. These unsigned-origin,
+software-test-signed candidates are not a production release.
+
+Optional `--rpm-checks` runs native RPM epoch/version/release comparison cases inside
+the Debian-family guest. That is compatibility evidence for the comparison function;
+it does not replace an actual RPM build, scriptlet transaction or Fedora/Rocky trial.
+Separately, [real RPM transactions](evidence/RPM_GUARD_TRANSACTIONS_20261118.json)
+with empty disposable packages passed upgrade/reinstall and refused lower version,
+release and epoch while preserving installed metadata. They execute the generated
+guard and native database machinery, without installing a VPN or changing the host.
+Optional `--controller-client` accepts the compiled disposable bus-validation client.
+Its positive authorization rule is a VM-only fixture and does not qualify a native
+Polkit authentication agent or the desktop's authorization interaction.

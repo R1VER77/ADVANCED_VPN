@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "status": "passed_real_rpm_preinstall_transactions",
+  "scope": "empty_packages_in_disposable_jammy_container_no_vpn_install_or_distro_qualification",
+  "rpm": "RPM version 4.17.0",
+  "transactions": 8,
+  "refusals": 3,
+  "guard_sha256": "7cd768f684553731e7d549a1549c923e7f8b8ae8f3caaa3966e0f80737b78ac1",
+  "image_id": "sha256:86c57f5d8146abbc8387c4f82612f2d30f59d123603dd028bc1e8a44ff6b6608",
+  "log_sha256": "83f38ce420a6c6e89ba0e88f2569ae95e2215ae11e02239711c131fc7346366b",
+  "harness_sha256": "aae1f0dc803f62b9c243dd5bc6ea76dcfff411cd5d31c46498d8d64df787eeb1",
+  "software_fixture_packages": true
+}

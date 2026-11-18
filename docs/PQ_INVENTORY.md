@@ -3,7 +3,22 @@
 Every asymmetric primitive in ADVANCED_VPN, the layer it protects, and what makes the
 post-quantum property hold. "Enforced" means a classical peer is refused, never accepted as
 a fallback, and a test fails if the refusal is removed (mutation-checked). Checked
-16 November 2026.
+16 November 2026, with a hardware-boundary correction on 18 November.
+
+The later full-stack hybrid-PQ/SafeCurves mandate is a target, not a qualification
+of the current hardware path. `tools/keyguard.py` uses CTAP `hmac-secret` through
+python-fido2. PIN/UV protocols 1/2 in the pinned library use P-256 ECDH, as specified
+by [CTAP 2.3](https://fidoalliance.org/specs/fido-v2.3-ps-20260226/fido-client-to-authenticator-protocol-v2.3-ps-20260226.html).
+An Ed25519 credential does not replace this separate key agreement. Hardware-backed
+sealing therefore retains a classical local-channel/custody assumption; recording
+that exchange needs explicit future-decryption analysis. The table below concerns
+network traffic and enrollment layers and does not qualify this hardware boundary.
+Generic vault creation also offers python-fido2's supported credential algorithms;
+it does not currently require Ed25519. Record the actual stored COSE algorithm per
+credential instead of inferring it from the vendor or FIDO2 label. ES256 credentials
+use P-256 and need their own compatibility transition under the new policy.
+Keep current credentials intact while designing a versioned compatible transition;
+the existing physical setup results do not establish an all-interface PQ claim.
 
 ## The claim
 
@@ -27,7 +42,7 @@ the cloak v2 composition is this project's own, tested but not independently rev
 | Cloak front (HTTP/3 and TCP/TLS camouflage) | browser-like offer; **a tunnel only over X25519MLKEM768** | protocol v2: both ends prove the member's 32-byte cloak key with a role-separated HMAC over the TLS exporter before any tunnel data or "connected" state (post-quantum: the exporter comes from the hybrid exchange, the proof is symmetric); the pinned ECDSA certificate is kept only as the camouflage's facade. v1 authenticated the server by that certificate alone | `src/cloak.rs` `role_proof`, `confirm_server`, `quic_hybrid`, `tls_hybrid`; schema-1 chains refused at connect (`CLOAK_V2_REQUIRED`) | `a_classical_key_exchange_never_becomes_a_tunnel`, `audit_v2_proofs_are_role_key_and_exporter_separated`, `audit_tcp_requires_one_well_formed_server_confirmation` |
 | Exit DNS upstream (DNS over TLS) | X25519MLKEM768 only; DNS fails closed otherwise | classical WebPKI (exception 4) | `advanced-vpn-dns` `upstream_tls` | `the_upstream_must_offer_hybrid_post_quantum_tls`; live: Cloudflare and Google answer, Quad9 does not |
 | Oblivious control plane | HPKE ML-KEM-768 + X25519 (`0x647A`) | gateway key | `tools/ohttp.py` | `test_ohttp.py` |
-| Enrollment and signed bundles | hybrid KEM sealing | Ed25519 (FIDO2) **and** ML-DSA-65, both required | `tools/managed_profile.py` | `test_managed.py` |
+| Enrollment and signed bundles | hybrid KEM sealing | the enrolled FIDO2 credential's COSE signature **and** ML-DSA-65, both required; generic enrollment does not enforce Ed25519 | `tools/managed_profile.py`, `tools/keyguard.py` | `test_managed.py`; hardware/channel caveat above |
 | Mix lane: Sphinx packets | X-Wing (ML-KEM-768 + X25519) per hop | | `tools/mix.py` `check_config` | `test_mix.py` (classical Sphinx refused) |
 | Mix lane: links | X-Wing PQ Noise | X-Wing | `check_config` (`WireKEMScheme`) | `test_mix.py` |
 | Mix lane: directory | | Ed25519 + SPHINCS+ (hybrid, hash-based) | `check_config` (`PKISignatureScheme`) | `test_mix.py`; the live lab runs the shipping check on its network |

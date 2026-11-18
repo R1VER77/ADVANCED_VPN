@@ -144,11 +144,34 @@ def network_config(name):
     return {"version": 2, "ethernets": eth}
 
 
-def seed(work, name, minimal_indexes=False):
+def seed(work, name, minimal_indexes=False, packages=None, administration_hook=False):
     d = work / (name + "-seed")
     d.mkdir(exist_ok=True)
     (d / "meta-data").write_text("instance-id: avpn-%s-%s\nlocal-hostname: avpn-%s\n" % (name, work.name, name))
     user = ["#cloud-config"]
+    if administration_hook:
+        if minimal_indexes:
+            raise ValueError("RPM administration hook is not a Debian-index fixture")
+        user += [
+            "write_files:",
+            "  - path: /usr/libexec/qemu-ga/fsfreeze-hook.d/cypherpunk-validation-exec",
+            "    permissions: '0700'",
+            "    content: |",
+            "      #!/bin/sh",
+            '      exec "$@"',
+            "  - path: /etc/qemu-ga/cypherpunk-validation.conf",
+            "    permissions: '0644'",
+            "    content: |",
+            "      [general]",
+            "      method=virtio-serial",
+            "      path=/dev/virtio-ports/org.qemu.guest_agent.0",
+            "  - path: /etc/systemd/system/qemu-guest-agent.service.d/cypherpunk-validation.conf",
+            "    permissions: '0644'",
+            "    content: |",
+            "      [Service]",
+            "      ExecStart=",
+            "      ExecStart=/usr/bin/qemu-ga --config=/etc/qemu-ga/cypherpunk-validation.conf --allow-rpcs=guest-ping,guest-sync-delimited,guest-exec,guest-exec-status,guest-shutdown",
+        ]
     if minimal_indexes:
         # Lifecycle tests need current binary package indexes; translation and
         # source indexes add downloads without changing those installed packages.
@@ -159,6 +182,8 @@ def seed(work, name, minimal_indexes=False):
             "    content: |",
             '      Acquire::Languages "none";',
             '      Acquire::IndexTargets::deb-src::Sources::DefaultEnabled "false";',
+            '      Acquire::IndexTargets::deb::DEP-11::DefaultEnabled "false";',
+            '      Acquire::IndexTargets::deb::CNF::DefaultEnabled "false";',
         ]
     if name != "client":
         # Servers boot exactly as avpn cloud creates them: every log in RAM from the start.
@@ -173,10 +198,19 @@ def seed(work, name, minimal_indexes=False):
         "    shell: /bin/bash",
         "    lock_passwd: true",
         "package_update: true",
-        "packages: [" + ", ".join(PACKAGES) + "]",
+        "packages: [" + ", ".join(PACKAGES if packages is None else packages) + "]",
         "runcmd:",
-        "  - [systemctl, enable, --now, qemu-guest-agent]",
     ]
+    if administration_hook:
+        user += [
+            "  - [restorecon, -F, /usr/libexec/qemu-ga/fsfreeze-hook.d/cypherpunk-validation-exec]",
+            "  - [setsebool, -P, virt_qemu_ga_run_unconfined, 'on']",
+            "  - [systemctl, daemon-reload]",
+            "  - [systemctl, restart, qemu-guest-agent]",
+            "  - [sh, -ec, 'test \"$(getenforce)\" = Enforcing && echo CYPHERPUNK_VALIDATION_ADMIN_READY']",
+        ]
+    else:
+        user += ["  - [systemctl, enable, --now, qemu-guest-agent]"]
     (d / "user-data").write_text("\n".join(user) + "\n")
     (d / "network-config").write_text(json.dumps(network_config(name)))
     iso = work / (name + "-seed.iso")
@@ -226,8 +260,25 @@ def start(work, base, name):
     spec = VMS[name]
     n = spec["n"]
     overlay = work / (name + ".qcow2")
+    image = json.loads(
+        subprocess.run(
+            ["qemu-img", "info", "--output=json", str(base.resolve())],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        ).stdout
+    )
+    if (
+        image.get("format") != "qcow2"
+        or image.get("backing-filename")
+        or not isinstance(image.get("virtual-size"), int)
+        or not 0 < image["virtual-size"] <= 128 << 30
+    ):
+        raise ValueError("expected a bounded standalone publisher qcow2 image")
+    size = str(max(8 << 30, image["virtual-size"]))
     subprocess.run(
-        ["qemu-img", "create", "-q", "-f", "qcow2", "-F", "qcow2", "-b", str(base.resolve()), str(overlay), "8G"],
+        ["qemu-img", "create", "-q", "-f", "qcow2", "-F", "qcow2", "-b", str(base.resolve()), str(overlay), size],
         check=True,
     )
     args = [

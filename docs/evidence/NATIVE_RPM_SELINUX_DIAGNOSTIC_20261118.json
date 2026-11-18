@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "status": "failed_native_rpm_lifecycle_with_label_repair_diagnostic_pass",
+  "scope": "fedora45_disposable_guest_diagnostic_not_a_fresh_candidate_qualification",
+  "package_sha256": "c3a737a5c6f852f7a20e9ccc702cde28ea2f91c456a5a548c1ad7745eb7abf55",
+  "selinux_enforcing": true,
+  "original_failure": "authorized_controller_worker_unavailable",
+  "audit_denial": "init_t self:process setpgid",
+  "installed_controller_file_context": "system_u:object_r:lib_t:s0",
+  "host_file_context_mapping": "system_u:object_r:bin_t:s0",
+  "diagnostic_action": "restorecon -RFv /opt/advanced-vpn",
+  "diagnostic_service_domain": "system_u:system_r:unconfined_service_t:s0",
+  "diagnostic_bus_test": "passed_with_vm_test_authorization",
+  "production_allow_rules_added": false,
+  "enforcement_changed": false,
+  "dedicated_selinux_domain_qualified": false,
+  "limitations": [
+    "Post-repair bus diagnostic overwrote controller-boundary.log in the same failed trial directory. RESULT.json remains failed.",
+    "Broad application-tree label repair was diagnostic only. The production correction labels only the new unselected system slot before activation.",
+    "Fresh corrected-candidate trials remain required."
+  ],
+  "files": {
+    "RESULT.json": "60f487016159d23bfc38596741caaa20b81fa9c0c2b322fba41104a275840562",
+    "controller-audit.log": "527b21ee54e9dec72fcbd33563b1ab9f87f24b2a10862dab94e3fc2c600c7b70",
+    "inspect-labels.log": "d8935871bb8007de6a132faeb5356e39015c6bd9a777e96219b50022c6ca219d",
+    "diagnostic-restore-default-labels.log": "c60eda6cdde23ee07e3554bf1f46af38ece25804bbec345952d173e054789179",
+    "diagnostic-restored-labels.log": "27f5912d25c22507b6be0d365d6e1d342e2592d5a366bccd914a821b89169270",
+    "controller-boundary.log": "5128e2474073913e82aa0d8b2614df7f65dd90ee61271787b2571b6f9722e1bb"
+  }
+}

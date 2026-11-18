@@ -1,0 +1,41 @@
+{
+  "schema": 1,
+  "status": "publisher_signatures_and_both_image_hashes_verified",
+  "images": [
+    {
+      "distribution": "fedora",
+      "name": "Fedora-Cloud-Base-Generic-45-1.4.x86_64.qcow2",
+      "url": "https://dl.fedoraproject.org/pub/fedora/linux/releases/45/Cloud/x86_64/images/Fedora-Cloud-Base-Generic-45-1.4.x86_64.qcow2",
+      "sha256": "50bdc5e70f6a24f540932d15411c1c6ae9fcfa40fb990d876d83c5cc823b2ad0",
+      "size": 606732288,
+      "virtual_size": 5368709120,
+      "status": "publisher_signature_and_image_sha256_verified"
+    },
+    {
+      "distribution": "rocky",
+      "name": "Rocky-10-GenericCloud-Base-10.3-20261112.0.x86_64.qcow2",
+      "url": "https://dl.rockylinux.org/pub/rocky/10/images/x86_64/Rocky-10-GenericCloud-Base-10.3-20261112.0.x86_64.qcow2",
+      "sha256": "68eae06d402c8b19e7dca06e85bdc43a3476089afa3ee20d93d0d43cf9871e9e",
+      "size": 568000512,
+      "virtual_size": 10737418240,
+      "status": "publisher_signature_and_image_sha256_verified"
+    }
+  ],
+  "signatures": [
+    {
+      "distribution": "fedora",
+      "fingerprint": "4F50A6114CD5C6976A7F1179655A4B02F577861E",
+      "status": "publisher_checksum_signature_verified"
+    },
+    {
+      "distribution": "rocky",
+      "fingerprint": "FC226859C0860BF0DDB95B085B106C736FEDFC85",
+      "status": "publisher_checksum_signature_verified"
+    }
+  ],
+  "public_sources": {
+    "fedora_key": "https://fedoraproject.org/security/",
+    "rocky_key": "https://rockylinux.org/resources/gpg-key-info"
+  },
+  "scope": "base_image_authentication_not_product_qualification"
+}

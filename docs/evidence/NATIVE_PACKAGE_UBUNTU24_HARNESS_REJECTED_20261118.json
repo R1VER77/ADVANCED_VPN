@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "status": "failed",
+  "scope": "local_native_deb_lifecycle_only",
+  "started": 1795038263.2640753,
+  "base_sha256": "04e8f2461a16a44e78a370284471f29616cdd9baf1893df25807b71f985b6c94",
+  "package_sha256": "d0973be51869b42feb262aee1949371004b8885b5aa52cc1584b697527193dc6",
+  "harness_sha256": "6b548042e6472a7ca50a6de7b4a0178657225552efbe5e8cdbba69eaa336391c",
+  "controller_client_sha256": "910c1acd12396072afb05aabebef5d7f164d65c5f6a107e2d5dc64df0bd947f0",
+  "downgrade_package_sha256": "346b8cfe1c28f0f6d8037b09b6e1c70d5b2ed48dcd21ad8c404961ee2c9dc8b9",
+  "phases": {
+    "dependency_preparation": {
+      "status": "passed",
+      "networkless_install_phases": true,
+      "package_downloads_disabled": true
+    }
+  },
+  "os_release": "PRETTY_NAME=\"Ubuntu 24.04.5 LTS\"\nNAME=\"Ubuntu\"\nVERSION_ID=\"24.04\"\nVERSION=\"24.04.5 LTS (Noble Numbat)\"\nVERSION_CODENAME=noble\nID=ubuntu\nID_LIKE=debian\nHOME_URL=\"https://www.ubuntu.com/\"\nSUPPORT_URL=\"https://help.ubuntu.com/\"\nBUG_REPORT_URL=\"https://bugs.launchpad.net/ubuntu/\"\nPRIVACY_POLICY_URL=\"https://www.ubuntu.com/legal/terms-and-policies/privacy-policy\"\nUBUNTU_CODENAME=noble\nLOGO=ubuntu-logo\n",
+  "error": "RuntimeError: native installation failed; see install.log",
+  "stopped": 1795038342.9748065
+}

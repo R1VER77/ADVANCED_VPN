@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "scope": "selinux_label_corrected_rpm_test_copies_only_not_production_signing_or_release_provenance",
+  "fingerprint": "829B421339B95609D2C493384D2CAA74E78556B8",
+  "isolated_rpm_keyring_verification": true,
+  "packages": [
+    {
+      "name": "cypherpunk-vpn-0.10.1-1.x86_64.rpm",
+      "sha256": "d8546c59ede3822a20dfb08c306b7633f724070512ef65cd75a0104c71575ea9"
+    },
+    {
+      "name": "cypherpunk-vpn-0.10.2-1.x86_64.rpm",
+      "sha256": "84755228c45ce94d558315bb7200b9bf8f9eae732b510490942393a3e9bf7325"
+    }
+  ],
+  "public_key_sha256": "0f5780c4d1ab6a9d37e12927c7706c73f86781f84532e1a1ff209bfb1bc53379",
+  "private_software_test_key_destroyed": true,
+  "status": "verified_disposable_software_test_signatures",
+  "unsigned_candidate_sha256": "6a23c965e1a7928fc34e2e479639693786e1c3293bc6429e160b4137eac946e3"
+}

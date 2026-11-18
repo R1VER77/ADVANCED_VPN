@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "scope": "ephemeral_software_test_signatures_only_never_production_or_hardware",
+  "fingerprint": "D0D6C346D871DC2A579FEBF2F0B7533B4AD569E6",
+  "isolated_rpm_keyring_verification": true,
+  "packages": [
+    {
+      "name": "cypherpunk-vpn-0.10.1-1.x86_64.rpm",
+      "sha256": "993eb106afcbc5339aad11f359025ef900f4523c70c0f778e050201f4cad9b0d"
+    },
+    {
+      "name": "cypherpunk-vpn-0.10.2-1.x86_64.rpm",
+      "sha256": "c3a737a5c6f852f7a20e9ccc702cde28ea2f91c456a5a548c1ad7745eb7abf55"
+    }
+  ],
+  "private_test_key_destroyed": true
+}

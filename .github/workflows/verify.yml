@@ -32,7 +32,7 @@ jobs:
       - name: Install namespace test dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends iproute2 iputils-ping nftables cmake build-essential uidmap libpcap0.8t64
+          sudo apt-get install -y --no-install-recommends iproute2 iputils-ping nftables cmake build-essential uidmap libpcap0.8t64 rpm
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           python - <<'PY'
           import os,pwd,subprocess
@@ -140,7 +140,7 @@ jobs:
   python310-compat:
     # Ubuntu 22.04 servers run Python 3.10; the hash lock and tools must work there.
     runs-on: ubuntu-22.04
-    timeout-minutes: 25
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
@@ -175,6 +175,27 @@ jobs:
               --tmpfs /tmp:rw,exec,mode=1777 -e HOME=/tmp/offline-home -e XDG_DATA_HOME= \
               --entrypoint /bin/sh "$image" /package/tools/offline_user_test.sh
           done
+      - name: Native package ABI and real apt authentication controls
+        run: |
+          set -eu
+          python tools/native_package.py --runtime offline-runtime --out native-package \
+            --format deb --epoch "$(git show -s --format=%ct HEAD)"
+          avpn_test_keyring=$(mktemp -d)
+          export GNUPGHOME="$avpn_test_keyring"
+          trap 'gpgconf --homedir "$avpn_test_keyring" --kill gpg-agent; rm -rf -- "$avpn_test_keyring"' EXIT
+          gpg --no-options --batch --pinentry-mode loopback --passphrase '' \
+            --quick-generate-key 'cypherpunk disposable CI repository key' ed25519 sign 1d
+          gpg --no-options --batch --with-colons --list-secret-keys > test-key-record.txt
+          avpn_test_fingerprint=$(python -c 'from pathlib import Path; print(next(line.split(":")[9] for line in Path("test-key-record.txt").read_text().splitlines() if line.startswith("fpr:")))')
+          gpg --no-options --batch --export "$avpn_test_fingerprint" > test-public-key.gpg
+          python tools/signed_repo.py build --packages native-package/*.deb \
+            --out test-repository --fingerprint "$avpn_test_fingerprint" --testing
+          docker pull ubuntu@sha256:74b12b11ffa550fba1929ad4d8d16533c34f6612728469671afba1b03b66881c
+          python tools/signed_repo_apt_test.py --repo test-repository \
+            --public-key test-public-key.gpg --fingerprint "$avpn_test_fingerprint" \
+            --package "cypherpunk-vpn=$(dpkg-deb --field native-package/*.deb Version)" \
+            --image ubuntu@sha256:74b12b11ffa550fba1929ad4d8d16533c34f6612728469671afba1b03b66881c \
+            --work apt-client-evidence
   formal-models:
     # Tamarin proofs of the DC-net round core and the mix lane's re-blinding: every lemma
     # listed in tools/tamarin_check.py must end "verified" (a falsified, unfinished or
@@ -216,7 +237,7 @@ jobs:
           tar -xJf "$RUNNER_TEMP/node.tar.xz" -C "$RUNNER_TEMP"
           echo "$RUNNER_TEMP/node-v22.23.5-linux-x64/bin" >> "$GITHUB_PATH"
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf xvfb xauth xdotool imagemagick dbus-x11
           rustup toolchain install 1.95.0 --profile minimal --component clippy --component rustfmt
       - name: Locked production and isolated demo builds
         run: |
@@ -232,3 +253,8 @@ jobs:
         # Build-only advisories are still a release gate; do not silently omit or
         # waive GHSA-fc5q-39xc-vjpf while upstream has no patched picomatch release.
         run: npm audit --audit-level=high
+      - name: Native WebKit unknown-state rendering and narrow layout
+        run: |
+          cargo build --manifest-path src-tauri/Cargo.toml --locked --features tauri/custom-protocol
+          xvfb-run -a -s '-screen 0 1200x900x24 -nolisten tcp' dbus-run-session -- \
+            node scripts/native-smoke.mjs src-tauri/target/debug/cypherpunk-vpn-gui "$RUNNER_TEMP/native-gui-smoke"

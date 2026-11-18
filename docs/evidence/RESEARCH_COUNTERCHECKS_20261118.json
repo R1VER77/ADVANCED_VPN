@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "status": "passed_research_scope_counterchecks",
+  "scope": "reviewed_model_and_metadata_only_no_live_transport_or_crypto_protocol_validation",
+  "input_archive_sha256": "f4a7ffeb3a2dc4cfec75f6623453d16eaa018018a805eb9ae1670594ff3f9e5b",
+  "checks": {
+    "shaped_features_identical_despite_different_source_traces": true,
+    "unshaped_features_different": true,
+    "computed_grid_counts": {
+      "idle": 600,
+      "loaded": 600
+    },
+    "coalition_parameters_unused": [
+      "n",
+      "n_colluders"
+    ],
+    "full_dleq_estimate_us": 246.7,
+    "claimed_target_us": 150.0
+  }
+}

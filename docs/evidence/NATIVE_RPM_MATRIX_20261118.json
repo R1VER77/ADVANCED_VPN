@@ -1,0 +1,264 @@
+{
+  "schema": 1,
+  "status": "passed_local_two_distribution_native_rpm_matrix",
+  "scope": "software_test_signed_candidate_lifecycle_and_vm_authorized_bus_checks_not_production_or_full_roadmap_qualification",
+  "candidate": {
+    "name": "cypherpunk-vpn-0.10.2-1.x86_64.rpm",
+    "sha256": "84755228c45ce94d558315bb7200b9bf8f9eae732b510490942393a3e9bf7325",
+    "unsigned_sha256": "6a23c965e1a7928fc34e2e479639693786e1c3293bc6429e160b4137eac946e3",
+    "core_source_commit": "5d69623697524796b105dd5f24f0644339a05652",
+    "packaged_tools_source": "reviewed_working_tree_snapshot_before_final_signed_publication",
+    "build_attestation_qualified": false
+  },
+  "trials": [
+    {
+      "distribution": "fedora45",
+      "evidence_sha256": "b857b16d276d9f3bf84b548bb97e7b773d0b73450751e64d967bb55e611e2ac0",
+      "result": {
+        "schema": 1,
+        "status": "passed_local_native_rpm_lifecycle",
+        "scope": "local_native_rpm_lifecycle_only",
+        "started": 1795042002.5321057,
+        "base_sha256": "50bdc5e70f6a24f540932d15411c1c6ae9fcfa40fb990d876d83c5cc823b2ad0",
+        "package_sha256": "84755228c45ce94d558315bb7200b9bf8f9eae732b510490942393a3e9bf7325",
+        "harness_sha256": "e19114701536ffd1fda3bfb54ef5e72d6ac59bac41b9faa7062edad539ffb851",
+        "controller_client_sha256": "910c1acd12396072afb05aabebef5d7f164d65c5f6a107e2d5dc64df0bd947f0",
+        "downgrade_package_sha256": "d8546c59ede3822a20dfb08c306b7633f724070512ef65cd75a0104c71575ea9",
+        "phases": {
+          "dependency_preparation": {
+            "status": "passed",
+            "networkless_install_phases": true,
+            "package_downloads_disabled": true
+          },
+          "package_signature": {
+            "status": "verified",
+            "production_key_qualified": false
+          },
+          "install": {
+            "slot": "releases/78cb39448fed7dcbe00bb87fcb6b9f6500b3edcb787b0511df8dc592935a1bea-bfedcb6032464922",
+            "units": {
+              "advanced-vpn.service": {
+                "active": "inactive",
+                "enabled": "disabled"
+              },
+              "advanced-vpn-guard.service": {
+                "active": "inactive",
+                "enabled": "disabled"
+              },
+              "cypherpunk-vpn-controller.service": {
+                "active": "inactive",
+                "enabled": "static"
+              }
+            },
+            "versions": {
+              "avpn": "avpn 0.10.2",
+              "cypherpunk": "avpn 0.10.2"
+            }
+          },
+          "downgrade_refused": {
+            "exit_code": 1,
+            "slot_unchanged": true,
+            "installed_version": "0.10.2-1"
+          },
+          "replace": {
+            "slot": "releases/78cb39448fed7dcbe00bb87fcb6b9f6500b3edcb787b0511df8dc592935a1bea-759eaf117faa44eb",
+            "previous_retained": true
+          },
+          "damaged_slot_repair": {
+            "candidate": "78cb39448fed7dcbe00bb87fcb6b9f6500b3edcb787b0511df8dc592935a1bea-00b7d0f4e5174e46",
+            "phase": "committed",
+            "previous": null,
+            "schema": 1,
+            "unusable_previous": "78cb39448fed7dcbe00bb87fcb6b9f6500b3edcb787b0511df8dc592935a1bea-759eaf117faa44eb"
+          },
+          "reboot_without_activation": {
+            "boot_id": "4e85a636-c0fa-4ee1-a6d2-b3e6ffb961db",
+            "units": {
+              "advanced-vpn.service": {
+                "active": "inactive",
+                "enabled": "disabled"
+              },
+              "advanced-vpn-guard.service": {
+                "active": "inactive",
+                "enabled": "disabled"
+              },
+              "cypherpunk-vpn-controller.service": {
+                "active": "inactive",
+                "enabled": "static"
+              }
+            }
+          },
+          "controller_boundary": {
+            "status": "passed_with_test_authorization",
+            "polkit_version": "pkaction version 127",
+            "authorization_fixture": "javascript_rule",
+            "native_authentication_agent_qualified": false
+          },
+          "positive_control": {
+            "attempts": 5,
+            "external_marker_frames": 10
+          },
+          "guarded_removal_refused": {
+            "exit_code": 1,
+            "attempts": 5,
+            "external_marker_frames": 0
+          },
+          "inactive_removal": {
+            "private_fixture_preserved": true
+          },
+          "reboot_after_removal": {
+            "boot_id": "9a35aab0-b1a6-4cff-b686-b930f17bacf1",
+            "attempts": 5,
+            "external_marker_frames": 10
+          }
+        },
+        "test_signing_key": {
+          "fingerprint": "829B421339B95609D2C493384D2CAA74E78556B8",
+          "sha256": "0f5780c4d1ab6a9d37e12927c7706c73f86781f84532e1a1ff209bfb1bc53379",
+          "scope": "explicit_testing_key_import_in_this_guest_only_not_production_signing"
+        },
+        "os_release": "NAME=\"Fedora Linux\"\nVERSION=\"45 (Cloud Edition)\"\nRELEASE_TYPE=stable\nID=fedora\nVERSION_ID=45\nVERSION_CODENAME=\"\"\nPRETTY_NAME=\"Fedora Linux 45 (Cloud Edition)\"\nANSI_COLOR=\"0;38;2;60;110;180\"\nLOGO=fedora-logo-icon\nCPE_NAME=\"cpe:/o:fedoraproject:fedora:45\"\nHOME_URL=\"https://fedoraproject.org/\"\nDOCUMENTATION_URL=\"https://docs.fedoraproject.org/en-US/fedora/f45/\"\nSUPPORT_URL=\"https://ask.fedoraproject.org/\"\nBUG_REPORT_URL=\"https://bugzilla.redhat.com/\"\nREDHAT_BUGZILLA_PRODUCT=\"Fedora\"\nREDHAT_BUGZILLA_PRODUCT_VERSION=45\nREDHAT_SUPPORT_PRODUCT=\"Fedora\"\nREDHAT_SUPPORT_PRODUCT_VERSION=45\nSUPPORT_END=2027-11-24\nVARIANT=\"Cloud Edition\"\nVARIANT_ID=cloud\n",
+        "selinux_enforcing": true,
+        "administration_fixture": {
+          "hook": "/usr/libexec/qemu-ga/fsfreeze-hook.d/cypherpunk-validation-exec",
+          "context": "system_u:system_r:virt_qemu_ga_unconfined_t:s0",
+          "virt_qemu_ga_run_unconfined": true,
+          "scope": "trusted_vm_administration_only_not_a_product_policy",
+          "commands": "trusted_guest_agent_hook_with_fixed_system_environment",
+          "package_administration": "transient_root_systemd_services_product_units_unchanged"
+        },
+        "stopped": 1795042236.6127996,
+        "guest_retained_for_diagnostics": false
+      }
+    },
+    {
+      "distribution": "rocky103",
+      "evidence_sha256": "6856ff8b664e53e3a4e10f1e0c35f953526791648839fbaa904a4c014dba2da6",
+      "result": {
+        "schema": 1,
+        "status": "passed_local_native_rpm_lifecycle",
+        "scope": "local_native_rpm_lifecycle_only",
+        "started": 1795042002.534284,
+        "base_sha256": "68eae06d402c8b19e7dca06e85bdc43a3476089afa3ee20d93d0d43cf9871e9e",
+        "package_sha256": "84755228c45ce94d558315bb7200b9bf8f9eae732b510490942393a3e9bf7325",
+        "harness_sha256": "e19114701536ffd1fda3bfb54ef5e72d6ac59bac41b9faa7062edad539ffb851",
+        "controller_client_sha256": "910c1acd12396072afb05aabebef5d7f164d65c5f6a107e2d5dc64df0bd947f0",
+        "downgrade_package_sha256": "d8546c59ede3822a20dfb08c306b7633f724070512ef65cd75a0104c71575ea9",
+        "phases": {
+          "dependency_preparation": {
+            "status": "passed",
+            "networkless_install_phases": true,
+            "package_downloads_disabled": true
+          },
+          "package_signature": {
+            "status": "verified",
+            "production_key_qualified": false
+          },
+          "install": {
+            "slot": "releases/78cb39448fed7dcbe00bb87fcb6b9f6500b3edcb787b0511df8dc592935a1bea-0e3218502862410c",
+            "units": {
+              "advanced-vpn.service": {
+                "active": "inactive",
+                "enabled": "disabled"
+              },
+              "advanced-vpn-guard.service": {
+                "active": "inactive",
+                "enabled": "disabled"
+              },
+              "cypherpunk-vpn-controller.service": {
+                "active": "inactive",
+                "enabled": "static"
+              }
+            },
+            "versions": {
+              "avpn": "avpn 0.10.2",
+              "cypherpunk": "avpn 0.10.2"
+            }
+          },
+          "downgrade_refused": {
+            "exit_code": 1,
+            "slot_unchanged": true,
+            "installed_version": "0.10.2-1"
+          },
+          "replace": {
+            "slot": "releases/78cb39448fed7dcbe00bb87fcb6b9f6500b3edcb787b0511df8dc592935a1bea-7bb646edc14f4c7f",
+            "previous_retained": true
+          },
+          "damaged_slot_repair": {
+            "candidate": "78cb39448fed7dcbe00bb87fcb6b9f6500b3edcb787b0511df8dc592935a1bea-d471a1f50d9942a6",
+            "phase": "committed",
+            "previous": null,
+            "schema": 1,
+            "unusable_previous": "78cb39448fed7dcbe00bb87fcb6b9f6500b3edcb787b0511df8dc592935a1bea-7bb646edc14f4c7f"
+          },
+          "reboot_without_activation": {
+            "boot_id": "1817472e-1d6f-4a0c-a1e3-bedc4e32972d",
+            "units": {
+              "advanced-vpn.service": {
+                "active": "inactive",
+                "enabled": "disabled"
+              },
+              "advanced-vpn-guard.service": {
+                "active": "inactive",
+                "enabled": "disabled"
+              },
+              "cypherpunk-vpn-controller.service": {
+                "active": "inactive",
+                "enabled": "static"
+              }
+            }
+          },
+          "controller_boundary": {
+            "status": "passed_with_test_authorization",
+            "polkit_version": "pkaction version 125",
+            "authorization_fixture": "javascript_rule",
+            "native_authentication_agent_qualified": false
+          },
+          "positive_control": {
+            "attempts": 5,
+            "external_marker_frames": 10
+          },
+          "guarded_removal_refused": {
+            "exit_code": 1,
+            "attempts": 5,
+            "external_marker_frames": 0
+          },
+          "inactive_removal": {
+            "private_fixture_preserved": true
+          },
+          "reboot_after_removal": {
+            "boot_id": "e8b34504-6090-475d-8d72-76271d231ec4",
+            "attempts": 5,
+            "external_marker_frames": 10
+          }
+        },
+        "test_signing_key": {
+          "fingerprint": "829B421339B95609D2C493384D2CAA74E78556B8",
+          "sha256": "0f5780c4d1ab6a9d37e12927c7706c73f86781f84532e1a1ff209bfb1bc53379",
+          "scope": "explicit_testing_key_import_in_this_guest_only_not_production_signing"
+        },
+        "os_release": "NAME=\"Rocky Linux\"\nVERSION=\"10.3 (Red Quartz)\"\nRELEASE_TYPE=\"stable\"\nID=\"rocky\"\nID_LIKE=\"rhel centos fedora\"\nVERSION_ID=\"10.3\"\nPLATFORM_ID=\"platform:el10\"\nPRETTY_NAME=\"Rocky Linux 10.3 (Red Quartz)\"\nANSI_COLOR=\"0;32\"\nLOGO=\"fedora-logo-icon\"\nCPE_NAME=\"cpe:/o:rocky:rocky:10::baseos\"\nHOME_URL=\"https://rockylinux.org/\"\nVENDOR_NAME=\"RESF\"\nVENDOR_URL=\"https://resf.org/\"\nBUG_REPORT_URL=\"https://bugs.rockylinux.org/\"\nSUPPORT_END=\"2035-05-31\"\nROCKY_SUPPORT_PRODUCT=\"Rocky-Linux-10\"\nROCKY_SUPPORT_PRODUCT_VERSION=\"10.3\"\nREDHAT_SUPPORT_PRODUCT=\"Rocky Linux\"\nREDHAT_SUPPORT_PRODUCT_VERSION=\"10.3\"\n",
+        "selinux_enforcing": true,
+        "administration_fixture": {
+          "hook": "/usr/libexec/qemu-ga/fsfreeze-hook.d/cypherpunk-validation-exec",
+          "context": "system_u:system_r:virt_qemu_ga_unconfined_t:s0",
+          "virt_qemu_ga_run_unconfined": true,
+          "scope": "trusted_vm_administration_only_not_a_product_policy",
+          "commands": "trusted_guest_agent_hook_with_fixed_system_environment",
+          "package_administration": "transient_root_systemd_services_product_units_unchanged"
+        },
+        "stopped": 1795042225.3308475,
+        "guest_retained_for_diagnostics": false
+      }
+    }
+  ],
+  "limitations": [
+    "Temporary VM authorization fixture does not qualify a native Polkit agent.",
+    "Private monotonic floor is a synthetic retention marker, not complete real enrollment/counter recovery.",
+    "External lifecycle probes are IPv4; separate namespace IPv6 evidence does not qualify this RPM configuration.",
+    "Downgrade fixture changes metadata, not historical protocol code.",
+    "No active enrolled tunnel, full boot-guard fault matrix or physical power loss qualification.",
+    "Host file-context restoration does not qualify a dedicated confined SELinux service domain.",
+    "Software test signatures do not qualify production hardware repository keys or release provenance."
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "status": "passed_native_unknown_state_render",
+  "scope": "headless_native_webkit_absent_controller_render_not_packaged_authorization_or_usability_qualification",
+  "software_compositing": true,
+  "native_authentication_agent_qualified": false,
+  "binary_sha256": "81425df5c9a7e6d31d0b71c9efe788ee3cc6f0aa74251447f9158d4a6df60e12",
+  "embedded_assets_only": true,
+  "unknown_without_controller": true,
+  "narrow_without_horizontal_overflow": true,
+  "build_profile": "debug_with_tauri_custom_protocol_embedded_production_web_assets",
+  "harness_sha256": "cad5939f848f54ac74578d43ec476440a2593c710b44a23cfc0f719070df5084",
+  "host": "Debian 13 x86_64",
+  "webkit_version": "2.54.0",
+  "screenshots": {
+    "docs/evidence/gui/native-unknown-desktop-20261118.png": "ea9f07a18669da5282e0c8a4d63e14ba299270805f615e5c55e74ebfa128db57",
+    "docs/evidence/gui/native-unknown-narrow-20261118.png": "e62c2c6444c92b52455279144927ede652a6d1c3a491305faa57e8f8bbc2e3fb"
+  },
+  "top_level_elf_glibc_required": "2.39",
+  "other_distributions_qualified": false
+}

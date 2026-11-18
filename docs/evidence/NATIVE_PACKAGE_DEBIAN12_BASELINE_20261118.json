@@ -1,0 +1,90 @@
+{
+  "schema": 1,
+  "status": "passed_local_native_deb_lifecycle",
+  "scope": "local_native_deb_lifecycle_only",
+  "started": 1794998830.8536406,
+  "base_sha256": "d8533680bab71d55bb181c95d60a1f394614aac761b73f1a6930938ecc0f9f54",
+  "package_sha256": "d0973be51869b42feb262aee1949371004b8885b5aa52cc1584b697527193dc6",
+  "harness_sha256": "ad33afa652d2e48828f6f5d9bd519ad0b4d0b2f4954d4c365bba47ce3ed6bce6",
+  "controller_client_sha256": "910c1acd12396072afb05aabebef5d7f164d65c5f6a107e2d5dc64df0bd947f0",
+  "downgrade_package_sha256": "346b8cfe1c28f0f6d8037b09b6e1c70d5b2ed48dcd21ad8c404961ee2c9dc8b9",
+  "phases": {
+    "install": {
+      "slot": "releases/d745bd52023cd1653aa253839609ea4a3f21edc116559946a9b878901534e0e2-9e4ad22f34044073",
+      "units": {
+        "advanced-vpn.service": {
+          "active": "inactive",
+          "enabled": "disabled"
+        },
+        "advanced-vpn-guard.service": {
+          "active": "inactive",
+          "enabled": "disabled"
+        },
+        "cypherpunk-vpn-controller.service": {
+          "active": "inactive",
+          "enabled": "static"
+        }
+      },
+      "versions": {
+        "avpn": "avpn 0.10.2",
+        "cypherpunk": "avpn 0.10.2"
+      }
+    },
+    "downgrade_refused": {
+      "exit_code": 1,
+      "slot_unchanged": true,
+      "installed_version": "0.10.2-1"
+    },
+    "replace": {
+      "slot": "releases/d745bd52023cd1653aa253839609ea4a3f21edc116559946a9b878901534e0e2-767596ddde1d47e1",
+      "previous_retained": true
+    },
+    "damaged_slot_repair": {
+      "candidate": "d745bd52023cd1653aa253839609ea4a3f21edc116559946a9b878901534e0e2-5fa29534cda34270",
+      "phase": "committed",
+      "previous": null,
+      "schema": 1,
+      "unusable_previous": "d745bd52023cd1653aa253839609ea4a3f21edc116559946a9b878901534e0e2-767596ddde1d47e1"
+    },
+    "reboot_without_activation": {
+      "boot_id": "683d6cd3-b971-4310-8f69-ba569df3d5b7",
+      "units": {
+        "advanced-vpn.service": {
+          "active": "inactive",
+          "enabled": "disabled"
+        },
+        "advanced-vpn-guard.service": {
+          "active": "inactive",
+          "enabled": "disabled"
+        },
+        "cypherpunk-vpn-controller.service": {
+          "active": "inactive",
+          "enabled": "static"
+        }
+      }
+    },
+    "controller_boundary": {
+      "status": "passed_with_test_authorization",
+      "native_authentication_agent_qualified": false
+    },
+    "positive_control": {
+      "attempts": 5,
+      "external_marker_frames": 10
+    },
+    "guarded_removal_refused": {
+      "exit_code": 1,
+      "attempts": 5,
+      "external_marker_frames": 0
+    },
+    "inactive_removal": {
+      "private_fixture_preserved": true
+    },
+    "reboot_after_removal": {
+      "boot_id": "7d6d5722-79c9-4961-96b3-5c9618929edc",
+      "attempts": 5,
+      "external_marker_frames": 10
+    }
+  },
+  "os_release": "PRETTY_NAME=\"Debian GNU/Linux 12 (bookworm)\"\nNAME=\"Debian GNU/Linux\"\nVERSION_ID=\"12\"\nVERSION=\"12 (bookworm)\"\nVERSION_CODENAME=bookworm\nID=debian\nHOME_URL=\"https://www.debian.org/\"\nSUPPORT_URL=\"https://www.debian.org/support\"\nBUG_REPORT_URL=\"https://bugs.debian.org/\"\n",
+  "stopped": 1794999124.8026092
+}

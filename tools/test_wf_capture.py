@@ -1,6 +1,7 @@
 """Metadata audit counterexamples and kernel timestamp ABI validation."""
 
 import json
+import os
 from pathlib import Path
 import socket
 import struct
@@ -85,7 +86,7 @@ class ProtectionSamples(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            now = time.time()
+            now = float(int(time.time()))
             status = dict(
                 state="supervising",
                 lifecycle="connected",
@@ -98,6 +99,8 @@ class ProtectionSamples(unittest.TestCase):
             (root / "controller.json").write_text(json.dumps(dict(pid=1, identity="one")))
             (root / "status.json").chmod(0o600)
             (root / "controller.json").chmod(0o600)
+            for name in ("status.json", "controller.json"):
+                os.utime(root / name, (now, now))
             with (
                 mock.patch.object(avpnctl, "read_json_private", side_effect=lambda path: json.loads(path.read_text())),
                 mock.patch.object(avpnctl, "identity_of", side_effect=lambda pid: {1: "one", 2: "two"}[pid]),
@@ -106,6 +109,8 @@ class ProtectionSamples(unittest.TestCase):
                 self.assertEqual(wf_observer.snapshot(root, now + 20)["protection"], "unknown")
                 with mock.patch.object(avpnctl, "identity_of", return_value="reused"):
                     self.assertEqual(wf_observer.snapshot(root, now)["protection"], "unknown")
+                os.utime(root / "status.json", (now + 1, now + 1))
+                self.assertEqual(wf_observer.snapshot(root, now)["protection"], "unknown")
 
     def test_observer_has_samples_before_and_after_the_observed_interval(self):
         with tempfile.TemporaryDirectory() as temporary:

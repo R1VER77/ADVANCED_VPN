@@ -160,6 +160,35 @@ class RuntimeManifest(unittest.TestCase):
         self.assertEqual((previous / "lib/dependency.py").read_bytes(), before)
         self.assertFalse(list((target / "releases").glob(".prepare-*")))
 
+    def test_label_failure_never_publishes_the_new_system_slot(self):
+        package = self.root / "package"
+        (package / "bin").mkdir(parents=True)
+        (package / "tools").mkdir(parents=True)
+        (package / "tools/hardware-requirements.txt").write_bytes(self.lock.read_bytes())
+        self.bundle.rename(package / "venv")
+        target = self.root / "installed"
+        with mock.patch.object(install.os, "chown"), mock.patch.object(install, "check_application"):
+            install.install_system(package, target)
+        previous = (target / "current").resolve()
+
+        def cannot_label(slot):
+            self.assertEqual(slot.parent, target / "releases")
+            self.assertTrue(slot.is_dir())
+            self.assertNotEqual(slot, previous)
+            self.assertEqual((target / "current").resolve(), previous)
+            raise PermissionError("host file-context restoration failed")
+
+        with (
+            mock.patch.object(install.os, "chown"),
+            mock.patch.object(install, "label_system_slot", side_effect=cannot_label),
+            mock.patch.object(install, "check_application") as application_check,
+        ):
+            with self.assertRaisesRegex(PermissionError, "file-context"):
+                install.install_system(package, target)
+            application_check.assert_not_called()
+        self.assertEqual((target / "current").resolve(), previous)
+        runtime.verify(previous / "venv", package / "tools/hardware-requirements.txt")
+
 
 if __name__ == "__main__":
     unittest.main()

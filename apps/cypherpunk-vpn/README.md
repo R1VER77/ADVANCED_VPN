@@ -52,10 +52,33 @@ was preserved before import; `PROTOTYPE_ORIGIN.json` records its source hashes.
 ## Validation status
 
 Production and demo web builds and native Rust checking/Clippy have passed locally.
-These checks do not qualify native installation, D-Bus/Polkit integration, a complete
-owner setup or usability with five new participants. The production npm dependency
-audit reported zero findings. The build dependency tree still contains the unpatched
-picomatch advisory GHSA-fc5q-39xc-vjpf; six high results include its dependent packages.
-It remains an open build-toolchain finding, not a waived or fixed issue.
+The [native WebKit smoke](../../docs/evidence/NATIVE_GUI_20261118.json) also passed
+with embedded production assets and an absent controller: status stays unknown,
+no mock appears, and a 420-pixel window has no horizontal overflow. See the
+[desktop](../../docs/evidence/gui/native-unknown-desktop-20261118.png) and
+[narrow](../../docs/evidence/gui/native-unknown-narrow-20261118.png) captures.
+This is a debug native build on a headless software display. Real D-Bus boundary
+checks separately passed in Debian guests with disposable authorization rules.
+These checks do not qualify packaged GUI installation, a native Polkit authentication
+agent, complete owner setup or usability with five new participants.
+
+Reproduce the rendering smoke on a disposable Linux host without the controller
+installed or running (requires Xvfb, xauth, xdotool, ImageMagick, dbus-run-session
+and busctl):
+
+```sh
+npm run build
+cargo build --manifest-path src-tauri/Cargo.toml --locked --features tauri/custom-protocol
+xvfb-run -a -s '-screen 0 1200x900x24 -nolisten tcp' dbus-run-session -- \
+  node scripts/native-smoke.mjs src-tauri/target/debug/cypherpunk-vpn-gui NEW_OUTPUT_DIRECTORY
+```
+
+The smoke refuses an active or activatable controller, uses fresh application data,
+waits for actual DOM and paint readiness, and opens a temporary loopback WebKit
+inspector only for this test. It performs no privileged action or device operation.
+The local build-tool dependency uses a vendored picomatch fork that rejects repeated
+extglobs before regex construction. Its adversarial test includes a guard-removed
+mutant; see `vendor/picomatch/CYPHERPUNK_GUARD.md`. This mitigation is separate from
+an upstream fix or a claim of general glob-parser safety.
 
 See `CONTROLLER_CONTRACT.md` and the main implementation progress document.

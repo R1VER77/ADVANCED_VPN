@@ -1,6 +1,6 @@
 # Platform and hardware validation matrix
 
-Updated 17 November 2026. Compatibility, a detected capability and a completed physical
+Updated 18 November 2026. Compatibility, a detected capability and a completed physical
 test are different claims. This project remains experimental; the matrix does not
 certify production security, hardware authenticity or every model in a product family.
 
@@ -13,6 +13,7 @@ certify production security, hardware authenticity or every model in a product f
 | **Ubuntu 24.04, x86_64 Linux — OFFLINE INSTALL TESTED** | Namespace protocol/sandbox/failover/shaping CI; 17 November clean-VM offline install/replacement/guarded removal passed. | Cross-release/live upgrades and current-version installed protection/reboot validation. |
 | **Debian 12, x86_64 Linux — OFFLINE INSTALL TESTED** | 17 November clean-VM offline system/user install, replacement and guarded removal passed. | Cross-release/live upgrades and current-version protection/recovery validation. |
 | aarch64 Linux | Planned build and test expansion; an installed compiler target is not a supported release. | Native builds, dependencies, seccomp/sandbox and protection tests on real ARM hardware. |
+| **Fedora 45 / Rocky Linux 10.3, x86_64 — NATIVE PACKAGE TESTED** | Publisher-authenticated images; corrected software-test-signed RPM passed install/replace/repair/reboot, VM-authorized controller use, armed-removal refusal and recovered state-preserving removal on both. SELinux remained enforcing. [Evidence](evidence/NATIVE_RPM_MATRIX_20261118.json). | Full enrolled-tunnel/boot-guard fault qualification, native authentication agent, dedicated confined SELinux domain, production repository/provenance and release qualification. |
 | Other Linux distributions / musl | Preflight can identify missing requirements and suggest package names; this is not support certification. | Distribution-specific packaging and protection tests; no musl data-plane release today. |
 | Windows / macOS | Planned, no current supported client release. | Native tunnel, guard, DNS, privilege separation, hardware access and recovery implementation and validation. |
 | Android / iOS | Planned, no current supported client release. | Platform VPN APIs, background/always-on behavior, battery/network changes, hardware-key transport and recovery validation on real devices. |
@@ -22,6 +23,39 @@ Historical evidence: [VM record](evidence/VM_VALIDATION.json),
 [managed validation](MANAGED_VALIDATION.md). Check the commit/date and configuration of
 each record before treating it as evidence for a new release. Passing Linux namespace
 tests does not establish mobile protection. IPv6 is currently blocked, not tunneled.
+
+The new native Debian candidate A passed the scoped
+[Debian 13 lifecycle trial](evidence/NATIVE_PACKAGE_DEBIAN13_20261118.json), including
+reboot and guarded removal. The same artifact was
+[refused by Debian 12](evidence/NATIVE_PACKAGE_DEBIAN12_REJECTED_20261118.json): its GNU
+core requires glibc 2.38 despite the metadata's 2.35 declaration. It is not a qualified
+portable release. The builder now rejects this mismatch; a baseline rebuild and fresh
+native package matrix follow. The 17 November offline tarball passes above refer to
+their separately hashed artifact and do not transfer to this candidate.
+
+Rebuilt candidate B passed the full local native-package lifecycle on **Debian 12,
+Debian 13, Ubuntu 22.04 and Ubuntu 24.04**. The
+[four-distribution record](evidence/NATIVE_PACKAGE_MATRIX_20261118.json) identifies
+the shared artifact, base images, harness revisions and actual phases. Ubuntu 22.04
+uses a VM-only legacy Polkit fixture; Ubuntu 24.04's final install phases ran without
+external networking after system dependency preparation. Native authentication-agent
+interaction, physical power loss and complete enrolled-counter recovery remain open.
+The downgrade archive is a metadata-only fixture, not an older protocol implementation.
+
+## Cloud setup coverage
+
+The current catalog names AWS, OCI, Azure, GCP, seven additional non-US providers,
+RackNerd and a generic own-server path. These are catalog entries, not thirteen
+independently qualified provisioning adapters. Only AWS and OCI have dedicated
+creation paths today. Other providers use an already-created compatible server over
+SSH; the GCP catalog entry is not recommended as a hop. Catalog terms are dated
+research, not a current pricing guarantee.
+
+Thousands of provider-specific integrations, automatic navigation of arbitrary cloud
+websites and a trained local setup model are not implemented. Planned provider
+expansion must distinguish a documented provider, authenticated readiness check,
+reviewed resource plan, successful provisioning and complete protection validation.
+The model must not promote an unrecognized interface or device to supported status.
 
 ## Security keys and wallets
 

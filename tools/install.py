@@ -46,7 +46,7 @@ BINARIES = [
     "cypherpunk-controller",
     "cypherpunk-bootguard",
 ]
-SOURCES = ["tools", "deploy", "third_party", "docs/cli", "docs/OFFLINE_INSTALLATION.md", "docs/SUPPORT_MATRIX.md",
+SOURCES = ["tools", "deploy", "third_party", "docs/cli", "docs/OFFLINE_INSTALLATION.md", "docs/SIGNED_REPOSITORY.md", "docs/SUPPORT_MATRIX.md",
            "docs/NAME_MIGRATION.md", "README.md", "LICENSE", "NOTICE", "SECURITY.md"]  # fmt: skip
 PACKAGE_OWNER = Path("/var/lib/cypherpunk-vpn/package-owner")
 PACKAGE_OWNER_BYTES = b"cypherpunk-vpn package ownership v1\n"
@@ -399,14 +399,45 @@ def install_system(package, target, adopt_legacy=False):
         store.releases.chmod(0o755)
         if legacy and store.current() is None:
             previous = store.prepare(lambda stage: clone_legacy(target, stage, names=legacy))
+            label_system_slot(store.releases / previous)
             store.adopt(previous, legacy)
         # These stable compatibility paths resolve through one atomic pointer.
         # Legacy flat directories need an explicit, inactive migration first.
         for name in sorted(names):
             compatibility_link(target / name, "current/" + name)
         name = store.prepare(lambda stage: _build_system(package, target, stage))
+        label_system_slot(store.releases / name)
         store.activate(name, check_application, repair_damaged=True)
     return upgraded
+
+
+def label_system_slot(slot):
+    """Apply this host's SELinux file contexts before publishing copied code.
+
+    copytree/copy2 can retain the package staging tree's security.selinux xattr.
+    That label is not authoritative for /opt application executables. Respect the
+    administrator's installed file-context mappings; never install an allow rule,
+    change enforcing mode or relabel external private state.
+    """
+    try:
+        enforcing = Path("/sys/fs/selinux/enforce").read_bytes().strip()
+    except FileNotFoundError:
+        return
+    if enforcing not in (b"0", b"1"):
+        raise RuntimeError("SELinux status could not be verified; application activation refused")
+    from release_slots import sync_tree
+
+    subprocess.run(
+        # restorecon is a setfiles symlink on RPM distributions. Preserve its
+        # dispatch name while executing the resolved, ownership-checked binary.
+        ["restorecon", "-RF", "--", str(slot)],  # noqa: S607 -- executable is pinned below; argv[0] selects setfiles mode
+        executable=trusted_exe("restorecon"),
+        check=True,
+        timeout=120,
+        env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LC_ALL": "C"},
+        capture_output=True,
+    )
+    sync_tree(slot)
 
 
 def _build_system(package, target, new):

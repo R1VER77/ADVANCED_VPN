@@ -1,0 +1,758 @@
+{
+  "schema": 1,
+  "scope": "supplied_review_inputs_not_authenticated_release_artifacts",
+  "github_source_commit": "5d69623697524796b105dd5f24f0644339a05652",
+  "files": [
+    {
+      "name": "BUILD.json",
+      "size": 255,
+      "sha256": "a78aea962cdf489c6f75dbb1b88a95a8978912e0a049b57ac9af4d51fec5e69b"
+    },
+    {
+      "name": "CYPHERPUNKS_Validation_Report.pdf",
+      "size": 883897,
+      "sha256": "a88562582f9b7912bf50247d5486a46dc10c499768f3031b359286453d8ad610"
+    },
+    {
+      "name": "CYPHERPUNKS_validation_bundle(1).zip",
+      "size": 1000213,
+      "sha256": "f0d3684e24345b22e4bca4c55e9398a1b27204d270b78c5ac52f33dfc9d17748"
+    },
+    {
+      "name": "CYPHERPUNKS_validation_bundle(2).zip",
+      "size": 1153118,
+      "sha256": "6d53412d39c4a2fe30051a1b0c208a155e01eb7914bcf05722ca470b4aaf1b2c"
+    },
+    {
+      "name": "CYPHERPUNKS_validation_bundle(3).zip",
+      "size": 1335329,
+      "sha256": "f4a7ffeb3a2dc4cfec75f6623453d16eaa018018a805eb9ae1670594ff3f9e5b"
+    },
+    {
+      "name": "CYPHERPUNKS_validation_bundle.zip",
+      "size": 678591,
+      "sha256": "3f2d439d92849d7edbd19d78e5007f1b6c4567635ba8f52639bbb41159d584b8"
+    },
+    {
+      "name": "InRelease",
+      "size": 1017,
+      "sha256": "83ee525be27cdab1fe469a62bb5e2c3080670b68ef37c9dcc57453468b9b7cd8"
+    },
+    {
+      "name": "Packages",
+      "size": 731,
+      "sha256": "e8fca19a03e09a56220e04b12beca0b88bad373c613aa070bb0fb5f93bdcc976"
+    },
+    {
+      "name": "Packages.gz",
+      "size": 531,
+      "sha256": "99bacf0b5fa0baeb30079d7b59c776976a3e25c6438726e34d1d9f9077c27fb0"
+    },
+    {
+      "name": "REPOSITORY.json",
+      "size": 589,
+      "sha256": "e774929c3e57a32c18df38ac0dafa0c64c25dc1e5404b909acb2a6122862b607"
+    },
+    {
+      "name": "Release",
+      "size": 740,
+      "sha256": "a2a3fb6b8f32163980784ecf8ccb0027c663be3d26da3ed74155a85354733aee"
+    },
+    {
+      "name": "Release.gpg",
+      "size": 119,
+      "sha256": "acc7390aad8e70bc4cf4c804d6009b7f77dca288d9045381d63749b178c26ea5"
+    },
+    {
+      "name": "TASK3_REPORT.md",
+      "size": 9269,
+      "sha256": "a3bbbed6aa8dfbb5f507bbcd7e36e2b8d3563b32ba8f8970083eb1979974ec36"
+    },
+    {
+      "name": "VALIDATION_REPORT.md",
+      "size": 5827,
+      "sha256": "22d4d3d02d3ce42aa991665a6264e83a5cbda4b8db567c545b87c637cefd7a73"
+    },
+    {
+      "name": "avpn_test_pir.py",
+      "size": 9362,
+      "sha256": "43ee20a10b0551c8906bff60b7a52956bd59e41dd0f70be338269959b8f80526"
+    },
+    {
+      "name": "avpn_test_wf.py",
+      "size": 12456,
+      "sha256": "9dbc0d7ac56b078858650de03dd7d48474939341a1037dce2d686ef618e67fa9"
+    },
+    {
+      "name": "cypherpunk-vpn_0.10.2-1_amd64(1).deb",
+      "size": 35481708,
+      "sha256": "25e0301de9c07ad1109c56f1c3232eeb14fa212c445e9ee4aa2aa523e6666979"
+    },
+    {
+      "name": "cypherpunk-vpn_0.10.2-1_amd64.deb",
+      "size": 35481708,
+      "sha256": "25e0301de9c07ad1109c56f1c3232eeb14fa212c445e9ee4aa2aa523e6666979"
+    },
+    {
+      "name": "downgrade-matrix.txt",
+      "size": 1182,
+      "sha256": "838088ebf605e234dd20420097951b1af0c43f1715cf8f75de2b81f358d607df"
+    },
+    {
+      "name": "main(1).rs",
+      "size": 6088,
+      "sha256": "79dafcaa2968a56ead113d3808db42cc143778793e890fc356f91b531a29240c"
+    },
+    {
+      "name": "main.rs",
+      "size": 6088,
+      "sha256": "79dafcaa2968a56ead113d3808db42cc143778793e890fc356f91b531a29240c"
+    },
+    {
+      "name": "pqc_sizes(1).c",
+      "size": 3942,
+      "sha256": "7b2198720a89e9510f0fe3d9566db68159efee851e25a3ac99bd03c22647dc29"
+    },
+    {
+      "name": "pqc_sizes.c",
+      "size": 3942,
+      "sha256": "7b2198720a89e9510f0fe3d9566db68159efee851e25a3ac99bd03c22647dc29"
+    },
+    {
+      "name": "task-3-downgrade-policy-and-signed-repo.patch",
+      "size": 51582,
+      "sha256": "c7cfc97b61e0caf79641cab855284f3fcdc0bd19d1a6fd60c6e5bfa8a620318a"
+    },
+    {
+      "name": "whitepaper_content.py",
+      "size": 36122,
+      "sha256": "a9c7892b9d7486eca34c0928129ce113c196f775322ad064e9339e1c7a991f91"
+    },
+    {
+      "name": "whitepaper_content2.py",
+      "size": 28480,
+      "sha256": "aecca526eee8aa8d4261222704c1f8043bb6aa3e6504fe1866122871d90cc9c2"
+    }
+  ],
+  "archives": [
+    {
+      "name": "CYPHERPUNKS_validation_bundle(1).zip",
+      "sha256": "f0d3684e24345b22e4bca4c55e9398a1b27204d270b78c5ac52f33dfc9d17748",
+      "entries": [
+        {
+          "name": "CYPHERPUNKS_validation/README.md",
+          "size": 8780,
+          "sha256": "b69fba802d94c60ac961fe3deecabf1bfe2a7a20b0d5165ae6e051aa761856e8"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/scripts/avpn_test_crypto.py",
+          "size": 8114,
+          "sha256": "acc6ae85ed20ae7d79191ac59365b6991d89a269caaeb4bb26a06e11057452e7"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/scripts/lsh_bench/Cargo.toml",
+          "size": 166,
+          "sha256": "4e28ef756d2e0f7b491c06e3378728742b84bd3be75117a0fe1580c47a8d7ec9"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/scripts/lsh_bench/src/main.rs",
+          "size": 6088,
+          "sha256": "79dafcaa2968a56ead113d3808db42cc143778793e890fc356f91b531a29240c"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/scripts/pqc_sizes.c",
+          "size": 3942,
+          "sha256": "7b2198720a89e9510f0fe3d9566db68159efee851e25a3ac99bd03c22647dc29"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/scripts/avpn_test_wf.py",
+          "size": 12456,
+          "sha256": "9dbc0d7ac56b078858650de03dd7d48474939341a1037dce2d686ef618e67fa9"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/scripts/hash_bench_c.c",
+          "size": 2237,
+          "sha256": "3ad01877e5b50281755dc64901f1d757e3ff59d1822c2317d957c6c5980e8ef2"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/scripts/avpn_test_pir.py",
+          "size": 9362,
+          "sha256": "43ee20a10b0551c8906bff60b7a52956bd59e41dd0f70be338269959b8f80526"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/scripts/kat/lsh512_256.txt",
+          "size": 40124,
+          "sha256": "ef394eaf3cb94585a18ddd2bf4da922ab6fc89f71eea24104372f95c0d76349c"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/scripts/kat/lsh512.txt",
+          "size": 96114,
+          "sha256": "007da3e86c4319eacd98252139a4b970bc0e9a3c2fb5723bd2a56facc7dd1860"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/scripts/kat/lsh256.txt",
+          "size": 78915,
+          "sha256": "e4726c1cb7cc1a72638b4a28a913273e3331702a317866f31580ff4cc2b3ee47"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/scripts/avpn_test_dcnet.py",
+          "size": 14530,
+          "sha256": "1e5713c900dc8184bc10361f89fa92956e96d2cb1ee0d9a3ff1eb0c6d93f7786"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/scripts/avpn_test_pqc_alternatives.py",
+          "size": 16452,
+          "sha256": "4d1c5d698897ff0f82af54362f952fd5eb2de466db48489ae3bb0fc0903ce972"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/charts/pir_bench.png",
+          "size": 145883,
+          "sha256": "28f40dc6fd9bfd69aebc9f323b9dfeee65213308c9f6f14353aaa3aa8a35d6f8"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/charts/hash_alternatives.png",
+          "size": 71859,
+          "sha256": "1cd88cecf6cb92cd68cb4de3c61e9627862e07e2029e4ab6931d25e82b8d9c27"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/charts/crypto_bench.png",
+          "size": 133533,
+          "sha256": "441aa2fcb7959ddaab79c68b0db023edaf0f3dda6995248750d50443cd456df5"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/charts/dcnet_anonymity.png",
+          "size": 112875,
+          "sha256": "945069dcbd23271f3d6f083a25a04cb3827b1302c6155a5e592de009a5b228b5"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/charts/dcnet_bandwidth.png",
+          "size": 133824,
+          "sha256": "a2de431fb7b9bff513664dcc15780f6937978790bf5479e29f34d0216c79addc"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/charts/wf_accuracy.png",
+          "size": 93309,
+          "sha256": "8c7cd239a10ad6d2da580f6786f3d67be71d77cfbda493fb676da24e4387018d"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/charts/wf_traces.png",
+          "size": 92825,
+          "sha256": "952c606449b153b29fe0abfebcec4fa49677a0230620d289595ebf0c6e327fc6"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/charts/pqc_alternatives.png",
+          "size": 163224,
+          "sha256": "26f6e35196fa40dff0fbb3386e6308d3327e7e43e3f38547c355c23e7e74b8dc"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/data/dcnet_results.json",
+          "size": 4982,
+          "sha256": "5341bc3cf026cb7fc4f402c8497250f5d6e7ba4031b42eabdd6fcf76292eb800"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/data/hash_baseline.json",
+          "size": 233,
+          "sha256": "456251d264fcecedc03452a7e57de865368c3d62e2cdacfd394c231fdf3276a8"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/data/wf_results.json",
+          "size": 801,
+          "sha256": "7a7a53e247323f44f5443b66ce072f39f08d71bc5ad5947dd39133dbb2eb082e"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/data/lsh256_results.json",
+          "size": 537,
+          "sha256": "0ccaa1f3b390e70ab4cd4416195fb9b6f805965bdb95933300e1d906acf3d4c9"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/data/pir_results.json",
+          "size": 3119,
+          "sha256": "56cc7d4f77f94252a5e781ab7c599ce61866ce68673e822c985b0d3691625d3c"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/data/track6_pqc_alternatives.json",
+          "size": 9579,
+          "sha256": "07c4ac0a7c4ac1024206aa1094a72e592e6ec94bb4a2c40d7fdfc834a451759b"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/data/dcnet_bandwidth.csv",
+          "size": 824,
+          "sha256": "c31c8775362b292a9783456738ede48d13fb02ef5d2dc9796bfdfeb2ce492f9d"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/data/crypto_results.json",
+          "size": 2326,
+          "sha256": "461ecbfe0211586c327a43c7156dcf7d6367fef8433348267133801e3cec0031"
+        }
+      ]
+    },
+    {
+      "name": "CYPHERPUNKS_validation_bundle(2).zip",
+      "sha256": "6d53412d39c4a2fe30051a1b0c208a155e01eb7914bcf05722ca470b4aaf1b2c",
+      "entries": [
+        {
+          "name": "CYPHERPUNKS_validation/README.md",
+          "size": 12391,
+          "sha256": "32a30cd99f21cfef09f431792c698736fae2c60139cdfdc63b6107c458d80526"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/scripts/avpn_test_crypto.py",
+          "size": 8114,
+          "sha256": "acc6ae85ed20ae7d79191ac59365b6991d89a269caaeb4bb26a06e11057452e7"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/scripts/lsh_bench/Cargo.toml",
+          "size": 166,
+          "sha256": "4e28ef756d2e0f7b491c06e3378728742b84bd3be75117a0fe1580c47a8d7ec9"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/scripts/lsh_bench/src/main.rs",
+          "size": 6088,
+          "sha256": "79dafcaa2968a56ead113d3808db42cc143778793e890fc356f91b531a29240c"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/scripts/pqc_sizes.c",
+          "size": 3942,
+          "sha256": "7b2198720a89e9510f0fe3d9566db68159efee851e25a3ac99bd03c22647dc29"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/scripts/avpn_test_wf.py",
+          "size": 12456,
+          "sha256": "9dbc0d7ac56b078858650de03dd7d48474939341a1037dce2d686ef618e67fa9"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/scripts/hash_bench_c.c",
+          "size": 2237,
+          "sha256": "3ad01877e5b50281755dc64901f1d757e3ff59d1822c2317d957c6c5980e8ef2"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/scripts/avpn_test_pir.py",
+          "size": 9362,
+          "sha256": "43ee20a10b0551c8906bff60b7a52956bd59e41dd0f70be338269959b8f80526"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/scripts/kat/lsh512_256.txt",
+          "size": 40124,
+          "sha256": "ef394eaf3cb94585a18ddd2bf4da922ab6fc89f71eea24104372f95c0d76349c"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/scripts/kat/lsh512.txt",
+          "size": 96114,
+          "sha256": "007da3e86c4319eacd98252139a4b970bc0e9a3c2fb5723bd2a56facc7dd1860"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/scripts/kat/lsh256.txt",
+          "size": 78915,
+          "sha256": "e4726c1cb7cc1a72638b4a28a913273e3331702a317866f31580ff4cc2b3ee47"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/scripts/avpn_test_dcnet.py",
+          "size": 14530,
+          "sha256": "1e5713c900dc8184bc10361f89fa92956e96d2cb1ee0d9a3ff1eb0c6d93f7786"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/scripts/avpn_commit_review.py",
+          "size": 20569,
+          "sha256": "6b4eac6e0f2e317dbf97d2054137367f20031128596567adee7fedb5710e00ae"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/scripts/avpn_test_pqc_alternatives.py",
+          "size": 16452,
+          "sha256": "4d1c5d698897ff0f82af54362f952fd5eb2de466db48489ae3bb0fc0903ce972"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/charts/pir_bench.png",
+          "size": 145883,
+          "sha256": "28f40dc6fd9bfd69aebc9f323b9dfeee65213308c9f6f14353aaa3aa8a35d6f8"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/charts/hash_alternatives.png",
+          "size": 71859,
+          "sha256": "1cd88cecf6cb92cd68cb4de3c61e9627862e07e2029e4ab6931d25e82b8d9c27"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/charts/crypto_bench.png",
+          "size": 133533,
+          "sha256": "441aa2fcb7959ddaab79c68b0db023edaf0f3dda6995248750d50443cd456df5"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/charts/dcnet_anonymity.png",
+          "size": 112875,
+          "sha256": "945069dcbd23271f3d6f083a25a04cb3827b1302c6155a5e592de009a5b228b5"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/charts/frame_budget.png",
+          "size": 149537,
+          "sha256": "991c541d80b2fed2208b4c304bbc421211f5f54260e9c248b0f9620556377245"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/charts/dcnet_bandwidth.png",
+          "size": 133824,
+          "sha256": "a2de431fb7b9bff513664dcc15780f6937978790bf5479e29f34d0216c79addc"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/charts/wf_accuracy.png",
+          "size": 93309,
+          "sha256": "8c7cd239a10ad6d2da580f6786f3d67be71d77cfbda493fb676da24e4387018d"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/charts/wf_traces.png",
+          "size": 92825,
+          "sha256": "952c606449b153b29fe0abfebcec4fa49677a0230620d289595ebf0c6e327fc6"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/charts/pqc_alternatives.png",
+          "size": 163224,
+          "sha256": "26f6e35196fa40dff0fbb3386e6308d3327e7e43e3f38547c355c23e7e74b8dc"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/data/dcnet_results.json",
+          "size": 4982,
+          "sha256": "5341bc3cf026cb7fc4f402c8497250f5d6e7ba4031b42eabdd6fcf76292eb800"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/data/commit_review.json",
+          "size": 13205,
+          "sha256": "c1038d2771e82152ddf9eaef600720cf4566be040c4f73773b26d61e63960350"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/data/hash_baseline.json",
+          "size": 233,
+          "sha256": "456251d264fcecedc03452a7e57de865368c3d62e2cdacfd394c231fdf3276a8"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/data/wf_results.json",
+          "size": 801,
+          "sha256": "7a7a53e247323f44f5443b66ce072f39f08d71bc5ad5947dd39133dbb2eb082e"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/data/lsh256_results.json",
+          "size": 537,
+          "sha256": "0ccaa1f3b390e70ab4cd4416195fb9b6f805965bdb95933300e1d906acf3d4c9"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/data/pir_results.json",
+          "size": 3119,
+          "sha256": "56cc7d4f77f94252a5e781ab7c599ce61866ce68673e822c985b0d3691625d3c"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/data/track6_pqc_alternatives.json",
+          "size": 9579,
+          "sha256": "07c4ac0a7c4ac1024206aa1094a72e592e6ec94bb4a2c40d7fdfc834a451759b"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/data/dcnet_bandwidth.csv",
+          "size": 824,
+          "sha256": "c31c8775362b292a9783456738ede48d13fb02ef5d2dc9796bfdfeb2ce492f9d"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/data/crypto_results.json",
+          "size": 2326,
+          "sha256": "461ecbfe0211586c327a43c7156dcf7d6367fef8433348267133801e3cec0031"
+        }
+      ]
+    },
+    {
+      "name": "CYPHERPUNKS_validation_bundle(3).zip",
+      "sha256": "f4a7ffeb3a2dc4cfec75f6623453d16eaa018018a805eb9ae1670594ff3f9e5b",
+      "entries": [
+        {
+          "name": "CYPHERPUNKS_validation/README.md",
+          "size": 12391,
+          "sha256": "32a30cd99f21cfef09f431792c698736fae2c60139cdfdc63b6107c458d80526"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/scripts/avpn_test_crypto.py",
+          "size": 8114,
+          "sha256": "acc6ae85ed20ae7d79191ac59365b6991d89a269caaeb4bb26a06e11057452e7"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/scripts/generate_whitepaper.py",
+          "size": 13988,
+          "sha256": "d670efa5615bc4e1709f788577d37b1036ce0f3863bf5e91cc7aee1b4f209738"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/scripts/lsh_bench/Cargo.toml",
+          "size": 166,
+          "sha256": "4e28ef756d2e0f7b491c06e3378728742b84bd3be75117a0fe1580c47a8d7ec9"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/scripts/lsh_bench/src/main.rs",
+          "size": 6088,
+          "sha256": "79dafcaa2968a56ead113d3808db42cc143778793e890fc356f91b531a29240c"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/scripts/pqc_sizes.c",
+          "size": 3942,
+          "sha256": "7b2198720a89e9510f0fe3d9566db68159efee851e25a3ac99bd03c22647dc29"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/scripts/avpn_test_wf.py",
+          "size": 12456,
+          "sha256": "9dbc0d7ac56b078858650de03dd7d48474939341a1037dce2d686ef618e67fa9"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/scripts/merge_whitepaper.py",
+          "size": 1046,
+          "sha256": "46da246be91ca32787e943f73bcd3453b831cc7c0d3cb6457b56f960b31327b3"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/scripts/hash_bench_c.c",
+          "size": 2237,
+          "sha256": "3ad01877e5b50281755dc64901f1d757e3ff59d1822c2317d957c6c5980e8ef2"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/scripts/avpn_test_pir.py",
+          "size": 9362,
+          "sha256": "43ee20a10b0551c8906bff60b7a52956bd59e41dd0f70be338269959b8f80526"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/scripts/kat/lsh512_256.txt",
+          "size": 40124,
+          "sha256": "ef394eaf3cb94585a18ddd2bf4da922ab6fc89f71eea24104372f95c0d76349c"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/scripts/kat/lsh512.txt",
+          "size": 96114,
+          "sha256": "007da3e86c4319eacd98252139a4b970bc0e9a3c2fb5723bd2a56facc7dd1860"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/scripts/kat/lsh256.txt",
+          "size": 78915,
+          "sha256": "e4726c1cb7cc1a72638b4a28a913273e3331702a317866f31580ff4cc2b3ee47"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/scripts/fix_wf_chart.py",
+          "size": 2181,
+          "sha256": "07828bd75ef6e82fa91ded0e888cd7080bdc3920d1099b896520e0deb2c7830f"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/scripts/whitepaper_content.py",
+          "size": 36122,
+          "sha256": "a9c7892b9d7486eca34c0928129ce113c196f775322ad064e9339e1c7a991f91"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/scripts/avpn_test_dcnet.py",
+          "size": 14530,
+          "sha256": "1e5713c900dc8184bc10361f89fa92956e96d2cb1ee0d9a3ff1eb0c6d93f7786"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/scripts/avpn_commit_review.py",
+          "size": 20569,
+          "sha256": "6b4eac6e0f2e317dbf97d2054137367f20031128596567adee7fedb5710e00ae"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/scripts/avpn_test_dualanchor.py",
+          "size": 5733,
+          "sha256": "7b60bdb603a13c8c73c888747450f66e5aa6c320a0d6ef097978d4bed886e5a4"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/scripts/whitepaper_content2.py",
+          "size": 28480,
+          "sha256": "aecca526eee8aa8d4261222704c1f8043bb6aa3e6504fe1866122871d90cc9c2"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/scripts/avpn_test_pqc_alternatives.py",
+          "size": 16452,
+          "sha256": "4d1c5d698897ff0f82af54362f952fd5eb2de466db48489ae3bb0fc0903ce972"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/scripts/whitepaper_charts.py",
+          "size": 4329,
+          "sha256": "04976e51fde533294d30a13d77d61de5bb1a642f58a5a8485de4db1ddd9d3f27"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/charts/dualanchor_bands.png",
+          "size": 92500,
+          "sha256": "e10350ab472eb3d8ec60c3e958c4b56757e91683fa116c3dbd1dcbf6f26bef8c"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/charts/padbook_volume.png",
+          "size": 82948,
+          "sha256": "5071d6ab9deba0efcf78c3bddc8e0aea0fb2a5574443d791a5d20b729b95f52d"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/charts/pir_bench.png",
+          "size": 145883,
+          "sha256": "28f40dc6fd9bfd69aebc9f323b9dfeee65213308c9f6f14353aaa3aa8a35d6f8"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/charts/hash_alternatives.png",
+          "size": 71859,
+          "sha256": "1cd88cecf6cb92cd68cb4de3c61e9627862e07e2029e4ab6931d25e82b8d9c27"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/charts/crypto_bench.png",
+          "size": 133533,
+          "sha256": "441aa2fcb7959ddaab79c68b0db023edaf0f3dda6995248750d50443cd456df5"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/charts/dcnet_anonymity.png",
+          "size": 112875,
+          "sha256": "945069dcbd23271f3d6f083a25a04cb3827b1302c6155a5e592de009a5b228b5"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/charts/frame_budget.png",
+          "size": 149537,
+          "sha256": "991c541d80b2fed2208b4c304bbc421211f5f54260e9c248b0f9620556377245"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/charts/dcnet_bandwidth.png",
+          "size": 133824,
+          "sha256": "a2de431fb7b9bff513664dcc15780f6937978790bf5479e29f34d0216c79addc"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/charts/wf_accuracy.png",
+          "size": 92195,
+          "sha256": "56f76b83196aa44df0afd68e4f651a0d22ede6456ab9a757d8efa247a4717461"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/charts/wf_traces.png",
+          "size": 92825,
+          "sha256": "952c606449b153b29fe0abfebcec4fa49677a0230620d289595ebf0c6e327fc6"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/charts/pqc_alternatives.png",
+          "size": 163224,
+          "sha256": "26f6e35196fa40dff0fbb3386e6308d3327e7e43e3f38547c355c23e7e74b8dc"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/data/dcnet_results.json",
+          "size": 4982,
+          "sha256": "5341bc3cf026cb7fc4f402c8497250f5d6e7ba4031b42eabdd6fcf76292eb800"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/data/commit_review.json",
+          "size": 13205,
+          "sha256": "c1038d2771e82152ddf9eaef600720cf4566be040c4f73773b26d61e63960350"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/data/hash_baseline.json",
+          "size": 233,
+          "sha256": "456251d264fcecedc03452a7e57de865368c3d62e2cdacfd394c231fdf3276a8"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/data/dualanchor_results.json",
+          "size": 840,
+          "sha256": "c31ea1c9ecf9669cd4439e33d398dd214f12c644a2c0b4712405847aa38a90e4"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/data/wf_results.json",
+          "size": 801,
+          "sha256": "7a7a53e247323f44f5443b66ce072f39f08d71bc5ad5947dd39133dbb2eb082e"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/data/lsh256_results.json",
+          "size": 537,
+          "sha256": "0ccaa1f3b390e70ab4cd4416195fb9b6f805965bdb95933300e1d906acf3d4c9"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/data/pir_results.json",
+          "size": 3119,
+          "sha256": "56cc7d4f77f94252a5e781ab7c599ce61866ce68673e822c985b0d3691625d3c"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/data/track6_pqc_alternatives.json",
+          "size": 9579,
+          "sha256": "07c4ac0a7c4ac1024206aa1094a72e592e6ec94bb4a2c40d7fdfc834a451759b"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/data/dcnet_bandwidth.csv",
+          "size": 824,
+          "sha256": "c31c8775362b292a9783456738ede48d13fb02ef5d2dc9796bfdfeb2ce492f9d"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/data/crypto_results.json",
+          "size": 2326,
+          "sha256": "461ecbfe0211586c327a43c7156dcf7d6367fef8433348267133801e3cec0031"
+        }
+      ]
+    },
+    {
+      "name": "CYPHERPUNKS_validation_bundle.zip",
+      "sha256": "3f2d439d92849d7edbd19d78e5007f1b6c4567635ba8f52639bbb41159d584b8",
+      "entries": [
+        {
+          "name": "CYPHERPUNKS_validation/README.md",
+          "size": 5146,
+          "sha256": "e72f92b2cd01df302187f60754696a56dbe41813bb18d8e183a42e5aca9b9e76"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/scripts/avpn_test_crypto.py",
+          "size": 8114,
+          "sha256": "acc6ae85ed20ae7d79191ac59365b6991d89a269caaeb4bb26a06e11057452e7"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/scripts/avpn_test_wf.py",
+          "size": 12456,
+          "sha256": "9dbc0d7ac56b078858650de03dd7d48474939341a1037dce2d686ef618e67fa9"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/scripts/avpn_test_pir.py",
+          "size": 9362,
+          "sha256": "43ee20a10b0551c8906bff60b7a52956bd59e41dd0f70be338269959b8f80526"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/scripts/avpn_test_dcnet.py",
+          "size": 14530,
+          "sha256": "1e5713c900dc8184bc10361f89fa92956e96d2cb1ee0d9a3ff1eb0c6d93f7786"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/charts/pir_bench.png",
+          "size": 145883,
+          "sha256": "28f40dc6fd9bfd69aebc9f323b9dfeee65213308c9f6f14353aaa3aa8a35d6f8"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/charts/crypto_bench.png",
+          "size": 133533,
+          "sha256": "441aa2fcb7959ddaab79c68b0db023edaf0f3dda6995248750d50443cd456df5"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/charts/dcnet_anonymity.png",
+          "size": 112875,
+          "sha256": "945069dcbd23271f3d6f083a25a04cb3827b1302c6155a5e592de009a5b228b5"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/charts/dcnet_bandwidth.png",
+          "size": 133824,
+          "sha256": "a2de431fb7b9bff513664dcc15780f6937978790bf5479e29f34d0216c79addc"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/charts/wf_accuracy.png",
+          "size": 93309,
+          "sha256": "8c7cd239a10ad6d2da580f6786f3d67be71d77cfbda493fb676da24e4387018d"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/charts/wf_traces.png",
+          "size": 92825,
+          "sha256": "952c606449b153b29fe0abfebcec4fa49677a0230620d289595ebf0c6e327fc6"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/data/dcnet_results.json",
+          "size": 4982,
+          "sha256": "5341bc3cf026cb7fc4f402c8497250f5d6e7ba4031b42eabdd6fcf76292eb800"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/data/wf_results.json",
+          "size": 801,
+          "sha256": "7a7a53e247323f44f5443b66ce072f39f08d71bc5ad5947dd39133dbb2eb082e"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/data/pir_results.json",
+          "size": 3119,
+          "sha256": "56cc7d4f77f94252a5e781ab7c599ce61866ce68673e822c985b0d3691625d3c"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/data/dcnet_bandwidth.csv",
+          "size": 824,
+          "sha256": "c31c8775362b292a9783456738ede48d13fb02ef5d2dc9796bfdfeb2ce492f9d"
+        },
+        {
+          "name": "CYPHERPUNKS_validation/data/crypto_results.json",
+          "size": 2326,
+          "sha256": "461ecbfe0211586c327a43c7156dcf7d6367fef8433348267133801e3cec0031"
+        }
+      ]
+    }
+  ]
+}

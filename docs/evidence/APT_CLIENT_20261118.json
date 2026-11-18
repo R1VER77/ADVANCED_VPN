@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "status": "passed_real_apt_metadata_and_download",
+  "scope": "apt_metadata_and_download_only",
+  "image": "ubuntu@sha256:74b12b11ffa550fba1929ad4d8d16533c34f6612728469671afba1b03b66881c",
+  "phases": {
+    "positive": {
+      "exit_code": 0,
+      "update": true,
+      "download": true
+    },
+    "wrong_key": {
+      "exit_code": 100,
+      "update": false,
+      "download": false
+    },
+    "damaged_package": {
+      "exit_code": 100,
+      "update": true,
+      "download": false
+    }
+  },
+  "repository": {
+    "status": "verified",
+    "suite": "stable",
+    "fingerprint": "94CDACCEC2D372DA11E64F565067DD6109205DA4",
+    "key_class": "testing",
+    "packages": [
+      "cypherpunk-vpn_0.10.2-1_amd64.deb"
+    ]
+  },
+  "package_sha256": "d0973be51869b42feb262aee1949371004b8885b5aa52cc1584b697527193dc6"
+}

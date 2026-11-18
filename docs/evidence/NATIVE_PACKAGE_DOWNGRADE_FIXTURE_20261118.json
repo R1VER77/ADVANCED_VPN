@@ -1,0 +1,7 @@
+{
+  "schema": 1,
+  "status": "metadata_only_downgrade_test_fixture_not_a_release",
+  "name": "cypherpunk-vpn_0.10.1-1_amd64.deb",
+  "sha256": "346b8cfe1c28f0f6d8037b09b6e1c70d5b2ed48dcd21ad8c404961ee2c9dc8b9",
+  "note": "Current code with deliberately older Debian version metadata, solely to test preinst refusal before extraction. Not an older protocol implementation, release or distribution artifact."
+}

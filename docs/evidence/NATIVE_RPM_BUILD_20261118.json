@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "status": "passed_native_rpm_build_and_scriptlet_inspection",
+  "scope": "unprivileged_archive_build_and_metadata_only_no_vpn_rpm_install",
+  "package_sha256": "28311b5aa01320125c5703a770cc683fad7e8ace1f3b9d0b95409ae5204457e9",
+  "size": 50691272,
+  "entries": 5249,
+  "scriptlets_match_reviewed_source": true,
+  "root_metadata": true,
+  "image_id": "sha256:86c57f5d8146abbc8387c4f82612f2d30f59d123603dd028bc1e8a44ff6b6608"
+}

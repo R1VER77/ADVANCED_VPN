@@ -1,0 +1,92 @@
+{
+  "schema": 1,
+  "status": "passed_local_native_deb_lifecycle",
+  "scope": "local_native_deb_lifecycle_only",
+  "started": 1794999913.3204753,
+  "base_sha256": "77d19e53656f87c95f1f6c6be59c789083b3f77fa08f9d88011ee04085c61f87",
+  "package_sha256": "d0973be51869b42feb262aee1949371004b8885b5aa52cc1584b697527193dc6",
+  "harness_sha256": "a3e68865dc1e457b7914b92b98d747fb4ba9846496155860c867733c1e27b616",
+  "controller_client_sha256": "910c1acd12396072afb05aabebef5d7f164d65c5f6a107e2d5dc64df0bd947f0",
+  "downgrade_package_sha256": "346b8cfe1c28f0f6d8037b09b6e1c70d5b2ed48dcd21ad8c404961ee2c9dc8b9",
+  "phases": {
+    "install": {
+      "slot": "releases/d745bd52023cd1653aa253839609ea4a3f21edc116559946a9b878901534e0e2-1848d2cf3eb549d4",
+      "units": {
+        "advanced-vpn.service": {
+          "active": "inactive",
+          "enabled": "disabled"
+        },
+        "advanced-vpn-guard.service": {
+          "active": "inactive",
+          "enabled": "disabled"
+        },
+        "cypherpunk-vpn-controller.service": {
+          "active": "inactive",
+          "enabled": "static"
+        }
+      },
+      "versions": {
+        "avpn": "avpn 0.10.2",
+        "cypherpunk": "avpn 0.10.2"
+      }
+    },
+    "downgrade_refused": {
+      "exit_code": 1,
+      "slot_unchanged": true,
+      "installed_version": "0.10.2-1"
+    },
+    "replace": {
+      "slot": "releases/d745bd52023cd1653aa253839609ea4a3f21edc116559946a9b878901534e0e2-d54cf51061804b63",
+      "previous_retained": true
+    },
+    "damaged_slot_repair": {
+      "candidate": "d745bd52023cd1653aa253839609ea4a3f21edc116559946a9b878901534e0e2-5f651d6944024e53",
+      "phase": "committed",
+      "previous": null,
+      "schema": 1,
+      "unusable_previous": "d745bd52023cd1653aa253839609ea4a3f21edc116559946a9b878901534e0e2-d54cf51061804b63"
+    },
+    "reboot_without_activation": {
+      "boot_id": "e4dc2135-7737-461c-884d-08c14220395a",
+      "units": {
+        "advanced-vpn.service": {
+          "active": "inactive",
+          "enabled": "disabled"
+        },
+        "advanced-vpn-guard.service": {
+          "active": "inactive",
+          "enabled": "disabled"
+        },
+        "cypherpunk-vpn-controller.service": {
+          "active": "inactive",
+          "enabled": "static"
+        }
+      }
+    },
+    "controller_boundary": {
+      "status": "passed_with_test_authorization",
+      "polkit_version": "pkaction version 0.105",
+      "authorization_fixture": "legacy_pkla",
+      "native_authentication_agent_qualified": false
+    },
+    "positive_control": {
+      "attempts": 5,
+      "external_marker_frames": 10
+    },
+    "guarded_removal_refused": {
+      "exit_code": 1,
+      "attempts": 5,
+      "external_marker_frames": 0
+    },
+    "inactive_removal": {
+      "private_fixture_preserved": true
+    },
+    "reboot_after_removal": {
+      "boot_id": "878ef4dc-1fd3-4a3e-8395-b802eda0b293",
+      "attempts": 5,
+      "external_marker_frames": 10
+    }
+  },
+  "os_release": "PRETTY_NAME=\"Ubuntu 22.04.5 LTS\"\nNAME=\"Ubuntu\"\nVERSION_ID=\"22.04\"\nVERSION=\"22.04.5 LTS (Jammy Jellyfish)\"\nVERSION_CODENAME=jammy\nID=ubuntu\nID_LIKE=debian\nHOME_URL=\"https://www.ubuntu.com/\"\nSUPPORT_URL=\"https://help.ubuntu.com/\"\nBUG_REPORT_URL=\"https://bugs.launchpad.net/ubuntu/\"\nPRIVACY_POLICY_URL=\"https://www.ubuntu.com/legal/terms-and-policies/privacy-policy\"\nUBUNTU_CODENAME=jammy\n",
+  "stopped": 1795000770.0607448
+}

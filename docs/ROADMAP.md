@@ -1,6 +1,6 @@
 # cypherpunk_vpn roadmap
 
-Updated 17 November 2026. This is the public project roadmap. Items below are planned
+Updated 18 November 2026. This is the public project roadmap. Items below are planned
 unless explicitly marked complete; implementation, a passing laboratory test and a
 production security claim are separate milestones. The existing detailed design and
 validation documents remain the technical references.
@@ -8,6 +8,11 @@ validation documents remain the technical references.
 The agreed [implementation plan for tasks 1–7](IMPLEMENTATION_PLAN_20261117.md) records
 the sequence, interfaces, code sketches, selected defaults and acceptance gates. It was
 saved at the owner's request before implementation; planned work is not completion.
+
+The owner's [18 November extension](HARDWARE_EMULATION_AND_CLOUD_INSTALLER_PLAN_20261118.md)
+specifies hardware simulation first, whole-registry OpenTofu search with separately
+reviewed VPN recipes, strict hardware eligibility, and immediate signed publication
+of the validated checkpoint. It preserves the remaining main-plan acceptance gates.
 
 ## 1. Traffic-analysis resistance: first technical priority
 
@@ -17,10 +22,13 @@ saved at the owner's request before implementation; planned work is not completi
   and more missed relay slots at 5 ms; defaults remain unchanged.
 - [ ] Repeat with a fresh undefended positive control, counterbalanced variant order,
   varied recorded site-order seeds and clear snapshot/failed-load reporting. The
-  six-round, 720-attempt plan is prepared but has not been started.
+  six-round, 720-attempt plan was attempted on 17 November; capture loss and battery
+  conditions invalidated that run. Its failed data remains preserved; a newly frozen
+  run is required.
   [Fresh-control analysis tooling](WF_REPLICATION.md) now retains complete failed-load
   windows and fits secondary resource references on training rounds only. Recorder,
-  protection and counterbalanced-runner evidence still need implementation.
+  protection-validity checks and the counterbalanced runner are implemented; fresh
+  controlled capture and cross-environment qualification remain open.
 - [ ] Validate the busy-CPU fix on held-out days, networks and devices, with confidence
   intervals, negative results and load failures reported alongside positive results.
 - [ ] Expand beyond the current small closed-world experiment to larger monitored and
@@ -54,7 +62,8 @@ organizational and nonprofit provisions are not automatically this project's str
   or undisclosed relationships are not evidence of independence.
 - [x] Record important [design and governance decisions](DECISIONS.md), their reasons and [review paths](GOVERNANCE.md);
   evaluate contributions by their merits and conduct rather than credentials or status.
-- [x] Preserve Apache-2.0 software freedoms. Community conduct rules must not become
+- [x] Preserve the project's free-software aims under its [current license terms](../LICENSE);
+  the previous Apache declaration is historical provenance. Community conduct rules must not become
   additional license restrictions, traffic inspection or identity collection.
 - [ ] Document hardware, server, accessibility and connectivity costs; test the setup
   with people who do not already administer servers. Report cover-traffic bandwidth,
@@ -82,6 +91,9 @@ These governance items are not complete merely because this roadmap lists them.
   also passed, preserving the same credential and USB/NFC settings.
 - [ ] Complete physical multiple-device, locked/unavailable-app, additional model/firmware
   and full enrolled-installation scenarios. Synthetic ambiguity checks do not close these.
+- [ ] Add actual Nitrokey USB/IP, Trezor and Ledger app-emulator integration and generic
+  virtual-token/fault tests against production crypto. Publish evidence by test level;
+  block strict setup for noncompliant interfaces without changing existing credentials.
 - [x] Package a pinned runtime and offline core dependencies. Validate system/user
   install, in-place replacement, guarded removal, corruption refusal and preserved state
   in clean Debian 12/13 and Ubuntu 22.04/24.04 VMs. Installation never enables services.
@@ -90,6 +102,9 @@ These governance items are not complete merely because this roadmap lists them.
 - [ ] Finish static musl preflight, native `.deb`/`.rpm` and signed apt distribution,
   cross-release/protocol migrations, interrupted-upgrade recovery and current-release
   reboot/protection testing. Same-bundle replacement is not a rolling live upgrade.
+  Native candidate lifecycle trials passed on [four Debian/Ubuntu releases](evidence/NATIVE_PACKAGE_MATRIX_20261118.json)
+  and [Fedora/Rocky](evidence/NATIVE_RPM_MATRIX_20261118.json). Production signing,
+  provenance, publication and full protection/recovery qualification remain open.
 - [ ] Add a GUI driven by the same typed controller checks, with honest progress,
   actionable failure states and explicit review of privileged or billable changes.
 - [ ] Evaluate an optional local Gemma assistant against the deterministic setup engine.
@@ -98,6 +113,9 @@ These governance items are not complete merely because this roadmap lists them.
   PINs outside model context, bound its tools, and reserve approval for the user.
 - [ ] Broaden cloud provisioning through pinned OpenTofu modules and retain bring-your-own
   SSH hosts. Provider actions need resource previews, cost information and clean teardown.
+- [ ] Add local search across the full OpenTofu registry. Only reviewed, pinned,
+  VPN-capable recipes may provision; enforce encrypted saved plans/state, exact-plan
+  review, operation ownership and recovery. Listing is not live-provider qualification.
 
 ## 4. Assurance, decentralization and anonymity sets
 
@@ -141,6 +159,44 @@ and the [post-quantum inventory](PQ_INVENTORY.md).
   platform-specific protection tests before marking each supported.
 - [x] Publish a [device/platform matrix](SUPPORT_MATRIX.md) distinguishing protocol compatibility,
   physically tested models/firmware and planned targets.
+
+## 6. CYPHERPUNKS research qualification
+
+The [18 November review](RESEARCH_REVIEW_20261118.md) reconciles the on-disk GLM5.3
+artifacts and the [research specification](CYPHERPUNKS_PROTOCOL_SPECIFICATION.md).
+The owner's full-stack hybrid-PQ and SafeCurves requirements remain target policy.
+
+- [x] Harden and locally validate the Task 3 packaging proposal: real RPM scriptlet/EVR
+  semantics, required signed index coverage, no-follow paths, primary/subkey pins,
+  signed key classification and freshness. Real apt positive/negative controls and
+  six-distribution native package lifecycle trials passed. This closes the scoped
+  proposal checks, not production signing/publication or complete platform protection.
+- [ ] Specify and prove voucher issuance, redemption, quantum unlinkability,
+  nullifier binding and spent-state recovery. A classical VOPRF plus KEM/hash inputs
+  is not by itself a proof of those properties. Keep public admission fail-closed.
+- [ ] Implement/authenticate a consistent PIR directory with secure randomness and
+  explicit independent-operator assumptions. Distinguish XOR reference timings from
+  deployed DPF results and from network reservations.
+- [ ] Account for all handshake flights and parameter generations. Retain the
+  established hybrid/ML-DSA baseline while evaluating MAYO; category-1 MAYO-1 does
+  not supply category-3 authentication. Preserve PMTU/fallback and downgrade protection.
+- [ ] Allocate disjoint, durably consumed material to DC-net masks and session PSKs;
+  qualify physical entropy/custody and cross-plane linkage before operational IT claims.
+- [ ] Resolve DC-net scheduling versus the bootstrap target, logical broadcast versus
+  physical fanout/bandwidth, and jamming abort versus event authorization.
+- [ ] Validate complete DLEQ batches, authenticated event effects and jamming/fallback
+  dependencies. Preserve no-tracing policy without claiming that all disruption
+  accountability identifies honest senders; include the whitepaper draft corrections
+  in the research review before publication.
+- [ ] Complete the interface/curve inventory and versioned migration. Preserve current
+  device keys, document compatibility dependencies and test the PQ property of each
+  interface; do not silently reset hardware to satisfy a design mandate.
+- [ ] Publish scientific claims/whitepaper figures only after the corresponding formal,
+  live empirical and independent-review gates. Synthetic chance-level classification
+  and primitive timings remain labelled research results.
+
+These items extend assurance stage 7 of the main plan. They do not close or replace
+its current installation, live traffic, native GUI, provider, hardware and usability gates.
 
 ## Release gates
 

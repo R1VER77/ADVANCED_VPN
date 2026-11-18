@@ -1,27 +1,47 @@
 # Main implementation progress
 
-Owner direction: complete main-plan tasks 1–7 before one final implementation commit.
-Preserve existing signed history; do not create interim implementation commits.
+Owner direction originally requested tasks 1–7 before one final implementation commit.
+On 18 November the owner explicitly requested immediate GitHub publication of the
+validated checkpoint and a saved hardware-emulation/cloud-installer plan, then continued
+implementation. Publish that checkpoint now; preserve all existing signed history.
 Pad-exposure qualification research follows the main implementation sequence; runtime
 incorporation depends on its evidence gates. The controlling specification is
-[the saved plan](IMPLEMENTATION_PLAN_20261117.md). No implementation commit has been made.
+[the saved plan](IMPLEMENTATION_PLAN_20261117.md). The initial implementation is
+published in signed commit `bad0a21`. Preserve it and the subsequent signed R&D
+policy commits through `5d69623`; this checkpoint records the subsequent validated
+review corrections and the newly saved extension. Publication is verified against
+the resulting signed commit and GitHub checks, not inferred from this document.
+
+The [new extension](HARDWARE_EMULATION_AND_CLOUD_INSTALLER_PLAN_20261118.md) records
+the chosen order (hardware simulation first), whole-registry search with reviewed
+VPN provisioning recipes, and refusal under strict hardware policy. Those new
+capabilities are planned; saving/publishing their plan is not implementation.
 
 Signed licensing commit `d26c355` appeared in the shared owner workspace during this
 work. Preserve it and the published documentation commit `66c26f3`. New component
 metadata follows AGPL-3.0-or-later and the authoritative repository LICENSE. The
 licensing commit included the in-progress workspace-member declarations; its new
-workspace dependencies are completed by the implementation still pending here.
+workspace dependencies were included by `bad0a21`. All remaining gates below
+retain their actual evidence status.
 
 Completion means the acceptance gate passed. Source implementation, simulation,
 physical validation and independent review remain distinct.
+
+Current installation scope: candidate B passed the full scoped native-package
+lifecycle on Debian 12/13 and Ubuntu 22.04/24.04. Fedora/Rocky RPM trials exposed
+inherited SELinux file labels at authorized controller startup. The correction
+restores host file contexts on the prepared slot before activation; fresh Fedora/Rocky
+trials now pass with enforcing mode retained. Cloud creation
+still has two dedicated provider paths plus generic SSH; thousands of integrations
+and a trained local model are not implemented. See the [support matrix](SUPPORT_MATRIX.md).
 
 | Task | Current implementation and evidence | Remaining gates |
 |---|---|---|
 | 1 CI/provenance | Baseline `43996ad` passed three jobs; verification/release share static bootstrap builds; new locked native desktop CI job; build dependency advisory GHSA-fc5q-39xc-vjpf addressed via vendored picomatch extglob guard | Final CI and provenance qualification |
 | 2 Traffic analysis | Metadata recorder, observation validity, counterbalanced runner and grouped analysis; three-arm smoke passed | Fresh controlled collection, analysis/correction and cross-environment replication |
-| 3 Installation | Shared native/Python preflight, static helpers, verified slots, atomic legacy adoption, guarded removal; native Debian candidate built and RPM recipe/builder added | Complete native package VM matrix, RPM qualification, downgrade policy and signed repository |
+| 3 Installation | Portable candidate B passed native lifecycle/live bus trials on Debian 12/13 and Ubuntu 22.04/24.04; real apt controls passed. Corrected RPM candidate E passed the complete scoped lifecycle/live bus trial on Fedora 45/Rocky 10.3 with SELinux enforcing | Hardware repository key, RPM repository metadata, provenance/publication and full release/protection qualification |
 | 4 Recovery/hardware | Static guard missing-runtime and missing-guard reboot trial passed; externally witnessed IPv4/IPv6 output/forwarding checks | Full installation fault matrix and remaining physical four-device cases |
-| 5 GUI | Prototype preserved/imported; production/demo separation, Vue/Tauri builds, native broker, caller-bound plans, native approval details, public request export | Native IPC/Polkit/WebKit integration, complete owner/provider flow and five participants |
+| 5 GUI | Prototype preserved/imported; production/demo separation, Vue/Tauri builds, native broker, caller-bound plans, native approval details, public request export; real system-bus boundary checks passed with disposable authorization fixture | Native authentication agent/WebKit interaction, complete owner/provider flow and five participants |
 | 6 Provisioning/assistant | Existing provider tooling/design retained | Deterministic expanded adapters, encrypted plans/state, documentation updates, training and physical evaluation |
 | 7 Assurance/platforms | Existing formal baseline; initial `cypherpunk` command aliases added | Selected DNS, added formal/fuzz/secret work, mesh reconciliation, migration, native platform qualification and independent review |
 
@@ -92,9 +112,10 @@ not implemented. Earlier failed harness trials remain preserved.
 Native package trial `native-package-debian13-20261117a` passed install, replacement,
 damaged-code repair and reboot without activation, and refused armed removal. The
 harness then incorrectly treated the expected kernel EPERM on its negative probe as
-a test failure. Its result remains failed. The corrected trial uses candidate B in a
-fresh `native-package-debian13-20261117b` directory; consult RESULT.json for its actual
-state before claiming completion. A private-state marker is a retention fixture,
+a test failure. Its result remains failed. Subsequent failed trials exposed a bootstrap
+timeout and an unmounted post-reboot test payload; preserve them. The corrected 18
+November trial passed its scoped lifecycle and real bus checks, as recorded below.
+A private-state marker is a retention fixture,
 not a complete qualification of real enrolled monotonic counters.
 
 ## Desktop/controller boundary
@@ -132,7 +153,7 @@ not a complete qualification of real enrolled monotonic counters.
 
 ## Validation record and next work
 
-The updated regression suite passed all **682 tests, 23 skipped**. Rust workspace
+The updated regression suite passed all **705 tests, 24 skipped**. Rust workspace
 crates (`cypherpunk-preflight`, `cypherpunk-bootguard`, `cypherpunk-controller`) passed
 all unit tests and strict Clippy without warnings. Native desktop production and demo
 builds succeed cleanly. These are mock/software fixture tests unless explicitly
@@ -144,3 +165,141 @@ and native GUI flows. Complete provider/owner onboarding and the remaining stage
 the controlling plan. Physical device sessions, five real people, cross-network/client
 traffic qualification, hardware OpenPGP provisioning and independent review require
 actual evidence. Do not mark them complete from source, simulation or model review.
+
+## 18 November research/proposal integration
+
+Reviewed all four GLM5.3 validation archives, the PDF, raw models/benchmarks, Task 3
+patch and current signed GitHub proposal. [Review](RESEARCH_REVIEW_20261118.md) and
+[scope counterchecks](evidence/RESEARCH_COUNTERCHECKS_20261118.json) record concrete
+limitations and incorporation decisions. The roadmap now includes the R&D proof and
+measurement gates without changing the owner's full-stack hybrid-PQ/SafeCurves goals.
+
+The Task 3 patch is integrated locally with corrections: the proposed RPM `$2`
+version guard was replaced by installed-database/native EVR checking; repository
+verification now requires signed index coverage, safe anchored paths, immutable
+signature snapshots, freshness, signed key classification and primary/subkey binding.
+All 19 focused repository tests passed on the development interpreter and Python 3.10.
+Nine packaging tests ran with one native-RPM
+compatibility skip on this host. Real RPM transaction/distro gates remain open.
+The package VM payload must be remounted after reboot; trial C's missing test client
+was a harness fault, and its failed evidence is preserved. New guest trials follow.
+
+The 18 November regression passed: **705 tests, 24 skips**. The local glob guard and
+full npm audit also passed (zero findings). GitHub run `44273400186` on `5d69623`
+failed desktop Rust formatting and a test fixture whose captured clock preceded its
+file mtime; those source corrections are now local. The timestamp fixture sets explicit
+inode times and retains the production refusal of future-dated status. Final CI on the
+new signed revision is still required.
+
+The new Debian 13 package/real-bus trial passed all its scoped phases: install, retained
+slot replacement, damaged-code repair, reboot without activation, twelve native RPM
+EVR comparisons, denied access and caller-bound live D-Bus operations, armed-removal
+refusal with zero externally observed probe markers, explicit recovered removal, and
+post-removal reboot with a working positive control. See
+[evidence](evidence/NATIVE_PACKAGE_DEBIAN13_20261118.json). It uses a synthetic private
+retention marker and a temporary Polkit authorization rule, so it does not qualify real
+enrollment, a native authentication agent, physical power loss or an RPM distribution.
+
+The same candidate A was correctly refused by Debian 12: its GNU core requires glibc
+2.38 while its package metadata declared 2.35. Preserve the failed trial. The package
+builder now checks staged ELF requirements against the shared release baseline before
+emitting an archive; a negative regression refuses a deliberately newer-ABI fixture.
+A fresh GNU core build from the signed `5d69623` source passed in an Ubuntu 22.04
+build image, with no network or host credentials mounted during compilation. All five
+GNU binaries require glibc 2.34; the selected release floor remains 2.35. The
+[build record](evidence/NATIVE_CORE_BASELINE_20261118.json) identifies inputs and hashes.
+The rebuilt core also passed the actual isolated
+[protocol/rejection lab](evidence/NATIVE_CORE_PROTOCOL_20261118.json), including
+replay/tamper/revocation refusal, relay-loss fail-closed behavior and reconnection.
+This is a local namespace result, without WAN or hardware qualification.
+Candidate A's Debian 13 pass does not qualify it for older distributions. Rebuilt
+candidate B (`d0973be5…`) is running fresh trials on all four declared Debian/Ubuntu
+distributions; Debian 12 has passed. Consult the per-trial RESULT.json files.
+
+The real apt client passed authenticated update/download and both wrong-key and
+tampered-archive negative controls in networkless containers. The retained
+[record](evidence/APT_CLIENT_20261118.json) is download-only evidence with an ephemeral
+software test key. Its private material was destroyed. This neither provisions the
+production hardware key nor fixes candidate A's ABI failure.
+
+The review also covers both whitepaper content drafts, including actual DLEQ batch
+binding, accountability versus sender tracing, event substitution, jamming isolation,
+fallback policy and pad custody. Original drafts remain unchanged. See the review's
+additional-drafts section and the hashed input inventory.
+
+The unsigned RPM archive now builds as an ordinary user in an isolated Ubuntu
+container. Inspection verifies exact generated scriptlets, root metadata and only
+declared payload/alias paths. The first inspected archive unexpectedly added global
+build-ID links; `_build_id_links none` removes them in the corrected candidate. Real
+RPM empty-package transactions also passed eight cases, including three downgrade
+refusals (version, release and epoch). These are archive and guard evidence, separate
+from the still-open Fedora/Rocky VPN installation matrix.
+
+CI now includes native package ABI checking and real apt positive/negative download
+controls with a disposable software key. Local YAML/shell parsing passed. The new
+workflow has not run on GitHub yet; the signed-publication gate remains pending.
+
+Native desktop rendering now has an actual repeatable WebKit test, separate from
+the earlier build checks. It passed the embedded production frontend's absent-controller
+unknown state and 420-pixel layout on an isolated X display with software compositing.
+The [record](evidence/NATIVE_GUI_20261118.json) and screenshots identify its exact debug
+binary. No mocked controller, privileged action, PIN field or device operation was
+used. Readiness now checks the DOM and compositor paint rather than capturing an early
+white window. This does not qualify a packaged app, native authentication agent or
+owner/provider/participant flow. The host-built GUI requires glibc 2.39 and therefore
+cannot be promoted as an older-distribution GUI artifact; build that release on its
+declared baseline and test native dependencies separately. CI includes the smoke.
+
+Candidate B passed full native package trials on Debian 12 and 13. Ubuntu 22.04
+passed install/replace/repair/reboot but its first live-bus trial failed because the
+temporary JavaScript authorization rule is unsupported by its legacy Polkit. That
+failed record remains. The corrected harness checks the actual Polkit version and
+uses a disposable `.pkla` fixture for pre-0.106, retaining denial before the fixture
+and never installing that grant in production. Fresh Ubuntu 22.04/24.04 trials are
+ran subsequently. The [final four-distribution matrix](evidence/NATIVE_PACKAGE_MATRIX_20261118.json)
+now passes, including Ubuntu 22.04's legacy Polkit fixture and Ubuntu 24.04's
+networkless dpkg lifecycle phases. Its earlier apt timeout, local-file handling and
+missing-PATH harness failures remain preserved. Both Python 3.10 and the development
+interpreter passed the full **705-test suite with 24 skips**. The exact ABI-correct
+candidate B also passed the real apt authentication/download negative controls.
+
+RPM qualification is in progress against publisher-signature/hash-verified Fedora 45
+and Rocky Linux 10.3 images. Their QGA administration restrictions require an explicit,
+VM-only management fixture; product SELinux policy and enforcing mode stay unchanged.
+Fedora correctly refused the unsigned candidate. A separately labelled, software-test-
+signed candidate and metadata-only older fixture now have verified signatures in an
+isolated keyring. Their private test key was destroyed; production hardware signing
+and release provenance remain unqualified. Current trial outcomes come from their
+RESULT.json files, not from successful signing or archive inspection alone.
+
+The policy inventory now names the local CTAP PIN/UV P-256 key agreement used by
+the pinned FIDO library. An Ed25519 credential does not change this boundary. The
+full-stack hybrid-PQ/SafeCurves mandate remains a target requiring compatible hardware
+protocols and migration; no available device was reset or modified for that policy.
+
+The initial signed RPM trials passed installation, replacement, damaged-code repair
+and reboot without activation on both Fedora and Rocky, then failed authorized
+controller use. Fedora's audit log reported `init_t self:process setpgid`; executable
+labels had been inherited as `lib_t` from the payload. Restoring the host's configured
+application labels gave `bin_t` and a successful bus diagnostic under enforcing mode.
+The [diagnostic record](evidence/NATIVE_RPM_SELINUX_DIAGNOSTIC_20261118.json) preserves
+the failed lifecycle result and explicitly identifies the separate diagnostic.
+The fix labels only each new, unselected system slot and syncs it before publishing;
+a regression proves label failure leaves the old current slot selected. All ten
+runtime-integrity/transaction tests passed on Python 3.10 and the development interpreter;
+nine package tests passed with one host-native-RPM skip. RPM depends explicitly on
+`policycoreutils`. Fresh candidate D is software-test-signed with a new disposable
+key, whose private material was destroyed. Fresh Fedora H and Rocky D trials follow.
+
+Those intermediate trials failed safely before slot activation: resolving the
+`restorecon` symlink changed argv[0] to `setfiles`, selecting its different command
+syntax. The [rejected results](evidence/NATIVE_RPM_LABEL_DISPATCH_REJECTED_20261118.json)
+are retained. The corrected invocation preserves its fixed dispatch name and still
+executes only the ownership-checked resolved binary. Fresh candidate E, separately
+test-signed with another destroyed software key, passed both full scoped lifecycle
+trials: Fedora I and Rocky E. The [aggregate record](evidence/NATIVE_RPM_MATRIX_20261118.json)
+includes signature, downgrade, retained replacement, repair, reboot, authorized bus,
+protected removal and state-preserving recovered removal phases. Both guests were
+stopped and owned temporary disks removed; logs/captures/results remain. Neither
+trial qualifies a dedicated SELinux domain, real enrollment, physical power loss,
+native authentication agent, RPM repository publication or release provenance.

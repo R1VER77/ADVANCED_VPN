@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import shutil
 import subprocess
 import tarfile
@@ -17,6 +18,7 @@ import tempfile
 
 import bundled_runtime
 import install
+import preflight
 from release_slots import inventory
 from sysexec import trusted_exe
 
@@ -33,11 +35,103 @@ def version(root):
     return found[1]
 
 
-def preinstall():
-    """Refuse foreign commands and unreviewed adoption before package extraction."""
-    return """#!/bin/sh
-set -eu
-if [ -e /opt/advanced-vpn ] || [ -L /opt/advanced-vpn ]; then
+DEB_NUMBER = r"[0-9]+\.[0-9]+\.[0-9]+(?:~[A-Za-z0-9.]+)?-1"
+RPM_NUMBER = r"[0-9]+\.[0-9]+\.[0-9]+"
+REFUSAL = (
+    "printf '%s\\n' \"Refusing package downgrade: installed $OLD is newer than {number}.\" >&2\n"
+    "printf '%s\\n' 'Package downgrades are not supported; roll back via the retained"
+    " application slot (docs/OFFLINE_INSTALLATION.md).' >&2\n"
+    "exit 1\n"
+)
+
+
+def rpm_compare_expression():
+    """Native RPM comparison expression, separately executable in compatibility tests."""
+    return r"""%{lua:
+local verdict, count = "allowed", 0
+for line in (os.getenv("CYPHERPUNK_RPM_INSTALLED") or ""):gmatch("[^\n]+") do
+  count = count + 1
+  local epoch, version, release = line:match("^(%d+)\t([^\t]+)\t([^\t]+)$")
+  if not epoch or #version > 128 or #release > 128 then
+    verdict = "invalid"
+  else
+    local comparison = rpm.vercmp(epoch, "0")
+    if comparison == 0 then comparison = rpm.vercmp(version, os.getenv("CYPHERPUNK_RPM_TARGET")) end
+    if comparison == 0 then comparison = rpm.vercmp(release, "1") end
+    if comparison > 0 and verdict ~= "invalid" then verdict = "newer" end
+  end
+end
+if count == 0 then verdict = "invalid" end
+print(verdict)
+}"""
+
+
+def rpm_upgrade_guard(number):
+    """Use RPM's installed database and native epoch/version/release comparison.
+
+    Scriptlet $1 is a package count; $2 is not an installed version. Passing
+    database rows in an environment variable keeps them outside Lua/macro code.
+    """
+    lua = rpm_compare_expression()
+    return (
+        'case "${1:-}" in ""|*[!0-9]*) exit 1 ;; esac\n'
+        "if installed=$(/usr/bin/rpm -q --qf '%{EPOCHNUM}\\t%{VERSION}\\t%{RELEASE}\\n' cypherpunk-vpn 2>/dev/null); then\n"
+        '    verdict=$(CYPHERPUNK_RPM_INSTALLED="$installed" CYPHERPUNK_RPM_TARGET='
+        + shlex.quote(number)
+        + " /usr/bin/rpm --eval "
+        + shlex.quote(lua)
+        + ") || exit 1\n"
+        '    case "$verdict" in\n'
+        "      allowed) ;;\n"
+        "      newer) OLD='installed RPM epoch/version/release'; " + REFUSAL.format(number=number) + "      ;;\n"
+        "      *) printf '%s\\n' 'Refusing package replacement: cannot compare installed RPM metadata.' >&2; exit 1 ;;\n"
+        "    esac\n"
+        'elif [ "$1" -ne 1 ]; then\n'
+        "    printf '%s\\n' 'Refusing replacement: installed RPM database could not be queried.' >&2\n"
+        "    exit 1\n"
+        "fi\n"
+    )
+
+
+def debian_upgrade_guard(number):
+    """Generate the exact native dpkg ordering gate independently of host paths."""
+    if not re.fullmatch(DEB_NUMBER, number):
+        raise ValueError("invalid Debian package version")
+    return (
+        'if [ "${1:-}" = upgrade ]; then\n'
+        "    OLD=${2:-}\n"
+        '    if [ -z "$OLD" ]; then exit 1; fi\n'
+        '    if /usr/bin/dpkg --compare-versions "$OLD" gt \''
+        + number
+        + "'; then\n"
+        + REFUSAL.format(number=number)
+        + '    elif /usr/bin/dpkg --compare-versions "$OLD" le \''
+        + number
+        + "'; then :\n"
+        "    else printf '%s\\n' 'Refusing replacement: cannot compare installed Debian version.' >&2; exit 1\n"
+        "    fi\nfi\n"
+    )
+
+
+def preinstall(number, debian=True):
+    """Refuse downgrades, foreign commands and unreviewed adoption before extraction.
+
+    A package downgrade would replace the retained, verified rollback slot with older
+    code and is refused. Reinstalling the same version (package-managed replacement)
+    stays allowed; rolling back application code is the slot system's transaction.
+    """
+    if debian and not re.fullmatch(DEB_NUMBER, number):
+        raise ValueError("invalid Debian package version")
+    if not debian and not re.fullmatch(RPM_NUMBER, number):
+        raise ValueError("invalid RPM package version")
+    if debian:
+        guard = 'case "${1:-}" in abort-upgrade) exit 0 ;; esac\n' + debian_upgrade_guard(number)
+    else:
+        guard = rpm_upgrade_guard(number)
+    return (
+        "#!/bin/sh\nset -eu\n"
+        + guard
+        + """if [ -e /opt/advanced-vpn ] || [ -L /opt/advanced-vpn ]; then
     marker=/var/lib/cypherpunk-vpn/package-owner
     if [ ! -f "$marker" ] || [ -L "$marker" ] ||
        [ "$(/usr/bin/stat -c '%u:%a' /var/lib/cypherpunk-vpn)" != 0:700 ] ||
@@ -59,6 +153,7 @@ for name in avpn avpnctl cypherpunk; do
     fi
 done
 """
+    )
 
 
 def configure(debian=True):
@@ -112,6 +207,15 @@ def stage(root, runtime, destination):
                 path.chmod(0o755 if path.stat().st_mode & 0o111 else 0o644)
     (payload / "install.sh").chmod(0o755)
     bundled_runtime.verify(payload / "runtime", payload / "tools/hardware-requirements.txt")
+    needed = preflight.glibc_need(payload)
+    if needed > preflight.RELEASE_GLIBC:
+        raise ValueError(
+            "native package ABI "
+            + ".".join(map(str, needed))
+            + " exceeds the declared release baseline "
+            + ".".join(map(str, preflight.RELEASE_GLIBC))
+            + "; rebuild core binaries on the baseline distribution"
+        )
     # Validate links/special files before adding the three fixed absolute aliases.
     contents = inventory(payload)
     (payload / "PACKAGE_CONTENTS.json").write_text(json.dumps(dict(schema=1, entries=contents), sort_keys=True) + "\n")
@@ -137,14 +241,16 @@ def debian(root, runtime, output, epoch):
         (control / "control").write_text(
             "Package: cypherpunk-vpn\nVersion: " + number + "\nArchitecture: amd64\n"
             "Maintainer: Anonymous\nSection: net\nPriority: optional\n"
-            "Depends: libc6 (>= 2.35), libgcc-s1, systemd, nftables, iproute2, mount, passwd, dbus, polkitd | policykit-1\n"
+            "Depends: libc6 (>= "
+            + ".".join(map(str, preflight.RELEASE_GLIBC))
+            + "), libgcc-s1, systemd, nftables, iproute2, mount, passwd, dbus, polkitd | policykit-1\n"
             "Homepage: https://github.com/R1VER77/ADVANCED_VPN\n"
             "Description: cypherpunk_vpn private network controller\n"
             " Offline application slots and an independent opt-in boot guard.\n"
             " Installation never starts a tunnel or enrolls a device.\n"
         )
         (control / "control").chmod(0o644)
-        for name, text in (("preinst", preinstall()), ("postinst", configure()), ("prerm", remove())):
+        for name, text in (("preinst", preinstall(number)), ("postinst", configure()), ("prerm", remove())):
             install.launcher(control / name, text.removeprefix("#!/bin/sh\n").rstrip("\n"))
         environment = dict(os.environ, SOURCE_DATE_EPOCH=str(epoch))
         subprocess.run(
@@ -158,10 +264,11 @@ def debian(root, runtime, output, epoch):
 
 def rpm_spec(number):
     """Render an offline RPM recipe with the same reviewed lifecycle hooks."""
-    if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", number):
+    if not re.fullmatch(RPM_NUMBER, number):
         raise ValueError("RPM builds currently require a stable upstream version")
     return f"""%global __os_install_post %{{nil}}
 %global debug_package %{{nil}}
+%global _build_id_links none
 Name: cypherpunk-vpn
 Version: {number}
 Release: 1
@@ -170,7 +277,7 @@ License: AGPL-3.0-or-later
 URL: https://github.com/R1VER77/ADVANCED_VPN
 Source0: payload.tar
 BuildArch: x86_64
-Requires: glibc >= 2.35, libgcc, systemd, nftables, iproute, util-linux, shadow-utils, dbus, polkit
+Requires: glibc >= {".".join(map(str, preflight.RELEASE_GLIBC))}, libgcc, systemd, nftables, iproute, util-linux, shadow-utils, dbus, polkit, policycoreutils
 AutoReqProv: no
 %description
 Offline application slots and an independent opt-in boot guard. No activation on install.
@@ -181,7 +288,7 @@ See the bundled LICENSE for the project's additional exception.
 mkdir -p %{{buildroot}}
 tar -xf %{{SOURCE0}} -C %{{buildroot}}
 %pre
-{preinstall().removeprefix("#!/bin/sh" + chr(10)).replace("%", "%%")}
+{preinstall(number, False).removeprefix("#!/bin/sh" + chr(10)).replace("%", "%%")}
 %post
 {configure(False).removeprefix("#!/bin/sh" + chr(10))}
 %preun

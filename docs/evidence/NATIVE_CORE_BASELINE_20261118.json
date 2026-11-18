@@ -1,0 +1,37 @@
+{
+  "schema": 1,
+  "source_commit": "5d69623697524796b105dd5f24f0644339a05652",
+  "source_archive_sha256": "dfafcdb551f7b4793c4129e0d12e8831568179563481a28cf57a2bf8fdd05c77",
+  "base": "ubuntu@sha256:74b12b11ffa550fba1929ad4d8d16533c34f6612728469671afba1b03b66881c",
+  "toolchain": "1.95.0",
+  "scope": "GNU core ABI build, not release attestation or independent review",
+  "image_id": "sha256:232fc618e16a2b54bfcf4ebcc68b27eb8a0b3f82ed1ae4771fb4fa1d2d6fef4c",
+  "binaries": [
+    {
+      "name": "advanced-vpn",
+      "sha256": "e2dbbbbb9d7d6d0855d0fbcf15b88886ac4f5ffde169f0c6c5086bcd62bc20d4",
+      "glibc_required": "2.34"
+    },
+    {
+      "name": "advanced-vpn-wireguard",
+      "sha256": "9ae3a99a0fb413c53e09db9099c56a88b2a446a0356f26a62797787a104946cb",
+      "glibc_required": "2.34"
+    },
+    {
+      "name": "advanced-vpn-dns",
+      "sha256": "fcc9e855f3b701f51bd835e46368b18c87a6aa2ce52a26bff45abc6f7c29ea3d",
+      "glibc_required": "2.34"
+    },
+    {
+      "name": "advanced-vpn-cloak",
+      "sha256": "a43c56b48a43b87e6ff26d14305c70136c392b2762aa276f5bfcd68b736ffc06",
+      "glibc_required": "2.34"
+    },
+    {
+      "name": "avpn",
+      "sha256": "6524e9f10abda94c21d51d7af61965e7e46228229b58b6a79b65c32c0ac3965c",
+      "glibc_required": "2.34"
+    }
+  ],
+  "status": "passed_core_glibc235_baseline"
+}

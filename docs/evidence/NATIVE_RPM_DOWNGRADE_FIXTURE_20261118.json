@@ -1,0 +1,7 @@
+{
+  "schema": 1,
+  "status": "metadata_only_downgrade_test_fixture_not_a_release",
+  "name": "cypherpunk-vpn-0.10.1-1.x86_64.rpm",
+  "sha256": "1f37c87fc0e7a13f2a98a1b566645b83fe301ab60ca5830dcc00b72bf8b6e00d",
+  "note": "Current code with deliberately older RPM version metadata, solely to test preinstall refusal before extraction. Not an older protocol implementation, release or distribution artifact."
+}
