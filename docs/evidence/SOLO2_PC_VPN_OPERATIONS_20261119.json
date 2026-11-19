@@ -1,0 +1,111 @@
+{
+  "schema": 1,
+  "status": "passed_key_sealing_operator_and_enrollment_operations",
+  "scope": "actual_solo2_fido_authenticator_with_project_ctaphid_udp_host_and_production_vpn_crypto",
+  "backend": "solo2-pc",
+  "vpn_source_commit": "465c7f46814823e6a16a574160bd14a067ccc9c2",
+  "firmware_source_commit": "45311f0b6761187d409ea3e7ea34f896810eb156",
+  "firmware_build": "solo2 45311f0, lpc55 fido_config, in runners/pc's test crate with tools/lab/solo2_ctaphid_udp_host.rs",
+  "binary_sha256": "5d736ea087cecd9130a8c5d453df6ffbb9981ee9228fe4df60759b35e416d5ca",
+  "harness_sha256": "f7494cf8add362094eb6c6281bdb8044e37a9cd93e24961ad95737aecd19f013",
+  "started": 1795107112.9538405,
+  "phases": {
+    "fresh_assertion_roundtrip": {
+      "credential_record": true,
+      "authenticated_assertion": true,
+      "fresh_assertion_unseal": true,
+      "corrupted_envelope_refused": true,
+      "local_test_vault_removed": true
+    },
+    "operator_dual_signature": {
+      "fido_verified": true,
+      "mldsa65_verified": true,
+      "wrong_message_refused": true,
+      "invalid_fido_half_refused": true,
+      "invalid_mldsa_half_refused": true
+    },
+    "two_salt_hmac_secret": {
+      "stable": true,
+      "separated": true,
+      "assertion_verified": true
+    },
+    "client_key_generation": {
+      "role": "client",
+      "sealed_keys_opened": 5
+    },
+    "relay_key_generation": {
+      "role": "relay",
+      "sealed_keys_opened": 5
+    },
+    "exit_key_generation": {
+      "role": "exit",
+      "sealed_keys_opened": 5
+    },
+    "signed_client_enrollment": {
+      "signed_bundle_imported": true,
+      "hybrid_delivery_verified": true
+    },
+    "ed25519_credential": {
+      "supported": true,
+      "actual_cose_algorithm": -8,
+      "assertion_verified": true
+    }
+  },
+  "physical_device_tested": false,
+  "tunnel_connection_tested": false,
+  "usb_channel": "p256_ecdh_ctap_pin_uv_1_2",
+  "limitations": [
+    "Solo 2's unmodified authenticator and Trussed runtime on a PC; the CTAPHID framing is the project's (upstream's PC runner serves none), its RNG is seeded with zeros and presence is always granted. Not a Solo 2 Secure or Hacker qualification.",
+    "Actual CTAPHID uses UDP transport; USB permissions and physical security are not tested.",
+    "No native PIN/presence UI, live tunnel or strict all-interface PQ qualification.",
+    "Only test discovery/transport/PIN input are substituted; production crypto is unchanged."
+  ],
+  "stage": "completed",
+  "get_info": {
+    "versions": [
+      "U2F_V2",
+      "FIDO_2_0",
+      "FIDO_2_1",
+      "FIDO_2_3"
+    ],
+    "extensions": [
+      "credProtect",
+      "credBlob",
+      "hmac-secret",
+      "hmac-secret-mc",
+      "largeBlobKey",
+      "minPinLength",
+      "thirdPartyPayment"
+    ],
+    "algorithms": [
+      {
+        "alg": -7,
+        "type": "public-key"
+      },
+      {
+        "alg": -8,
+        "type": "public-key"
+      },
+      {
+        "alg": -48,
+        "type": "public-key"
+      }
+    ],
+    "pin_uv_protocols": [
+      2,
+      1
+    ]
+  },
+  "pin_uv_protocols_client_allows": [
+    2,
+    1
+  ],
+  "default_credential_cose_algorithm": -7,
+  "disposable_secret_state_removed": true,
+  "stopped": 1795107114.6700594,
+  "production_source_sha256": {
+    "keyguard.py": "942f2131886bb9cae5ef611d22204bb2529a4589a90a05aee2ff8e3fdd99a021",
+    "managed_profile.py": "a31fc89b631a0237d8b5428db7be6a51c326e6cafeb4cc714dcc8c0310c62303",
+    "hardware_setup_test.py": "277c21fea4a5644541aac8a9436d2cdf7b3ed500b935190cc098276d025a81bf"
+  }
+}
