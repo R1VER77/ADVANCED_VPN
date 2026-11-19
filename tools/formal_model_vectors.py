@@ -32,6 +32,7 @@ sys.path.insert(0, str(TOOLS))
 
 results = {}
 failures = []
+passed = []
 
 
 def section(name):
@@ -45,6 +46,7 @@ def expect(condition, what):
         failures.append(what)
         print(f"  [FAIL] {what}")
     else:
+        passed.append(what)
         print(f"  [OK] {what}")
 
 
@@ -136,9 +138,14 @@ except ohttp.Refused:
 
 results["ohttp"] = dict(
     implementation="tools/ohttp.py::encapsulate/Gateway.open/Gateway.seal/decapsulate",
-    hpke_suite=str(getattr(ohttp, "SUITE", None)),
+    # RFC 9180 identifiers as the request header carries them: key id, KEM, KDF, AEAD.
+    hpke_suite=dict(
+        kem_id=ohttp.header(key_id)[1:3].hex(),
+        kdf_id=ohttp.header(key_id)[3:5].hex(),
+        aead_id=ohttp.header(key_id)[5:7].hex(),
+    ),
     request_header_hex=ohttp.header(key_id).hex(),
-    request_info="REQUEST_INFO + header; per-request fresh reply key (X25519)",
+    request_info="REQUEST_INFO + header; per-request fresh reply key pair (ML-KEM-768 + X25519, ohttp.keypair)",
     freshness=f"abs(now - t) <= {ohttp.FRESH_SECONDS}s; replay cache in memory",
     response_binding_refused=True,
     replay_refused=True,
@@ -287,12 +294,12 @@ report = dict(
     ).stdout.strip(),
     vectors=results,
     checks_failed=failures,
-    checks_passed=len(results),
+    checks_passed=len(passed),
 )
 out = REPO / "docs" / "evidence"
 out.mkdir(parents=True, exist_ok=True)
 (out / "FORMAL_MODEL_VECTORS_20261119.json").write_text(json.dumps(report, indent=2) + "\n")
 print()
-print(f"checks passed: {len(results)}, failed: {len(failures)}")
+print(f"checks passed: {len(passed)}, failed: {len(failures)}")
 print(f"Evidence: {out / 'FORMAL_MODEL_VECTORS_20261119.json'}")
 sys.exit(1 if failures else 0)

@@ -1,8 +1,8 @@
 {
   "schema": 1,
-  "generated_utc": "2026-11-19T09:13:29Z",
+  "generated_utc": "2026-11-19T15:35:18Z",
   "purpose": "Pin the VERIFICATION_PLAN item 1-6 Tamarin models to the real crypto code: every abstract function the models use (h, senc, sign, aenc) is anchored to a concrete implementation value or refusal recorded here.",
-  "repo_commit": "8b3c720bf92568a2fa17cee9fe6d3fd660df14a5",
+  "repo_commit": "7de974c1d4a35df9170fbc3c0fd83df739340a5b",
   "vectors": {
     "kem_seal": {
       "implementation": "tools/keyguard.py::kem_seal/kem_open/_kem_key",
@@ -17,7 +17,7 @@
       "kdf": {
         "function": "HKDF-SHA256, length 32, salt none",
         "info_format": "b'advanced-vpn/hybrid-kem/v1|' + context + b'|' + sha256(ephemeral || mlkem_ct || recipient_public)",
-        "info_hex_sample": "616476616e6365642d76706e2f6879627269642d6b656d2f76317c636c69656e747c1e7a75083eebe195841be683922e58884d0b324880ffb007515f4674945d6ff0",
+        "info_hex_sample": "616476616e6365642d76706e2f6879627269642d6b656d2f76317c636c69656e747c42db93c9a718562b6d7316b8829fc1b335056a16af2141bed697fa83560a6731",
         "key_material": "x25519_shared || mlkem768_shared (both shared secrets; the hybrid_compatibility abstraction)"
       },
       "aead": "AES-256-GCM, 12-byte nonce, associated data = context (the context_binding anchor)",
@@ -32,9 +32,13 @@
     },
     "ohttp": {
       "implementation": "tools/ohttp.py::encapsulate/Gateway.open/Gateway.seal/decapsulate",
-      "hpke_suite": "<cryptography.hazmat.bindings._rust.openssl.hpke.Suite object at 0x7f373698dfe0>",
+      "hpke_suite": {
+        "kem_id": "647a",
+        "kdf_id": "0001",
+        "aead_id": "0002"
+      },
       "request_header_hex": "01647a00010002",
-      "request_info": "REQUEST_INFO + header; per-request fresh reply key (X25519)",
+      "request_info": "REQUEST_INFO + header; per-request fresh reply key pair (ML-KEM-768 + X25519, ohttp.keypair)",
       "freshness": "abs(now - t) <= 60s; replay cache in memory",
       "response_binding_refused": true,
       "replay_refused": true,
@@ -48,7 +52,7 @@
     },
     "credits": {
       "implementation": "tools/mesh_tokens.py::blind/sign_blinded/unblind/verify",
-      "issuer_id": "!830992ce",
+      "issuer_id": "!94ecf11a",
       "fdh": {
         "function": "Hash `token` to an integer in [1, n) with SHA-256 in counter mode.\n\n    Deterministic and domain-separated for this credit scheme; the digest\n    stream is interpreted big-endian and reduced modulo n. The result is\n    coprime to n except with negligible probability, which the caller\n    tolerates (verification simply fails for a bad draw).",
         "key_bits": 3072,
@@ -110,5 +114,5 @@
     }
   },
   "checks_failed": [],
-  "checks_passed": 6
+  "checks_passed": 15
 }

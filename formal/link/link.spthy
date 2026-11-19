@@ -1,0 +1,130 @@
+// link.spthy — Tamarin model of the paced link handshake and cells (VERIFICATION_PLAN item 1).
+// Companion to src/link.rs and docs/VERIFICATION_PLAN.md section 1.
+//
+// MODELED: a link PSK shared by two servers; the offer carries ephemeral X25519 and
+// ML-KEM keys under k1 = h(psk, sid); the answer returns the DH share and a KEM
+// ciphertext; both directions' keys mix psk, the DH secret, the KEM secret, the direction
+// and the transcript hash. X25519 is the diffie-hellman builtin; ML-KEM is the
+// asymmetric-encryption builtin (the encapsulated secret is the encrypted message).
+// The adversary controls the network and may leak the PSK at any time.
+//
+// LEMMAS (each must verify; mutants in tools/tamarin_check.py must falsify):
+//  0. executable                         an honest handshake and cell exist.
+//  1. session_key_secrecy_before_leak    a session key is known only after a PSK leak.
+//  2. psk_forward_secrecy                a session key stays secret even after a PSK leak
+//                                        (the ephemeral secrets are in the KDF).
+//  3. handshake_binding                  an answer follows an offer under the same PSK
+//                                        (or the PSK had leaked).
+//  4. no_reflection                      the initiator accepts only cells the responder sent.
+//  5. no_amplification                   the responder accepts only cells the initiator sent.
+//
+// The adversary may also break either primitive for a session (break_x25519, break_mlkem).
+// ABSTRACTED (src/link.rs session_keys): HKDF(salt = psk, ikm = X25519 || ML-KEM secret,
+// info = label || direction || SHA-256(offer || answer)) is h over the same inputs; the
+// answer travels in the clear here (the code seals it in a cell), which only helps the
+// adversary.
+// NOT MODELED: the replay window and counters (Kani/proptest), rotation timers, credit
+// accounting, AEAD internals, and compromise of the responder's ephemeral secrets.
+theory link_paced
+begin
+
+builtins: hashing, symmetric-encryption, asymmetric-encryption, diffie-hellman
+
+rule enroll:
+  [ Fr(~psk) ]
+  --[ LinkPsk(~psk) ]->
+  [ !Psk(~psk) ]
+
+rule psk_leak:
+  [ !Psk(psk) ]
+  --[ PskLeaked(psk) ]->
+  [ Out(psk) ]
+
+rule offer:
+  [ !Psk(psk), Fr(~sid), Fr(~x), Fr(~dk) ]
+  --[ Offered(psk, ~sid, 'g'^~x, pk(~dk)) ]->
+  [ St_A(psk, ~sid, ~x, ~dk), !EphA(~sid, ~x, ~dk),
+    Out(<~sid, senc(<'g'^~x, pk(~dk)>, h(<psk, ~sid, 'k1'>))>) ]
+
+// Breaking one primitive for one session: the adversary learns the initiator's ephemeral
+// secret for it (X25519: computes the DH secret; ML-KEM: decapsulates the ciphertext).
+rule break_x25519:
+  [ !EphA(sid, x, dk) ]
+  --[ XBroken(sid) ]->
+  [ Out(x) ]
+
+rule break_mlkem:
+  [ !EphA(sid, x, dk) ]
+  --[ KemBroken(sid) ]->
+  [ Out(dk) ]
+
+rule answer:
+  let ct = aenc(~m, pkk)
+      th = h(<sid, gx, pkk, 'g'^~y, ct>)
+      ka = h(<psk, gx^~y, ~m, 'AtoB', th>)
+      kb = h(<psk, gx^~y, ~m, 'BtoA', th>)
+  in
+  [ !Psk(psk), In(<sid, senc(<gx, pkk>, h(<psk, sid, 'k1'>))>), Fr(~y), Fr(~m) ]
+  --[ Answered(psk, sid, gx, pkk), SessionKeys(psk, sid, gx, pkk, ka, kb) ]->
+  [ !St_B(psk, sid, ka, kb), Out(<sid, 'g'^~y, ct>) ]
+
+rule initiator_key:
+  let th = h(<sid, 'g'^x, pk(dk), ey, ct>)
+      ka = h(<psk, ey^x, adec(ct, dk), 'AtoB', th>)
+      kb = h(<psk, ey^x, adec(ct, dk), 'BtoA', th>)
+  in
+  [ St_A(psk, sid, x, dk), In(<sid, ey, ct>) ]
+  --[ InitiatorKeys(psk, sid, ka, kb) ]->
+  [ !St_A2(psk, sid, ka, kb) ]
+
+rule a_send:
+  [ !St_A2(psk, sid, ka, kb), Fr(~p) ]
+  --[ CellSentA(sid, ~p) ]->
+  [ Out(senc(~p, ka)) ]
+
+rule b_send:
+  [ !St_B(psk, sid, ka, kb), Fr(~p) ]
+  --[ CellSentB(sid, ~p) ]->
+  [ Out(senc(~p, kb)) ]
+
+rule b_accept:
+  [ !St_B(psk, sid, ka, kb), In(senc(p, ka)) ]
+  --[ CellAcceptedB(sid, p) ]->
+  []
+
+rule a_accept:
+  [ !St_A2(psk, sid, ka, kb), In(senc(p, kb)) ]
+  --[ CellAcceptedA(sid, p) ]->
+  []
+
+lemma executable:
+  exists-trace
+  "Ex psk sid gx pkk ka kb p #i #j #k.
+     SessionKeys(psk, sid, gx, pkk, ka, kb) @i & CellSentA(sid, p) @j & CellAcceptedB(sid, p) @k
+     & #i < #j & #j < #k"
+
+lemma session_key_secrecy_before_leak:
+  "All psk sid gx pkk ka kb #i #j. SessionKeys(psk, sid, gx, pkk, ka, kb) @i & K(ka) @j ==>
+     Ex #l. PskLeaked(psk) @l"
+
+lemma psk_forward_secrecy:
+  // Only sessions whose offer an honest initiator made: once the PSK leaks the adversary can
+  // open sessions of its own, which is not a forward-secrecy failure. Hybrid: even with the
+  // PSK leaked, the key is known only if BOTH X25519 and ML-KEM were broken for the session.
+  "All psk sid gx pkk ka kb #i #j #o. SessionKeys(psk, sid, gx, pkk, ka, kb) @i & K(ka) @j
+     & Offered(psk, sid, gx, pkk) @o ==>
+     (Ex #a. XBroken(sid) @a) & (Ex #b. KemBroken(sid) @b)"
+
+lemma handshake_binding:
+  "All psk sid gx pkk #i. Answered(psk, sid, gx, pkk) @i ==>
+     (Ex #j. Offered(psk, sid, gx, pkk) @j & #j < #i) | (Ex #l. PskLeaked(psk) @l)"
+
+lemma no_reflection:
+  "All sid p #i. CellAcceptedA(sid, p) @i ==>
+     (Ex #j. CellSentB(sid, p) @j) | (Ex psk #l. PskLeaked(psk) @l)"
+
+lemma no_amplification:
+  "All sid p #i. CellAcceptedB(sid, p) @i ==>
+     (Ex #j. CellSentA(sid, p) @j) | (Ex psk #l. PskLeaked(psk) @l)"
+
+end

@@ -26,6 +26,23 @@ MODELS = {
         "server_confirmation",
         "no_reflection",
     ],
+    "formal/link/link.spthy": [
+        "executable",
+        "session_key_secrecy_before_leak",
+        "psk_forward_secrecy",
+        "handshake_binding",
+        "no_reflection",
+        "no_amplification",
+    ],
+    "formal/kem_seal/kem_seal.spthy": ["executable", "hybrid_confidentiality", "context_binding"],
+    "formal/ohttp/ohttp.spthy": ["executable", "request_secrecy", "response_secrecy", "response_binding"],
+    "formal/credits/credits.spthy": ["executable", "no_double_spend", "issuer_only"],
+    "formal/enrollment/enrollment.spthy": [
+        "executable",
+        "dual_signature_binding",
+        "no_role_substitution",
+        "either_scheme_holds",
+    ],
     "formal/dcnet/dcnet.spthy": ["keys_secret", "frame_authenticity", "cancellation"],
     "formal/dcnet/dcnet_authenticity.spthy": ["keys_secret", "frame_authenticity", "executable_accept"],
     "formal/dcnet/dcnet_no_collusion.spthy": ["pad_secrecy_without_collusion"],
@@ -59,9 +76,66 @@ MODELS = {
     ],
 }
 
+# Tamarin's derivation check gives up after 5 s by default and --quit-on-warning then aborts;
+# these models need longer (0 = no limit) for it to finish, and it does pass.
+DERIVCHECK_TIMEOUT = {"formal/kem_seal/kem_seal.spthy": 0}
+
 # Broken variants the prover must falsify, so a lemma cannot pass by being vacuous or
 # by not depending on what it is meant to protect: (model, [(text, replacement)], lemma).
 MUTANTS = [
+    (
+        "formal/link/link.spthy",
+        [("ka = h(<psk, gx^~y, ~m, 'AtoB', th>)", "ka = h(<psk, 'AtoB', th>)")],
+        "psk_forward_secrecy",
+    ),
+    # Hybrid: dropping either shared secret leaves the key to the other primitive alone.
+    (
+        "formal/link/link.spthy",
+        [("ka = h(<psk, gx^~y, ~m, 'AtoB', th>)", "ka = h(<psk, gx^~y, 'AtoB', th>)")],
+        "psk_forward_secrecy",
+    ),
+    (
+        "formal/link/link.spthy",
+        [("ka = h(<psk, gx^~y, ~m, 'AtoB', th>)", "ka = h(<psk, ~m, 'AtoB', th>)")],
+        "psk_forward_secrecy",
+    ),
+    (
+        "formal/kem_seal/kem_seal.spthy",
+        [("kemss, ctx, ", "kemss, ")],
+        "context_binding",
+    ),
+    (
+        "formal/kem_seal/kem_seal.spthy",
+        [("h(<dhs, kemss, ctx, ", "h(<dhs, ctx, ")],
+        "hybrid_confidentiality",
+    ),
+    (
+        "formal/kem_seal/kem_seal.spthy",
+        [("h(<dhs, kemss, ctx, ", "h(<kemss, ctx, ")],
+        "hybrid_confidentiality",
+    ),
+    # The reply key is what binds a response to its request: published, anyone can answer.
+    (
+        "formal/ohttp/ohttp.spthy",
+        [("Out(aenc(<~nonce, pk(~rsk), ~body>, gpk)) ]", "Out(pk(~rsk)), Out(aenc(<~nonce, pk(~rsk), ~body>, gpk)) ]")],
+        "response_binding",
+    ),
+    # A client that takes the gateway key from the network seals to whoever sent it.
+    (
+        "formal/ohttp/ohttp.spthy",
+        [("[ !GatewayKey(gpk), Fr(~nonce)", "[ In(gpk), Fr(~nonce)")],
+        "request_secrecy",
+    ),
+    (
+        "formal/credits/credits.spthy",
+        [("NotSpent(token), ", "")],
+        "no_double_spend",
+    ),
+    (
+        "formal/enrollment/enrollment.spthy",
+        [("h(<m, dk, role>)", "h(<dk, role>)")],
+        "dual_signature_binding",
+    ),
     (
         "formal/cloak/cloak.spthy",
         [
@@ -185,7 +259,13 @@ def prove(model, timeout, lemma=None, path=None):
     start = time.monotonic()
     try:
         r = subprocess.run(
-            ["tamarin-prover", "--quit-on-warning", "--prove" + ("=" + lemma if lemma else ""), str(path or ROOT / model)],
+            [
+                "tamarin-prover",
+                "--quit-on-warning",
+                *(["--derivcheck-timeout=%d" % DERIVCHECK_TIMEOUT[model]] if model in DERIVCHECK_TIMEOUT else []),
+                "--prove" + ("=" + lemma if lemma else ""),
+                str(path or ROOT / model),
+            ],
             capture_output=True,
             text=True,
             timeout=timeout,
@@ -266,6 +346,8 @@ def main():
                         "terminate; it is proved unrolled to three rounds with one seizure",
                         "Re-blinding: secrecy of the KEM secret itself, and unlinkability across hop 1 "
                         "(an equivalence): did not terminate; the construction stays review-pending",
+                        "Oblivious control plane: unlinkability (an equivalence) is not modelled, and "
+                        "freshness is a restriction in formal/ohttp, exercised by tools/test_ohttp.py",
                     ],
                 ),
                 indent=2,

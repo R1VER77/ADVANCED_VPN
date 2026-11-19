@@ -1,0 +1,69 @@
+// kem_seal.spthy — Tamarin model of hybrid KEM sealing (VERIFICATION_PLAN item 3).
+// Companion to tools/keyguard.py kem_seal and docs/VERIFICATION_PLAN.md section 3.
+//
+// MODELED, as tools/keyguard.py kem_seal/kem_open do it: the recipient holds a long-term
+// X25519 key (diffie-hellman builtin) and an ML-KEM-768 key (asymmetric-encryption builtin:
+// the encapsulated secret is the encrypted message). The sealer makes an ephemeral X25519
+// share, derives the key from both shared secrets, the context, the ephemeral share, the
+// KEM ciphertext and the recipient keys, in _kem_key's order, and encrypts the payload
+// under it. ABSTRACTED: AES-GCM is senc (the context is also its AAD in the code), HKDF is h. The adversary may break either primitive (learn the
+// recipient's secret for it) and chooses the context.
+//
+// LEMMAS:
+//  0. executable              an honest seal and unseal exist.
+//  1. hybrid_confidentiality  the payload is known only if BOTH primitives were broken.
+//  2. context_binding         an envelope opens only under the context it was sealed for.
+theory kem_seal
+begin
+
+builtins: hashing, symmetric-encryption, asymmetric-encryption, diffie-hellman
+
+rule enroll_recipient:
+  [ Fr(~rx), Fr(~rdk) ]
+  --[ RecipientEnrolled(~rx, ~rdk) ]->
+  [ !Recipient(~rx, ~rdk), Out(<'g'^~rx, pk(~rdk)>) ]
+
+rule seal:
+  let dhs = ('g'^rx)^~ex
+      kemss = ~m
+      eph = 'g'^~ex
+      ct = aenc(~m, pk(rdk))
+      k = h(<dhs, kemss, ctx, eph, ct, 'g'^rx, pk(rdk)>)
+  in
+  [ !Recipient(rx, rdk), In(ctx), Fr(~ex), Fr(~m), Fr(~payload) ]
+  --[ PayloadSealed(~payload, ctx, rx, rdk) ]->
+  [ Out(<ctx, eph, ct, senc(~payload, k)>) ]
+
+rule unseal:
+  let dhs = eph^rx
+      kemss = adec(ct, rdk)
+      k = h(<dhs, kemss, ctx, eph, ct, 'g'^rx, pk(rdk)>)
+  in
+  [ !Recipient(rx, rdk), In(<ctx, eph, ct, senc(payload, k)>) ]
+  --[ Unsealed(payload, ctx) ]->
+  []
+
+rule break_x25519:
+  [ !Recipient(rx, rdk) ]
+  --[ XBroken(rx) ]->
+  [ Out(rx) ]
+
+rule break_mlkem:
+  [ !Recipient(rx, rdk) ]
+  --[ KemBroken(rdk) ]->
+  [ Out(rdk) ]
+
+lemma executable:
+  exists-trace
+  "Ex payload ctx rx rdk #i #j. PayloadSealed(payload, ctx, rx, rdk) @i
+     & Unsealed(payload, ctx) @j & #i < #j"
+
+lemma hybrid_confidentiality:
+  "All payload ctx rx rdk #i #j. PayloadSealed(payload, ctx, rx, rdk) @i & K(payload) @j ==>
+     (Ex #a. XBroken(rx) @a) & (Ex #b. KemBroken(rdk) @b)"
+
+lemma context_binding:
+  "All payload c1 rx rdk c2 #i #j. PayloadSealed(payload, c1, rx, rdk) @i & Unsealed(payload, c2) @j ==>
+     c1 = c2 | ((Ex #a. XBroken(rx) @ #a) & (Ex #b. KemBroken(rdk) @ #b))"
+
+end

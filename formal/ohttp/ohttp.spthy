@@ -1,0 +1,78 @@
+// ohttp.spthy — Tamarin model of the oblivious control plane (VERIFICATION_PLAN item 4).
+// Companion to tools/ohttp.py and docs/VERIFICATION_PLAN.md section 4.
+//
+// MODELED, as tools/ohttp.py does it: the client makes a fresh reply key pair for every
+// request and puts the reply PUBLIC key inside the request it seals to the gateway, with a
+// fresh nonce and the body (`encapsulate`). The gateway opens the request, accepts each nonce
+// once, and seals the response to that reply key (`Gateway.open`, `Gateway.seal`). This
+// replaces RFC 9458's HPKE exporter, and that deviation is the thing proved here: HPKE base
+// mode does not authenticate the sender, so a response binds to its request only because
+// the reply public key never leaves the encrypted request.
+// The relay is the network adversary. The gateway's key can be leaked.
+//
+// ABSTRACTED: the hybrid ML-KEM-768 + X25519 HPKE suite is one asymmetric-encryption
+// builtin (its hybrid composition is formal/kem_seal); the header, the HPKE info strings and
+// the JSON encoding are not modelled; the response body is a fresh secret.
+//
+// NOT MODELED: freshness (the 60 s window, the nonce cache and the restart rule) is a
+// restriction here, not a result: tools/test_ohttp.py exercises it. Unlinkability is an
+// equivalence property and is out of scope.
+//
+// LEMMAS:
+//  0. executable         an honest request, response and open exist.
+//  1. request_secrecy    the relay never learns a client's request body.
+//  2. response_secrecy   the relay never learns the response to a client's request.
+//  3. response_binding   a client opens only the response the gateway sealed for that request.
+// Each holds unless the gateway's key was leaked.
+theory ohttp_control
+begin
+
+builtins: asymmetric-encryption
+
+rule enroll_gateway:
+  [ Fr(~gsk) ]
+  --[ GatewayEnrolled(pk(~gsk)) ]->
+  [ !Gateway(~gsk), !GatewayKey(pk(~gsk)), Out(pk(~gsk)) ]
+
+rule leak_gateway:
+  [ !Gateway(gsk) ]
+  --[ GatewayLeaked(pk(gsk)) ]->
+  [ Out(gsk) ]
+
+rule request:
+  [ !GatewayKey(gpk), Fr(~nonce), Fr(~rsk), Fr(~body) ]
+  --[ Requested(gpk, ~nonce, pk(~rsk), ~body) ]->
+  [ Client(gpk, ~nonce, ~rsk, ~body), Out(aenc(<~nonce, pk(~rsk), ~body>, gpk)) ]
+
+rule gateway_respond:
+  [ !Gateway(gsk), In(aenc(<nonce, rpk, body>, pk(gsk))), Fr(~resp) ]
+  --[ NonceAccepted(pk(gsk), nonce), Responded(pk(gsk), nonce, rpk, body, ~resp) ]->
+  [ Out(aenc(~resp, rpk)) ]
+
+restriction one_accept_per_nonce:
+  "All g n #i #j. NonceAccepted(g, n) @i & NonceAccepted(g, n) @j ==> #i = #j"
+
+rule client_open:
+  [ Client(gpk, nonce, rsk, body), In(aenc(resp, pk(rsk))) ]
+  --[ Opened(gpk, nonce, pk(rsk), body, resp) ]->
+  []
+
+lemma executable:
+  exists-trace
+  "Ex g n r b resp #i #j #k. Requested(g, n, r, b) @i & Responded(g, n, r, b, resp) @j
+     & Opened(g, n, r, b, resp) @k & #i < #j & #j < #k
+     & not (Ex #l. GatewayLeaked(g) @l)"
+
+lemma request_secrecy:
+  "All g n r b #i #j. Requested(g, n, r, b) @i & K(b) @j ==>
+     Ex #l. GatewayLeaked(g) @l"
+
+lemma response_secrecy:
+  "All g n r b resp #i #j #k. Requested(g, n, r, b) @i & Responded(g, n, r, b, resp) @j
+     & K(resp) @k ==> Ex #l. GatewayLeaked(g) @l"
+
+lemma response_binding:
+  "All g n r b resp #i. Opened(g, n, r, b, resp) @i ==>
+     (Ex #j. Responded(g, n, r, b, resp) @j & #j < #i) | (Ex #l. GatewayLeaked(g) @l)"
+
+end

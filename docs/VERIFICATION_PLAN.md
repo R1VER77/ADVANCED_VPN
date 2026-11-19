@@ -6,8 +6,12 @@ Noise IK, ML-KEM, ML-DSA, HPKE's base mode, Sphinx and Katzenpost's PKI. Our own
 cryptographic constructions are proved: each one below is ours, unaudited, and decides
 who gets in, what stays secret or who can be linked.
 
-Status (15 Nov 2026): the DC-net round core (item 7) and part of Option E's re-blinding
-(item 8) are machine-checked in CI; everything else is planned. Nothing in the
+Status (19 Nov 2026): items 1–6 (paced links, the cloak's proof, hybrid KEM sealing, the
+oblivious control plane, blind-RSA credits, signed enrollment), the DC-net round core
+(item 7) and part of Option E's re-blinding (item 8) are machine-checked in CI, each within
+the abstraction its model states: `formal/README.md` lists what each model leaves out and
+which lemmas rest on an assumption. Still planned: the ProVerif equivalences (ohttp and
+credit unlinkability), the Kani harnesses and the live Rust vectors for items 1–2. Nothing in the
 documentation may claim a property from this list until its model and its gates are in CI.
 Proofs run with Tamarin 1.12.0 and Maude 3.5.1 (official release binaries, pinned by
 SHA-256 in `.github/workflows/verify.yml`, job `formal-models`); `tools/tamarin_check.py`

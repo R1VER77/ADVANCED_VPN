@@ -1,0 +1,85 @@
+// enrollment.spthy — Tamarin model of signed enrollment (VERIFICATION_PLAN item 6).
+// Companion to tools/managed_profile.py and docs/VERIFICATION_PLAN.md section 6.
+//
+// MODELED: one operator holds a classical (FIDO2) and a post-quantum (ML-DSA) signing key.
+// A bundle's manifest names the device's key and role; the operator signs it with BOTH
+// keys; a device enrolls only a bundle whose two signatures verify and that names its own
+// key. The adversary controls the network and may break either scheme, never both
+// (lemmas hold in all traces where it does not break both).
+// ABSTRACTED (tools/managed_profile.py): the code signs set.json, which lists the SHA-256 of
+// each bundle's manifest, which lists the role and the SHA-256 of every file; here one hash
+// h(<m, dk, role>) stands for that chain. The classical signature is Ed25519 (FIDO2 or
+// software), the post-quantum one ML-DSA-65; both are the signing builtin.
+//
+// LEMMAS:
+//  0. executable             an honest sign and enroll exist.
+//  1. dual_signature_binding an enrollment was covered by both signatures (or both broken).
+//  2. no_role_substitution   a bundle created for one role never enrolls as another.
+//  3. either_scheme_holds    an uncreated bundle enrolls only if BOTH schemes were broken.
+theory enrollment_signed
+begin
+
+builtins: hashing, signing
+
+restriction equality:
+  "All x y #i. Eq(x, y) @i ==> x = y"
+
+restriction one_operator:
+  "All #i #j. OperatorEnrolled() @i & OperatorEnrolled() @j ==> #i = #j"
+
+rule enroll_operator:
+  [ Fr(~fk), Fr(~qk) ]
+  --[ OperatorEnrolled() ]->
+  [ !Operator(~fk, ~qk), !OperatorPub(pk(~fk), pk(~qk)), Out(<pk(~fk), pk(~qk)>) ]
+
+rule device:
+  [ Fr(~dk) ]
+  --[ DeviceKeys(~dk) ]->
+  [ !Device(~dk) ]
+
+rule bundle:
+  [ !Device(dk), In(role), Fr(~m) ]
+  --[ BundleCreated(~m, dk, role) ]->
+  [ !Bundle(~m, dk, role) ]
+
+rule dual_sign:
+  [ !Operator(fk, qk), !Bundle(m, dk, role) ]
+  --[ FidoSigned(m, dk, role), MldsaSigned(m, dk, role) ]->
+  [ Out(<m, dk, role, sign(h(<m, dk, role>), fk), sign(h(<m, dk, role>), qk)>) ]
+
+rule enroll:
+  [ !Device(dk), !OperatorPub(fpk, qpk), In(<m, dk, role, fsig, qsig>) ]
+  --[ Eq(verify(fsig, h(<m, dk, role>), fpk), true),
+      Eq(verify(qsig, h(<m, dk, role>), qpk), true),
+      Enrolled(dk, role, m) ]->
+  []
+
+rule break_classical:
+  [ !Operator(fk, qk) ]
+  --[ ClassicalBroken(fk) ]->
+  [ Out(fk) ]
+
+rule break_pq:
+  [ !Operator(fk, qk) ]
+  --[ PqBroken(qk) ]->
+  [ Out(qk) ]
+
+lemma executable:
+  exists-trace
+  "Ex m dk role #i #j. BundleCreated(m, dk, role) @i & Enrolled(dk, role, m) @j & #i < #j"
+
+lemma dual_signature_binding:
+  "All dk role m #i. Enrolled(dk, role, m) @i ==>
+     (Ex #j #k. FidoSigned(m, dk, role) @j & MldsaSigned(m, dk, role) @k)
+     | ((Ex fk #a. ClassicalBroken(fk) @a) & (Ex qk #b. PqBroken(qk) @b))"
+
+lemma no_role_substitution:
+  "All m dk r1 r2 #i #j. BundleCreated(m, dk, r1) @i & Enrolled(dk, r2, m) @j ==>
+     r1 = r2 | ((Ex fk #a. ClassicalBroken(fk) @a) & (Ex qk #b. PqBroken(qk) @b))"
+
+lemma either_scheme_holds:
+  "All dk role m #i. Enrolled(dk, role, m) @i ==>
+     (Ex #j. BundleCreated(m, dk, role) @j)
+     | ((Ex fk #a. ClassicalBroken(fk) @a) & (Ex qk #b. PqBroken(qk) @b))"
+
+end

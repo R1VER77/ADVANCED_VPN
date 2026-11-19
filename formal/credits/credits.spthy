@@ -1,0 +1,58 @@
+// credits.spthy — Tamarin model of blind-RSA credits (VERIFICATION_PLAN item 5).
+// Companion to tools/mesh_tokens.py and docs/VERIFICATION_PLAN.md section 5.
+//
+// MODELED: the mesh signs a fresh token (blinding is abstracted: only the client holds
+// the unblinded token and signature); the client presents it to a relay; the relay checks
+// the signature and a persistent spent set shared by all relays.
+// ASSUMPTION: no_double_spend rests on the spent_set restriction, i.e. on every redemption
+// going through ONE tools/mesh_tokens.py Ledger (one JSON spent set); relays that keep
+// separate ledgers are not covered. RSA-FDH is the signing builtin; epochs, expiry and the
+// Inflation check are not modelled.
+//
+// LEMMAS:
+//  0. executable      issue, present and redeem exist.
+//  1. no_double_spend a token is redeemed at most once across relays sharing the set.
+//  2. issuer_only     only mesh-issued tokens redeem.
+// Unlinkability is an equivalence property; one-more unforgeability is computational.
+theory credits
+begin
+
+builtins: hashing, signing
+
+restriction equality:
+  "All x y #i. Eq(x, y) @i ==> x = y"
+
+restriction spent_set:
+  "All t #i. NotSpent(t) @i ==> not (Ex #j. Spent(t) @j & #j < #i)"
+
+rule enroll_mesh:
+  [ Fr(~sk) ]
+  --[ MeshEnrolled() ]->
+  [ !Mesh(~sk), !MeshPub(pk(~sk)), Out(pk(~sk)) ]
+
+rule issue:
+  [ !Mesh(sk), Fr(~token) ]
+  --[ Issued(~token) ]->
+  [ !Credit(~token, sign(~token, sk)) ]
+
+rule present:
+  [ !Credit(t, s) ]
+  --[ Presented(t) ]->
+  [ Out(<t, s>) ]
+
+rule redeem:
+  [ !MeshPub(pkm), In(<token, sig>) ]
+  --[ Eq(verify(sig, token, pkm), true), NotSpent(token), Spent(token), Redeemed(token) ]->
+  []
+
+lemma executable:
+  exists-trace
+  "Ex token #i #j. Issued(token) @i & Redeemed(token) @j & #i < #j"
+
+lemma no_double_spend:
+  "All token #i #j. Redeemed(token) @i & Redeemed(token) @j ==> #i = #j"
+
+lemma issuer_only:
+  "All token #i. Redeemed(token) @i ==> Ex #j. Issued(token) @j & #j < #i"
+
+end
