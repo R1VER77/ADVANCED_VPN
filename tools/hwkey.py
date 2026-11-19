@@ -44,12 +44,21 @@ FIRMWARE = {
     "Trezor": "open",
     "Solo 1": "open",
     "Solo 2": "open",
+    "CanoKey": "open",
+    "TKey": "open",
     "YubiKey": "closed",
     "Ledger": "closed",
 }
 # Ranked by full USB id only (these vendor ids are shared): STMicroelectronics' with Solo 1's
-# product id (solo1 usbd_desc.c); pid.codes' with Solo 2's (solo2 runners/lpc55 device_config.rs).
-RANKED_ONLY = {("0483", "A2CA"): "Solo 1", ("1209", "BEEE"): "Solo 2"}
+# product id (solo1 usbd_desc.c); pid.codes' with Solo 2's (solo2 runners/lpc55 device_config.rs);
+# Clay Logic's with CanoKey's (canokey-core interfaces/USB/device/usbd_desc.h); Tillitis' with
+# the TKey's (tkeyclient ports.go, and the FIDO2 token in Tillitis' QEMU tools/tk1).
+RANKED_ONLY = {
+    ("0483", "A2CA"): "Solo 1",
+    ("1209", "BEEE"): "Solo 2",
+    (NITROKEY, "42D4"): "CanoKey",
+    ("1207", "8887"): "TKey",
+}
 # CTAP PIN/UV protocols 1 and 2 are the only ones any key or client implements: the PIN and the
 # hmac-secret that unseals the vault cross USB encrypted under a P-256 ECDH key. Flagged on
 # every key; a recorded USB link plus a future quantum computer would reveal both.

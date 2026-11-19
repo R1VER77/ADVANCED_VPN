@@ -2,6 +2,7 @@
 and a fake CTAP probe. Each case is one situation setup must recognise; the same fixture
 can generate the scenarios a setup assistant is trained and evaluated on."""
 
+import re
 import subprocess
 import tempfile
 import unittest
@@ -151,6 +152,8 @@ class AdditionalDiagnostics(unittest.TestCase):
             ("20A0", "42B2", "Nitrokey 3", READY, "cypherpunk_preferred", 2, "typed on this computer"),
             ("0483", "A2CA", "Solo", READY, "cypherpunk_preferred", 2, "typed on this computer"),
             ("1209", "BEEE", "Solo 2", READY, "cypherpunk_preferred", 2, "typed on this computer"),
+            ("20A0", "42D4", "CanoKey", READY, "cypherpunk_preferred", 2, "typed on this computer"),
+            ("1207", "8887", "TKey", READY, "cypherpunk_preferred", 2, "typed on this computer"),
             ("2C97", "5000", "Ledger", on_key, "closed_source", 3, "entered on the key"),
             ("1050", "0407", "YubiKey", READY, "closed_source", 4, "typed on this computer"),
             ("0483", "5740", "Other ST device", READY, "unranked", 5, "typed on this computer"),
@@ -169,6 +172,18 @@ class AdditionalDiagnostics(unittest.TestCase):
                 # Every key is flagged: the PIN/hmac-secret channel on USB is P-256 for all of them.
                 self.assertEqual(f.detail["usb_channel"], "p256_ecdh_ctap_pin_uv_1_2")
                 self.assertIn("not post-quantum", f.message)
+
+    def test_every_key_the_documented_ranking_names_is_ranked_by_setup(self):
+        """The ranking table and hwkey.FIRMWARE name the same families, and each one is
+        reachable from a USB id, so no documented key is reported as unranked."""
+        doc = (Path(__file__).resolve().parents[1] / "docs/DEVICE_COMPATIBILITY_VALIDATION.md").read_text()
+        table = doc[doc.index("## Ranking") :]
+        named = set()
+        for row in re.findall(r"^\| [1-4] \|[^|]*\| ([^|]*) \|", table, re.M):
+            named |= {name.strip().removesuffix(" 5") for name in row.split(",")}
+        self.assertEqual(named, set(h.FIRMWARE))
+        reachable = set(h.KNOWN_KEYS.values()) | set(h.RANKED_ONLY.values())
+        self.assertLessEqual(set(h.FIRMWARE), reachable)
 
     def test_fido_classification_does_not_imply_desktop_access_tag(self):
         self.s.hid("hidraw2", "20A0", "42B2", "Nitrokey 3", access=False)
