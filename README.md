@@ -136,8 +136,10 @@ current `avpn` commands, state paths and signed protocol identifiers recoverable
 The [hardware emulation and cloud-installer plan](docs/HARDWARE_EMULATION_AND_CLOUD_INSTALLER_PLAN_20261118.md)
 adds vendor software-authenticator tests first, then searchable whole-registry
 OpenTofu onboarding. Registry listings and simulated passes do not establish live
-provider or physical-device qualification. Strict hardware policy remains blocking
-where the actual interface does not meet the PQ/SafeCurves target.
+provider or physical-device qualification. Every FIDO2 key's PIN/UV channel on USB is
+P-256 (CTAP PIN/UV 1 and 2): since 19 November it is flagged rather than blocking, and
+keys are ranked, open firmware with the PIN entered on the device first
+([ranking](docs/DEVICE_COMPATIBILITY_VALIDATION.md#ranking-and-the-usb-channel-owner-decision-19-november-2026)).
 
 The firmware lab has verified the VPN key/signing/enrollment operations on pinned
 Solo 1 and CanoKey virtual builds; [results and limits](docs/DEVICE_COMPATIBILITY_VALIDATION.md)

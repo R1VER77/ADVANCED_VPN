@@ -36,6 +36,28 @@ KNOWN_KEYS = {
 }
 LOW_PIN_RETRIES = 3
 
+# Ranking (docs/DEVICE_COMPATIBILITY_VALIDATION.md, "Ranking"). Every key is supported; the
+# ranking says which to prefer. "open": the firmware doing the FIDO2 work is published;
+# "closed": it is not (Ledger's app is public, its OS and secure element are not).
+FIRMWARE = {"Nitrokey 3": "open", "Trezor": "open", "Solo 1": "open", "YubiKey": "closed", "Ledger": "closed"}
+SOLO1 = ("0483", "A2CA")  # STMicroelectronics' vendor id with Solo 1's product id (solo1 usbd_desc.c)
+# CTAP PIN/UV protocols 1 and 2 are the only ones any key or client implements: the PIN and the
+# hmac-secret that unseals the vault cross USB encrypted under a P-256 ECDH key. Flagged on
+# every key; a recorded USB link plus a future quantum computer would reveal both.
+USB_CHANNEL = "p256_ecdh_ctap_pin_uv_1_2"
+
+
+def rank(vendor, product, on_device):
+    """(tier, rank) of a key: 1 is best. Open firmware is cypherpunk-preferred, and a PIN
+    entered on the key itself beats one typed on this computer, where malware can read it."""
+    family = key_name(vendor, product) or ("Solo 1" if (vendor, product) == SOLO1 else None)
+    firmware = FIRMWARE.get(family)
+    if firmware is None:
+        return "unranked", 5
+    tier = "cypherpunk_preferred" if firmware == "open" else "closed_source"
+    return tier, (1 if firmware == "open" else 3) + (0 if on_device else 1)
+
+
 UDEV_RULE_PATH = "/etc/udev/rules.d/70-avpn-security-keys.rules"
 # Reclassify FIDO HID interfaces if the distribution's classification rule is absent.
 # Wallet access is restricted to the FIDO interface: never grant their wallet APDU
@@ -318,11 +340,20 @@ def diagnose(devices, usb, probe=ctap_probe, management=yubikey_info):
                 f"Only {retries} PIN attempts are left on the {name}. Enter it carefully.", d.node,
                 dict(base, pin_retries=retries),
             ))  # fmt: skip
+        tier, place = rank(d.vendor, d.product, uv)
         findings.append(Finding(
             "key_ready", "ok", f"The {name} reports FIDO2, hmac-secret and "
-            + ("on-device verification." if uv else "a configured PIN."), d.node,
+            + ("on-device verification." if uv else "a configured PIN.")
+            + {"cypherpunk_preferred": " Cypherpunk-preferred: its firmware is open source.",
+               "closed_source": " Supported, but its firmware is closed source.",
+               "unranked": ""}[tier]
+            + (" Its PIN is entered on the key, so this computer never sees it." if uv else
+               " Its PIN is typed on this computer, where malware could read it.")
+            + " Like every FIDO2 key, it protects the PIN and key secret on the USB link with P-256,"
+            " which is not post-quantum.", d.node,
             dict(base, pin_retries=retries, verification="on_device" if uv else "pin",
-                 algorithms=p.get("algorithms", []), validation="capability_only"),
+                 algorithms=p.get("algorithms", []), validation="capability_only",
+                 tier=tier, rank=place, usb_channel=USB_CHANNEL),
         ))  # fmt: skip
     # Missing HID / CBOR is not evidence that an application is disabled. Ask the vendor
     # tool, and authorize an enable only for a single identified device with that state.

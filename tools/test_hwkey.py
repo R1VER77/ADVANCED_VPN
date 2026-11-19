@@ -144,6 +144,31 @@ class AdditionalDiagnostics(unittest.TestCase):
         self.assertEqual(finding.code, "key_ready")
         self.assertEqual(finding.detail["verification"], "on_device")
 
+    def test_ranking_prefers_open_firmware_then_a_pin_entered_on_the_key(self):
+        on_key = dict(READY, pin_set=False, uv=True, pin_retries=None)
+        cases = [
+            ("1209", "53C1", "Trezor", on_key, "cypherpunk_preferred", 1, "entered on the key"),
+            ("20A0", "42B2", "Nitrokey 3", READY, "cypherpunk_preferred", 2, "typed on this computer"),
+            ("0483", "A2CA", "Solo", READY, "cypherpunk_preferred", 2, "typed on this computer"),
+            ("2C97", "5000", "Ledger", on_key, "closed_source", 3, "entered on the key"),
+            ("1050", "0407", "YubiKey", READY, "closed_source", 4, "typed on this computer"),
+            ("0483", "5740", "Other ST device", READY, "unranked", 5, "typed on this computer"),
+        ]
+        for vendor, product, name, probe, tier, place, pin in cases:
+            with self.subTest(name):
+                s = Sim()
+                try:
+                    s.hid("hidraw2", vendor, product, name, probe=probe)
+                    [f] = s.diagnose()
+                finally:
+                    s.tmp.cleanup()
+                self.assertEqual(f.code, "key_ready")
+                self.assertEqual((f.detail["tier"], f.detail["rank"]), (tier, place))
+                self.assertIn(pin, f.message)
+                # Every key is flagged: the PIN/hmac-secret channel on USB is P-256 for all of them.
+                self.assertEqual(f.detail["usb_channel"], "p256_ecdh_ctap_pin_uv_1_2")
+                self.assertIn("not post-quantum", f.message)
+
     def test_fido_classification_does_not_imply_desktop_access_tag(self):
         self.s.hid("hidraw2", "20A0", "42B2", "Nitrokey 3", access=False)
         self.s.udev["hidraw2"].pop("TAGS")

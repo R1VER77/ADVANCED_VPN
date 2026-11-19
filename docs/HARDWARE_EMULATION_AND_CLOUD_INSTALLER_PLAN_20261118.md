@@ -163,6 +163,13 @@ dependency lock when their versions conflict.
 
 ### Strict policy decision
 
+**Superseded 19 November 2026:** the owner does not count a physical USB eavesdropper
+in the threat model. Keys are no longer blocked for the P-256 PIN/UV channel: it is
+flagged on every key, firmware is not modified, and keys are ranked
+(cypherpunk-preferred open firmware first, PIN entered on the device ahead of a PIN
+typed on the computer). See [the ranking](DEVICE_COMPATIBILITY_VALIDATION.md#ranking-and-the-usb-channel-owner-decision-19-november-2026).
+The 18 November decision, kept for the record:
+
 The owner selected **block under strict policy**. Report credential-signature
 algorithm separately from PIN/UV key agreement. Current CTAP PIN/UV protocols 1/2 use
 P-256; an Ed25519 credential does not change that. See [the inventory](PQ_INVENTORY.md).

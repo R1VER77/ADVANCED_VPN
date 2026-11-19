@@ -268,3 +268,30 @@ class PinDialogTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PinProtocolQuirkTests(unittest.TestCase):
+    """A key whose hmac-secret works only under PIN/UV protocol 1 is named by AAGUID up front."""
+
+    def info(self, aaguid, protocols):
+        from fido2.ctap2 import Info
+        from fido2.webauthn import Aaguid
+
+        return Info(
+            versions=["FIDO_2_0"], extensions=["hmac-secret"], aaguid=Aaguid.parse(aaguid), pin_uv_protocols=protocols
+        )
+
+    def test_tkey_negotiates_protocol_1(self):
+        import keyguard
+
+        self.assertEqual(keyguard.pin_protocols(self.info("dbe42d66-22be-4624-8811-972a8e65367e", [1, 2])), [1])
+
+    def test_a_tkey_without_protocol_1_is_left_with_nothing(self):
+        import keyguard
+
+        self.assertEqual(keyguard.pin_protocols(self.info("dbe42d66-22be-4624-8811-972a8e65367e", [2])), [])
+
+    def test_other_keys_keep_every_protocol_they_offer(self):
+        import keyguard
+
+        self.assertEqual(keyguard.pin_protocols(self.info("00000000-0000-0000-0000-000000000001", [2, 1])), [2, 1])

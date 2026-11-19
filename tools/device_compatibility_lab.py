@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Test additional authenticators against real VPN key/enrollment operations.
 
-Backends use Solo 1 or CanoKey upstream PC authenticators. A private,
-networkless Docker container transports actual CTAPHID frames over loopback UDP.
+Backends use Solo 1 or CanoKey upstream PC authenticators, whose actual CTAPHID frames
+travel over loopback UDP, or the TKey FIDO2 app on Tillitis' QEMU TKey (Castor), whose
+frames travel through upstream's USB-mode multiplexer on a pseudo-terminal. All run in a
+private, networkless Docker container.
 It receives no host USB devices, home directory, credentials or signing keys.
 Only transport/discovery and the virtual token's test PIN input are substituted;
 the production credential, signature, KEM and sealing code runs unchanged.
@@ -15,10 +17,12 @@ import os
 from pathlib import Path
 import re
 import secrets
+import select
 import shutil
 import signal
 import socket
 import subprocess
+import sys
 import time
 from unittest import mock
 import uuid
@@ -26,6 +30,9 @@ import uuid
 ROOT = Path(__file__).resolve().parents[1]
 SOLO_SOURCE = "fc8d2867c5ba8161302b809c80fa1fd6a4df94a2"
 CANOKEY_SOURCE = "a349b268e12953dd85169e9649091c4f91ce7c68"
+TKEY_SOURCE = "7fdf8ead29a2ff12aaedb710f31392055136e7e3"
+# The TKey simulator is a reviewed bundle (a directory), every file pinned by its build record.
+TKEY_BUNDLE = ("firmware.elf", "flash.bin", "qemu-system-riscv32", "qemu_usb_mux.py", "tkey-runapp", "tkey_app.bin")
 BACKENDS = {
     "solo1-pc": dict(
         source=SOLO_SOURCE,
@@ -39,11 +46,26 @@ BACKENDS = {
         build="upstream fido-hid-over-udp; ENABLE_TESTS=ON; ASan/UBSan; simulated presence",
         limitation="Upstream virtual firmware, not a shipped CanoKey Pigeon/Canary qualification.",
     ),
+    "tkey-qemu": dict(
+        source=TKEY_SOURCE,
+        scope="actual_tkey_fido2_app_on_tillitis_qemu_castor_with_upstream_usb_mux_and_production_vpn_crypto",
+        build="tkey-fido2 7fdf8ea (tkey-libs add_littlefs c7ef7ea) in tkey-builder:5rc1; QEMU tk1 d8413fe",
+        limitation="Emulated TKey Castor running upstream test firmware; touch reads as pressed. "
+        "Not a physical TKey qualification.",
+        deadline=900,
+    ),
 }
 
 
 def digest(path):
-    """Hash an input without retaining its complete contents."""
+    """Hash an input without retaining its complete contents. A directory (a simulator
+    bundle) hashes as the sorted list of its files' names and digests; it may hold only
+    regular files."""
+    if path.is_dir():
+        entries = sorted(path.iterdir())
+        if any(not e.is_file() or e.is_symlink() for e in entries):
+            raise ValueError("a simulator bundle holds only regular files")
+        return hashlib.sha256("".join(f"{e.name}\0{digest(e)}\n" for e in entries).encode()).hexdigest()
     h = hashlib.sha256()
     with path.open("rb") as stream:
         for block in iter(lambda: stream.read(1 << 20), b""):
@@ -96,7 +118,89 @@ def udp_device(timeout=4):
         raise
 
 
-def operations(work, result, test_pin):
+def pty_device(path, timeout=30):
+    """Transport real 64-byte CTAPHID reports through upstream's TKey USB-mode multiplexer."""
+    from fido2.hid import CtapHidConnection, CtapHidDevice, HidDescriptor
+
+    class Connection(CtapHidConnection):
+        def __init__(self):
+            self.handle = os.open(path, os.O_RDWR | os.O_NOCTTY)
+
+        def read_packet(self):
+            data = b""
+            deadline = time.monotonic() + timeout
+            while len(data) < 64:
+                left = deadline - time.monotonic()
+                if left <= 0 or not select.select([self.handle], [], [], left)[0]:
+                    raise TimeoutError("no response frame from the emulated TKey")
+                data += os.read(self.handle, 64 - len(data))
+            return data
+
+        def write_packet(self, data):
+            if len(data) != 64 or os.write(self.handle, data) != 64:
+                raise ValueError("invalid outbound frame")
+
+        def close(self):
+            os.close(self.handle)
+
+    return CtapHidDevice(
+        HidDescriptor("tkey-qemu-fido-pty", 0, 0, 64, 64, "Upstream firmware test only", None), Connection()
+    )
+
+
+def tkey_start(work, log):
+    """Boot the emulated TKey, start upstream's USB-mode multiplexer and load the FIDO2 app.
+    Returns (processes, FIDO pseudo-terminal path)."""
+    bundle = Path("/simulator")
+    flash = work / "flash.bin"
+    shutil.copyfile(bundle / "flash.bin", flash)  # the emulator writes its flash; the bundle is read-only
+    flash.chmod(0o600)
+    qemu_log = work / "qemu.log"
+    with qemu_log.open("xb") as qlog:
+        qemu = subprocess.Popen(
+            [str(bundle / "qemu-system-riscv32"), "-nographic", "-M", "tk1-castor,fifo=chrid",
+             "-bios", str(bundle / "firmware.elf"), "-chardev", "pty,id=chrid",
+             "-drive", f"file={flash},if=mtd,format=raw,index=0"],
+            cwd=work, stdin=subprocess.DEVNULL, stdout=qlog, stderr=qlog,
+        )  # fmt: skip
+    processes = [qemu]
+    pts = None
+    for _ in range(100):
+        found = re.search(r"char device redirected to (/dev/pts/\d+) \(label chrid\)", qemu_log.read_text())
+        if found:
+            pts = found.group(1)
+            break
+        if qemu.poll() is not None:
+            raise RuntimeError("emulator exited")
+        time.sleep(0.1)
+    if pts is None:
+        raise RuntimeError("emulator did not open its serial device")
+    prefix = work / "usbc"
+    processes.append(
+        subprocess.Popen(
+            [sys.executable, "-B", "-I", str(bundle / "qemu_usb_mux.py"), pts, "--symlink", str(prefix)],
+            cwd=work,
+            stdin=subprocess.DEVNULL,
+            stdout=log,
+            stderr=log,
+        )  # fmt: skip
+    )
+    cdc, fido = Path(str(prefix) + "-CDC.pty"), Path(str(prefix) + "-FIDO.pty")
+    for _ in range(100):
+        if cdc.exists() and fido.exists():
+            break
+        time.sleep(0.1)
+    else:
+        raise RuntimeError("multiplexer did not create its endpoints")
+    subprocess.run(
+        [str(bundle / "tkey-runapp"), "--not-usb-device", "--port", str(cdc), "--speed", "9600",
+         str(bundle / "tkey_app.bin")],
+        cwd=work, stdin=subprocess.DEVNULL, stdout=log, stderr=log, check=True, timeout=120,
+    )  # fmt: skip
+    return processes, str(fido)
+
+
+def operations(work, result, test_pin, device=udp_device):
     """Exercise shipping key/sealing/enrollment code with the actual authenticator."""
     import hardware_setup_test
     import keyguard
@@ -113,7 +217,7 @@ def operations(work, result, test_pin):
             self.allowed_algorithms = [PublicKeyCredentialParameters(type=PublicKeyCredentialType.PUBLIC_KEY, alg=-8)]
 
     with (
-        mock.patch.object(CtapHidDevice, "list_devices", side_effect=lambda: iter([udp_device()])),
+        mock.patch.object(CtapHidDevice, "list_devices", side_effect=lambda: iter([device()])),
         mock.patch.object(keyguard, "pinentry", return_value=test_pin),
     ):
         result["phases"]["fresh_assertion_roundtrip"] = hardware_setup_test.roundtrip(work)
@@ -220,8 +324,9 @@ def worker(out, vpn_commit, backend="solo1-pc"):
         phases={},
         physical_device_tested=False,
         tunnel_connection_tested=False,
-        strict_hardware_eligible=False,
-        strict_block_reason="CTAP PIN/UV protocols 1/2 use P-256; choosing Ed25519 does not change this channel",
+        # Flagged, not blocking (owner decision, 19 Nov 2026): the PIN and hmac-secret cross
+        # USB under P-256 ECDH on every CTAP key; choosing Ed25519 does not change it.
+        usb_channel="p256_ecdh_ctap_pin_uv_1_2",
         limitations=[
             selected["limitation"],
             "Actual CTAPHID uses UDP transport; USB permissions and physical security are not tested.",
@@ -229,14 +334,14 @@ def worker(out, vpn_commit, backend="solo1-pc"):
             "Only test discovery/transport/PIN input are substituted; production crypto is unchanged.",
         ],
     )
-    process = None
+    processes = []
     simulator_log = None
 
     def deadline(*_):
         raise TimeoutError("virtual test deadline")
 
     signal.signal(signal.SIGALRM, deadline)
-    signal.alarm(120)
+    signal.alarm(selected.get("deadline", 120))
     try:
         result["stage"] = "simulator_start"
         simulator_log = (out / "simulator.log").open("xb")
@@ -248,22 +353,34 @@ def worker(out, vpn_commit, backend="solo1-pc"):
                 ASAN_OPTIONS="detect_leaks=1:abort_on_error=1",
                 UBSAN_OPTIONS="halt_on_error=1",
             )
-        process = subprocess.Popen(
-            ["/simulator"],
-            cwd=work,
-            env=environment,
-            stdin=subprocess.DEVNULL,
-            stdout=simulator_log,
-            stderr=simulator_log,
-        )
-        time.sleep(0.5)
-        if process.poll() is not None:
+        if backend == "tkey-qemu":
+            processes, fido = tkey_start(work, simulator_log)
+
+            def connect():
+                return pty_device(fido)
+        else:
+            processes.append(
+                subprocess.Popen(
+                    ["/simulator"],
+                    cwd=work,
+                    env=environment,
+                    stdin=subprocess.DEVNULL,
+                    stdout=simulator_log,
+                    stderr=simulator_log,
+                )
+            )
+            time.sleep(0.5)
+
+            def connect():
+                # CanoKey's own virtual-card fabrication simulates five timed presence
+                # steps before serving HID. Allow that startup, without weakening the
+                # ordinary operation deadline or the production hardware code.
+                return udp_device(timeout=30 if backend == "canokey-udp" else 4)
+
+        if any(p.poll() is not None for p in processes):
             raise RuntimeError("simulator exited")
         result["stage"] = "ctaphid_initialization"
-        # CanoKey's own virtual-card fabrication simulates five timed presence
-        # steps before serving HID. Allow that startup, without weakening the
-        # ordinary operation deadline or the production hardware code.
-        device = udp_device(timeout=30 if backend == "canokey-udp" else 4)
+        device = connect()
         try:
             result["stage"] = "get_info"
             ctap = Ctap2(device)
@@ -274,14 +391,18 @@ def worker(out, vpn_commit, backend="solo1-pc"):
                 algorithms=info.algorithms,
                 pin_uv_protocols=info.pin_uv_protocols,
             )
+            import keyguard
+
+            # What production lets the client negotiate (a known-quirk key is limited up front).
+            result["pin_uv_protocols_client_allows"] = keyguard.pin_protocols(info)
             test_pin = secrets.token_hex(8)
             result["stage"] = "virtual_pin_initialization"
             ClientPin(ctap).set_pin(test_pin)  # Only the isolated disposable software token.
         finally:
             device.close()
         result["stage"] = "production_vpn_operations"
-        operations(work, result, test_pin)
-        if process.poll() is not None:
+        operations(work, result, test_pin, connect)
+        if any(p.poll() is not None for p in processes):
             raise RuntimeError("simulator terminated during operations")
         result["status"] = "passed_key_sealing_operator_and_enrollment_operations"
         result["stage"] = "completed"
@@ -290,15 +411,21 @@ def worker(out, vpn_commit, backend="solo1-pc"):
         code = getattr(error, "code", None)
         if code is not None:
             result["ctap_error_code"] = int(code)
+        cause = getattr(error, "cause", None)  # a ClientError wraps the device's CTAP error
+        if cause is not None:
+            result["cause_type"] = type(cause).__name__
+            if getattr(cause, "code", None) is not None:
+                result["cause_ctap_error_code"] = int(cause.code)
     finally:
         signal.alarm(0)
-        if process is not None and process.poll() is None:
-            process.terminate()
-            try:
-                process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=5)
+        for process in reversed(processes):
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=5)
         if simulator_log is not None:
             simulator_log.close()
         shutil.rmtree(work)
@@ -330,7 +457,10 @@ def run(args):
         r"sha256:[a-f0-9]{64}", image
     ):
         raise ValueError("unrecognized firmware build identity")
-    if not simulator.is_file() or digest(simulator) != build["binary_sha256"]:
+    bundle = args.backend == "tkey-qemu"
+    if bundle and (not simulator.is_dir() or tuple(sorted(e.name for e in simulator.iterdir())) != TKEY_BUNDLE):
+        raise ValueError("the TKey simulator must be the reviewed bundle directory")
+    if not (simulator.is_dir() if bundle else simulator.is_file()) or digest(simulator) != build["binary_sha256"]:
         raise ValueError("simulator does not match the reviewed build record")
     bundled_runtime.verify(runtime, ROOT / "tools/hardware-requirements.txt")
     for path in (ROOT, simulator, runtime, out):
@@ -372,7 +502,12 @@ def run(args):
             cap_drop=host["CapDrop"], user=config["Config"]["User"], mounts=config["Mounts"],
         ), indent=2) + "\n")  # fmt: skip
         with (out / "console.log").open("x") as log:
-            completed = subprocess.run([docker, "start", "--attach", name], stdout=log, stderr=log, timeout=150)
+            completed = subprocess.run(
+                [docker, "start", "--attach", name],
+                stdout=log,
+                stderr=log,
+                timeout=BACKENDS[args.backend].get("deadline", 120) + 30,
+            )
         result = json.loads((out / "RESULT.json").read_text())
         print(json.dumps(dict(status=result["status"], evidence=str(out / "RESULT.json"))))
         return completed.returncode

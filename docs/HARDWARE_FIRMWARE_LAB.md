@@ -3,7 +3,8 @@
 The laboratory asks whether a named authenticator implementation can perform the
 VPN's actual key-protection and enrollment operations. It is independent of the
 production CLI/controller: no virtual-device switch is added to the installed app.
-It currently implements **one backend: Solo 1's experimental upstream PC firmware**.
+It implements three backends: Solo 1's experimental upstream PC firmware (`solo1-pc`), CanoKey's
+upstream virtual card (`canokey-udp`) and the TKey FIDO2 app on Tillitis' QEMU TKey (`tkey-qemu`).
 
 ## Recorded Solo build
 
@@ -36,6 +37,33 @@ the source root in the prepared constrained build container. Do not invoke upstr
 flash, bootloader, reset or USB deployment commands. Only the resulting PC binary
 is used. A rebuild that changes inputs/hash needs a new reviewed build record;
 the runner deliberately refuses a binary that differs from its selected record.
+
+## TKey (tkey-qemu)
+
+See [build inputs](evidence/TKEY_QEMU_BUILD_20261119.json) and
+[operation results](evidence/TKEY_QEMU_VPN_OPERATIONS_20261119.json).
+
+- App: <https://github.com/tillitis/tkey-fido2> `7fdf8ea`, with tkey-libs `add_littlefs`
+  (`c7ef7ea`), built by `build-tkey.sh`'s commands in upstream's CI image
+  `ghcr.io/tillitis/tkey-builder:5rc1`, network disabled. No source changes.
+- Emulator: Tillitis' QEMU, branch `tk1` at `d8413fe` (the commit upstream's
+  `tkey-devtools/tkey-qemu.dockerfile` pins), machine `tk1-castor`; its subprojects are
+  fetched at their `.wrap` revisions first, then it builds with networking disabled.
+- Firmware and flash image: the Castor test images upstream's own FIDO2 tests use
+  (`tkeytest-py` `5953932`, `test/device.py` `CastorPre`).
+- Transport: upstream's `qemu_usb_mux.py` splits the TKey's USB-mode stream into CDC and
+  FIDO pseudo-terminals; `tkey-runapp` (`tkey-devtools` `740715a`, `--not-usb-device`) loads
+  the app over CDC; real 64-byte CTAPHID reports then travel over the FIDO one.
+- The simulator is a bundle directory of six files; the build record pins each file and
+  the runner refuses any other set or digest.
+
+**Finding.** The app advertises PIN/UV protocols 1 and 2, but its hmac-secret parser takes
+only protocol 1's 32/64-byte encrypted salts (`fido2/src/ctap_extensions.c`), so the
+default protocol-2 client gets `CTAP1_ERR_INVALID_LENGTH` (trial without the fix:
+`cause_ctap_error_code: 3`). With the client limited to protocol 1, every operation
+passed. `tools/keyguard.py` now names this AAGUID (`PIN_UV_PROTOCOL_1_ONLY`) and uses
+protocol 1 with it from the start, as it already must with Trezor, Ledger and Solo 1;
+it is not a fallback after a failure. Touch reads as pressed in the emulator.
 
 ## Run the recorded trial
 
@@ -77,12 +105,14 @@ does not mean a live tunnel was connected. The result explicitly records:
 {
   "physical_device_tested": false,
   "tunnel_connection_tested": false,
-  "strict_hardware_eligible": false
+  "usb_channel": "p256_ecdh_ctap_pin_uv_1_2"
 }
 ```
 
-PIN/UV protocol 1 uses P-256 even when an Ed25519 credential succeeds. The software
-compatibility result cannot bypass strict policy. The GetInfo algorithms array
+PIN/UV protocol 1 uses P-256 even when an Ed25519 credential succeeds. Since 19 November
+that channel is flagged, not blocking (results recorded before then carry
+`strict_hardware_eligible: false` instead); see the device ranking in
+[DEVICE_COMPATIBILITY_VALIDATION.md](DEVICE_COMPATIBILITY_VALIDATION.md). The GetInfo algorithms array
 is empty on this build; the separate actual Ed25519 credential/assertion trial
 establishes that capability rather than guessing from advertisement.
 

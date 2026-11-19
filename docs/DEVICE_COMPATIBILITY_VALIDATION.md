@@ -13,9 +13,10 @@ For each exact model/firmware/application and VPN role, record:
 - **Evidence:** physical unit, actual firmware emulator, protocol implementation,
   source inspection or synthetic fixture. A shared-core or generic simulator pass
   does not prove a different vendor/model works.
-- **Strict policy:** eligible, blocked or unknown, with credential and PIN/secret
-  channel algorithms reported separately. An Ed25519 credential does not remove
-  CTAP PIN/UV 1/2's P-256 exchange.
+- **USB channel and ranking:** the credential algorithm and the PIN/secret channel
+  algorithm reported separately. An Ed25519 credential does not remove CTAP PIN/UV
+  1/2's P-256 exchange. Since 19 November that channel is flagged, not blocked: see
+  [Ranking](#ranking-and-the-usb-channel-owner-decision-19-november-2026).
 
 The primary functional check uses the production VPN code to create a disposable
 credential, obtain a verified hmac-secret with required user verification, seal and
@@ -42,10 +43,10 @@ The newer supplied spreadsheet and metadata refine those leads; the
 
 | Candidate | Immediate validation route | Current status |
 |---|---|---|
-| SoloKeys Solo 1 | Upstream standalone PC authenticator; exercise production VPN operations against actual CTAP code. | **Software operations verified** on experimental upstream `fc8d286`, including actual Ed25519, hmac-secret, operator dual signatures and signed enrollment. [Result](evidence/SOLO1_PC_VPN_OPERATIONS_20261118.json). Physical/tunnel qualification absent; strict policy blocked by PIN/UV P-256. |
-| CanoKey Pigeon/STM32 | Upstream CanoKey virtual card/core, recording the actual emulated build and hardware differences. | Unverified for this VPN; first open-core target after the Solo PC path. |
+| SoloKeys Solo 1 | Upstream standalone PC authenticator; exercise production VPN operations against actual CTAP code. | **Software operations verified** on experimental upstream `fc8d286`, including actual Ed25519, hmac-secret, operator dual signatures and signed enrollment. [Result](evidence/SOLO1_PC_VPN_OPERATIONS_20261118.json). Physical/tunnel qualification absent. Ranked: open firmware, PIN typed on the computer. |
+| CanoKey Pigeon/STM32 | Upstream CanoKey virtual card/core, recording the actual emulated build and hardware differences. | **Software operations verified** on upstream canokey-core `a349b26` (virtual card over UDP), including Ed25519, two-salt hmac-secret, operator dual signatures and signed enrollment. [Result](evidence/CANOKEY_UDP_VPN_OPERATIONS_20261119.json). A Pigeon/STM32 board is not qualified by it. |
 | SoloKeys Solo 2 Hacker/Secure | Inspect/run its upstream PC runner and actual authenticator; keep secure-boot/physical variant differences explicit. | Unverified; shared Nitrokey code is not a Solo 2 test. |
-| Tillitis TKey | Inspect the official tkey-fido2 application and available virtual transport; validate host integration and required verification. | Unverified; app availability alone is insufficient. |
+| Tillitis TKey | Inspect the official tkey-fido2 application and available virtual transport; validate host integration and required verification. | **Software operations verified** on tkey-fido2 `7fdf8ea` in Tillitis' QEMU TKey (Castor), including Ed25519, two-salt hmac-secret, operator dual signatures and signed enrollment, with the client on PIN/UV protocol 1: the app's hmac-secret refuses protocol 2 salts. [Result](evidence/TKEY_QEMU_VPN_OPERATIONS_20261119.json). No physical TKey or touch-sensor test. |
 | OnlyKey | Check official firmware and its precise CTAP extension; run host/emulated portions where available. | Unverified; password challenge-response is not CTAP hmac-secret. |
 | BitBox02 | Inspect/run the vendor simulator and FIDO interface, not only its wallet API. | Unverified; browser PRF notes do not prove native compatibility. |
 | Other Nitrokey 3 variants | Use exact-model evidence only if it adds a requirement absent from the existing baseline. | Variant/firmware/transport gaps remain; no repeat of the commissioned unit. |
@@ -66,6 +67,53 @@ Original U2F-only Titan, YubiKey 4/NEO and any demonstrated U2F-only configurati
 are negative controls. A candidate with no hmac-secret, no required verification,
 incompatible crypto or no usable transport is reported with that precise reason.
 
+## Ranking and the USB channel (owner decision, 19 November 2026)
+
+Every key that passes the functional check is **supported**. None is blocked for the
+channel below; the ranking says which to prefer, and setup reports it
+(`tools/hwkey.py`: `tier`, `rank` and `usb_channel` on each ready key).
+
+**The USB wire weakness, flagged on every key.** CTAP PIN/UV protocols 1 and 2 are the
+only ones any key or client implements (python-fido2 2.2.1 has no other; CanoKey,
+Solo 1, TKey, Trezor and Ledger all derive the channel from P-256 ECDH in their
+source). The PIN, when it is typed on the computer, and the hmac-secret that unseals
+the vault (`tools/keyguard.py`, the wrapping key derives from it alone) cross USB
+encrypted under that P-256 key. Someone who records the USB link and later has a
+quantum computer could recover both. The owner does not count a physical USB
+eavesdropper in the threat model, so the channel is flagged and accepted. No firmware
+is modified to change it.
+
+**Malware on this computer.** A PIN typed on the computer passes through it, so
+malware running as the user can read it. A key that verifies the user on itself
+(GetInfo `uv: true` without a client PIN) never sends the PIN to the computer:
+
+- Trezor: its FIDO2 code advertises `uv` and no `clientPin`, and its ClientPIN command
+  answers only GetKeyAgreement, which hmac-secret needs (`core/src/apps/webauthn/fido2.py`).
+  The physical unit reported on-device verification on 17 November.
+- Ledger Security Key app: the device's own unlock PIN is its verification, advertised
+  only **while no FIDO2 client PIN is set**; setting one moves the PIN to the computer
+  (`src/ctap2/get_info.c`, app `8918841`). Do not set a FIDO2 PIN on a Ledger. The
+  physical unit reported on-device verification on 17 November.
+- YubiKey 5 (non-Bio), Nitrokey 3, Solo, CanoKey and TKey have no PIN entry of their
+  own: the PIN is typed on the computer.
+
+On-device entry protects the PIN, not everything: the unsealed hmac-secret still
+reaches the computer, because the VPN's keys are used there
+([HARDWARE_MANAGED.json](evidence/HARDWARE_MANAGED.json)). The key's own prompt
+(touch, or PIN on its screen) is what shows the user each use.
+
+| Rank | Tier | Keys | Why |
+|---|---|---|---|
+| 1 | Cypherpunk-preferred | Trezor | Open-source firmware; PIN entered on the device. |
+| 2 | Cypherpunk-preferred | Nitrokey 3, Solo 1, CanoKey, TKey, Solo 2 | Open-source firmware; PIN typed on the computer. TKey verified in emulation; Solo 2 awaits its firmware run. |
+| 3 | Closed source | Ledger | The Security Key app is public, but the OS and secure element firmware are not; PIN on the device while no FIDO2 PIN is set. |
+| 4 | Closed source | YubiKey 5 | Closed firmware; PIN typed on the computer. (A YubiKey Bio verifies a fingerprint on the device.) |
+| 5 | Unranked | Any other passing key | Supported; firmware openness not established by this project. |
+
+All tiers carry the same USB channel flag. Setup ranks only the families it can
+identify by USB id (Nitrokey 3, Trezor, Solo 1, YubiKey, Ledger); others report
+`unranked` until their ids are verified from their own sources.
+
 ## Evidence and installation behavior
 
 Pin the source/build, run against isolated temporary state and publish sanitized
@@ -73,9 +121,9 @@ results. Never attach production wallets or change commissioned keys for simulat
 No emulated key may sign git commits or become a production trust root.
 
 The installer checks the connected interface at runtime, requests and verifies an
-Ed25519 signing credential when supported, and never silently falls back under the
-strict policy. Missing algorithm advertisement is unknown evidence. A functional
-compatibility pass can coexist with a strict-policy block. Research-only or
+Ed25519 signing credential when supported, and never silently falls back. Missing
+algorithm advertisement is unknown evidence. A functional pass makes a key supported;
+its USB channel is flagged and its rank reported, as above. Research-only or
 unverified devices stay clearly labelled; unavailable vendor firmware is an honest
 limit, not a reason to substitute a generic device and call the vendor tested.
 

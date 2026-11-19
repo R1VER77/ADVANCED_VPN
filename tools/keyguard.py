@@ -237,6 +237,21 @@ def desktop_pinentry(session=None):
     return values[0].decode()
 
 
+# Firmware that advertises CTAP PIN/UV protocol 2 but refuses hmac-secret under it: its salt
+# parser takes only protocol 1's 32/64-byte encrypted salts (tkey-fido2 7fdf8ea,
+# fido2/src/ctap_extensions.c; docs/evidence/TKEY_QEMU_VPN_OPERATIONS_20261119.json). The client
+# uses protocol 1 with it, as it already must with Trezor, Ledger and Solo 1, which offer only 1.
+# Chosen up front by AAGUID, never as a fallback after a failure.
+PIN_UV_PROTOCOL_1_ONLY = {"dbe42d66-22be-4624-8811-972a8e65367e": "Tillitis TKey FIDO2 app"}
+
+
+def pin_protocols(info):
+    """The PIN/UV protocols the client may negotiate with this key."""
+    if str(info.aaguid) in PIN_UV_PROTOCOL_1_ONLY:
+        return [p for p in info.pin_uv_protocols if p == 1]
+    return list(info.pin_uv_protocols)
+
+
 def eligible(info):
     """Whether a FIDO2 key can hold a vault: `hmac-secret`, and user verification by a
     PIN typed on this computer (`clientPin`) or on the key itself (`uv`, as on a Trezor,
@@ -283,12 +298,19 @@ def client():
             return True
 
     device = found[0]
-    return device, Fido2Client(
+    c = Fido2Client(
         device,
         DefaultClientDataCollector("https://" + RP),
         user_interaction=Interaction(),
         extensions=[HmacSecretExtension(allow_hmac_secret=True)],
     )
+    allowed = pin_protocols(c._backend.info)  # the client negotiates from this copy of GetInfo
+    if allowed != list(c._backend.info.pin_uv_protocols):
+        if not allowed:
+            device.close()
+            raise RuntimeError("this key offers no PIN/UV protocol it can use for hmac-secret")
+        c._backend.info = replace(c._backend.info, pin_uv_protocols=allowed)
+    return device, c
 
 
 def enroll(vault):

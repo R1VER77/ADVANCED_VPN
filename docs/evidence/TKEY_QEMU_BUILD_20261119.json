@@ -1,0 +1,63 @@
+{
+  "schema": 1,
+  "status": "built_actual_upstream_tkey_fido2_app_and_tillitis_qemu",
+  "source_repository": "https://github.com/tillitis/tkey-fido2",
+  "source_commit": "7fdf8ead29a2ff12aaedb710f31392055136e7e3",
+  "submodule_revisions": [
+    "5953932546f5c1fdf83b5837d00fe39b7cb90978 test/tt (heads/main)"
+  ],
+  "tkey_libs": {
+    "repository": "https://github.com/tillitis/tkey-libs",
+    "branch": "add_littlefs (build-tkey.sh)",
+    "commit": "c7ef7ea143dcf3d50e133a489492d09dba2ed14b"
+  },
+  "qemu": {
+    "repository": "https://github.com/tillitis/qemu",
+    "branch": "tk1",
+    "commit": "d8413fe3d93daee611cb737a52819cb2cb89976d",
+    "pinned_by": "tillitis/tkey-devtools tkey-qemu.dockerfile QEMUREPO_TREEISH",
+    "configure": "--target-list=riscv32-softmmu --disable-werror --disable-docs --disable-slirp",
+    "subprojects": {
+      "dtc": "b6910bec11614980a21e46fbccc35934b671bd81",
+      "keycodemapdb": "f5772a62ec52591ff6870b7e8ef32482371f22c6",
+      "berkeley-softfloat-3": "b64af41c3276f97f0e181920400ee056b9c88037",
+      "berkeley-testfloat-3": "e7af9751d9f9fd3b47911f51a5cfd08af256a9ab"
+    }
+  },
+  "tkey_runapp": {
+    "repository": "https://github.com/tillitis/tkey-devtools",
+    "commit": "740715ac02089f5d732198aa1f75f4f989c6b104",
+    "build": "go build -trimpath (golang:1.26-bookworm, CGO_ENABLED=0, network none after go mod download)"
+  },
+  "firmware": {
+    "source": "tillitis/tkeytest-py test/tt data (submodule of tkey-fido2)",
+    "commit": "5953932546f5c1fdf83b5837d00fe39b7cb90978",
+    "firmware": "qemu_firmware-260225-main-2ffd46c.elf",
+    "flash_image": "flash_image-260225-main-2ffd46c.bin",
+    "machine": "tk1-castor (upstream tkey-fido2 test/device.py CastorPre)"
+  },
+  "app_build": {
+    "image": "ghcr.io/tillitis/tkey-builder@sha256:30e6fbb30b75ad584ace7ae3970ecc435331cb2a22b9c9384d22fb2b4a3f3e4b",
+    "command": "make -C ../tkey-libs && make tkey_app",
+    "network": "none"
+  },
+  "bundle_files": {
+    "firmware.elf": "f18b9adf3b3139174e125642274c748a3cead9cef7a72e17c77227aaa63c7554",
+    "flash.bin": "d1fd31eae3c826430e62752778233ca67457c032e3a10175c170083dae4f090c",
+    "qemu-system-riscv32": "de6613cf5d81b8855c3de1cb1fe9c9a5a213e14302049205761222c8c8bd84e1",
+    "qemu_usb_mux.py": "4dc1ac1d06a19f388e60fe695b1ac954bffded51ab5243055ddd1a4e942c0516",
+    "tkey-runapp": "237b108cd68394e0b21499a3a2dc357f96331a7366c994edfa0bc7cc66b4121d",
+    "tkey_app.bin": "bb217f9b127dd0c09226b3378822593da1714778ac17abb7382ebb9759cb2248"
+  },
+  "binary_sha256": "2236b9ec7f8542f20e5e5b5631ad48a457939621faa00247c332bbb7d606b14d",
+  "image_id": "sha256:ff70ecf0f6ea4dcfb19d751e59fbbb37aafd6a3bfeda542ff545add7c3146060",
+  "image_recipe_sha256": "d049c349be2b000406e96ca6befd34cd944dc32e2790acd9d0cbaba69bf71f71",
+  "build_log_sha256": {
+    "qemu": "a579fe6498761a852bb37aff2c0058de2e8c2411a61fd90b0f6a434c1855a45a",
+    "app": "cef8d868a771c7426f65da376b302efc75ff53d7f52d447eaeae0ea3bd1920ed"
+  },
+  "container_network": "none",
+  "build_user": 1000,
+  "local_firmware_source_patches": false,
+  "physical_device_qualified": false
+}
