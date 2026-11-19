@@ -1,0 +1,58 @@
+{
+  "schema": 1,
+  "status": "failed",
+  "scope": "actual_tkey_fido2_app_on_tillitis_qemu_castor_with_upstream_usb_mux_and_production_vpn_crypto",
+  "backend": "tkey-qemu",
+  "vpn_source_commit": "b48c0e79980c4dd4f3bfb24baf5bf34584e8bb68",
+  "firmware_source_commit": "7fdf8ead29a2ff12aaedb710f31392055136e7e3",
+  "firmware_build": "tkey-fido2 7fdf8ea (tkey-libs add_littlefs c7ef7ea) in tkey-builder:5rc1; QEMU tk1 d8413fe",
+  "binary_sha256": "2236b9ec7f8542f20e5e5b5631ad48a457939621faa00247c332bbb7d606b14d",
+  "harness_sha256": "3033f9bca93b26c8eab698a5710b7ef9255ef7e048185a681ac8b359789e3c41",
+  "started": 1795105694.2236688,
+  "phases": {},
+  "physical_device_tested": false,
+  "tunnel_connection_tested": false,
+  "usb_channel": "p256_ecdh_ctap_pin_uv_1_2",
+  "limitations": [
+    "Emulated TKey Castor running upstream test firmware; touch reads as pressed. Not a physical TKey qualification.",
+    "Actual CTAPHID uses UDP transport; USB permissions and physical security are not tested.",
+    "No native PIN/presence UI, live tunnel or strict all-interface PQ qualification.",
+    "Only test discovery/transport/PIN input are substituted; production crypto is unchanged."
+  ],
+  "stage": "production_vpn_operations",
+  "get_info": {
+    "versions": [
+      "FIDO_2_0",
+      "FIDO_2_1"
+    ],
+    "extensions": [
+      "credProtect",
+      "hmac-secret"
+    ],
+    "algorithms": [
+      {
+        "alg": -8,
+        "type": "public-key"
+      },
+      {
+        "alg": -7,
+        "type": "public-key"
+      }
+    ],
+    "pin_uv_protocols": [
+      1,
+      2
+    ]
+  },
+  "error_type": "ClientError",
+  "ctap_error_code": 1,
+  "cause_type": "CtapError",
+  "cause_ctap_error_code": 3,
+  "disposable_secret_state_removed": true,
+  "stopped": 1795105698.807136,
+  "production_source_sha256": {
+    "keyguard.py": "936fcf31e235b2ee5dc8030b6c6f7868e13fd919b4f8e90d90cb07886e04d3a7",
+    "managed_profile.py": "a31fc89b631a0237d8b5428db7be6a51c326e6cafeb4cc714dcc8c0310c62303",
+    "hardware_setup_test.py": "277c21fea4a5644541aac8a9436d2cdf7b3ed500b935190cc098276d025a81bf"
+  }
+}

@@ -1,0 +1,99 @@
+{
+  "schema": 1,
+  "status": "passed_key_sealing_operator_and_enrollment_operations",
+  "scope": "actual_tkey_fido2_app_on_tillitis_qemu_castor_with_upstream_usb_mux_and_production_vpn_crypto",
+  "backend": "tkey-qemu",
+  "vpn_source_commit": "569858dce9bdea67e9216066b8ffda640e49a471",
+  "firmware_source_commit": "7fdf8ead29a2ff12aaedb710f31392055136e7e3",
+  "firmware_build": "tkey-fido2 7fdf8ea (tkey-libs add_littlefs c7ef7ea) in tkey-builder:5rc1; QEMU tk1 d8413fe",
+  "binary_sha256": "2236b9ec7f8542f20e5e5b5631ad48a457939621faa00247c332bbb7d606b14d",
+  "harness_sha256": "a6ac9d7aca11b3f1ef966b778c1170721bc0b6e9148a11abb12fe5b4a51cf15c",
+  "started": 1795106053.6948018,
+  "phases": {
+    "fresh_assertion_roundtrip": {
+      "credential_record": true,
+      "authenticated_assertion": true,
+      "fresh_assertion_unseal": true,
+      "corrupted_envelope_refused": true,
+      "local_test_vault_removed": true
+    },
+    "operator_dual_signature": {
+      "fido_verified": true,
+      "mldsa65_verified": true,
+      "wrong_message_refused": true,
+      "invalid_fido_half_refused": true,
+      "invalid_mldsa_half_refused": true
+    },
+    "two_salt_hmac_secret": {
+      "stable": true,
+      "separated": true,
+      "assertion_verified": true
+    },
+    "client_key_generation": {
+      "role": "client",
+      "sealed_keys_opened": 5
+    },
+    "relay_key_generation": {
+      "role": "relay",
+      "sealed_keys_opened": 5
+    },
+    "exit_key_generation": {
+      "role": "exit",
+      "sealed_keys_opened": 5
+    },
+    "signed_client_enrollment": {
+      "signed_bundle_imported": true,
+      "hybrid_delivery_verified": true
+    },
+    "ed25519_credential": {
+      "supported": true,
+      "actual_cose_algorithm": -8,
+      "assertion_verified": true
+    }
+  },
+  "physical_device_tested": false,
+  "tunnel_connection_tested": false,
+  "usb_channel": "p256_ecdh_ctap_pin_uv_1_2",
+  "limitations": [
+    "Emulated TKey Castor running upstream test firmware; touch reads as pressed. Not a physical TKey qualification.",
+    "Actual CTAPHID uses UDP transport; USB permissions and physical security are not tested.",
+    "No native PIN/presence UI, live tunnel or strict all-interface PQ qualification.",
+    "Only test discovery/transport/PIN input are substituted; production crypto is unchanged."
+  ],
+  "stage": "completed",
+  "get_info": {
+    "versions": [
+      "FIDO_2_0",
+      "FIDO_2_1"
+    ],
+    "extensions": [
+      "credProtect",
+      "hmac-secret"
+    ],
+    "algorithms": [
+      {
+        "alg": -8,
+        "type": "public-key"
+      },
+      {
+        "alg": -7,
+        "type": "public-key"
+      }
+    ],
+    "pin_uv_protocols": [
+      1,
+      2
+    ]
+  },
+  "pin_uv_protocols_client_allows": [
+    1
+  ],
+  "default_credential_cose_algorithm": -7,
+  "disposable_secret_state_removed": true,
+  "stopped": 1795106061.1841037,
+  "production_source_sha256": {
+    "keyguard.py": "942f2131886bb9cae5ef611d22204bb2529a4589a90a05aee2ff8e3fdd99a021",
+    "managed_profile.py": "a31fc89b631a0237d8b5428db7be6a51c326e6cafeb4cc714dcc8c0310c62303",
+    "hardware_setup_test.py": "277c21fea4a5644541aac8a9436d2cdf7b3ed500b935190cc098276d025a81bf"
+  }
+}

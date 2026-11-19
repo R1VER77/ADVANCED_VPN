@@ -59,7 +59,7 @@ See [build inputs](evidence/TKEY_QEMU_BUILD_20261119.json) and
 
 **Finding.** The app advertises PIN/UV protocols 1 and 2, but its hmac-secret parser takes
 only protocol 1's 32/64-byte encrypted salts (`fido2/src/ctap_extensions.c`), so the
-default protocol-2 client gets `CTAP1_ERR_INVALID_LENGTH` (trial without the fix:
+default protocol-2 client gets `CTAP1_ERR_INVALID_LENGTH` ([trial without the fix](evidence/TKEY_QEMU_PROTOCOL2_REFUSED_20261119.json):
 `cause_ctap_error_code: 3`). With the client limited to protocol 1, every operation
 passed. `tools/keyguard.py` now names this AAGUID (`PIN_UV_PROTOCOL_1_ONLY`) and uses
 protocol 1 with it from the start, as it already must with Trezor, Ledger and Solo 1;
