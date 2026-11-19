@@ -1,0 +1,114 @@
+{
+  "schema": 1,
+  "generated_utc": "2026-11-19T09:12:58Z",
+  "purpose": "Pin the VERIFICATION_PLAN item 1-6 Tamarin models to the real crypto code: every abstract function the models use (h, senc, sign, aenc) is anchored to a concrete implementation value or refusal recorded here.",
+  "repo_commit": "c967e7a09c65ea2e00a7f06b8c2c81ee93ee2d14",
+  "vectors": {
+    "kem_seal": {
+      "implementation": "tools/keyguard.py::kem_seal/kem_open/_kem_key",
+      "envelope_schema": 1,
+      "fields": [
+        "ciphertext",
+        "ephemeral",
+        "mlkem",
+        "nonce",
+        "schema"
+      ],
+      "kdf": {
+        "function": "HKDF-SHA256, length 32, salt none",
+        "info_format": "b'advanced-vpn/hybrid-kem/v1|' + context + b'|' + sha256(ephemeral || mlkem_ct || recipient_public)",
+        "info_hex_sample": "616476616e6365642d76706e2f6879627269642d6b656d2f76317c636c69656e747cb86f0c48ecb562fb0532521f7217352a47927f77fc74c11915850287fcf3a679",
+        "key_material": "x25519_shared || mlkem768_shared (both shared secrets; the hybrid_compatibility abstraction)"
+      },
+      "aead": "AES-256-GCM, 12-byte nonce, associated data = context (the context_binding anchor)",
+      "context_binding_refused": true,
+      "vector": {
+        "context": "client",
+        "ephemeral_len": 32,
+        "mlkem_ct_len": 1088,
+        "nonce_len": 12,
+        "plaintext_len": 14
+      }
+    },
+    "ohttp": {
+      "implementation": "tools/ohttp.py::encapsulate/Gateway.open/Gateway.seal/decapsulate",
+      "hpke_suite": "<cryptography.hazmat.bindings._rust.openssl.hpke.Suite object at 0x7facfaf85f50>",
+      "request_header_hex": "01647a00010002",
+      "request_info": "REQUEST_INFO + header; per-request fresh reply key (X25519)",
+      "freshness": "abs(now - t) <= 60s; replay cache in memory",
+      "response_binding_refused": true,
+      "replay_refused": true,
+      "vector": {
+        "method": "POST",
+        "path": "/v1/vector",
+        "request_body_len": 12,
+        "response_status": 200,
+        "response_body_len": 13
+      }
+    },
+    "credits": {
+      "implementation": "tools/mesh_tokens.py::blind/sign_blinded/unblind/verify",
+      "issuer_id": "!679aedc3",
+      "fdh": {
+        "function": "Hash `token` to an integer in [1, n) with SHA-256 in counter mode.\n\n    Deterministic and domain-separated for this credit scheme; the digest\n    stream is interpreted big-endian and reduced modulo n. The result is\n    coprime to n except with negligible probability, which the caller\n    tolerates (verification simply fails for a bad draw).",
+        "key_bits": 3072,
+        "domain": "the token->element map the model abstracts as h(token)"
+      },
+      "grant": [
+        "epoch",
+        "issuer",
+        "token"
+      ],
+      "round_trip": true,
+      "cross_token_substitution_refused": true
+    },
+    "enrollment": {
+      "implementation": "tools/managed_profile.py::SoftwareOperator.sign/verify_operator",
+      "classical": "Ed25519 over canonical(message)",
+      "pq": "ML-DSA-65 over canonical(message)",
+      "signed_object": "the canonical manifest bytes (the model's manifest hash)",
+      "both_halves_required": true,
+      "tampered_manifest_refused": true,
+      "vector": {
+        "role": "client",
+        "manifest": "vector-manifest",
+        "keys": [
+          "k1",
+          "k2"
+        ]
+      }
+    },
+    "link_source_pins": {
+      "note": "src/link.rs is Rust; live vectors need the owner's cargo runtime. These are source-pinned format references for the model's k1/k2 abstractions.",
+      "kdf_info_search": [
+        {
+          "needle": "psk",
+          "line": 21
+        },
+        {
+          "needle": "direction",
+          "line": 21
+        },
+        {
+          "needle": "sid",
+          "line": 17
+        }
+      ]
+    },
+    "cloak_source_pins": {
+      "note": "src/cloak.rs is Rust; live vectors need the owner's cargo runtime.",
+      "proof_search": [
+        {
+          "needle": "exporter",
+          "line": 12
+        },
+        {
+          "needle": "proof",
+          "line": 13
+        }
+      ]
+    }
+  },
+  "checks_failed": [],
+  "checks_passed": 6
+}
