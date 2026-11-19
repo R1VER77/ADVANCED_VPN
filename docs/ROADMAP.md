@@ -1,6 +1,6 @@
 # cypherpunk_vpn roadmap
 
-Updated 18 November 2026. This is the public project roadmap. Items below are planned
+Updated 19 November 2026. This is the public project roadmap. Items below are planned
 unless explicitly marked complete; implementation, a passing laboratory test and a
 production security claim are separate milestones. The existing detailed design and
 validation documents remain the technical references.
@@ -94,6 +94,25 @@ These governance items are not complete merely because this roadmap lists them.
 - [ ] Add actual Nitrokey USB/IP, Trezor and Ledger app-emulator integration and generic
   virtual-token/fault tests against production crypto. Publish evidence by test level;
   block strict setup for noncompliant interfaces without changing existing credentials.
+  On 19 November the unmodified FIDO2 firmware of CanoKey, TKey (Tillitis QEMU) and
+  Solo 2 passed the same production-crypto operations as Solo 1
+  ([support matrix](SUPPORT_MATRIX.md)); the TKey run found a firmware hmac-secret
+  protocol-2 defect, handled by negotiating protocol 1 for that key. The owner skipped
+  the Nitrokey 3, Trezor and Ledger emulators as optional, the physical units being the
+  baseline; they remain open here.
+- [ ] Keep the long-term VPN keys on the hardware key (owner request, 19 November). Today
+  the key only unseals a vault, so malware on the computer can copy the unlocked keys
+  whatever the PIN entry. Kernel WireGuard takes its static key as bytes and needs it at
+  every handshake (about every two minutes), so this needs a userspace data plane that asks
+  the key for each X25519 operation without a touch: OpenPGP-card ECDH on Nitrokey 3,
+  YubiKey, CanoKey and Ledger, SLIP-0017 on Trezor, or a TKey app; not FIDO2. It protects
+  the durable identity, not a session in progress: present malware still sees that
+  session's keys and plaintext. The post-quantum PSK and ML-KEM keys stay on the computer
+  until a key offers ML-KEM without returning the shared secret over USB.
+- [x] Rank every supported key (owner decision, 19 November): open firmware is
+  cypherpunk-preferred, a PIN entered on the key beats one typed on the computer, and the
+  P-256 CTAP PIN/UV channel is flagged on every key rather than blocking
+  ([ranking](DEVICE_COMPATIBILITY_VALIDATION.md)). No firmware is modified.
 - [x] Package a pinned runtime and offline core dependencies. Validate system/user
   install, in-place replacement, guarded removal, corruption refusal and preserved state
   in clean Debian 12/13 and Ubuntu 22.04/24.04 VMs. Installation never enables services.
@@ -124,6 +143,15 @@ These governance items are not complete merely because this roadmap lists them.
 - [ ] Extend formal models, fuzz parsers, review secret handling and obtain actual
   independent review covering shaping and enrollment/control boundaries. Self-review
   and CI are not independent review.
+  On 19 November Tamarin models for [verification plan](VERIFICATION_PLAN.md) items 1–6
+  joined CI: 15 models, 52 lemmas verified and 24 mutants falsified, each within the
+  abstraction [its fidelity table](../formal/README.md) states. ProVerif then proved
+  OHTTP and credit unlinkability (mutation-checked); the credit work found and closed an
+  issuer tagging attack (`unblind` now verifies). Kani harnesses and parser fuzzing remain.
+- [x] Let the operator add a hardware post-quantum signature (19 November): an optional
+  third signature half from an ML-DSA-44 FIDO2 credential on a separate key, required by
+  every verifier once the operator's public file names it. Only Solo 2's Hacker build
+  offers that credential today, so it is tested in emulation only.
 - [x] Review the owner-supplied Maurer and Ahlswede–Csiszár papers against the DC-net
   construction and pad tools. The [review](INFORMATION_THEORETIC_REVIEW_20261117.md)
   supports conditional construction-level sender anonymity and records the current

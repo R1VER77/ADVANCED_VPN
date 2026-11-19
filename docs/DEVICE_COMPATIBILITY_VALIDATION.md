@@ -104,7 +104,7 @@ reaches the computer, because the VPN's keys are used there
 
 | Rank | Tier | Keys | Why |
 |---|---|---|---|
-| 1 | Cypherpunk-preferred | Trezor | Open-source firmware; PIN entered on the device. |
+| 1 | Cypherpunk-preferred | Trezor | Open-source firmware; PIN entered on the device. The PIN only: malware already on the computer can still copy the unlocked VPN keys (above). |
 | 2 | Cypherpunk-preferred | Nitrokey 3, Solo 1, CanoKey, TKey, Solo 2 | Open-source firmware; PIN typed on the computer. TKey and Solo 2 verified in emulation. |
 | 3 | Closed source | Ledger | The Security Key app is public, but the OS and secure element firmware are not; PIN on the device while no FIDO2 PIN is set. |
 | 4 | Closed source | YubiKey 5 | Closed firmware; PIN typed on the computer. (A YubiKey Bio verifies a fingerprint on the device.) |

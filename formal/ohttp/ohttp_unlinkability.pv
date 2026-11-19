@@ -1,0 +1,62 @@
+(* ohttp_unlinkability.pv - ProVerif model of the oblivious control plane's unlinkability
+   (docs/VERIFICATION_PLAN.md item 4). Companion to formal/ohttp/ohttp.spthy (secrecy and
+   binding, Tamarin) and tools/ohttp.py.
+
+   PROPERTY: the gateway cannot tell whether two requests came from one member or from two.
+   Stated as strong unlinkability: a world where each member sends many requests is
+   observationally equivalent to one where every request comes from a different member.
+
+   ADVERSARY: the gateway itself. It holds the gateway private key, so it opens every
+   request, and it controls the network: it chooses each request's method, path and body,
+   sees every request and answers each one as it likes. It does not see member addresses:
+   that is the relay's knowledge, and relay and gateway belong to different operators,
+   which tools/mesh.py (beacon_entry) enforces. Against the relay alone, which holds less,
+   the property follows.
+
+   MODELED, as tools/ohttp.py does it: a fresh reply key pair and a fresh nonce for every
+   request (`encapsulate`), sealed with the body to the gateway's public key; the response
+   sealed to the reply key (`Gateway.seal`, `decapsulate`). Every member uses the same
+   gateway key (key consistency): the key reaches members as configuration, not per member.
+
+   ABSTRACTED: the hybrid ML-KEM-768 + X25519 HPKE suite is one probabilistic public-key
+   encryption; the header and key id (the same for every member under one gateway key) and
+   the JSON encoding are not modelled. Request contents are the adversary's choice, the same
+   in both worlds: a body that names its member links by content, which no transport hides.
+
+   NOT MODELED (outside a symbolic model): sizes and timing. In particular each request
+   carries the member's clock reading to the second (`t`), and the gateway sees it beside
+   its own clock, so a member whose clock is skewed by a consistent offset is linkable by
+   that offset. Lengths and timing are traffic-analysis questions for the labs.
+
+   MUTANTS (edits in tools/proverif_check.py; each must fail to prove):
+   - a member keeps one reply key for all its requests;
+   - each member is given its own gateway key (no key consistency). *)
+
+free c: channel.
+
+type skey.
+type pkey.
+
+fun pk(skey): pkey.
+fun aenc(bitstring, pkey, bitstring): bitstring.
+reduc forall m: bitstring, k: skey, r: bitstring; adec(aenc(m, pk(k), r), k) = m.
+
+free ok: bitstring.
+
+(* One request from a member: the member's identity `id` is its long-term state. In the
+   real protocol nothing in a request derives from it; the mutants show what links. *)
+let Member(gpk: pkey, id: skey) =
+  in(c, (method: bitstring, path: bitstring, body: bitstring));
+  new nonce: bitstring;
+  new rsk: skey;
+  new r: bitstring;
+  out(c, aenc((nonce, method, path, body, pk(rsk)), gpk, r));
+  in(c, response: bitstring);
+  let (status: bitstring, answer: bitstring) = adec(response, rsk) in
+  out(c, ok).
+
+process
+  new gsk: skey;
+  out(c, gsk);
+  (* left: each member sends many requests; right: every request has its own member *)
+  ! new id1: skey; ! new id2: skey; Member(pk(gsk), choice[id1, id2])

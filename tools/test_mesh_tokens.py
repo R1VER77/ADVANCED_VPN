@@ -21,7 +21,7 @@ class BlindSignatureTests(unittest.TestCase):
         key = fresh_key()
         token = mt.new_token()
         blinded, r = mt.blind(token, key.public_key())
-        sig = mt.unblind(mt.sign_blinded(key, blinded), r, key.public_key())
+        sig = mt.unblind(mt.sign_blinded(key, blinded), r, key.public_key(), token)
         self.assertTrue(mt.verify(token, sig, key.public_key()))
 
     def test_blinding_hides_the_token_hash(self):
@@ -35,14 +35,14 @@ class BlindSignatureTests(unittest.TestCase):
         key = fresh_key()
         token = mt.new_token()
         blinded, r = mt.blind(token, key.public_key())
-        sig = mt.unblind(mt.sign_blinded(key, blinded), r, key.public_key())
+        sig = mt.unblind(mt.sign_blinded(key, blinded), r, key.public_key(), token)
         self.assertFalse(mt.verify(mt.new_token(), sig, key.public_key()))
 
     def test_wrong_key_does_not_verify(self):
         key, other = fresh_key(), fresh_key()
         token = mt.new_token()
         blinded, r = mt.blind(token, key.public_key())
-        sig = mt.unblind(mt.sign_blinded(key, blinded), r, key.public_key())
+        sig = mt.unblind(mt.sign_blinded(key, blinded), r, key.public_key(), token)
         self.assertFalse(mt.verify(token, sig, other.public_key()))
 
     def test_unblinded_signature_is_unlinkable_to_blinded_value(self):
@@ -52,9 +52,28 @@ class BlindSignatureTests(unittest.TestCase):
         token = mt.new_token()
         blinded, r = mt.blind(token, key.public_key())
         blind_sig = mt.sign_blinded(key, blinded)
-        sig = mt.unblind(blind_sig, r, key.public_key())
+        sig = mt.unblind(blind_sig, r, key.public_key(), token)
         self.assertNotEqual(blind_sig, sig)
         self.assertNotEqual(blinded, sig)
+
+    def test_a_tagged_blind_signature_is_refused_so_the_issuer_cannot_link_the_spend(self):
+        # An issuer multiplies each member's blind signature by its own factor. Kept
+        # unchecked, the unblinded signature carries that factor into the anonymous spend,
+        # where the issuer divides it back out and names the member. Finalize refuses it.
+        key = fresh_key()
+        pub = key.public_key()
+        n, _, d = mt._numbers(key)
+        token = mt.new_token()
+        blinded, r = mt.blind(token, pub)
+        tagged = (mt.sign_blinded(key, blinded) * 3) % n
+        untagged = (tagged * pow(3, -1, n) * pow(r, -1, n)) % n
+        self.assertEqual(untagged, pow(mt.fdh(token, n), d, n))  # the factor would survive unblinding
+        with self.assertRaises(mt.InvalidSignature):
+            mt.unblind(tagged, r, pub, token)
+        # A blind signature under another key is refused the same way.
+        other = fresh_key()
+        with self.assertRaises(mt.InvalidSignature):
+            mt.unblind(mt.sign_blinded(other, blinded % mt._numbers(other)[0]), r, pub, token)
 
     def test_issuer_cannot_sign_without_the_private_key(self):
         pub = fresh_key().public_key()

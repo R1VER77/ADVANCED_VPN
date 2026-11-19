@@ -25,6 +25,7 @@ ignore = [
 "tools/txtime_experiment.py" = ["S101", "S108", "S311", "S607", "D101", "D102", "D103"]
 # Runs the provers found on PATH (CI installs pinned, checksum-verified releases there).
 "tools/tamarin_check.py" = ["S607"]
+"tools/proverif_check.py" = ["S607"]
 "tools/vm_validation.py" = ["S101", "S108", "S607", "S104", "D101", "D102", "D103"]
 "tools/lab_peer.py" = ["S104", "B023", "D101", "D102", "D103"]
 "tools/managed_lab_peer.py" = ["S104", "D101", "D102", "D103"]

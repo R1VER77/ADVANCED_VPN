@@ -10,8 +10,10 @@ Status (19 Nov 2026): items 1–6 (paced links, the cloak's proof, hybrid KEM se
 oblivious control plane, blind-RSA credits, signed enrollment), the DC-net round core
 (item 7) and part of Option E's re-blinding (item 8) are machine-checked in CI, each within
 the abstraction its model states: `formal/README.md` lists what each model leaves out and
-which lemmas rest on an assumption. Still planned: the ProVerif equivalences (ohttp and
-credit unlinkability), the Kani harnesses and the live Rust vectors for items 1–2. Nothing in the
+which lemmas rest on an assumption. The ProVerif equivalences (ohttp and credit
+unlinkability) are proved in the same CI job (`tools/proverif_check.py`, results in
+`docs/evidence/PROVERIF.json`). Still planned: the Kani harnesses and the live Rust vectors
+for items 1–2. Nothing in the
 documentation may claim a property from this list until its model and its gates are in CI.
 Proofs run with Tamarin 1.12.0 and Maude 3.5.1 (official release binaries, pinned by
 SHA-256 in `.github/workflows/verify.yml`, job `formal-models`); `tools/tamarin_check.py`
@@ -86,14 +88,14 @@ That deviation is exactly what needs proving.
 - Request and response secrecy against the relay (Tamarin).
 - **Response binding**: a response cannot be swapped onto another request (Tamarin).
 - **Freshness**: the 60 s window and the nonce cache accept each request at most once (Tamarin, stateful), across restarts too: the cache lives in memory, so a gateway refuses anything sent before it started (`test_a_restarted_gateway_refuses_replays_of_earlier_requests`).
-- **Unlinkability**: the gateway cannot tell whether two requests came from the same client, and the relay learns nothing but sizes and times (ProVerif, observational equivalence).
+- **Unlinkability**: the gateway cannot tell whether two requests came from the same client, and the relay learns nothing but sizes and times (ProVerif, observational equivalence). **Proved** (`formal/ohttp/ohttp_unlinkability.pv`), given that every member uses the same gateway key; mutants that reuse a reply key or give each member its own gateway key fail. Not covered: the request's whole-second clock reading, which links a member with a consistently skewed clock.
 - Operator separation (relay and gateway run by different operators) is an assumption of the property, and the code already enforces it (`mesh.beacon_entry`).
 
 ### 5. Blind-RSA credits (`tools/mesh_tokens.py`)
 
 Chaum blind RSA with a full-domain hash, issued by the mesh and spent at relays.
 
-- **Unlinkability** of issuance and spending: a signer who sees every issuance cannot tell which one a spend came from (ProVerif, with the blind-signature equational theory).
+- **Unlinkability** of issuance and spending: a signer who sees every issuance cannot tell which one a spend came from (ProVerif, with the blind-signature equational theory). **Proved** (`formal/credits/credits_unlinkability.pv`), given one trusted key per epoch. The equational theory cannot express RSA's multiplicative tagging attack, so `unblind` verifies each signature before the credit is kept (RFC 9474 Finalize), and `tools/test_mesh_tokens.py` shows the attack on the real arithmetic being refused.
 - **No double spending**: a token is accepted at most once across every relay sharing the spent set (Tamarin, with a persistent set). The code side: a redemption holds an exclusive lock while it re-reads, checks and records the spend; eight racing processes accept exactly one (`test_racing_processes_accept_exactly_one_redemption`). Relays that do not share a ledger file still need the mesh's gossiped spent set.
 - One-more unforgeability is a computational property that symbolic tools cannot prove. It rests on the RSA blind-signature literature, so the plan also replaces our FDH construction with RFC 9474's RSABSSA (SHA-384, PSS, deterministic) from a reviewed library. Then the computational argument is the published one and the model covers the protocol around it.
 - **Not post-quantum.** RSA blind signatures fall to a quantum adversary, and one who can forge credits never needs to break a tunnel. The credits move to a lattice-based blind signature (a reviewed implementation, once one exists) before the project describes itself as post-quantum throughout. The protocol model above carries over unchanged; only the signature's equational theory changes.

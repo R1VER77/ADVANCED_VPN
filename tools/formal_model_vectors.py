@@ -169,7 +169,7 @@ issuer_pub = issuer.public_key()
 token = mesh_tokens.new_token()
 blinded, unblinder = mesh_tokens.blind(token, issuer_pub)
 blind_signature = mesh_tokens.sign_blinded(issuer, blinded)
-signature = mesh_tokens.unblind(blind_signature, unblinder, issuer_pub)
+signature = mesh_tokens.unblind(blind_signature, unblinder, issuer_pub, token)
 expect(mesh_tokens.verify(token, signature, issuer_pub), "blind -> sign_blinded -> unblind -> verify round trip")
 other = mesh_tokens.new_token()
 expect(
@@ -177,7 +177,7 @@ expect(
     "a signature for one token does not verify for another (token_digest binding)",
 )
 forged, forged_unblinder = mesh_tokens.blind(other, issuer_pub)
-forged_signature = mesh_tokens.unblind(mesh_tokens.sign_blinded(issuer, forged), forged_unblinder, issuer_pub)
+forged_signature = mesh_tokens.unblind(mesh_tokens.sign_blinded(issuer, forged), forged_unblinder, issuer_pub, other)
 expect(
     mesh_tokens.verify(other, forged_signature, issuer_pub)
     and not mesh_tokens.verify(token, forged_signature, issuer_pub),

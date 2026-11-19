@@ -29,6 +29,23 @@ class EncapsulationTests(unittest.TestCase):
         self.assertNotIn(b'"ok"', sealed)
         self.assertEqual(ohttp.decapsulate(sealed, reply), (200, b'{"ok":true}'))
 
+    def test_two_requests_from_one_member_share_only_what_every_member_sends(self):
+        """The code side of formal/ohttp/ohttp_unlinkability.pv: opened by the gateway, two
+        identical requests from one member agree only on the gateway's header, the chosen
+        method, path and body, and the clock reading (named in the model as not covered);
+        the nonce and the reply key are fresh, and nothing else is in a request."""
+        h = ohttp.header(7)
+        inner = []
+        for _ in range(2):
+            wire, _reply = ohttp.encapsulate(self.public, 7, "GET", "/descriptors")
+            self.assertEqual(wire[: len(h)], h)
+            inner.append(json.loads(ohttp.SUITE.decrypt(wire[len(h) :], self.private, ohttp.REQUEST_INFO + h)))
+        a, b = inner
+        self.assertEqual(set(a), {"t", "nonce", "method", "path", "body", "reply"})
+        self.assertNotEqual(a["nonce"], b["nonce"])
+        self.assertNotEqual(a["reply"], b["reply"])
+        self.assertLessEqual({k for k in a if a[k] == b[k]}, {"t", "method", "path", "body"})
+
     def test_tampering_wrong_key_staleness_and_replay_are_refused(self):
         wire, reply = ohttp.encapsulate(self.public, 7, "GET", "/descriptors")
         for i in [0, 1, 7, 20, len(wire) - 1]:

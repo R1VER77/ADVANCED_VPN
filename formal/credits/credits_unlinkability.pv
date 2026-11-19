@@ -1,0 +1,66 @@
+(* credits_unlinkability.pv - ProVerif model of blind-RSA credit unlinkability
+   (docs/VERIFICATION_PLAN.md item 5). Companion to formal/credits/credits.spthy (no double
+   spending and issuer-only minting, Tamarin) and tools/mesh_tokens.py.
+
+   PROPERTY: an issuer that sees every issuance cannot tell which issuance a spend came
+   from. Two members are each issued one credit; afterwards (phase 1) both credits are
+   spent. In one world the spends come in issuance order, in the other swapped; the two
+   worlds are observationally equivalent.
+
+   ADVERSARY: the issuer, also running the ledger. It holds the signing key, signs whatever
+   it is sent, may answer an issuance with any value it likes, and sees every spend.
+
+   MODELED, as tools/mesh_tokens.py does it: a fresh random token per credit; the member
+   blinds the token's full-domain hash (`blind`), the issuer signs the blinded value
+   (`sign_blinded`), the member unblinds (`unblind`) and checks the signature under the
+   epoch key it trusts before keeping the credit (`unblind` with `token`; RFC 9474
+   Finalize); a spend shows the token and the signature (`make_spend`), from which the
+   ledger derives its digest. Every member trusts the same published key for the epoch
+   (key consistency: `redeem_live` accepts only the published epoch keys).
+
+   ABSTRACTED: RSA blinding and the full-domain hash are the standard blind-signature
+   equational theory: unblinding a signature on a blinded message gives the signature on
+   the message. Its multiplicative structure is not modelled, so this model cannot show
+   the tagging attack that the finalize check stops (an issuer multiplying a blind
+   signature by a per-member factor); tools/test_mesh_tokens.py shows that attack against
+   the real RSA arithmetic and the check refusing it.
+
+   NOT MODELED: one-more unforgeability (computational, from the RSA blind-signature
+   literature) and timing: a credit spent right after it was issued is linkable by time,
+   which no blinding hides.
+
+   MUTANTS (edits in tools/proverif_check.py; each must fail to prove):
+   - the member sends its token's hash unblinded;
+   - each member trusts its own issuer key, which the spend names. *)
+
+free c: channel.
+
+type skey.
+type pkey.
+
+fun pk(skey): pkey.
+fun fdh(bitstring): bitstring.
+fun sign(bitstring, skey): bitstring.
+fun blind(bitstring, bitstring): bitstring.
+reduc forall m: bitstring, k: skey; checksign(sign(m, k), pk(k)) = m.
+reduc forall m: bitstring, r: bitstring; unblind(blind(m, r), r) = m;
+      forall m: bitstring, r: bitstring, k: skey; unblind(sign(blind(m, r), k), r) = sign(m, k).
+
+process
+  new sk: skey;
+  out(c, sk);
+  ! (
+    new tokenA: bitstring; new rA: bitstring;
+    new tokenB: bitstring; new rB: bitstring;
+    out(c, blind(fdh(tokenA), rA));
+    out(c, blind(fdh(tokenB), rB));
+    in(c, signedA: bitstring);
+    in(c, signedB: bitstring);
+    let sigA = unblind(signedA, rA) in
+    let sigB = unblind(signedB, rB) in
+    if checksign(sigA, pk(sk)) = fdh(tokenA) then
+    if checksign(sigB, pk(sk)) = fdh(tokenB) then
+    phase 1;
+    out(c, choice[(tokenA, sigA), (tokenB, sigB)]);
+    out(c, choice[(tokenB, sigB), (tokenA, sigA)])
+  )

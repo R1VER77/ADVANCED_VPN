@@ -1,0 +1,56 @@
+{
+ "tool": "Proverif 2.05. Cryptographic protocol verifier, by Bruno Blanchet, Vincent Cheval, and Marc Sylvestre",
+ "models": {
+  "formal/ohttp/ohttp_unlinkability.pv": {
+   "seconds": 0.01,
+   "exit_code": 0,
+   "results": [
+    "Observational equivalence is true."
+   ]
+  },
+  "formal/credits/credits_unlinkability.pv": {
+   "seconds": 0.01,
+   "exit_code": 0,
+   "results": [
+    "Observational equivalence is true."
+   ]
+  }
+ },
+ "mutants": [
+  {
+   "model": "formal/ohttp/ohttp_unlinkability.pv",
+   "breaks": "a member reuses one reply key for every request",
+   "results": [
+    "Observational equivalence cannot be proved."
+   ],
+   "seconds": 0.01
+  },
+  {
+   "model": "formal/ohttp/ohttp_unlinkability.pv",
+   "breaks": "each member is given its own gateway key (no key consistency)",
+   "results": [
+    "Observational equivalence cannot be proved."
+   ],
+   "seconds": 0.01
+  },
+  {
+   "model": "formal/credits/credits_unlinkability.pv",
+   "breaks": "the member sends its token's hash unblinded",
+   "results": [
+    "Observational equivalence cannot be proved.",
+    "Observational equivalence cannot be proved."
+   ],
+   "seconds": 0.03
+  },
+  {
+   "model": "formal/credits/credits_unlinkability.pv",
+   "breaks": "each member trusts its own issuer key, named in the spend",
+   "results": [
+    "Observational equivalence cannot be proved.",
+    "Observational equivalence cannot be proved."
+   ],
+   "seconds": 0.04
+  }
+ ],
+ "failed": []
+}

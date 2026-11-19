@@ -200,6 +200,8 @@ jobs:
     # Tamarin proofs of the DC-net round core and the mix lane's re-blinding: every lemma
     # listed in tools/tamarin_check.py must end "verified" (a falsified, unfinished or
     # missing lemma fails). Releases pinned by the SHA-256 GitHub publishes for them.
+    # ProVerif proves the unlinkability equivalences (tools/proverif_check.py), built from
+    # the official 2.05 source release pinned by SHA-256 (no binary release for Linux).
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -220,6 +222,16 @@ jobs:
           echo "$HOME/bin" >> "$GITHUB_PATH"
       - name: Prove every model
         run: python3 tools/tamarin_check.py --timeout 900
+      - name: ProVerif 2.05, built from the official source release
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -q ocaml-nox
+          cd "$HOME/opt"
+          curl -fsSLo proverif.tgz https://bblanche.gitlabpages.inria.fr/proverif/proverif2.05.tar.gz
+          printf '%s  %s\n' 4871f53c32ab4a04669a060c4886ba5d9080496963fb980a9a62d2c429ceabc4 proverif.tgz | sha256sum -c -
+          tar -xzf proverif.tgz && (cd proverif2.05 && ./build -nointeract)
+          ln -s "$HOME/opt/proverif2.05/proverif" "$HOME/bin/proverif"
+      - name: Prove every equivalence (unlinkability)
+        run: python3 tools/proverif_check.py --timeout 600
   linux-desktop:
     runs-on: ubuntu-24.04
     timeout-minutes: 45

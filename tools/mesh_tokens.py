@@ -12,8 +12,9 @@ Flow:
   1. The spender draws a random 256-bit token and blinds its full-domain hash.
   2. The issuer signs the blinded value and returns the blind signature; it
      learns nothing about the token.
-  3. The spender unblinds: a plain RSA-FDH signature on the token, unlinkable
-     to the blinded value the issuer saw.
+  3. The spender unblinds and verifies: a plain RSA-FDH signature on the token,
+     unlinkable to the blinded value the issuer saw. A signature that does not verify
+     is refused (an issuer could otherwise tag it).
   4. Redemption presents (token, signature) to the ledger, which checks the
      signature against the issuer's public key and rejects any token hash it
      has seen before - each credit is spent exactly once, yet nobody can say
@@ -154,10 +155,16 @@ def sign_blinded(private_key, blinded: int) -> int:
     return pow(blinded, d, n)
 
 
-def unblind(blind_signature: int, unblinder: int, public_key) -> int:
-    """Strip the blinding factor: the RSA-FDH signature on the token."""
+def unblind(blind_signature: int, unblinder: int, public_key, token: bytes) -> int:
+    """Strip the blinding factor: the RSA-FDH signature on the token, checked before it is
+    kept (RFC 9474's Finalize). Without the check an issuer could multiply each member's
+    blind signature by its own factor and read that factor back out of the anonymous spend,
+    linking it to the issuance; an unverified signature is refused, never spent."""
     n, _, _ = _numbers(public_key)
-    return (blind_signature * pow(unblinder, -1, n)) % n
+    signature = (blind_signature * pow(unblinder, -1, n)) % n
+    if not verify(token, signature, public_key):
+        raise InvalidSignature("the issuer's blind signature does not verify: refused, not spent")
+    return signature
 
 
 def verify(token: bytes, signature: int, public_key) -> bool:
@@ -316,6 +323,6 @@ def issue_credit(private_key, epoch: int | None = None) -> tuple[dict, dict]:
     group flow, where one machine plays both sides)."""
     token = new_token()
     blinded, r = blind(token, private_key.public_key())
-    sig = unblind(sign_blinded(private_key, blinded), r, private_key.public_key())
+    sig = unblind(sign_blinded(private_key, blinded), r, private_key.public_key(), token)
     grant = make_grant(token, private_key.public_key(), epoch)
     return grant, make_spend(grant, sig, private_key.key_size)
