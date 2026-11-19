@@ -3,12 +3,12 @@
   "status": "passed_key_sealing_operator_and_enrollment_operations",
   "scope": "actual_solo2_fido_authenticator_with_project_ctaphid_udp_host_and_production_vpn_crypto",
   "backend": "solo2-pc",
-  "vpn_source_commit": "465c7f46814823e6a16a574160bd14a067ccc9c2",
+  "vpn_source_commit": "f5b9c010389a1ee4bce22e6f76603e24760b93c5",
   "firmware_source_commit": "45311f0b6761187d409ea3e7ea34f896810eb156",
   "firmware_build": "solo2 45311f0, lpc55 fido_config, in runners/pc's test crate with tools/lab/solo2_ctaphid_udp_host.rs",
-  "binary_sha256": "5d736ea087cecd9130a8c5d453df6ffbb9981ee9228fe4df60759b35e416d5ca",
-  "harness_sha256": "f7494cf8add362094eb6c6281bdb8044e37a9cd93e24961ad95737aecd19f013",
-  "started": 1795107112.9538405,
+  "binary_sha256": "0607c330f00768821eb519cb2e73dc02f9b9cd50f63156e28ca9aed013369bf6",
+  "harness_sha256": "1461cbe7278465e61539cd6d9cf9b8d3eeef04fa82ed71733ef67667742999fb",
+  "started": 1795122970.4118128,
   "phases": {
     "fresh_assertion_roundtrip": {
       "credential_record": true,
@@ -23,6 +23,16 @@
       "wrong_message_refused": true,
       "invalid_fido_half_refused": true,
       "invalid_mldsa_half_refused": true
+    },
+    "hardware_mldsa44_operator": {
+      "separate_key": true,
+      "operator_key_refused": true,
+      "cose_algorithm": -48,
+      "signature_bytes": 2420,
+      "three_halves_verified": true,
+      "wrong_message_refused": true,
+      "missing_mldsa44_half_refused": true,
+      "invalid_mldsa44_half_refused": true
     },
     "two_salt_hmac_secret": {
       "stable": true,
@@ -43,7 +53,8 @@
     },
     "signed_client_enrollment": {
       "signed_bundle_imported": true,
-      "hybrid_delivery_verified": true
+      "hybrid_delivery_verified": true,
+      "operator_signature_halves": 3
     },
     "ed25519_credential": {
       "supported": true,
@@ -102,10 +113,10 @@
   ],
   "default_credential_cose_algorithm": -7,
   "disposable_secret_state_removed": true,
-  "stopped": 1795107114.6700594,
+  "stopped": 1795122972.5369127,
   "production_source_sha256": {
-    "keyguard.py": "942f2131886bb9cae5ef611d22204bb2529a4589a90a05aee2ff8e3fdd99a021",
-    "managed_profile.py": "a31fc89b631a0237d8b5428db7be6a51c326e6cafeb4cc714dcc8c0310c62303",
+    "keyguard.py": "1486aaf8deca61de0330884dddf40b4f9519a19508b34daee99eadbd78c93aa4",
+    "managed_profile.py": "bd1ab288adc05f99c20783185a0e55f8349bc2a061a4305c748af28d3e21ec66",
     "hardware_setup_test.py": "277c21fea4a5644541aac8a9436d2cdf7b3ed500b935190cc098276d025a81bf"
   }
 }
