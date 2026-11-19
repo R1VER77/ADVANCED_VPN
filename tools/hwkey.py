@@ -39,8 +39,17 @@ LOW_PIN_RETRIES = 3
 # Ranking (docs/DEVICE_COMPATIBILITY_VALIDATION.md, "Ranking"). Every key is supported; the
 # ranking says which to prefer. "open": the firmware doing the FIDO2 work is published;
 # "closed": it is not (Ledger's app is public, its OS and secure element are not).
-FIRMWARE = {"Nitrokey 3": "open", "Trezor": "open", "Solo 1": "open", "YubiKey": "closed", "Ledger": "closed"}
-SOLO1 = ("0483", "A2CA")  # STMicroelectronics' vendor id with Solo 1's product id (solo1 usbd_desc.c)
+FIRMWARE = {
+    "Nitrokey 3": "open",
+    "Trezor": "open",
+    "Solo 1": "open",
+    "Solo 2": "open",
+    "YubiKey": "closed",
+    "Ledger": "closed",
+}
+# Ranked by full USB id only (these vendor ids are shared): STMicroelectronics' with Solo 1's
+# product id (solo1 usbd_desc.c); pid.codes' with Solo 2's (solo2 runners/lpc55 device_config.rs).
+RANKED_ONLY = {("0483", "A2CA"): "Solo 1", ("1209", "BEEE"): "Solo 2"}
 # CTAP PIN/UV protocols 1 and 2 are the only ones any key or client implements: the PIN and the
 # hmac-secret that unseals the vault cross USB encrypted under a P-256 ECDH key. Flagged on
 # every key; a recorded USB link plus a future quantum computer would reveal both.
@@ -50,7 +59,7 @@ USB_CHANNEL = "p256_ecdh_ctap_pin_uv_1_2"
 def rank(vendor, product, on_device):
     """(tier, rank) of a key: 1 is best. Open firmware is cypherpunk-preferred, and a PIN
     entered on the key itself beats one typed on this computer, where malware can read it."""
-    family = key_name(vendor, product) or ("Solo 1" if (vendor, product) == SOLO1 else None)
+    family = key_name(vendor, product) or RANKED_ONLY.get((vendor, product))
     firmware = FIRMWARE.get(family)
     if firmware is None:
         return "unranked", 5

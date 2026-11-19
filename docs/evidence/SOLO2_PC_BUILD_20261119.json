@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "status": "built_actual_solo2_fido_authenticator_with_project_ctaphid_udp_host",
+  "source_repository": "https://github.com/solokeys/solo2",
+  "source_commit": "45311f0b6761187d409ea3e7ea34f896810eb156",
+  "cargo_lock_sha256": "951224f694fe1b1177b2e84db735bbc2df6bef27b4a11dc1f4eb1e994bd164f4",
+  "fido_authenticator_git_checkouts": [
+    "fae4a1e"
+  ],
+  "authenticator_configuration": "components/solo-apps fido_config (lpc55): max_msg_size 7609, 100 resident keys, large blobs 1024 B external, credential id V2; firmware version 0",
+  "local_firmware_source_patches": false,
+  "lab_harness": {
+    "added_file": "runners/pc/tests/avpn_ctaphid_udp_host.rs",
+    "source": "tools/lab/solo2_ctaphid_udp_host.rs",
+    "sha256": "7662a5e13491e411d83c4199ccac8f968843f9506c5347569aac1e025a4f577a",
+    "role": "CTAPHID framing over loopback UDP into fido-authenticator's App::call; upstream's PC runner serves no CTAPHID"
+  },
+  "toolchain": "rustc 1.94.1 (e408947bf 2026-03-25)",
+  "build_command": "cargo test --locked --offline --release --test avpn_ctaphid_udp_host --no-run (runners/pc, RUSTUP_TOOLCHAIN=1.94.1, network none after cargo fetch --locked)",
+  "run_arguments": [
+    "--ignored",
+    "--exact",
+    "serve_ctaphid_over_udp",
+    "--test-threads=1"
+  ],
+  "binary_sha256": "5d736ea087cecd9130a8c5d453df6ffbb9981ee9228fe4df60759b35e416d5ca",
+  "image_id": "sha256:8d5c34d4b6c2a42ad9080015ff7fc546c03d250350463cbec50cc5d471c06ae9",
+  "image_recipe_sha256": "a1b5246a574d796d30a5895ccf95a1120a98346816dba24cf223c18b74915d17",
+  "base_image": "rust@sha256:6ae102bdbf528294bc79ad6e1fae682f6f7c2a6e6621506ba959f9685b308a55",
+  "build_log_sha256": "6510a7f12f1dddf18e68121b0a036a98bd1aa1353e56871e795763758a28203a",
+  "container_network": "none",
+  "build_user": 1000,
+  "rng": "ChaCha8 seeded with 32 zero bytes (upstream tests/support/sim.rs)",
+  "physical_device_qualified": false
+}

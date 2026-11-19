@@ -45,7 +45,7 @@ The newer supplied spreadsheet and metadata refine those leads; the
 |---|---|---|
 | SoloKeys Solo 1 | Upstream standalone PC authenticator; exercise production VPN operations against actual CTAP code. | **Software operations verified** on experimental upstream `fc8d286`, including actual Ed25519, hmac-secret, operator dual signatures and signed enrollment. [Result](evidence/SOLO1_PC_VPN_OPERATIONS_20261118.json). Physical/tunnel qualification absent. Ranked: open firmware, PIN typed on the computer. |
 | CanoKey Pigeon/STM32 | Upstream CanoKey virtual card/core, recording the actual emulated build and hardware differences. | **Software operations verified** on upstream canokey-core `a349b26` (virtual card over UDP), including Ed25519, two-salt hmac-secret, operator dual signatures and signed enrollment. [Result](evidence/CANOKEY_UDP_VPN_OPERATIONS_20261119.json). A Pigeon/STM32 board is not qualified by it. |
-| SoloKeys Solo 2 Hacker/Secure | Inspect/run its upstream PC runner and actual authenticator; keep secure-boot/physical variant differences explicit. | Unverified; shared Nitrokey code is not a Solo 2 test. |
+| SoloKeys Solo 2 Hacker/Secure | Inspect/run its upstream PC runner and actual authenticator; keep secure-boot/physical variant differences explicit. | **Software operations verified** on Solo 2 `45311f0`'s unmodified authenticator (lpc55 configuration) behind the project's CTAPHID-over-UDP host, since upstream's PC runner serves none: Ed25519, two-salt hmac-secret on PIN/UV protocol 2, operator dual signatures and signed enrollment. It also offers ML-DSA-44 credentials. [Result](evidence/SOLO2_PC_VPN_OPERATIONS_20261119.json). Not a Secure or Hacker unit test. |
 | Tillitis TKey | Inspect the official tkey-fido2 application and available virtual transport; validate host integration and required verification. | **Software operations verified** on tkey-fido2 `7fdf8ea` in Tillitis' QEMU TKey (Castor), including Ed25519, two-salt hmac-secret, operator dual signatures and signed enrollment, with the client on PIN/UV protocol 1: the app's hmac-secret refuses protocol 2 salts. [Result](evidence/TKEY_QEMU_VPN_OPERATIONS_20261119.json). No physical TKey or touch-sensor test. |
 | OnlyKey | Check official firmware and its precise CTAP extension; run host/emulated portions where available. | Unverified; password challenge-response is not CTAP hmac-secret. |
 | BitBox02 | Inspect/run the vendor simulator and FIDO interface, not only its wallet API. | Unverified; browser PRF notes do not prove native compatibility. |
@@ -105,13 +105,13 @@ reaches the computer, because the VPN's keys are used there
 | Rank | Tier | Keys | Why |
 |---|---|---|---|
 | 1 | Cypherpunk-preferred | Trezor | Open-source firmware; PIN entered on the device. |
-| 2 | Cypherpunk-preferred | Nitrokey 3, Solo 1, CanoKey, TKey, Solo 2 | Open-source firmware; PIN typed on the computer. TKey verified in emulation; Solo 2 awaits its firmware run. |
+| 2 | Cypherpunk-preferred | Nitrokey 3, Solo 1, CanoKey, TKey, Solo 2 | Open-source firmware; PIN typed on the computer. TKey and Solo 2 verified in emulation. |
 | 3 | Closed source | Ledger | The Security Key app is public, but the OS and secure element firmware are not; PIN on the device while no FIDO2 PIN is set. |
 | 4 | Closed source | YubiKey 5 | Closed firmware; PIN typed on the computer. (A YubiKey Bio verifies a fingerprint on the device.) |
 | 5 | Unranked | Any other passing key | Supported; firmware openness not established by this project. |
 
 All tiers carry the same USB channel flag. Setup ranks only the families it can
-identify by USB id (Nitrokey 3, Trezor, Solo 1, YubiKey, Ledger); others report
+identify by USB id (Nitrokey 3, Trezor, Solo 1, Solo 2, YubiKey, Ledger); others report
 `unranked` until their ids are verified from their own sources.
 
 ## Evidence and installation behavior

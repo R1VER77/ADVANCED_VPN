@@ -150,6 +150,7 @@ class AdditionalDiagnostics(unittest.TestCase):
             ("1209", "53C1", "Trezor", on_key, "cypherpunk_preferred", 1, "entered on the key"),
             ("20A0", "42B2", "Nitrokey 3", READY, "cypherpunk_preferred", 2, "typed on this computer"),
             ("0483", "A2CA", "Solo", READY, "cypherpunk_preferred", 2, "typed on this computer"),
+            ("1209", "BEEE", "Solo 2", READY, "cypherpunk_preferred", 2, "typed on this computer"),
             ("2C97", "5000", "Ledger", on_key, "closed_source", 3, "entered on the key"),
             ("1050", "0407", "YubiKey", READY, "closed_source", 4, "typed on this computer"),
             ("0483", "5740", "Other ST device", READY, "unranked", 5, "typed on this computer"),

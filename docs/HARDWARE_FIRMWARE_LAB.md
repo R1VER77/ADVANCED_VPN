@@ -3,8 +3,9 @@
 The laboratory asks whether a named authenticator implementation can perform the
 VPN's actual key-protection and enrollment operations. It is independent of the
 production CLI/controller: no virtual-device switch is added to the installed app.
-It implements three backends: Solo 1's experimental upstream PC firmware (`solo1-pc`), CanoKey's
-upstream virtual card (`canokey-udp`) and the TKey FIDO2 app on Tillitis' QEMU TKey (`tkey-qemu`).
+It implements four backends: Solo 1's experimental upstream PC firmware (`solo1-pc`), CanoKey's
+upstream virtual card (`canokey-udp`), Solo 2's authenticator on a PC (`solo2-pc`) and the TKey
+FIDO2 app on Tillitis' QEMU TKey (`tkey-qemu`).
 
 ## Recorded Solo build
 
@@ -37,6 +38,28 @@ the source root in the prepared constrained build container. Do not invoke upstr
 flash, bootloader, reset or USB deployment commands. Only the resulting PC binary
 is used. A rebuild that changes inputs/hash needs a new reviewed build record;
 the runner deliberately refuses a binary that differs from its selected record.
+
+## Solo 2 (solo2-pc)
+
+See [build inputs](evidence/SOLO2_PC_BUILD_20261119.json) and
+[operation results](evidence/SOLO2_PC_VPN_OPERATIONS_20261119.json).
+
+- Source: <https://github.com/solokeys/solo2> `45311f0`, `Cargo.lock` unchanged,
+  `fido-authenticator` at its locked git revision `fae4a1e`. No firmware source changes.
+- Upstream's PC runner (`runners/pc`) builds the Trussed service but serves no CTAPHID; its
+  test suite calls the authenticator in process, and its own notes say the socket and
+  device paths panic. So the project adds one file to that test crate,
+  `tools/lab/solo2_ctaphid_udp_host.rs`: CTAPHID framing (INIT, PING, WINK, MSG, CBOR,
+  CANCEL, channel and sequence errors) over loopback UDP into the authenticator's
+  `ctaphid_app::App::call`, the entry `usbd-ctaphid` uses on the device. The authenticator
+  is configured as the lpc55 build configures it (`solo-apps` `fido_config`).
+- It reuses upstream's in-process Trussed runtime (`tests/support/sim.rs`), whose RNG is
+  seeded with 32 zero bytes, and grants presence to every request.
+- Built with Rust 1.94.1 (the repository's `rust-toolchain.toml`) in a Debian image with
+  libclang and the hidapi build libraries, network disabled after `cargo fetch --locked`.
+
+GetInfo reports FIDO 2.3, hmac-secret, PIN/UV protocols 2 and 1, and ES256, EdDSA and
+ML-DSA-44 (COSE -48) credentials. Every operation passed on protocol 2.
 
 ## TKey (tkey-qemu)
 

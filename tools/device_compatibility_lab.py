@@ -31,6 +31,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SOLO_SOURCE = "fc8d2867c5ba8161302b809c80fa1fd6a4df94a2"
 CANOKEY_SOURCE = "a349b268e12953dd85169e9649091c4f91ce7c68"
 TKEY_SOURCE = "7fdf8ead29a2ff12aaedb710f31392055136e7e3"
+SOLO2_SOURCE = "45311f0b6761187d409ea3e7ea34f896810eb156"
 # The TKey simulator is a reviewed bundle (a directory), every file pinned by its build record.
 TKEY_BUNDLE = ("firmware.elf", "flash.bin", "qemu-system-riscv32", "qemu_usb_mux.py", "tkey-runapp", "tkey_app.bin")
 BACKENDS = {
@@ -45,6 +46,15 @@ BACKENDS = {
         scope="actual_canokey_core_firmware_with_udp_ctaphid_transport_and_production_vpn_crypto",
         build="upstream fido-hid-over-udp; ENABLE_TESTS=ON; ASan/UBSan; simulated presence",
         limitation="Upstream virtual firmware, not a shipped CanoKey Pigeon/Canary qualification.",
+    ),
+    "solo2-pc": dict(
+        source=SOLO2_SOURCE,
+        scope="actual_solo2_fido_authenticator_with_project_ctaphid_udp_host_and_production_vpn_crypto",
+        build="solo2 45311f0, lpc55 fido_config, in runners/pc's test crate with tools/lab/solo2_ctaphid_udp_host.rs",
+        limitation="Solo 2's unmodified authenticator and Trussed runtime on a PC; the CTAPHID framing is the "
+        "project's (upstream's PC runner serves none), its RNG is seeded with zeros and presence is always "
+        "granted. Not a Solo 2 Secure or Hacker qualification.",
+        args=("--ignored", "--exact", "serve_ctaphid_over_udp", "--test-threads=1"),
     ),
     "tkey-qemu": dict(
         source=TKEY_SOURCE,
@@ -361,7 +371,7 @@ def worker(out, vpn_commit, backend="solo1-pc"):
         else:
             processes.append(
                 subprocess.Popen(
-                    ["/simulator"],
+                    ["/simulator", *selected.get("args", ())],
                     cwd=work,
                     env=environment,
                     stdin=subprocess.DEVNULL,
