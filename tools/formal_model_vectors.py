@@ -35,10 +35,12 @@ failures = []
 
 
 def section(name):
+    """Print a section header."""
     print(f"--- {name}")
 
 
 def expect(condition, what):
+    """Record one check result."""
     if not condition:
         failures.append(what)
         print(f"  [FAIL] {what}")
@@ -242,6 +244,7 @@ cloak_src = (REPO / "src/cloak.rs").read_text()
 
 
 def line_of(text, needle):
+    """Return the 1-based line number of needle in text."""
     for number, line in enumerate(text.splitlines(), 1):
         if needle in line:
             return number
@@ -278,7 +281,9 @@ report = dict(
         "anchored to a concrete implementation value or refusal recorded here."
     ),
     repo_commit=subprocess.run(
-        ["git", "-C", str(REPO), "rev-parse", "HEAD"], capture_output=True, text=True
+        ["git", "-C", str(REPO), "rev-parse", "HEAD"],  # noqa: S607
+        capture_output=True,
+        text=True,
     ).stdout.strip(),
     vectors=results,
     checks_failed=failures,
