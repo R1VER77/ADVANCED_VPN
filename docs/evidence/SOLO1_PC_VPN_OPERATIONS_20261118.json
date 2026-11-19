@@ -1,0 +1,86 @@
+{
+  "schema": 1,
+  "status": "passed_key_sealing_operator_and_enrollment_operations",
+  "scope": "actual_solo_pc_firmware_with_udp_ctaphid_transport_and_production_vpn_crypto",
+  "vpn_source_commit": "15e79759b0d182d7e6eec1ea83f093ac7f1c36f6",
+  "firmware_source_commit": "fc8d2867c5ba8161302b809c80fa1fd6a4df94a2",
+  "firmware_build": "4.1.5-8-gfc8d286, upstream PC Makefile, SOLO_EXPERIMENTAL=1",
+  "binary_sha256": "103199aa4b1cb43b39c543846aecb93d32871bc7ef70ae3da612c2775fe7d250",
+  "harness_sha256": "f9bf550b9e8651b60b4e1a846dd9b1bf2bcce77304af8f41c5e238326b45fb37",
+  "started": 1795057998.473796,
+  "phases": {
+    "fresh_assertion_roundtrip": {
+      "credential_record": true,
+      "authenticated_assertion": true,
+      "fresh_assertion_unseal": true,
+      "corrupted_envelope_refused": true,
+      "local_test_vault_removed": true
+    },
+    "operator_dual_signature": {
+      "fido_verified": true,
+      "mldsa65_verified": true,
+      "wrong_message_refused": true,
+      "invalid_fido_half_refused": true,
+      "invalid_mldsa_half_refused": true
+    },
+    "two_salt_hmac_secret": {
+      "stable": true,
+      "separated": true,
+      "assertion_verified": true
+    },
+    "client_key_generation": {
+      "role": "client",
+      "sealed_keys_opened": 5
+    },
+    "relay_key_generation": {
+      "role": "relay",
+      "sealed_keys_opened": 5
+    },
+    "exit_key_generation": {
+      "role": "exit",
+      "sealed_keys_opened": 5
+    },
+    "signed_client_enrollment": {
+      "signed_bundle_imported": true,
+      "hybrid_delivery_verified": true
+    },
+    "ed25519_credential": {
+      "supported": true,
+      "actual_cose_algorithm": -8,
+      "assertion_verified": true
+    }
+  },
+  "physical_device_tested": false,
+  "tunnel_connection_tested": false,
+  "strict_hardware_eligible": false,
+  "strict_block_reason": "CTAP PIN/UV 1 uses P-256; choosing Ed25519 does not change this channel",
+  "limitations": [
+    "Experimental PC firmware, not a shipped physical Solo 1 qualification.",
+    "Actual CTAPHID uses UDP transport; USB permissions and physical security are not tested.",
+    "No native PIN/presence UI, live tunnel or strict all-interface PQ qualification.",
+    "Only test discovery/transport/PIN input are substituted; production crypto is unchanged."
+  ],
+  "get_info": {
+    "versions": [
+      "U2F_V2",
+      "FIDO_2_0",
+      "FIDO_2_1_PRE"
+    ],
+    "extensions": [
+      "credProtect",
+      "hmac-secret"
+    ],
+    "algorithms": [],
+    "pin_uv_protocols": [
+      1
+    ]
+  },
+  "default_credential_cose_algorithm": -7,
+  "disposable_secret_state_removed": true,
+  "stopped": 1795058003.414999,
+  "production_source_sha256": {
+    "keyguard.py": "936fcf31e235b2ee5dc8030b6c6f7868e13fd919b4f8e90d90cb07886e04d3a7",
+    "managed_profile.py": "a31fc89b631a0237d8b5428db7be6a51c326e6cafeb4cc714dcc8c0310c62303",
+    "hardware_setup_test.py": "277c21fea4a5644541aac8a9436d2cdf7b3ed500b935190cc098276d025a81bf"
+  }
+}

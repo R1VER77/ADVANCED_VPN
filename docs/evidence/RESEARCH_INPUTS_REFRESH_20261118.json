@@ -1,0 +1,107 @@
+{
+  "schema": 1,
+  "scope": "incremental_supplied_research_inputs_not_authenticated_test_provenance",
+  "previous_manifest_sha256": "185a16f300768f123568234b290d10f590146f924cad6b1204e2ade7f520f59e",
+  "previous_files": 26,
+  "current_files": 36,
+  "unchanged_files": 26,
+  "changed_files": [],
+  "files": [
+    {
+      "name": "ADVANCED_VPN_FIDO2_Compatibility_Matrix.pdf",
+      "size": 398424,
+      "sha256": "ef62a07004a6d52f12e6587b8a3cd45388bb36a7ba959d7035478b78c1369f31",
+      "status": "new"
+    },
+    {
+      "name": "ADVANCED_VPN_FIDO2_Compatibility_Matrix.xlsx",
+      "size": 30219,
+      "sha256": "6f6a3e9a9ae2ce8bb76726468a215f6c6976492682dc414da8e0e1aab1e624bc",
+      "status": "new"
+    },
+    {
+      "name": "IMPLEMENTATION_PROGRESS_20261119.md",
+      "size": 17136,
+      "sha256": "8c18b63665dc7b29caca09a6f2d555cf745cd88df07dfac68773472c0dabcca8",
+      "status": "new"
+    },
+    {
+      "name": "WAN_2HOP_CLI.bin",
+      "size": 3087,
+      "sha256": "ef51f9bc72d2fde737dd04204cefb96b8f98333e40eaaaafc36cd5825c9e4829",
+      "status": "new",
+      "content_format": "json",
+      "existing_record": "docs/evidence/WAN_2HOP_CLI.json",
+      "existing_record_sha256": "ef51f9bc72d2fde737dd04204cefb96b8f98333e40eaaaafc36cd5825c9e4829",
+      "identical_json": true,
+      "identical_bytes": true,
+      "interpretation": "duplicate_existing_evidence_not_a_new_run"
+    },
+    {
+      "name": "WF_REAL_PILOT.bin",
+      "size": 6211,
+      "sha256": "930389e60e7d914b8a92722666514af2921aabf4e7b53da29e077c65e4e9a73e",
+      "status": "new",
+      "content_format": "json",
+      "existing_record": "docs/evidence/WF_REAL_PILOT.json",
+      "existing_record_sha256": "930389e60e7d914b8a92722666514af2921aabf4e7b53da29e077c65e4e9a73e",
+      "identical_json": true,
+      "identical_bytes": true,
+      "interpretation": "duplicate_existing_evidence_not_a_new_run"
+    },
+    {
+      "name": "WF_REAL_RERUN.bin",
+      "size": 5078,
+      "sha256": "b6f1396340bc54e91bc19e4dcc4ba9f20b074ab4af483df20fd9f98f25dcb443",
+      "status": "new",
+      "content_format": "json",
+      "existing_record": "docs/evidence/WF_REAL_RERUN.json",
+      "existing_record_sha256": "b6f1396340bc54e91bc19e4dcc4ba9f20b074ab4af483df20fd9f98f25dcb443",
+      "identical_json": true,
+      "identical_bytes": true,
+      "interpretation": "duplicate_existing_evidence_not_a_new_run"
+    },
+    {
+      "name": "WF_REAL_RERUN2.bin",
+      "size": 4241,
+      "sha256": "b39b2f1963974a419de3c0390e253bd5058a397ac93d48770401226a3c0ad204",
+      "status": "new",
+      "content_format": "json",
+      "existing_record": "docs/evidence/WF_REAL_RERUN2.json",
+      "existing_record_sha256": "b39b2f1963974a419de3c0390e253bd5058a397ac93d48770401226a3c0ad204",
+      "identical_json": true,
+      "identical_bytes": true,
+      "interpretation": "duplicate_existing_evidence_not_a_new_run"
+    },
+    {
+      "name": "WF_REAL_RERUN3.bin",
+      "size": 46533,
+      "sha256": "ab2ae74cb3a1b0c5258e0971284f8a1dc983821d3dfa7e7b5bb34b5093270fe7",
+      "status": "new",
+      "content_format": "json",
+      "existing_record": "docs/evidence/WF_REAL_RERUN3.json",
+      "existing_record_sha256": "ab2ae74cb3a1b0c5258e0971284f8a1dc983821d3dfa7e7b5bb34b5093270fe7",
+      "identical_json": true,
+      "identical_bytes": true,
+      "interpretation": "duplicate_existing_evidence_not_a_new_run"
+    },
+    {
+      "name": "ZK_MEMBERSHIP.bin",
+      "size": 2456,
+      "sha256": "3ff7bd90fbd5d8354f073cb6a85b2dc4d80c3a1d67cf19483129c4baddc659ac",
+      "status": "new",
+      "content_format": "json",
+      "existing_record": "docs/evidence/ZK_MEMBERSHIP.json",
+      "existing_record_sha256": "3ff7bd90fbd5d8354f073cb6a85b2dc4d80c3a1d67cf19483129c4baddc659ac",
+      "identical_json": true,
+      "identical_bytes": true,
+      "interpretation": "duplicate_existing_evidence_not_a_new_run"
+    },
+    {
+      "name": "fido_mds_full.json",
+      "size": 337408,
+      "sha256": "59087564aab2f391c08f057baa4b25569811f44f61b5ce397f479fef11d18c3d",
+      "status": "new"
+    }
+  ]
+}

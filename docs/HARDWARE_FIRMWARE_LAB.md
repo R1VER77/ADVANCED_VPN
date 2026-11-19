@@ -1,0 +1,93 @@
+# Firmware compatibility laboratory
+
+The laboratory asks whether a named authenticator implementation can perform the
+VPN's actual key-protection and enrollment operations. It is independent of the
+production CLI/controller: no virtual-device switch is added to the installed app.
+It currently implements **one backend: Solo 1's experimental upstream PC firmware**.
+
+## Recorded Solo build
+
+See [build inputs](evidence/SOLO1_PC_BUILD_20261118.json) and
+[operation results](evidence/SOLO1_PC_VPN_OPERATIONS_20261118.json).
+
+- Repository: <https://github.com/solokeys/solo1>.
+- Source: `fc8d2867c5ba8161302b809c80fa1fd6a4df94a2`, described as
+  `4.1.5-8-gfc8d286`.
+- Build uses the repository-root Makefile for its `pc/` backend, not a board
+  firmware or a directory named `targets/pc`. That Makefile enables
+  `SOLO_EXPERIMENTAL=1` and `DEBUG_LEVEL=1`. No firmware source changes were made.
+- The build record pins the checked-out crypto/CBOR submodules, resulting binary
+  digest and local build/run image identity. This identifies the trial; it does not
+  claim independent reproducible builds or a publicly published container image.
+- The local Ubuntu 22.04 build environment adds `libsodium-dev`, `git`, `python3`
+  and `python-is-python3` to the existing compiler image. Build as an ordinary user
+  with networking disabled after dependencies and submodules have been fetched.
+
+Upstream source preparation, in a **separate disposable directory**, is:
+
+```sh
+git clone https://github.com/solokeys/solo1 solo1
+git -C solo1 checkout --detach fc8d2867c5ba8161302b809c80fa1fd6a4df94a2
+git -C solo1 submodule update --init --recursive
+```
+
+Compare the recorded submodule revisions before compiling. Run `make main` from
+the source root in the prepared constrained build container. Do not invoke upstream
+flash, bootloader, reset or USB deployment commands. Only the resulting PC binary
+is used. A rebuild that changes inputs/hash needs a new reviewed build record;
+the runner deliberately refuses a binary that differs from its selected record.
+
+## Run the recorded trial
+
+From the VPN repository, using this machine's retained simulator and the fully
+verified offline Python runtime:
+
+```sh
+.venv/bin/python -B tools/device_compatibility_lab.py \
+  --backend solo1-pc \
+  --simulator /home/debian/vm/advanced-vpn/hardware-lab-20261118/solo-build-a/source/main \
+  --build-record docs/evidence/SOLO1_PC_BUILD_20261118.json \
+  --runtime /home/debian/vm/advanced-vpn/offline-package-20261117/runtime-31318 \
+  --out /home/debian/vm/advanced-vpn/hardware-lab-20261118/solo-next-trial
+```
+
+The output directory must not already exist. The local Docker image identified by
+the selected build record must be present. These example absolute paths describe
+the retained development lab, not portable release locations or public downloads.
+
+The host verifies the build identity, binary and pinned runtime before running.
+The container uses the ordinary UID, no capabilities, no privilege escalation,
+a read-only root/source/runtime, private temporary storage and a network containing
+only loopback. It receives no host USB devices, home, SSH agent or commissioned
+vault. UDP ports 7112/8111 exist only inside that network; nothing is published.
+
+The worker refuses exposed USB/hidraw or external interfaces, creates a fresh virtual
+PIN and disposable credentials, executes the real VPN operations and removes its
+temporary secret state. The host stops/removes its own container on exit. Results
+contain booleans, algorithms, hashes and error classes; private console/sandbox
+records stay in the output directory. The fixture PIN is never a production PIN.
+
+## Interpret the result
+
+`passed_key_sealing_operator_and_enrollment_operations` means exactly those named
+operations passed for the pinned PC firmware and production source hashes. It
+does not mean a live tunnel was connected. The result explicitly records:
+
+```json
+{
+  "physical_device_tested": false,
+  "tunnel_connection_tested": false,
+  "strict_hardware_eligible": false
+}
+```
+
+PIN/UV protocol 1 uses P-256 even when an Ed25519 credential succeeds. The software
+compatibility result cannot bypass strict policy. The GetInfo algorithms array
+is empty on this build; the separate actual Ed25519 credential/assertion trial
+establishes that capability rather than guessing from advertisement.
+
+A future physical confirmation should target the remaining differences, rather
+than repeat all of this cryptographic suite: shipped firmware/configuration,
+transport permissions, real verification/presence prompts, and persistence across
+unplug/restart. The physical Nitrokey, YubiKey, Trezor and Ledger baseline need not
+be repeated to validate this additional candidate.

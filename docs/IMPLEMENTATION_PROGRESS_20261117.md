@@ -17,6 +17,16 @@ the chosen order (hardware simulation first), whole-registry search with reviewe
 VPN provisioning recipes, and refusal under strict hardware policy. Those new
 capabilities are planned; saving/publishing their plan is not implementation.
 
+The checkpoint is now published as hardware-signed `15e79759b0d182d7e6eec1ea83f093ac7f1c36f6`;
+both local verification and GitHub report a valid signature, and remote `main` matched.
+[Verification run 44421603036](https://github.com/R1VER77/ADVANCED_VPN/actions/runs/44421603036)
+passed all four jobs (Linux desktop, protocol proof, formal models and Python 3.10).
+The owner's subsequent refinement defers
+repeat baseline/emulator work for **all four commissioned physical units**. The next
+hardware work determines VPN usability for the additional devices named in the
+research, using [the candidate inventory](DEVICE_COMPATIBILITY_VALIDATION.md).
+No Nitrokey emulator build was launched.
+
 Signed licensing commit `d26c355` appeared in the shared owner workspace during this
 work. Preserve it and the published documentation commit `66c26f3`. New component
 metadata follows AGPL-3.0-or-later and the authoritative repository LICENSE. The
@@ -40,7 +50,7 @@ and a trained local model are not implemented. See the [support matrix](SUPPORT_
 | 1 CI/provenance | Baseline `43996ad` passed three jobs; verification/release share static bootstrap builds; new locked native desktop CI job; build dependency advisory GHSA-fc5q-39xc-vjpf addressed via vendored picomatch extglob guard | Final CI and provenance qualification |
 | 2 Traffic analysis | Metadata recorder, observation validity, counterbalanced runner and grouped analysis; three-arm smoke passed | Fresh controlled collection, analysis/correction and cross-environment replication |
 | 3 Installation | Portable candidate B passed native lifecycle/live bus trials on Debian 12/13 and Ubuntu 22.04/24.04; real apt controls passed. Corrected RPM candidate E passed the complete scoped lifecycle/live bus trial on Fedora 45/Rocky 10.3 with SELinux enforcing | Hardware repository key, RPM repository metadata, provenance/publication and full release/protection qualification |
-| 4 Recovery/hardware | Static guard missing-runtime and missing-guard reboot trial passed; externally witnessed IPv4/IPv6 output/forwarding checks | Full installation fault matrix and remaining physical four-device cases |
+| 4 Recovery/hardware | Static guard missing-runtime and missing-guard reboot trial passed; externally witnessed IPv4/IPv6 output/forwarding checks; additional Solo PC firmware key/signing/enrollment operations passed | Full installation fault matrix; remaining additional-device operations and targeted physical differences, without repeating the commissioned four-unit baseline |
 | 5 GUI | Prototype preserved/imported; production/demo separation, Vue/Tauri builds, native broker, caller-bound plans, native approval details, public request export; real system-bus boundary checks passed with disposable authorization fixture | Native authentication agent/WebKit interaction, complete owner/provider flow and five participants |
 | 6 Provisioning/assistant | Existing provider tooling/design retained | Deterministic expanded adapters, encrypted plans/state, documentation updates, training and physical evaluation |
 | 7 Assurance/platforms | Existing formal baseline; initial `cypherpunk` command aliases added | Selected DNS, added formal/fuzz/secret work, mesh reconciliation, migration, native platform qualification and independent review |
@@ -303,3 +313,28 @@ protected removal and state-preserving recovered removal phases. Both guests wer
 stopped and owned temporary disks removed; logs/captures/results remain. Neither
 trial qualifies a dedicated SELinux domain, real enrollment, physical power loss,
 native authentication agent, RPM repository publication or release provenance.
+
+## Additional downloads and device compatibility
+
+The supplied research directory now has 36 files: the original 26 are unchanged,
+and 10 additions are reconciled in [the gap review](RESEARCH_GAPS_20261118.md).
+All six newly downloaded `.bin` JSON reports exactly match existing repository
+records; they are retained evidence, not fresh WAN, traffic or membership runs.
+The new spreadsheet supplies useful source/metadata corrections. The accompanying
+progress report marks all 148 emulator scenarios skipped and does not deliver its
+referenced runner/mutation/fuzz files. Do not count those descriptions as execution.
+
+The new [firmware laboratory](HARDWARE_FIRMWARE_LAB.md) closes one actual execution
+gap: Solo 1's pinned experimental PC authenticator passed real VPN fresh-assertion
+sealing, operator dual signatures and corrupted-half refusals, two-salt hmac-secret,
+all three roles' key generation/unseal, signed client enrollment and an explicit
+Ed25519 assertion. [Result](evidence/SOLO1_PC_VPN_OPERATIONS_20261118.json).
+USB transport, PIN input and presence are virtual; no physical or tunnel pass is
+claimed, and PIN/UV P-256 keeps strict hardware eligibility blocked.
+
+The owner clarified that firmware execution should establish software compatibility
+without waiting for a physical device or duplicating the full suite. Continue the
+additional candidates. A later physical check targets shipped firmware/configuration,
+native access/prompts and unplug/restart differences. The four commissioned units
+remain untouched. An open glib 0.18.5 dependency alert, GHSA-wrw7-89jp-8q8g, remains
+a separate desktop assurance task; the successful checkpoint CI does not close it.

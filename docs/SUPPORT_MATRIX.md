@@ -78,3 +78,16 @@ and source/provenance limitations. The [procedure](HARDWARE_SETUP_TESTS.md) expl
 isolated vaults, restoration and cases still needed. These tests did not reset devices,
 change PINs, update firmware or inspect wallet material. Nitrokey/YubiKey udev rules
 and generic FIDO rules can coexist: removing one vendor rule need not remove access.
+
+### Additional firmware compatibility
+
+| Implementation | Actual software result | Limits |
+|---|---|---|
+| Solo 1 experimental PC firmware, upstream `fc8d286` | Real CTAPHID and production VPN code passed fresh-assertion sealing, tamper refusal, both operator-signature halves with negative controls, two-salt hmac-secret, client/relay/exit key generation and signed client enrollment. Explicit Ed25519 credential and assertion passed. [Evidence](evidence/SOLO1_PC_VPN_OPERATIONS_20261118.json). | Software compatibility for this build; no physical USB/prompt/persistence or live-tunnel qualification. Strict hardware policy remains blocked because PIN/UV uses P-256. |
+
+The [firmware laboratory](HARDWARE_FIRMWARE_LAB.md) and
+[additional candidate inventory](DEVICE_COMPATIBILITY_VALIDATION.md) keep execution,
+source inspection and supplied metadata separate. A firmware result permits continued
+software development; physical confirmation can focus on the remaining device-specific
+differences. It need not duplicate the full cryptographic suite or retest commissioned
+units. The new downloaded matrices do not qualify other models by themselves.

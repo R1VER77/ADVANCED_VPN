@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "status": "built_experimental_upstream_solo1_pc_authenticator",
+  "source_repository": "https://github.com/solokeys/solo1",
+  "source_commit": "fc8d2867c5ba8161302b809c80fa1fd6a4df94a2",
+  "source_description": "4.1.5-8-gfc8d286",
+  "submodule_revisions": [
+    " d04dd318609733d809904d4f2973597240655cde crypto/cifra (heads/master)",
+    " 601bd11062c551b108adbb43ba99f199b840777c crypto/micro-ecc (v1.0-3-g601bd11)",
+    " 809cdf009fa52d97adb292a8547d13c9015d6a06 crypto/salty (0.1.0-alpha.0-10-g809cdf0)",
+    " 08c5f2a1fb16b279907eb622ac043046d7a1a35c crypto/salty/c-api/libopencm3 (v0.8.0-2-g08c5f2a1)",
+    " 4b97e75fb96c08f026d545f7f8905b5daa14e9e8 crypto/tiny-AES-c (v1.0.0~7)",
+    " 878eb01b96c573e353b217439c0f418f69c2ca04 tinycbor (v0.5.2-16-g878eb01)"
+  ],
+  "binary_sha256": "103199aa4b1cb43b39c543846aecb93d32871bc7ef70ae3da612c2775fe7d250",
+  "image_id": "sha256:28e203735f935114e6eb26e7a70e38f4de884ac90f18f9d5c79ed9ef4705a869",
+  "build": "upstream PC Makefile, network-none ordinary-user container, SOLO_EXPERIMENTAL=1",
+  "firmware_source_changes": false,
+  "physical_device_qualified": false
+}

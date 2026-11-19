@@ -7,6 +7,20 @@ violates the full-stack PQ/SafeCurves target. Simulation does not establish phys
 device support. This extends, rather than replaces,
 [the main implementation plan](IMPLEMENTATION_PLAN_20261117.md).
 
+Owner refinement later the same day: the four available Nitrokey, YubiKey, Trezor
+and Ledger units are already physically tested and have commissioned VPN keys.
+The immediate purpose is to determine whether the **other research-listed devices**
+can perform the VPN's required operations. Do not repeat those four baseline tests
+or build their emulators as this milestone's first task. Preserve their evidence;
+additional unowned models within those families remain separate candidates.
+
+Primary deliverable: a device/role compatibility matrix, with genuine firmware or
+protocol tests where possible, an explicit incompatible result for demonstrated
+missing requirements, and an unverified result where a closed device cannot be
+faithfully exercised. Functional VPN compatibility and strict crypto-policy compliance
+are separate verdicts. Raw-entropy export and comprehensive hardware-security
+certification are not prerequisites for the ordinary VPN authenticator verdict.
+
 ## 1. Starting state and publication
 
 GitHub `main` was checked at hardware-signed `5d69623697524796b105dd5f24f0644339a05652`.
@@ -55,6 +69,12 @@ Publication procedure:
 
 ### What virtual testing establishes
 
+Use [the candidate inventory](DEVICE_COMPATIBILITY_VALIDATION.md) as the immediate
+work list. Start with unowned open implementations such as Solo/CanoKey rather than
+rerunning the commissioned devices. The previously investigated Nitrokey/Trezor/Ledger
+backends below remain reference options for a newly identified regression or an
+unowned model, not a requirement to repeat existing successful baseline work.
+
 Exercise the shipping setup, key-generation, sealing, enrollment and verification
 code against actual software authenticators. Do not mock successful signatures,
 derived secrets, encryption or enrollment verification in end-to-end cases. Transport
@@ -69,7 +89,8 @@ isolation, without adding a new production GPG-to-FIDO substitution.
 |---|---|---|
 | Nitrokey 3 upstream USB/IP runner | Run the actual NK3 application stack, attach its virtual CTAPHID interface inside a disposable Linux guest, control presence and persistent test storage. | No secure-element, physical entropy, actual USB/NFC electrical or production-unit assurance. |
 | Trezor firmware emulator and its FIDO transport | Run production client/protocol code against the upstream firmware snapshot; use upstream debug controls for simulated device approval. | Record emulated model/build; emulator transport and display do not qualify a physical model. |
-| Ledger Security Key with Speculos | Run the actual app with its supported CTAP/U2F transport and upstream test harness. Start with Nano S Plus app builds; add other app targets only with separate results. | App tests do not emulate every OS, firmware-update, secure-element or wallet behavior. |
+| Ledger Security Key with Speculos | Reference path for additional exact models where the app/SDK supports them; the commissioned Ledger is already the baseline. Public physical evidence does not establish its exact model/app version. | App tests do not emulate every OS, firmware-update, secure-element or wallet behavior. |
+| Solo 1 upstream PC firmware | Run actual CTAPHID messages and production VPN key/signing/enrollment operations inside a networkless ordinary-user container. This path has now passed for the pinned experimental build; see [the laboratory](HARDWARE_FIRMWARE_LAB.md). | Does not qualify a shipped board, USB access, real prompts, persistence or strict PIN/UV policy. |
 | Generic CanoKey virtual card | Independently test CTAPHID, Ed25519/hmac-secret and, separately, OpenPGP boundaries through real guest USB plumbing. | A CanoKey pass is not a YubiKey, Nitrokey, Trezor or Ledger firmware pass. |
 | Capability/fault fixtures | Deterministic unsupported features, vendor-tool responses, malformed frames and multiple-device ambiguity. | Synthetic outcomes, especially YubiKey-specific configuration cases, remain labelled synthetic. |
 
@@ -351,7 +372,7 @@ the main roadmap rather than allowed to substitute for missing protection eviden
 | Workstream | What remains |
 |---|---|
 | 1 CI/provenance | Green checks for the checkpoint; reproducible release artifacts, authenticated provenance and production repository-key/publication qualification. |
-| 4 Hardware/recovery, first | The virtual laboratory and strict eligibility above; complete VM interruption/full-storage/damaged-runtime/profile/restart/power-cut fault matrix with external packet witnesses; remaining physical device cases. VM power cuts are labelled VM tests. |
+| 4 Hardware/recovery, first | The virtual laboratory and strict eligibility above; complete VM interruption/full-storage/damaged-runtime/profile/restart/power-cut fault matrix with external packet witnesses. Additional-device firmware operations are the priority; physical checks target only residual firmware/transport/prompt/persistence differences rather than repeating the commissioned baseline. VM power cuts are labelled VM tests. |
 | 5–6 GUI/provisioning, next | Whole-registry search, reviewed recipe rollout, encrypted OpenTofu jobs, full create/join branches, verified enrollment/connect/resume and native prompts; five real participant sessions. |
 | 2 Traffic analysis, quiet windows | Re-smoke the dedicated recorder CPU/64 MiB buffers, freeze a new 720-attempt run, analyze all attempts/grouped holdouts and permutations, correct leakage and freshly replicate across three days, two networks and two physical clients. |
 | 3 Distribution | Production signing/provenance, RPM repository metadata, cross-release migrations and final packages rebuilt from one source revision. Candidate lifecycle passes do not close these gates. |
