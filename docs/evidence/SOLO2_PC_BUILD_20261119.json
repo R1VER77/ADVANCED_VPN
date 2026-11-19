@@ -12,8 +12,8 @@
   "lab_harness": {
     "added_file": "runners/pc/tests/avpn_ctaphid_udp_host.rs",
     "source": "tools/lab/solo2_ctaphid_udp_host.rs",
-    "sha256": "7662a5e13491e411d83c4199ccac8f968843f9506c5347569aac1e025a4f577a",
-    "role": "CTAPHID framing over loopback UDP into fido-authenticator's App::call; upstream's PC runner serves no CTAPHID"
+    "sha256": "877c88418b85fe154963e65ff48d57116fc53500d171ce85cde3c22ba0672823",
+    "role": "CTAPHID framing over loopback UDP into fido-authenticator's App::call; upstream's PC runner serves no CTAPHID; AVPN_CTAPHID_PORTS moves it to other loopback ports, so the lab runs a second, separate key"
   },
   "toolchain": "rustc 1.94.1 (e408947bf 2026-03-25)",
   "build_command": "cargo test --locked --offline --release --test avpn_ctaphid_udp_host --no-run (runners/pc, RUSTUP_TOOLCHAIN=1.94.1, network none after cargo fetch --locked)",
@@ -23,13 +23,17 @@
     "serve_ctaphid_over_udp",
     "--test-threads=1"
   ],
-  "binary_sha256": "5d736ea087cecd9130a8c5d453df6ffbb9981ee9228fe4df60759b35e416d5ca",
+  "binary_sha256": "0607c330f00768821eb519cb2e73dc02f9b9cd50f63156e28ca9aed013369bf6",
   "image_id": "sha256:8d5c34d4b6c2a42ad9080015ff7fc546c03d250350463cbec50cc5d471c06ae9",
   "image_recipe_sha256": "a1b5246a574d796d30a5895ccf95a1120a98346816dba24cf223c18b74915d17",
   "base_image": "rust@sha256:6ae102bdbf528294bc79ad6e1fae682f6f7c2a6e6621506ba959f9685b308a55",
-  "build_log_sha256": "6510a7f12f1dddf18e68121b0a036a98bd1aa1353e56871e795763758a28203a",
+  "build_log_sha256": "3c9f66e0a5381760771253e28c8beb0958b52edd8db7cb502f6d954be4e4f631",
   "container_network": "none",
   "build_user": 1000,
   "rng": "ChaCha8 seeded with 32 zero bytes (upstream tests/support/sim.rs)",
-  "physical_device_qualified": false
+  "physical_device_qualified": false,
+  "second_instance_ports": [
+    8113,
+    7114
+  ]
 }

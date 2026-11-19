@@ -3,7 +3,8 @@
 //! Serves Solo 2's unmodified `fido-authenticator`, configured as `runners/lpc55` configures
 //! it (`components/solo-apps` `fido_config`), over CTAPHID on loopback UDP: 64-byte frames
 //! from 127.0.0.1:7112 to 127.0.0.1:8111, the transport the laboratory's Solo 1 and CanoKey
-//! backends use (`tools/device_compatibility_lab.py`). Upstream's PC runner serves no
+//! backends use (`tools/device_compatibility_lab.py`). `AVPN_CTAPHID_PORTS=HOST,PEER` moves
+//! it to other loopback ports, so the lab can present a second, separate key. Upstream's PC runner serves no
 //! CTAPHID, so this file supplies only the framing that `usbd-ctaphid` does on the device;
 //! every message goes to the authenticator through the same `ctaphid_app::App::call` entry.
 //!
@@ -18,8 +19,6 @@ use ctaphid_dispatch::app::{App, Command, Error};
 use fido_authenticator::{credential::CredentialIdVersion, Authenticator, Config, Conforming};
 use std::net::UdpSocket;
 
-const ME: &str = "127.0.0.1:8111";
-const PEER: &str = "127.0.0.1:7112";
 const BROADCAST: u32 = 0xffff_ffff;
 const MAX_MESSAGE: usize = ctaphid_dispatch::DEFAULT_MESSAGE_SIZE;
 
@@ -59,14 +58,22 @@ fn production_config() -> Config {
     }
 }
 
-fn send(sock: &UdpSocket, cid: u32, cmd: u8, data: &[u8]) {
+/// (this host's address, the client's address) on loopback.
+fn addresses() -> (String, String) {
+    let ports = std::env::var("AVPN_CTAPHID_PORTS").unwrap_or_else(|_| "8111,7112".into());
+    let (me, peer) = ports.split_once(',').expect("AVPN_CTAPHID_PORTS=HOST,PEER");
+    let port = |p: &str| p.parse::<u16>().expect("a port number");
+    (format!("127.0.0.1:{}", port(me)), format!("127.0.0.1:{}", port(peer)))
+}
+
+fn send_frames(sock: &UdpSocket, peer: &str, cid: u32, cmd: u8, data: &[u8]) {
     let mut frame = [0u8; 64];
     frame[..4].copy_from_slice(&cid.to_be_bytes());
     frame[4] = cmd;
     frame[5..7].copy_from_slice(&(data.len() as u16).to_be_bytes());
     let mut sent = data.len().min(57);
     frame[7..7 + sent].copy_from_slice(&data[..sent]);
-    sock.send_to(&frame, PEER).expect("send");
+    sock.send_to(&frame, peer).expect("send");
     let mut seq = 0u8;
     while sent < data.len() {
         let mut frame = [0u8; 64];
@@ -74,7 +81,7 @@ fn send(sock: &UdpSocket, cid: u32, cmd: u8, data: &[u8]) {
         frame[4] = seq;
         let n = (data.len() - sent).min(59);
         frame[5..5 + n].copy_from_slice(&data[sent..sent + n]);
-        sock.send_to(&frame, PEER).expect("send");
+        sock.send_to(&frame, peer).expect("send");
         sent += n;
         seq += 1;
     }
@@ -89,13 +96,15 @@ struct Message {
 }
 
 fn serve<'i>(app: &mut dyn App<'i>) {
-    let sock = UdpSocket::bind(ME).expect("bind 127.0.0.1:8111");
+    let (me, peer) = addresses();
+    let sock = UdpSocket::bind(&me).expect("bind the host's loopback port");
+    let send = |cid: u32, cmd: u8, data: &[u8]| send_frames(&sock, &peer, cid, cmd, data);
     let mut next_cid: u32 = 0;
     let mut pending: Option<Message> = None;
     let mut frame = [0u8; 65];
     loop {
         let (n, from) = sock.recv_from(&mut frame).expect("recv");
-        if n != 64 || from.to_string() != PEER {
+        if n != 64 || from.to_string() != peer {
             continue;
         }
         let cid = u32::from_be_bytes(frame[..4].try_into().unwrap());
@@ -103,7 +112,7 @@ fn serve<'i>(app: &mut dyn App<'i>) {
             let (cmd, len) = (frame[4], u16::from_be_bytes([frame[5], frame[6]]) as usize);
             if cmd == INIT {
                 if len != 8 {
-                    send(&sock, cid, ERROR, &[ERR_INVALID_LEN]);
+                    send(cid, ERROR, &[ERR_INVALID_LEN]);
                     continue;
                 }
                 let assigned = if cid == BROADCAST {
@@ -118,15 +127,15 @@ fn serve<'i>(app: &mut dyn App<'i>) {
                 let mut reply = frame[7..15].to_vec(); // the client's nonce
                 reply.extend_from_slice(&assigned.to_be_bytes());
                 reply.extend_from_slice(&[2, 0, 0, 0, 0x01 | 0x04]); // protocol 2; WINK and CBOR; MSG offered
-                send(&sock, cid, INIT, &reply);
+                send(cid, INIT, &reply);
                 continue;
             }
             if cid == BROADCAST || cid == 0 || cid > next_cid {
-                send(&sock, cid, ERROR, &[ERR_INVALID_CHANNEL]);
+                send(cid, ERROR, &[ERR_INVALID_CHANNEL]);
                 continue;
             }
             if len > MAX_MESSAGE {
-                send(&sock, cid, ERROR, &[ERR_INVALID_LEN]);
+                send(cid, ERROR, &[ERR_INVALID_LEN]);
                 continue;
             }
             pending = Some(Message { cid, cmd, len, data: frame[7..7 + len.min(57)].to_vec(), seq: 0 });
@@ -136,7 +145,7 @@ fn serve<'i>(app: &mut dyn App<'i>) {
                 continue; // a continuation for another channel is ignored, as the spec allows
             }
             if frame[4] != message.seq {
-                send(&sock, cid, ERROR, &[ERR_INVALID_SEQ]);
+                send(cid, ERROR, &[ERR_INVALID_SEQ]);
                 pending = None;
                 continue;
             }
@@ -148,26 +157,26 @@ fn serve<'i>(app: &mut dyn App<'i>) {
             let message = pending.take().unwrap();
             let command = match message.cmd {
                 PING => {
-                    send(&sock, message.cid, PING, &message.data);
+                    send(message.cid, PING, &message.data);
                     continue;
                 }
                 WINK => {
-                    send(&sock, message.cid, WINK, &[]);
+                    send(message.cid, WINK, &[]);
                     continue;
                 }
                 CANCEL => continue,
                 MSG => Command::Msg,
                 CBOR => Command::Cbor,
                 _ => {
-                    send(&sock, message.cid, ERROR, &[ERR_INVALID_CMD]);
+                    send(message.cid, ERROR, &[ERR_INVALID_CMD]);
                     continue;
                 }
             };
             let mut response = ctap_types::Bytes::<MAX_MESSAGE>::new();
             match app.call(command, &message.data, response.as_mut_view()) {
-                Ok(()) => send(&sock, message.cid, message.cmd, &response),
-                Err(Error::InvalidLength) => send(&sock, message.cid, ERROR, &[ERR_INVALID_LEN]),
-                Err(Error::InvalidCommand) => send(&sock, message.cid, ERROR, &[ERR_INVALID_CMD]),
+                Ok(()) => send(message.cid, message.cmd, &response),
+                Err(Error::InvalidLength) => send(message.cid, ERROR, &[ERR_INVALID_LEN]),
+                Err(Error::InvalidCommand) => send(message.cid, ERROR, &[ERR_INVALID_CMD]),
                 Err(Error::NoResponse) => {}
             }
         }

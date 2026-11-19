@@ -18,7 +18,9 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, ed25519, x25519, mldsa
 
 # operator.pub (JSON): a classical half (the Nitrokey FIDO2 credential, or a lab-only
-# Ed25519 key) and an ML-DSA-65 public key. Enrollment requires BOTH signatures.
+# Ed25519 key) and an ML-DSA-65 public key; schema 3 adds a third, a non-exportable
+# ML-DSA-44 FIDO2 credential (keyguard enroll-pq-signer). Enrollment requires every half
+# the operator file names.
 MLDSA65_PUBLIC = 1952
 
 from provision import put, RATE_BYTES, RATE_PACKETS
@@ -676,10 +678,9 @@ class SoftwareOperator:
         )
 
     def sign(self, message):
-        """Sign `message` with both halves of the hybrid operator key."""
-        return dict(kind="ed25519", signature=base64.b64encode(self.classical.sign(message)).decode()), self.pq.sign(
-            message
-        )
+        """Sign `message` with both halves of the hybrid operator key (no hardware third half)."""
+        classical = dict(kind="ed25519", signature=base64.b64encode(self.classical.sign(message)).decode())
+        return classical, self.pq.sign(message), None
 
 
 class HardwareOperator:
@@ -687,25 +688,35 @@ class HardwareOperator:
     PQ half: an ML-DSA-65 key sealed under that credential's hmac-secret; one
     assertion yields both, so the ML-DSA key is plaintext only in memory."""
 
-    def __init__(self, vault):
+    def __init__(self, vault, pq_vault=None):
         self.vault = vault.resolve()
+        # The ML-DSA-44 credential's own vault, on a separate key (keyguard enroll-pq-signer).
+        self.pq_vault = pq_vault.resolve() if pq_vault is not None else None
 
     def public(self):
-        """The hardware operator's public keys: the FIDO2 credential and the ML-DSA-65 key."""
-        from keyguard import credential_public
+        """The hardware operator's public keys: the FIDO2 credential, the ML-DSA-65 key and,
+        with a `pq_vault`, the ML-DSA-44 FIDO2 credential held on that other key (schema 3)."""
+        from keyguard import credential_public, pq_signer_public
 
         pq = self.vault / "operator-mldsa65.pub"
         if not pq.exists():
             raise ValueError("operator ML-DSA key not created yet; run init once")
-        return dict(
+        public = dict(
             schema=2,
             classical=dict(kind="fido2", public_key=credential_public(self.vault)),
             mldsa65=base64.b64encode(read_private(pq)).decode(),
         )
+        if self.pq_vault is not None:
+            hardware_pq = pq_signer_public(self.pq_vault)
+            if hardware_pq is None:
+                raise ValueError("no ML-DSA-44 credential in %s; run keyguard enroll-pq-signer" % self.pq_vault)
+            public.update(schema=3, hardware_mldsa44=hardware_pq)
+        return public
 
     def sign(self, message):
-        """Sign `message`: a FIDO2 assertion plus ML-DSA-65, the key unsealed for this one use (created and sealed on first use)."""
-        from keyguard import hardware_assertion, seal_bytes, open_bytes, atomic
+        """Sign `message`: a FIDO2 assertion plus ML-DSA-65, the key unsealed for this one use (created and sealed on first use),
+        and, with a `pq_vault`, the ML-DSA-44 credential's assertion on that key (its own PIN + touch)."""
+        from keyguard import hardware_assertion, seal_bytes, open_bytes, atomic, pq_signer_assertion
 
         secret, meta, assertion = hardware_assertion(self.vault, message)
         sealed = self.vault / "operator-mldsa65.sealed.json"
@@ -723,11 +734,42 @@ class HardwareOperator:
                 serialization.Encoding.DER, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()
             )
             atomic(sealed, canonical(seal_bytes(secret, meta, "operator-mldsa65", public, der)))
-        return dict(kind="fido2", **assertion), key.sign(message)
+        hardware_pq = pq_signer_assertion(self.pq_vault, message) if self.pq_vault is not None else None
+        return dict(kind="fido2", **assertion), key.sign(message), hardware_pq
 
 
-def verify_operator(operator, message, classical, pq_signature):
-    """Both halves must verify (hybrid)."""
+def signature_members(operator):
+    """The archive members an operator's signature occupies."""
+    return {"set.classical.json", "set.mldsa65.sig"} | ({"set.mldsa44.json"} if operator["schema"] == 3 else set())
+
+
+def write_signature(z, classical, pq_signature, hardware_pq):
+    """Store a signature's halves in an archive."""
+    z.writestr("set.classical.json", canonical(classical))
+    z.writestr("set.mldsa65.sig", pq_signature)
+    if hardware_pq is not None:
+        z.writestr("set.mldsa44.json", canonical(hardware_pq))
+
+
+def verify_archive_signature(z, operator, message):
+    """Verify the signature stored in an archive against the operator's every half."""
+    hardware_pq = json.loads(z.read("set.mldsa44.json")) if operator["schema"] == 3 else None
+    verify_operator(operator, message, json.loads(z.read("set.classical.json")), z.read("set.mldsa65.sig"), hardware_pq)
+
+
+def verify_operator(operator, message, classical, pq_signature, hardware_pq=None):
+    """Every half the operator names must verify (hybrid): a schema-3 operator's
+    ML-DSA-44 FIDO2 half cannot be left out."""
+    if operator["schema"] == 3:
+        from keyguard import MLDSA44, _verifying_key, verify_assertion
+
+        if hardware_pq is None:
+            raise ValueError("operator ML-DSA-44 signature missing")
+        if _verifying_key(operator["hardware_mldsa44"]).ALGORITHM != MLDSA44:
+            raise ValueError("wrong operator ML-DSA-44 key")
+        verify_assertion(operator["hardware_mldsa44"], message, hardware_pq)
+    elif hardware_pq is not None:
+        raise ValueError("unexpected third signature half")
     c = operator["classical"]
     if c["kind"] == "fido2" and classical.get("kind") == "fido2":
         from keyguard import verify_assertion
@@ -1037,17 +1079,16 @@ def create(
         )
     )
     # One signing operation (one PIN + touch) covers every bundle in the chain.
-    classical, pq_signature = signer.sign(enrollment_set)
+    classical, pq_signature, hardware_pq = signer.sign(enrollment_set)
     operator = signer.public()
-    verify_operator(operator, enrollment_set, classical, pq_signature)
+    verify_operator(operator, enrollment_set, classical, pq_signature, hardware_pq)
     put(root / "operator.pub", canonical(operator))
     for role, files in payloads.items():
         path = root / (role + ".avpn")
         with zipfile.ZipFile(path, "x", compression=zipfile.ZIP_STORED) as z:
             z.writestr("manifest.json", manifests[role])
             z.writestr("set.json", enrollment_set)
-            z.writestr("set.classical.json", canonical(classical))
-            z.writestr("set.mldsa65.sig", pq_signature)
+            write_signature(z, classical, pq_signature, hardware_pq)
             for name, b in files.items():
                 z.writestr(name, b)
         os.chmod(path, 0o600)
@@ -1063,8 +1104,14 @@ def read_operator(path):
             raise ValueError("untrusted operator key file")
         raw = f.read(16385)
     operator = json.loads(raw)
-    if operator.get("schema") != 2 or set(operator) != {"schema", "classical", "mldsa65"}:
+    keys = {2: {"schema", "classical", "mldsa65"}, 3: {"schema", "classical", "mldsa65", "hardware_mldsa44"}}
+    if set(operator) != keys.get(operator.get("schema")):
         raise ValueError("wrong enrollment operator key")
+    if operator["schema"] == 3:
+        from keyguard import MLDSA44, _verifying_key
+
+        if _verifying_key(operator["hardware_mldsa44"]).ALGORITHM != MLDSA44:
+            raise ValueError("wrong operator ML-DSA-44 key")
     if len(base64.b64decode(operator["mldsa65"], validate=True)) != MLDSA65_PUBLIC:
         raise ValueError("wrong operator ML-DSA key")
     return raw, operator
@@ -1213,10 +1260,10 @@ def mesh_verify_directory(bundle, operator_public):
         raise ValueError("oversized directory")
     with zipfile.ZipFile(bundle) as z:
         names = sorted(z.namelist())
-        if names != ["directory.json", "set.classical.json", "set.json", "set.mldsa65.sig"]:
+        if names != sorted({"directory.json", "set.json"} | signature_members(operator)):
             raise ValueError("not a signed directory")
         enrollment_set = z.read("set.json")
-        verify_operator(operator, enrollment_set, json.loads(z.read("set.classical.json")), z.read("set.mldsa65.sig"))
+        verify_archive_signature(z, operator, enrollment_set)
         raw = z.read("directory.json")
     if json.loads(enrollment_set).get("directory") != hashlib.sha256(raw).hexdigest():
         raise ValueError("directory not covered by the signature")
@@ -1560,9 +1607,9 @@ def mesh_bundles(root, mesh, signer, defense="strong", daily_mib=None, dns=None,
             bundles={name: hashlib.sha256(m).hexdigest() for name, m in manifests.items()},
         )
     )
-    classical, pq_signature = signer.sign(enrollment_set)
+    classical, pq_signature, hardware_pq = signer.sign(enrollment_set)
     operator = signer.public()
-    verify_operator(operator, enrollment_set, classical, pq_signature)
+    verify_operator(operator, enrollment_set, classical, pq_signature, hardware_pq)
     root.mkdir(mode=0o700, parents=True, exist_ok=True)
     put(root / "operator.pub", canonical(operator))
     for name, files in payloads.items():
@@ -1572,8 +1619,7 @@ def mesh_bundles(root, mesh, signer, defense="strong", daily_mib=None, dns=None,
         with zipfile.ZipFile(path, "x", compression=zipfile.ZIP_STORED) as z:
             z.writestr("manifest.json", manifests[name])
             z.writestr("set.json", enrollment_set)
-            z.writestr("set.classical.json", canonical(classical))
-            z.writestr("set.mldsa65.sig", pq_signature)
+            write_signature(z, classical, pq_signature, hardware_pq)
             for fname, b in files.items():
                 z.writestr(fname, b)
         os.chmod(path, 0o600)
@@ -1583,8 +1629,7 @@ def mesh_bundles(root, mesh, signer, defense="strong", daily_mib=None, dns=None,
     with zipfile.ZipFile(directory_path, "x", compression=zipfile.ZIP_STORED) as z:
         z.writestr("directory.json", directory)
         z.writestr("set.json", enrollment_set)
-        z.writestr("set.classical.json", canonical(classical))
-        z.writestr("set.mldsa65.sig", pq_signature)
+        write_signature(z, classical, pq_signature, hardware_pq)
     os.chmod(directory_path, 0o600)
     return hashlib.sha256(canonical(operator)).hexdigest()
 
@@ -1608,7 +1653,7 @@ def inspect_enrollment_bundle(bundle, operator_public, state, replace=False):
         raise ValueError("already enrolled; use replace to switch chains")
     if bundle.stat().st_size > 1_048_576:
         raise ValueError("oversized bundle")
-    signed = {"manifest.json", "set.json", "set.classical.json", "set.mldsa65.sig"}
+    signed = {"manifest.json", "set.json"} | signature_members(operator)
     with zipfile.ZipFile(bundle) as z:
         entries = z.infolist()
         names = [v.filename for v in entries]
@@ -1621,7 +1666,7 @@ def inspect_enrollment_bundle(bundle, operator_public, state, replace=False):
         if any(v.file_size > 65536 for v in entries) or sum(v.file_size for v in entries) > 262144:
             raise ValueError("bundle expansion bound")
         enrollment_set = z.read("set.json")
-        verify_operator(operator, enrollment_set, json.loads(z.read("set.classical.json")), z.read("set.mldsa65.sig"))
+        verify_archive_signature(z, operator, enrollment_set)
         raw = z.read("manifest.json")
         manifest = json.loads(raw)
         role = manifest["role"]

@@ -23,6 +23,14 @@ bundle per device.
 - `--request ROLE=FILE`: repeat once for the client and once for every server in the chain.
 - `--vault DIR`: production. Signs with the Nitrokey's FIDO2 Ed25519 credential plus the ML-DSA-65 operator key sealed in the vault (PIN + touch).
 - `--software-operator DIR`: LAB ONLY. Plaintext operator keys.
+- `--pq-vault DIR` (with `--vault`): adds a third signature half, a non-exportable ML-DSA-44
+  FIDO2 credential on a **second, separate key**, so the operator itself stays on its locked
+  key. Today only a Solo 2 Hacker (unlocked) offers ML-DSA-44 in FIDO2. Create it once with
+  keyguard's `enroll-pq-signer` action (given this directory and the operator's vault), which
+  refuses the key holding the operator's credential. `operator.pub` then has schema 3, and every bundle
+  and directory must carry all three halves (`set.mldsa44.json`). Each signing asks for the
+  second key's PIN and touch as well. Plug both keys in: each signing uses the key holding
+  its credential.
 - `--rate`: the constant-rate stream's class (`auto`, `metered`, `standard`, `fast`, or `line`; default `auto`, which selects the fastest class whose outbound cost fits `--allowance-gib` at `--hours-per-day`).
 - `--allowance-gib N`: the smallest hop's monthly outbound data allowance in GiB, used by `--rate auto` and the cost guard. A relay sends the stream on two links (back to the client and on to its next hop), so in a 2- or 3-hop chain the cost counts both.
 - `--hours-per-day H`: expected hours connected per day for the monthly GiB cost calculation (default `8`).

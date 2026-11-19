@@ -209,7 +209,7 @@ with tempfile.TemporaryDirectory() as directory:
     operator_key = managed_profile.SoftwareOperator(Path(directory))
     public_keys = operator_key.public()
     message = managed_profile.canonical(dict(role="client", manifest="vector-manifest", keys=["k1", "k2"]))
-    classical, pq_signature = operator_key.sign(message)
+    classical, pq_signature, _ = operator_key.sign(message)
     managed_profile.verify_operator(public_keys, message, classical, pq_signature)
     expect(True, "SoftwareOperator dual signature verifies (both halves over the same bytes)")
 

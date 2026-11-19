@@ -1964,6 +1964,12 @@ def build_parser():
     signer.add_argument("--vault", type=Path, help="Nitrokey vault: hardware-signed operator (production)")
     signer.add_argument("--software-operator", type=Path, help="LAB ONLY: plaintext operator keys in this directory")
     init.add_argument(
+        "--pq-vault",
+        type=Path,
+        help="with --vault: the vault of a second key's ML-DSA-44 credential (keyguard enroll-pq-signer), "
+        "added as a third operator signature half",
+    )
+    init.add_argument(
         "--rate",
         choices=["auto", *RATE_CLASSES],
         default="auto",
@@ -2219,7 +2225,11 @@ def dispatch(a):
         if any(len(x) != 2 for x in standby):
             raise ValueError("--standby-exit takes NAME=IP:PORT")
         rotate = tuple(int(x) for x in a.rotate_seconds.split(","))
-        signer_impl = HardwareOperator(a.vault) if a.vault else SoftwareOperator(a.software_operator.resolve())
+        if a.pq_vault and not a.vault:
+            raise ValueError("--pq-vault needs --vault (it adds to a hardware operator)")
+        signer_impl = (
+            HardwareOperator(a.vault, a.pq_vault) if a.vault else SoftwareOperator(a.software_operator.resolve())
+        )
         dns_arg = (
             dict(
                 upstream="1.1.1.1:853",

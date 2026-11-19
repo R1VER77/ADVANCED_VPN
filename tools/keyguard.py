@@ -260,9 +260,29 @@ def eligible(info):
     return "hmac-secret" in (info.extensions or []) and (options.get("clientPin") is True or options.get("uv") is True)
 
 
-def client():
-    """Open the one eligible hmac-secret FIDO2 device. A PIN typed on this computer comes
-    from `pinentry` and is never retried; a key that verifies on the device asks there."""
+def holds(device, credential_id):
+    """Whether `device` holds this credential: a silent lookup (no touch, no PIN, no
+    signature kept), which is how a client picks among several keys."""
+    from fido2.ctap import CtapError
+    from fido2.ctap2 import Ctap2
+
+    try:
+        Ctap2(device).get_assertion(
+            RP, os.urandom(32), [{"type": "public-key", "id": credential_id}], options={"up": False}
+        )
+    except CtapError as e:
+        if e.code == CtapError.ERR.NO_CREDENTIALS:
+            return False
+        raise
+    return True
+
+
+def client(credential_id=None, require=None, exclude=None):
+    """Open the one eligible hmac-secret FIDO2 device: the one holding `credential_id`
+    when several are present, only keys `require(info)` accepts, and never one holding
+    the credential `exclude`. A PIN typed on this
+    computer comes from `pinentry` and is never retried; a key that verifies on the device
+    asks there."""
     from fido2.hid import CtapHidDevice
     from fido2.ctap2 import Ctap2
     from fido2.client import Fido2Client, DefaultClientDataCollector, UserInteraction
@@ -271,10 +291,24 @@ def client():
     found = []
     for d in CtapHidDevice.list_devices():
         info = Ctap2(d).info
-        if eligible(info):
+        if eligible(info) and (require is None or require(info)):
             found.append(d)
         else:
             d.close()
+    if exclude is not None:
+        kept = [d for d in found if not holds(d, exclude)]
+        for d in found:
+            if d not in kept:
+                d.close()
+        if found and not kept:
+            raise RuntimeError("the only suitable key holds the operator's credential: use a separate key")
+        found = kept
+    if credential_id is not None and len(found) > 1:
+        holding = [d for d in found if holds(d, credential_id)]
+        for d in found:
+            if d not in holding:
+                d.close()
+        found = holding
     if len(found) != 1:
         for d in found:
             d.close()
@@ -348,6 +382,102 @@ def enroll(vault):
         device.close()
 
 
+# An optional third operator half: a non-exportable ML-DSA-44 FIDO2 credential (COSE -48),
+# on keys that offer one (Solo 2's Hacker build). Kept in its own record beside the vault's.
+MLDSA44 = -48
+PQ_SIGNER = "credential-mldsa44.json"
+
+
+def offers_mldsa44(info):
+    """Whether a key's GetInfo lists ML-DSA-44 (COSE -48) credentials."""
+    return any(a.get("alg") == MLDSA44 for a in (info.algorithms or []))
+
+
+def _pq_signer(vault):
+    meta = json.loads(read_private(vault / PQ_SIGNER))
+    if meta["schema"] != 1 or meta["rp"] != RP:
+        raise ValueError("credential policy mismatch")
+    return meta
+
+
+def enroll_pq_signer(vault, operator_vault):
+    """Create the operator's ML-DSA-44 FIDO2 credential in its own vault (PIN + touch), on
+    a key that offers ML-DSA-44 (a Solo 2 Hacker) and is NOT the one holding the operator's
+    credential: the operator stays on a locked key, and an unlocked one adds only this half.
+    Refused unless the key returns exactly ML-DSA-44."""
+    from fido2.server import Fido2Server
+    from fido2.webauthn import Aaguid, AttestedCredentialData, PublicKeyCredentialParameters, PublicKeyCredentialType
+
+    vault, operator_vault = vault.resolve(), operator_vault.resolve()
+    if vault == operator_vault:
+        raise ValueError("the ML-DSA-44 credential needs its own vault, apart from the operator's")
+    meta = json.loads(read_private(operator_vault / "credential.json"))
+    if meta["schema"] != 1 or meta["rp"] != RP:
+        raise ValueError("credential policy mismatch")
+    operator_credential = AttestedCredentialData(unb64(meta["credential"])).credential_id
+    if vault.exists():
+        raise ValueError("%s already exists" % vault)
+    device, c = client(require=offers_mldsa44, exclude=operator_credential)
+    try:
+        if holds(device, operator_credential):
+            raise RuntimeError("this key holds the operator's credential: use a separate key for ML-DSA-44")
+        s = Fido2Server({"id": RP, "name": "ADVANCED VPN"}, attestation="none")
+        s.allowed_algorithms = [PublicKeyCredentialParameters(type=PublicKeyCredentialType.PUBLIC_KEY, alg=MLDSA44)]
+        options, state = s.register_begin(
+            {"id": os.urandom(32), "name": "operator", "displayName": "VPN operator (ML-DSA-44)"},
+            resident_key_requirement="discouraged",
+            user_verification="required",
+        )
+        response = c.make_credential(replace(options.public_key, timeout=90000))
+        auth = s.register_complete(state, response)
+        if auth.credential_data.public_key.ALGORITHM != MLDSA44:
+            raise RuntimeError("the key returned another algorithm than ML-DSA-44")
+        kept = AttestedCredentialData.create(
+            Aaguid(bytes(16)), auth.credential_data.credential_id, auth.credential_data.public_key
+        )
+        value = dict(schema=1, rp=RP, credential=b64(bytes(kept)), counter=auth.counter)
+        vault.mkdir(mode=0o700, parents=False, exist_ok=False)
+        atomic(vault / PQ_SIGNER, json.dumps(value).encode())
+    finally:
+        device.close()
+
+
+def pq_signer_public(vault):
+    """The ML-DSA-44 credential's COSE public key, or None when the vault has none."""
+    return public_key_of(_pq_signer(vault)["credential"]) if (vault / PQ_SIGNER).exists() else None
+
+
+def pq_signer_assertion(vault, message):
+    """One PIN + touch: the ML-DSA-44 credential's assertion over SHA-256(message)."""
+    from fido2.server import Fido2Server
+    from fido2.webauthn import AttestedCredentialData
+
+    meta = _pq_signer(vault)
+    credential = AttestedCredentialData(unb64(meta["credential"]))
+    device, c = client(credential.credential_id)
+    try:
+        s = Fido2Server({"id": RP, "name": "ADVANCED VPN"})
+        options, state = s.authenticate_begin(
+            [credential], user_verification="required", challenge=hashlib.sha256(message).digest()
+        )
+        if not holds(device, credential.credential_id):
+            raise RuntimeError("the connected key does not hold the operator's ML-DSA-44 credential")
+        response = c.get_assertion(replace(options.public_key, timeout=90000)).get_response(0)
+        s.authenticate_complete(state, [credential], response)
+        counter = response.response.authenticator_data.counter
+        if (counter or meta["counter"]) and counter <= meta["counter"]:
+            raise RuntimeError("counter did not advance")
+        meta["counter"] = counter
+        atomic(vault / PQ_SIGNER, json.dumps(meta).encode())
+        return dict(
+            authenticator_data=b64(bytes(response.response.authenticator_data)),
+            client_data=b64(bytes(response.response.client_data)),
+            signature=b64(bytes(response.response.signature)),
+        )
+    finally:
+        device.close()
+
+
 def hardware_secret(vault):
     """The vault's hmac-secret and metadata (one PIN + touch)."""
     secret, meta, _ = hardware_assertion(vault)
@@ -375,7 +505,7 @@ def hardware_assertion(vault, message=None, salt2=None):
     if meta["schema"] != 1 or meta["rp"] != RP:
         raise ValueError("credential policy mismatch")
     credential = AttestedCredentialData(unb64(meta["credential"]))
-    device, c = client()
+    device, c = client(credential.credential_id)
     try:
         s = Fido2Server({"id": RP, "name": "ADVANCED VPN"})
         options, state = s.authenticate_begin(
@@ -717,8 +847,9 @@ def main():
 
     ctypes.CDLL(None).prctl(4, 0, 0, 0, 0)  # PR_SET_DUMPABLE=0
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("action", choices=["enroll", "seal", "run", "mesh-seal", "mesh-sign"])
+    p.add_argument("action", choices=["enroll", "enroll-pq-signer", "seal", "run", "mesh-seal", "mesh-sign"])
     p.add_argument("--vault", type=Path, required=True)
+    p.add_argument("--operator-vault", type=Path, help="with enroll-pq-signer: the operator's (locked key's) vault")
     p.add_argument("--config", type=Path)
     p.add_argument("--binary", type=Path)
     p.add_argument("--check", action="store_true")
@@ -734,6 +865,12 @@ def main():
     if a.action == "enroll":
         enroll(a.vault)
         print("New hardware credential enrolled; existing credentials and PIN unchanged.")
+        return
+    if a.action == "enroll-pq-signer":
+        if a.operator_vault is None:
+            raise ValueError("enroll-pq-signer needs --operator-vault (the locked key's vault)")
+        enroll_pq_signer(a.vault, a.operator_vault)
+        print("ML-DSA-44 operator credential added: operator signatures now carry three halves.")
         return
     if a.action == "mesh-seal":
         if not (a.key and a.cert and a.envelope):

@@ -61,6 +61,15 @@ See [build inputs](evidence/SOLO2_PC_BUILD_20261119.json) and
 GetInfo reports FIDO 2.3, hmac-secret, PIN/UV protocols 2 and 1, and ES256, EdDSA and
 ML-DSA-44 (COSE -48) credentials. Every operation passed on protocol 2.
 
+**Third operator half.** The lab runs a second instance on other ports
+(`AVPN_CTAPHID_PORTS`, its own flash file) as a separate key. It checks that
+`keyguard enroll-pq-signer` refuses the key holding the operator's credential. It then
+creates the ML-DSA-44 credential on the second key, signs with all three halves (each key
+picked by the credential it holds), and requires refusal of a wrong message, a missing
+ML-DSA-44 half and a tampered one. The signed client enrollment then goes through the real
+bundle writer and reader with three halves. On a real Solo 2 only the Hacker build offers
+FIDO2 ML-DSA-44 (`mldsa44-fido`); the Secure build does not.
+
 ## TKey (tkey-qemu)
 
 See [build inputs](evidence/TKEY_QEMU_BUILD_20261119.json) and

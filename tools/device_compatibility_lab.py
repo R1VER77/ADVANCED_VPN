@@ -11,6 +11,7 @@ the production credential, signature, KEM and sealing code runs unchanged.
 """
 
 import argparse
+import contextlib
 import hashlib
 import json
 import os
@@ -24,6 +25,7 @@ import socket
 import subprocess
 import sys
 import time
+import traceback
 from unittest import mock
 import uuid
 
@@ -55,6 +57,8 @@ BACKENDS = {
         "project's (upstream's PC runner serves none), its RNG is seeded with zeros and presence is always "
         "granted. Not a Solo 2 Secure or Hacker qualification.",
         args=("--ignored", "--exact", "serve_ctaphid_over_udp", "--test-threads=1"),
+        # A second instance on other ports: a separate key for the ML-DSA-44 operator half.
+        second_ports=(8113, 7114),
     ),
     "tkey-qemu": dict(
         source=TKEY_SOURCE,
@@ -92,26 +96,26 @@ def isolated_environment():
         raise RuntimeError("virtual test requires a private loopback-only network")
 
 
-def udp_device(timeout=4):
+def udp_device(timeout=4, local=7112, remote=8111):
     """Transport real 64-byte upstream PC CTAPHID frames, not simulated crypto results."""
     from fido2.hid import CtapHidConnection, CtapHidDevice, HidDescriptor
 
     class Connection(CtapHidConnection):
         def __init__(self):
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            self.sock.bind(("127.0.0.1", 7112))
+            self.sock.bind(("127.0.0.1", local))
             self.sock.settimeout(timeout)
 
         def read_packet(self):
             data, address = self.sock.recvfrom(65)
-            if len(data) != 64 or address != ("127.0.0.1", 8111):
+            if len(data) != 64 or address != ("127.0.0.1", remote):
                 raise ValueError("invalid simulator response frame")
             return data
 
         def write_packet(self, data):
             if len(data) != 64:
                 raise ValueError("invalid outbound simulator frame")
-            self.sock.sendto(data, ("127.0.0.1", 8111))
+            self.sock.sendto(data, ("127.0.0.1", remote))
 
         def close(self):
             self.sock.close()
@@ -210,7 +214,7 @@ def tkey_start(work, log):
     return processes, str(fido)
 
 
-def operations(work, result, test_pin, device=udp_device):
+def operations(work, result, test_pin, device=udp_device, second_key=None):
     """Exercise shipping key/sealing/enrollment code with the actual authenticator."""
     import hardware_setup_test
     import keyguard
@@ -236,7 +240,7 @@ def operations(work, result, test_pin, device=udp_device):
         result["default_credential_cose_algorithm"] = keyguard._verifying_key(keyguard.credential_public(vault)).get(3)
         signer = managed_profile.HardwareOperator(vault)
         message = secrets.token_bytes(32)
-        classical, pq = signer.sign(message)
+        classical, pq, _ = signer.sign(message)
         managed_profile.verify_operator(signer.public(), message, classical, pq)
         wrong_message_refused = False
         try:
@@ -266,6 +270,59 @@ def operations(work, result, test_pin, device=udp_device):
             invalid_fido_half_refused=True,
             invalid_mldsa_half_refused=True,
         )
+        offers = any(a.get("alg") == keyguard.MLDSA44 for a in result["get_info"]["algorithms"] or [])
+
+        def both_keys():
+            return mock.patch.object(CtapHidDevice, "list_devices", side_effect=lambda: iter([device(), second_key()]))
+
+        if offers and second_key is not None:
+            # Third operator half: a non-exportable ML-DSA-44 credential on a SEPARATE key (in
+            # practice an unlocked Solo 2 Hacker, the only build offering it), so the operator's
+            # own credential stays on its locked key. Refused on the operator's key first.
+            try:
+                keyguard.enroll_pq_signer(work / "pq-on-operator-key", vault)
+            except RuntimeError:
+                pass
+            else:
+                raise AssertionError("an ML-DSA-44 credential on the operator's own key was accepted")
+            pq_vault = work / "pq-signer-vault"
+            with both_keys():
+                keyguard.enroll_pq_signer(pq_vault, vault)
+                signer = managed_profile.HardwareOperator(vault, pq_vault)
+                public = signer.public()
+                if public["schema"] != 3:
+                    raise AssertionError("operator did not publish its ML-DSA-44 key")
+                classical, pq, hardware_pq = signer.sign(message)
+            managed_profile.verify_operator(public, message, classical, pq, hardware_pq)
+            tampered = dict(hardware_pq)
+            flipped = bytearray(keyguard.unb64(hardware_pq["signature"]))
+            flipped[-1] ^= 1
+            tampered["signature"] = keyguard.b64(bytes(flipped))
+            for args in (
+                (message + b"wrong", classical, pq, hardware_pq),
+                (message, classical, pq, None),
+                (message, classical, pq, tampered),
+            ):
+                try:
+                    managed_profile.verify_operator(public, *args)
+                except (ValueError, InvalidSignature):
+                    continue
+                raise AssertionError("an operator signature without a valid ML-DSA-44 half was accepted")
+            result["phases"]["hardware_mldsa44_operator"] = dict(
+                separate_key=True,
+                operator_key_refused=True,
+                cose_algorithm=keyguard._verifying_key(public["hardware_mldsa44"]).ALGORITHM,
+                signature_bytes=len(keyguard.unb64(hardware_pq["signature"])),
+                three_halves_verified=True,
+                wrong_message_refused=True,
+                missing_mldsa44_half_refused=True,
+                invalid_mldsa44_half_refused=True,
+            )
+        else:
+            result["phases"]["hardware_mldsa44_operator"] = dict(
+                supported=False,
+                reason="no second key in this backend" if offers else "GetInfo lists no COSE -48",
+            )
         second_salt = secrets.token_bytes(32)
         first, _, assertion, second = keyguard.hardware_assertion(vault, message=message, salt2=second_salt)
         keyguard.verify_assertion(keyguard.credential_public(vault), message, assertion)
@@ -286,12 +343,16 @@ def operations(work, result, test_pin, device=udp_device):
             result["phases"][role + "_key_generation"] = dict(role=request["role"], sealed_keys_opened=len(opened))
         lab = work / "enrollment"
         lab.mkdir(mode=0o700)
-        managed_profile.lab_setup(
-            lab, None, "127.0.0.1:4433", hops=1, protect={"client": "nitrokey"}, vault=vault, operator=signer
-        )
+        three = signer.pq_vault is not None
+        with both_keys() if three else contextlib.nullcontext():
+            managed_profile.lab_setup(
+                lab, None, "127.0.0.1:4433", hops=1, protect={"client": "nitrokey"}, vault=vault, operator=signer
+            )
         if not (lab / "client/profile.json").is_file():
             raise AssertionError("signed client enrollment not installed")
-        result["phases"]["signed_client_enrollment"] = dict(signed_bundle_imported=True, hybrid_delivery_verified=True)
+        result["phases"]["signed_client_enrollment"] = dict(
+            signed_bundle_imported=True, hybrid_delivery_verified=True, operator_signature_halves=3 if three else 2
+        )
         with mock.patch("fido2.server.Fido2Server", EdOnlyServer):
             edvault = work / "ed25519-vault"
             try:
@@ -379,6 +440,20 @@ def worker(out, vpn_commit, backend="solo1-pc"):
                     stderr=simulator_log,
                 )
             )
+            ports = selected.get("second_ports")
+            if ports:
+                own = work / "second-key"  # its own flash file (solo-state.bin), like a separate device
+                own.mkdir(mode=0o700)
+                processes.append(
+                    subprocess.Popen(
+                        ["/simulator", *selected.get("args", ())],
+                        cwd=own,
+                        env=dict(environment, AVPN_CTAPHID_PORTS="%d,%d" % ports),
+                        stdin=subprocess.DEVNULL,
+                        stdout=simulator_log,
+                        stderr=simulator_log,
+                    )
+                )
             time.sleep(0.5)
 
             def connect():
@@ -410,14 +485,28 @@ def worker(out, vpn_commit, backend="solo1-pc"):
             ClientPin(ctap).set_pin(test_pin)  # Only the isolated disposable software token.
         finally:
             device.close()
+        second_key = None
+        if selected.get("second_ports"):
+
+            def second_key():
+                return udp_device(4, local=selected["second_ports"][1], remote=selected["second_ports"][0])
+
+            other = second_key()
+            try:
+                ClientPin(Ctap2(other)).set_pin(test_pin)  # the separate key gets the same test PIN
+            finally:
+                other.close()
         result["stage"] = "production_vpn_operations"
-        operations(work, result, test_pin, connect)
+        operations(work, result, test_pin, connect, second_key)
         if any(p.poll() is not None for p in processes):
             raise RuntimeError("simulator terminated during operations")
         result["status"] = "passed_key_sealing_operator_and_enrollment_operations"
         result["stage"] = "completed"
     except Exception as error:
         result["error_type"] = type(error).__name__
+        # Where it was raised (file, line, function): no values, so nothing secret.
+        frames = traceback.extract_tb(error.__traceback__)
+        result["error_at"] = ["%s:%d %s" % (Path(f.filename).name, f.lineno, f.name) for f in frames[-4:]]
         code = getattr(error, "code", None)
         if code is not None:
             result["ctap_error_code"] = int(code)
