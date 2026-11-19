@@ -1,0 +1,44 @@
+{
+  "schema": 1,
+  "status": "built_actual_upstream_canokey_udp_authenticator",
+  "source_repository": "https://github.com/canokeys/canokey-core",
+  "source_commit": "a349b268e12953dd85169e9649091c4f91ce7c68",
+  "submodule_revisions": [
+    " f9382dc23ea330521ad0874b669826702fea790b canokey-crypto (f9382dc)",
+    " 0ef26791ceb1445b0563c40b8e2c073000245a7d canokey-crypto/tf-psa-crypto (v1.1.0-132-g0ef26791c)",
+    " 5772b4f4a0105694b1203abb582273f78fa951b7 canokey-crypto/tf-psa-crypto/drivers/pqcp/mldsa-native (remotes/origin/main-53-g5772b4f)",
+    " e79f4fdd4877e79a92e6b1e5965132ff0c5cc729 canokey-crypto/tf-psa-crypto/framework (mbedtls-4.1.0_tf-psa-crypto-1.1.0-30-ge79f4fdd4)",
+    " d2cae2be522a67bfae26100fdb520576f1b2ef90 canokey-crypto/third_party/mlkem-native (v1.1.0)",
+    " 6cb4e86540eca0d9ba62500a298385c9d863c8be littlefs (v2.11.3)",
+    " 6442e749ca811e24afad1551338a45c75e09808f tinycbor (v0.6.1-51-g6442e74)"
+  ],
+  "binary_sha256": "4e7eadd160de8edaf6093e970351f17bf12f0aa1032885909d9d5acd0249904c",
+  "image_id": "sha256:7d8c8a77ed691398728798f46c165c1a1d440aa713d3cb2f0468579fb2f5c53d",
+  "build_flags": {
+    "ENABLE_TESTS": "ON",
+    "ENABLE_DEBUG_OUTPUT": "OFF",
+    "CMAKE_BUILD_TYPE": "Debug"
+  },
+  "target": "fido-hid-over-udp",
+  "build_command": [
+    "cmake",
+    "--build",
+    "build",
+    "--target",
+    "fido-hid-over-udp",
+    "--parallel",
+    "2"
+  ],
+  "container_network": "none",
+  "build_user": 1000,
+  "sanitizers": "upstream ENABLE_TESTS enables ASan/UBSan",
+  "build_log_sha256": "4561698c2375e57615ca95d0b64d8b3b738434db9525fca8a3d56050e4ae50a6",
+  "image_recipe_sha256": "db7be075685d770837c8a5fd80b826b5cddf9be3d40edbf16c2c1bb51b59e6bd",
+  "upstream_crypto_build_patch": {
+    "path": "canokey-crypto/tf-psa-crypto-ed25519.patch",
+    "sha256": "42b1218edf34b4172a2889d9318a8da53b9020698f354a8c8bb52f0c8b936647",
+    "applied_by": "upstream canokey-crypto CMake configuration"
+  },
+  "local_firmware_source_patches": false,
+  "physical_device_qualified": false
+}

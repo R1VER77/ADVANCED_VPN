@@ -1,0 +1,44 @@
+{
+  "schema": 1,
+  "scope": "supplied_formal_proposals_checked_with_actual_Tamarin_not_accepted_as_proofs",
+  "original_cloak_wellformedness_refused_by_updated_driver": true,
+  "original_cloak_exit_code": 1,
+  "other_models": [
+    {
+      "model": "credits",
+      "source_sha256": "8dd6f06c5e206a72e61e2e5dedd64aee4187f7a74949b5c05fa190b8fd241473",
+      "exit_code": 0,
+      "summary": "summary of summaries:\n\nanalyzed: /home/debian/Documents/CYPHERPUNK/research-review-20261119/formal-proposal/formal/credits/credits.spthy\n\n  processing time: 0.29s\n  \n  executable (all-traces): falsified - found trace (2 steps)\n  no_double_spend (all-traces): verified (2 steps)\n  issuer_only (all-traces): verified (3 steps)\n\n==============================================================================\n",
+      "log_sha256": "9fae278a4490bb5a754ae5e9b4740aa5dc95545404b9658cebe7f560bc96aa7f"
+    },
+    {
+      "model": "enrollment",
+      "source_sha256": "164f30697e690d1812679f5f205e64da7ec4fb3ede1585b082aa8a28c05ce8d8",
+      "exit_code": 1,
+      "summary": "maude tool: 'maude'\n checking version: 3.5.1. OK.\n checking installation: OK.\n\"/home/debian/Documents/CYPHERPUNK/research-review-20261119/formal-proposal/formal/enrollment/enrollment.spthy\" (line 53, column 32):\nunexpected \"(\"\nexpecting letter or digit, \".\", \",\" or \")\"\n",
+      "log_sha256": "08e8342c11513df716897d503463713adef132c1623b1048d71f23a8c767e753"
+    },
+    {
+      "model": "kem_seal",
+      "source_sha256": "c726c52b74b8d4e6ec2c8d8e2a96365e608e1386dd1b45fa3a91a733e6553ac2",
+      "exit_code": 1,
+      "summary": "maude tool: 'maude'\n checking version: 3.5.1. OK.\n checking installation: OK.\n\"/home/debian/Documents/CYPHERPUNK/research-review-20261119/formal-proposal/formal/kem_seal/kem_seal.spthy\" (line 45, column 10):\nunexpected \"(\"\nexpecting letter or digit, \".\", \"XOR\", \"\u2295\", \",\" or \")\"\n",
+      "log_sha256": "d8ee95b64e3020c3bf5414b6d4f1c8d123bb98648f5ecffc91d181d93f6af176"
+    },
+    {
+      "model": "link",
+      "source_sha256": "9f03c573ff1e624ffe6c62922dc8d9e13342788a7a16afbff6d479dbce2bce95",
+      "exit_code": 1,
+      "summary": "maude tool: 'maude'\n checking version: 3.5.1. OK.\n checking installation: OK.\n\"/home/debian/Documents/CYPHERPUNK/research-review-20261119/formal-proposal/formal/link/link.spthy\" (line 65, column 20):\nunexpected \"(\"\nexpecting letter or digit, \".\", \"XOR\", \"\u2295\", \",\" or \">\"\n",
+      "log_sha256": "a885d442f63eeda760688fd7eaed863059bf4530ecc3056e6dd8099d30e83499"
+    },
+    {
+      "model": "ohttp",
+      "source_sha256": "a777aa857d0d873d92dabf86257b0f5f45d836e779833f80528199ebb0098ccb",
+      "exit_code": 1,
+      "summary": "maude tool: 'maude'\n checking version: 3.5.1. OK.\n checking installation: OK.\n\"/home/debian/Documents/CYPHERPUNK/research-review-20261119/formal-proposal/formal/ohttp/ohttp.spthy\" (line 47, column 13):\nunexpected \"(\"\nexpecting letter or digit, \".\", \",\" or \")\"\n",
+      "log_sha256": "b468cb1500391a25a30e4d95ed969426fd0174df182525d4eaaf3cbc0ea65a54"
+    }
+  ],
+  "correction": "Only the corrected cloak model is integrated; no proof_matches/one_redeem_per_token conclusion restriction is used in it."
+}

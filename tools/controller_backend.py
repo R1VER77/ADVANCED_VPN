@@ -337,6 +337,10 @@ def main():
                 method, value = request["method"], request.get("value")
                 if method == "GetSnapshot":
                     result = controller_status.snapshot(STATE)
+                elif method == "SearchProviders":
+                    import search_providers
+
+                    result = search_providers.search(search_providers.shipped_index(), value)
                 elif method == "GetSetup":
                     with broker.lock:
                         busy = any(

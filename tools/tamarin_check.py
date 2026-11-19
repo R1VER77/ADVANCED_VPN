@@ -19,6 +19,13 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 
 MODELS = {
+    "formal/cloak/cloak.spthy": [
+        "executable",
+        "channel_binding",
+        "key_holder_only",
+        "server_confirmation",
+        "no_reflection",
+    ],
     "formal/dcnet/dcnet.spthy": ["keys_secret", "frame_authenticity", "cancellation"],
     "formal/dcnet/dcnet_authenticity.spthy": ["keys_secret", "frame_authenticity", "executable_accept"],
     "formal/dcnet/dcnet_no_collusion.spthy": ["pad_secrecy_without_collusion"],
@@ -55,6 +62,30 @@ MODELS = {
 # Broken variants the prover must falsify, so a lemma cannot pass by being vacuous or
 # by not depending on what it is meant to protect: (model, [(text, replacement)], lemma).
 MUTANTS = [
+    (
+        "formal/cloak/cloak.spthy",
+        [
+            (
+                "mac(ck, <'advanced-vpn/cloak/v2/client', exporter>)",
+                "mac(ck, 'advanced-vpn/cloak/v2/client')",
+            ),
+            (
+                "mac(ck, <'advanced-vpn/cloak/v2/server', exporter>)",
+                "mac(ck, 'advanced-vpn/cloak/v2/server')",
+            ),
+        ],
+        "channel_binding",
+    ),
+    (
+        "formal/cloak/cloak.spthy",
+        [("In(client_proof) ]", "In(arbitrary) ]")],
+        "key_holder_only",
+    ),
+    (
+        "formal/cloak/cloak.spthy",
+        [("'advanced-vpn/cloak/v2/server'", "'advanced-vpn/cloak/v2/client'")],
+        "no_reflection",
+    ),
     (
         "formal/dcnet/dcnet_authenticity.spthy",
         [("In(<r, f, h(<'dc-mac', kc, r, f>)>)", "In(<r, f, mac>)")],
@@ -154,7 +185,7 @@ def prove(model, timeout, lemma=None, path=None):
     start = time.monotonic()
     try:
         r = subprocess.run(
-            ["tamarin-prover", "--prove" + ("=" + lemma if lemma else ""), str(path or ROOT / model)],
+            ["tamarin-prover", "--quit-on-warning", "--prove" + ("=" + lemma if lemma else ""), str(path or ROOT / model)],
             capture_output=True,
             text=True,
             timeout=timeout,
@@ -182,8 +213,11 @@ def main():
         lemmas, seconds, code = prove(model, a.timeout)
         results[model] = dict(
             seconds=seconds,
+            exit_code=code,
             lemmas={k: dict(kind=v[0], result=v[1], steps=v[2]) for k, v in lemmas.items()},
         )
+        if code != 0:
+            failed.append("%s: prover failed (%s)" % (model, code))
         for lemma in expected:
             got = lemmas.get(lemma)
             ok = got is not None and got[1] == "verified"
@@ -208,7 +242,7 @@ def main():
         result = got.get(lemma, (None, "MISSING (%s)" % code, 0))[1]
         mutants.append(dict(model=model, lemma=lemma, edits=len(edits), result=result, seconds=seconds))
         print("%-55s %-34s %s (mutant: must be falsified)" % (model, lemma, result))
-        if not result.startswith("falsified"):
+        if code != 0 or not result.startswith("falsified"):
             failed.append("%s: mutant of %s was not falsified (%s)" % (model, lemma, result))
     if a.json:
         a.json.write_text(

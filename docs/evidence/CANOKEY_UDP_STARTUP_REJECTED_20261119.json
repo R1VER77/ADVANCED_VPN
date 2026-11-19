@@ -1,0 +1,77 @@
+{
+  "schema": 1,
+  "scope": "preserved_laboratory_startup_timeouts_not_device_incompatibility",
+  "cause": "upstream fabrication performs five timed presence stages; the first handshake deadline was shorter than startup",
+  "correction": "30-second first HID initialization only; ordinary operations keep the existing deadline",
+  "results": [
+    {
+      "trial": "canokey-trial-a",
+      "result": {
+        "schema": 1,
+        "status": "failed",
+        "scope": "actual_canokey_core_firmware_with_udp_ctaphid_transport_and_production_vpn_crypto",
+        "backend": "canokey-udp",
+        "vpn_source_commit": "ae7cd8c155f419a1ee91d0f8175060224344aa13",
+        "firmware_source_commit": "a349b268e12953dd85169e9649091c4f91ce7c68",
+        "firmware_build": "upstream fido-hid-over-udp; ENABLE_TESTS=ON; ASan/UBSan; simulated presence",
+        "binary_sha256": "4e7eadd160de8edaf6093e970351f17bf12f0aa1032885909d9d5acd0249904c",
+        "harness_sha256": "b11d60834b507216499a90b09f31103ea3addac2752bf2fe66b9445ca7f3dfea",
+        "started": 1795069495.0630434,
+        "phases": {},
+        "physical_device_tested": false,
+        "tunnel_connection_tested": false,
+        "strict_hardware_eligible": false,
+        "strict_block_reason": "CTAP PIN/UV protocols 1/2 use P-256; choosing Ed25519 does not change this channel",
+        "limitations": [
+          "Upstream virtual firmware, not a shipped CanoKey Pigeon/Canary qualification.",
+          "Actual CTAPHID uses UDP transport; USB permissions and physical security are not tested.",
+          "No native PIN/presence UI, live tunnel or strict all-interface PQ qualification.",
+          "Only test discovery/transport/PIN input are substituted; production crypto is unchanged."
+        ],
+        "error_type": "TimeoutError",
+        "disposable_secret_state_removed": true,
+        "stopped": 1795069504.5689182,
+        "production_source_sha256": {
+          "keyguard.py": "936fcf31e235b2ee5dc8030b6c6f7868e13fd919b4f8e90d90cb07886e04d3a7",
+          "managed_profile.py": "a31fc89b631a0237d8b5428db7be6a51c326e6cafeb4cc714dcc8c0310c62303",
+          "hardware_setup_test.py": "277c21fea4a5644541aac8a9436d2cdf7b3ed500b935190cc098276d025a81bf"
+        }
+      }
+    },
+    {
+      "trial": "canokey-trial-b",
+      "result": {
+        "schema": 1,
+        "status": "failed",
+        "scope": "actual_canokey_core_firmware_with_udp_ctaphid_transport_and_production_vpn_crypto",
+        "backend": "canokey-udp",
+        "vpn_source_commit": "ae7cd8c155f419a1ee91d0f8175060224344aa13",
+        "firmware_source_commit": "a349b268e12953dd85169e9649091c4f91ce7c68",
+        "firmware_build": "upstream fido-hid-over-udp; ENABLE_TESTS=ON; ASan/UBSan; simulated presence",
+        "binary_sha256": "4e7eadd160de8edaf6093e970351f17bf12f0aa1032885909d9d5acd0249904c",
+        "harness_sha256": "1cd503d1bcbbec70c74231b4a237d9d6b7e81e83801fcc7a40af11299fe08451",
+        "started": 1795069532.3899236,
+        "phases": {},
+        "physical_device_tested": false,
+        "tunnel_connection_tested": false,
+        "strict_hardware_eligible": false,
+        "strict_block_reason": "CTAP PIN/UV protocols 1/2 use P-256; choosing Ed25519 does not change this channel",
+        "limitations": [
+          "Upstream virtual firmware, not a shipped CanoKey Pigeon/Canary qualification.",
+          "Actual CTAPHID uses UDP transport; USB permissions and physical security are not tested.",
+          "No native PIN/presence UI, live tunnel or strict all-interface PQ qualification.",
+          "Only test discovery/transport/PIN input are substituted; production crypto is unchanged."
+        ],
+        "stage": "ctaphid_initialization",
+        "error_type": "TimeoutError",
+        "disposable_secret_state_removed": true,
+        "stopped": 1795069541.898597,
+        "production_source_sha256": {
+          "keyguard.py": "936fcf31e235b2ee5dc8030b6c6f7868e13fd919b4f8e90d90cb07886e04d3a7",
+          "managed_profile.py": "a31fc89b631a0237d8b5428db7be6a51c326e6cafeb4cc714dcc8c0310c62303",
+          "hardware_setup_test.py": "277c21fea4a5644541aac8a9436d2cdf7b3ed500b935190cc098276d025a81bf"
+        }
+      }
+    }
+  ]
+}

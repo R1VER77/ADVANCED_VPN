@@ -1,0 +1,45 @@
+{
+  "schema": 1,
+  "tool": "tamarin-prover 1.12.0, (C) David Basin, Cas Cremers, Jannik Dreier, Simon Meier, Ralf Sasse, Benedikt Schmidt, 2010-2023",
+  "maude": "3.5.1",
+  "date": "2026-11-19",
+  "models": {
+    "formal/dcnet/dcnet.spthy": {
+      "seconds": 35.0,
+      "exit_code": 0,
+      "lemmas": {
+        "keys_secret": {
+          "kind": "all-traces",
+          "result": "verified",
+          "steps": 13
+        },
+        "frame_authenticity": {
+          "kind": "all-traces",
+          "result": "verified",
+          "steps": 260
+        },
+        "cancellation": {
+          "kind": "all-traces",
+          "result": "verified",
+          "steps": 167
+        }
+      }
+    }
+  },
+  "mutants": [
+    {
+      "model": "formal/dcnet/dcnet.spthy",
+      "lemma": "cancellation",
+      "edits": 1,
+      "result": "falsified - found trace",
+      "seconds": 77.1
+    }
+  ],
+  "not_proved": [
+    "DC-net sender anonymity as observational equivalence: --diff with XOR did not terminate, even on the two-party core; the argument is the hand proof in docs/DCNET_CONTROL_DESIGN.md section 6",
+    "DC-net per-round pad secrecy and an existence trace in the multi-round, MAC-authenticated model: did not terminate (single-round versions are proved)",
+    "The 4-member collusion model over full frames (all six pads) did not finish in 25 minutes; the proved model takes the colluders' view, their own pads stripped",
+    "The network chain's forward secrecy for an unbounded number of rounds did not terminate; it is proved unrolled to three rounds with one seizure",
+    "Re-blinding: secrecy of the KEM secret itself, and unlinkability across hop 1 (an equivalence): did not terminate; the construction stays review-pending"
+  ]
+}

@@ -57,6 +57,11 @@ expansion must distinguish a documented provider, authenticated readiness check,
 reviewed resource plan, successful provisioning and complete protection validation.
 The model must not promote an unrecognized interface or device to supported status.
 
+The desktop create screen now provides local discovery across 4,825 pinned OpenTofu
+provider entries. Their IDs/paths were checked against the complete upstream tree.
+Selection does not execute plugins or create resources; the eleven recipe candidates
+are not reviewed runnable recipes. [Evidence](evidence/OPENTOFU_REGISTRY_CHECK_20261119.json).
+
 ## Security keys and wallets
 
 The generic path needs the CTAP capabilities used by the requested operation, including
@@ -84,6 +89,7 @@ and generic FIDO rules can coexist: removing one vendor rule need not remove acc
 | Implementation | Actual software result | Limits |
 |---|---|---|
 | Solo 1 experimental PC firmware, upstream `fc8d286` | Real CTAPHID and production VPN code passed fresh-assertion sealing, tamper refusal, both operator-signature halves with negative controls, two-salt hmac-secret, client/relay/exit key generation and signed client enrollment. Explicit Ed25519 credential and assertion passed. [Evidence](evidence/SOLO1_PC_VPN_OPERATIONS_20261118.json). | Software compatibility for this build; no physical USB/prompt/persistence or live-tunnel qualification. Strict hardware policy remains blocked because PIN/UV uses P-256. |
+| CanoKey upstream UDP virtual firmware, `a349b268` | The same real VPN operations passed, including both signature-half negative controls and actual Ed25519/hmac-secret. [Evidence](evidence/CANOKEY_UDP_VPN_OPERATIONS_20261119.json). | Upstream test build with simulated presence and actual CTAPHID over loopback; not a shipped Pigeon/Canary qualification or tunnel trial. Strict policy remains blocked by PIN/UV P-256. |
 
 The [firmware laboratory](HARDWARE_FIRMWARE_LAB.md) and
 [additional candidate inventory](DEVICE_COMPATIBILITY_VALIDATION.md) keep execution,

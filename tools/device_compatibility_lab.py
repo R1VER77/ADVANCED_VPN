@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Test additional authenticators against real VPN key/enrollment operations.
 
-The first backend is Solo 1's upstream experimental PC authenticator. A private,
+Backends use Solo 1 or CanoKey upstream PC authenticators. A private,
 networkless Docker container transports actual CTAPHID frames over loopback UDP.
 It receives no host USB devices, home directory, credentials or signing keys.
 Only transport/discovery and the virtual token's test PIN input are substituted;
@@ -25,6 +25,21 @@ import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
 SOLO_SOURCE = "fc8d2867c5ba8161302b809c80fa1fd6a4df94a2"
+CANOKEY_SOURCE = "a349b268e12953dd85169e9649091c4f91ce7c68"
+BACKENDS = {
+    "solo1-pc": dict(
+        source=SOLO_SOURCE,
+        scope="actual_solo_pc_firmware_with_udp_ctaphid_transport_and_production_vpn_crypto",
+        build="4.1.5-8-gfc8d286, upstream PC Makefile, SOLO_EXPERIMENTAL=1",
+        limitation="Experimental PC firmware, not a shipped physical Solo 1 qualification.",
+    ),
+    "canokey-udp": dict(
+        source=CANOKEY_SOURCE,
+        scope="actual_canokey_core_firmware_with_udp_ctaphid_transport_and_production_vpn_crypto",
+        build="upstream fido-hid-over-udp; ENABLE_TESTS=ON; ASan/UBSan; simulated presence",
+        limitation="Upstream virtual firmware, not a shipped CanoKey Pigeon/Canary qualification.",
+    ),
+}
 
 
 def digest(path):
@@ -45,15 +60,15 @@ def isolated_environment():
         raise RuntimeError("virtual test requires a private loopback-only network")
 
 
-def solo_device():
-    """Transport real 64-byte Solo PC CTAPHID frames, not simulated crypto results."""
+def udp_device(timeout=4):
+    """Transport real 64-byte upstream PC CTAPHID frames, not simulated crypto results."""
     from fido2.hid import CtapHidConnection, CtapHidDevice, HidDescriptor
 
     class Connection(CtapHidConnection):
         def __init__(self):
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             self.sock.bind(("127.0.0.1", 7112))
-            self.sock.settimeout(4)
+            self.sock.settimeout(timeout)
 
         def read_packet(self):
             data, address = self.sock.recvfrom(65)
@@ -72,8 +87,10 @@ def solo_device():
     connection = Connection()
     try:
         # No vendor/product identifier is forged to make the generic transport
-        # look like a physical Solo unit to production vendor-repair logic.
-        return CtapHidDevice(HidDescriptor("solo-pc-test-udp", 0, 0, 64, 64, "Solo PC test only", None), connection)
+        # look like a physical vendor unit to production repair logic.
+        return CtapHidDevice(
+            HidDescriptor("firmware-test-udp", 0, 0, 64, 64, "Upstream firmware test only", None), connection
+        )
     except BaseException:
         connection.close()
         raise
@@ -96,7 +113,7 @@ def operations(work, result, test_pin):
             self.allowed_algorithms = [PublicKeyCredentialParameters(type=PublicKeyCredentialType.PUBLIC_KEY, alg=-8)]
 
     with (
-        mock.patch.object(CtapHidDevice, "list_devices", side_effect=lambda: iter([solo_device()])),
+        mock.patch.object(CtapHidDevice, "list_devices", side_effect=lambda: iter([udp_device()])),
         mock.patch.object(keyguard, "pinentry", return_value=test_pin),
     ):
         result["phases"]["fresh_assertion_roundtrip"] = hardware_setup_test.roundtrip(work)
@@ -180,7 +197,7 @@ def operations(work, result, test_pin):
                 )
 
 
-def worker(out, vpn_commit):
+def worker(out, vpn_commit, backend="solo1-pc"):
     """Internal container worker; owns disposable state and emits no secret values."""
     isolated_environment()
     from fido2.ctap2 import Ctap2
@@ -188,13 +205,15 @@ def worker(out, vpn_commit):
 
     work = out / "state"
     work.mkdir(mode=0o700)
+    selected = BACKENDS[backend]
     result = dict(
         schema=1,
         status="failed",
-        scope="actual_solo_pc_firmware_with_udp_ctaphid_transport_and_production_vpn_crypto",
+        scope=selected["scope"],
+        backend=backend,
         vpn_source_commit=vpn_commit,
-        firmware_source_commit=SOLO_SOURCE,
-        firmware_build="4.1.5-8-gfc8d286, upstream PC Makefile, SOLO_EXPERIMENTAL=1",
+        firmware_source_commit=selected["source"],
+        firmware_build=selected["build"],
         binary_sha256=digest(Path("/simulator")),
         harness_sha256=digest(Path(__file__)),
         started=time.time(),
@@ -202,15 +221,16 @@ def worker(out, vpn_commit):
         physical_device_tested=False,
         tunnel_connection_tested=False,
         strict_hardware_eligible=False,
-        strict_block_reason="CTAP PIN/UV 1 uses P-256; choosing Ed25519 does not change this channel",
+        strict_block_reason="CTAP PIN/UV protocols 1/2 use P-256; choosing Ed25519 does not change this channel",
         limitations=[
-            "Experimental PC firmware, not a shipped physical Solo 1 qualification.",
+            selected["limitation"],
             "Actual CTAPHID uses UDP transport; USB permissions and physical security are not tested.",
             "No native PIN/presence UI, live tunnel or strict all-interface PQ qualification.",
             "Only test discovery/transport/PIN input are substituted; production crypto is unchanged.",
         ],
     )
     process = None
+    simulator_log = None
 
     def deadline(*_):
         raise TimeoutError("virtual test deadline")
@@ -218,14 +238,34 @@ def worker(out, vpn_commit):
     signal.signal(signal.SIGALRM, deadline)
     signal.alarm(120)
     try:
+        result["stage"] = "simulator_start"
+        simulator_log = (out / "simulator.log").open("xb")
+        environment = dict(os.environ)
+        if backend == "canokey-udp":
+            environment.update(
+                CANOKEY_VIRT_LFS_ROOT=str(work / "device-lfs"),
+                CANOKEY_VIRT_RESET_STORAGE="1",
+                ASAN_OPTIONS="detect_leaks=1:abort_on_error=1",
+                UBSAN_OPTIONS="halt_on_error=1",
+            )
         process = subprocess.Popen(
-            ["/simulator"], cwd=work, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            ["/simulator"],
+            cwd=work,
+            env=environment,
+            stdin=subprocess.DEVNULL,
+            stdout=simulator_log,
+            stderr=simulator_log,
         )
         time.sleep(0.5)
         if process.poll() is not None:
             raise RuntimeError("simulator exited")
-        device = solo_device()
+        result["stage"] = "ctaphid_initialization"
+        # CanoKey's own virtual-card fabrication simulates five timed presence
+        # steps before serving HID. Allow that startup, without weakening the
+        # ordinary operation deadline or the production hardware code.
+        device = udp_device(timeout=30 if backend == "canokey-udp" else 4)
         try:
+            result["stage"] = "get_info"
             ctap = Ctap2(device)
             info = ctap.info
             result["get_info"] = dict(
@@ -235,11 +275,16 @@ def worker(out, vpn_commit):
                 pin_uv_protocols=info.pin_uv_protocols,
             )
             test_pin = secrets.token_hex(8)
+            result["stage"] = "virtual_pin_initialization"
             ClientPin(ctap).set_pin(test_pin)  # Only the isolated disposable software token.
         finally:
             device.close()
+        result["stage"] = "production_vpn_operations"
         operations(work, result, test_pin)
+        if process.poll() is not None:
+            raise RuntimeError("simulator terminated during operations")
         result["status"] = "passed_key_sealing_operator_and_enrollment_operations"
+        result["stage"] = "completed"
     except Exception as error:
         result["error_type"] = type(error).__name__
         code = getattr(error, "code", None)
@@ -254,6 +299,8 @@ def worker(out, vpn_commit):
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.wait(timeout=5)
+        if simulator_log is not None:
+            simulator_log.close()
         shutil.rmtree(work)
         result["disposable_secret_state_removed"] = True
         result["stopped"] = time.time()
@@ -279,8 +326,10 @@ def run(args):
     simulator = args.simulator.resolve(strict=True)
     runtime = args.runtime.resolve(strict=True)
     out = args.out.absolute()
-    if build.get("source_commit") != SOLO_SOURCE or not re.fullmatch(r"sha256:[a-f0-9]{64}", image):
-        raise ValueError("unrecognized Solo PC build identity")
+    if build.get("source_commit") != BACKENDS[args.backend]["source"] or not re.fullmatch(
+        r"sha256:[a-f0-9]{64}", image
+    ):
+        raise ValueError("unrecognized firmware build identity")
     if not simulator.is_file() or digest(simulator) != build["binary_sha256"]:
         raise ValueError("simulator does not match the reviewed build record")
     bundled_runtime.verify(runtime, ROOT / "tools/hardware-requirements.txt")
@@ -308,7 +357,7 @@ def run(args):
         argv.extend(["--mount", f"type=bind,source={source},target={target}" + (",readonly" if readonly else "")])
     argv.extend([
         image, "/runtime/bin/python3", "-B", "-E", "-s", "/src/tools/device_compatibility_lab.py",
-        "--worker", "--out", "/out", "--vpn-source-commit", commit,
+        "--worker", "--out", "/out", "--vpn-source-commit", commit, "--backend", args.backend,
     ])  # fmt: skip
     created = False
     try:
@@ -337,7 +386,7 @@ def run(args):
 def main():
     """Only this explicit laboratory CLI exposes virtual transport, never the broker."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--backend", choices=["solo1-pc"], default="solo1-pc")
+    parser.add_argument("--backend", choices=tuple(BACKENDS), default="solo1-pc")
     parser.add_argument("--simulator", type=Path)
     parser.add_argument("--build-record", type=Path)
     parser.add_argument("--runtime", type=Path)
@@ -347,7 +396,7 @@ def main():
     args = parser.parse_args()
     os.umask(0o077)
     if args.worker:
-        return worker(args.out, args.vpn_source_commit)
+        return worker(args.out, args.vpn_source_commit, args.backend)
     if any(value is None for value in (args.simulator, args.build_record, args.runtime)):
         parser.error("--simulator, --build-record and --runtime are required")
     return run(args)

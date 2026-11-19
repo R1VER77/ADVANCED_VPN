@@ -1,0 +1,87 @@
+// Connection and role binding of the v2 cloak proof in src/cloak.rs.
+// Replaces the supplied proposal's arbitrary-input acceptance rule and
+// proof_matches restriction: acceptance here pattern-matches the actual MAC.
+//
+// ASSUMPTIONS: TLS gives each connection a unique exporter; HMAC is an ideal
+// keyed constructor. Exporters and proofs are public in this conservative
+// abstraction. Provisioning initially shares ck with the two honest roles.
+// An explicit leak rule exposes ck; authentication allows that exception.
+// The two role tags abstract role_proof's client/server domain strings.
+//
+// NOT MODELED: TLS implementation, computational HMAC reduction, packet timing,
+// HTTP decoy indistinguishability, real-time deadlines or the full VPN composition.
+// This proves no traffic-analysis or information-theoretic anonymity claim.
+//
+// MUTANTS: remove exporters from both role proofs -> channel_binding fails;
+// skip the input MAC check -> key_holder_only fails; merge role tags ->
+// no_reflection fails. The CI driver checks these counterexamples separately.
+
+theory cloak_v2
+begin
+
+functions: mac/2
+
+rule enroll:
+  [ Fr(~ck) ]
+  --[ CloakEnrolled(~ck) ]->
+  [ !ClientKey(~ck), !ServerKey(~ck) ]
+
+rule connect:
+  [ Fr(~exporter) ]
+  --[ TlsConnection(~exporter) ]->
+  [ !Connection(~exporter), Out(~exporter) ]
+
+rule leak:
+  [ !ServerKey(ck) ]
+  --[ CloakLeaked(ck) ]->
+  [ Out(ck) ]
+
+rule client_proof:
+  let proof = mac(ck, <'advanced-vpn/cloak/v2/client', exporter>)
+  in
+  [ !ClientKey(ck), !Connection(exporter) ]
+  --[ ClientProofSent(ck, exporter, proof) ]->
+  [ Out(proof), AwaitConfirmation(ck, exporter) ]
+
+rule server_accept:
+  let client_proof = mac(ck, <'advanced-vpn/cloak/v2/client', exporter>)
+      server_proof = mac(ck, <'advanced-vpn/cloak/v2/server', exporter>)
+  in
+  [ !ServerKey(ck), !Connection(exporter), In(client_proof) ]
+  --[ TunnelAccepted(ck, exporter, client_proof), ServerProofSent(ck, exporter, server_proof) ]->
+  [ Out(server_proof) ]
+
+rule client_confirm:
+  let proof = mac(ck, <'advanced-vpn/cloak/v2/server', exporter>)
+  in
+  [ AwaitConfirmation(ck, exporter), In(proof) ]
+  --[ ClientConfirmed(ck, exporter, proof) ]->
+  []
+
+// Existential sanity: a complete mutually authenticated exchange is reachable.
+lemma executable:
+  exists-trace
+  "Ex ck e p s #i #j #k.
+     ClientProofSent(ck,e,p) @i & TunnelAccepted(ck,e,p) @j
+     & ClientConfirmed(ck,e,s) @k & #i < #j & #j < #k"
+
+// Relate acceptance to THIS submitted proof, not every proof for the same key.
+lemma channel_binding:
+  "All ck e1 e2 p #i #j.
+     ClientProofSent(ck,e1,p) @i & TunnelAccepted(ck,e2,p) @j ==> e1 = e2"
+
+lemma key_holder_only:
+  "All ck e p #i. TunnelAccepted(ck,e,p) @i ==>
+     (Ex #j. ClientProofSent(ck,e,p) @j & #j < #i)
+     | (Ex #j. CloakLeaked(ck) @j & #j < #i)"
+
+lemma server_confirmation:
+  "All ck e s #i. ClientConfirmed(ck,e,s) @i ==>
+     (Ex #j. ServerProofSent(ck,e,s) @j & #j < #i)
+     | (Ex #j. CloakLeaked(ck) @j & #j < #i)"
+
+lemma no_reflection:
+  "All ck e p s #i #j.
+     ClientProofSent(ck,e,p) @i & ServerProofSent(ck,e,s) @j ==> not(p = s)"
+
+end

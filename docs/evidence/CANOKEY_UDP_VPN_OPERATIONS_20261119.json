@@ -1,0 +1,112 @@
+{
+  "schema": 1,
+  "status": "passed_key_sealing_operator_and_enrollment_operations",
+  "scope": "actual_canokey_core_firmware_with_udp_ctaphid_transport_and_production_vpn_crypto",
+  "backend": "canokey-udp",
+  "vpn_source_commit": "ae7cd8c155f419a1ee91d0f8175060224344aa13",
+  "firmware_source_commit": "a349b268e12953dd85169e9649091c4f91ce7c68",
+  "firmware_build": "upstream fido-hid-over-udp; ENABLE_TESTS=ON; ASan/UBSan; simulated presence",
+  "binary_sha256": "4e7eadd160de8edaf6093e970351f17bf12f0aa1032885909d9d5acd0249904c",
+  "harness_sha256": "2e5027df90091b00ac8729a9822f298b1d8bcfea02fad7c54a79ae551beee9af",
+  "started": 1795070110.9676669,
+  "phases": {
+    "fresh_assertion_roundtrip": {
+      "credential_record": true,
+      "authenticated_assertion": true,
+      "fresh_assertion_unseal": true,
+      "corrupted_envelope_refused": true,
+      "local_test_vault_removed": true
+    },
+    "operator_dual_signature": {
+      "fido_verified": true,
+      "mldsa65_verified": true,
+      "wrong_message_refused": true,
+      "invalid_fido_half_refused": true,
+      "invalid_mldsa_half_refused": true
+    },
+    "two_salt_hmac_secret": {
+      "stable": true,
+      "separated": true,
+      "assertion_verified": true
+    },
+    "client_key_generation": {
+      "role": "client",
+      "sealed_keys_opened": 5
+    },
+    "relay_key_generation": {
+      "role": "relay",
+      "sealed_keys_opened": 5
+    },
+    "exit_key_generation": {
+      "role": "exit",
+      "sealed_keys_opened": 5
+    },
+    "signed_client_enrollment": {
+      "signed_bundle_imported": true,
+      "hybrid_delivery_verified": true
+    },
+    "ed25519_credential": {
+      "supported": true,
+      "actual_cose_algorithm": -8,
+      "assertion_verified": true
+    }
+  },
+  "physical_device_tested": false,
+  "tunnel_connection_tested": false,
+  "strict_hardware_eligible": false,
+  "strict_block_reason": "CTAP PIN/UV protocols 1/2 use P-256; choosing Ed25519 does not change this channel",
+  "limitations": [
+    "Upstream virtual firmware, not a shipped CanoKey Pigeon/Canary qualification.",
+    "Actual CTAPHID uses UDP transport; USB permissions and physical security are not tested.",
+    "No native PIN/presence UI, live tunnel or strict all-interface PQ qualification.",
+    "Only test discovery/transport/PIN input are substituted; production crypto is unchanged."
+  ],
+  "stage": "completed",
+  "get_info": {
+    "versions": [
+      "U2F_V2",
+      "FIDO_2_0",
+      "FIDO_2_1",
+      "FIDO_2_3"
+    ],
+    "extensions": [
+      "credBlob",
+      "credProtect",
+      "hmac-secret",
+      "hmac-secret-mc",
+      "largeBlobKey",
+      "minPinLength",
+      "thirdPartyPayment"
+    ],
+    "algorithms": [
+      {
+        "alg": -7,
+        "type": "public-key"
+      },
+      {
+        "alg": -8,
+        "type": "public-key"
+      },
+      {
+        "alg": -49,
+        "type": "public-key"
+      },
+      {
+        "alg": -54,
+        "type": "public-key"
+      }
+    ],
+    "pin_uv_protocols": [
+      1,
+      2
+    ]
+  },
+  "default_credential_cose_algorithm": -7,
+  "disposable_secret_state_removed": true,
+  "stopped": 1795070124.1882918,
+  "production_source_sha256": {
+    "keyguard.py": "936fcf31e235b2ee5dc8030b6c6f7868e13fd919b4f8e90d90cb07886e04d3a7",
+    "managed_profile.py": "a31fc89b631a0237d8b5428db7be6a51c326e6cafeb4cc714dcc8c0310c62303",
+    "hardware_setup_test.py": "277c21fea4a5644541aac8a9436d2cdf7b3ed500b935190cc098276d025a81bf"
+  }
+}

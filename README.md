@@ -139,6 +139,13 @@ OpenTofu onboarding. Registry listings and simulated passes do not establish liv
 provider or physical-device qualification. Strict hardware policy remains blocking
 where the actual interface does not meet the PQ/SafeCurves target.
 
+The firmware lab has verified the VPN key/signing/enrollment operations on pinned
+Solo 1 and CanoKey virtual builds; [results and limits](docs/DEVICE_COMPATIBILITY_VALIDATION.md)
+remain separate from physical tests. The create screen now searches a pinned local
+index of **4,825 OpenTofu providers**, with no query telemetry or plugin execution.
+Selections are discovery only: reviewed provisioning recipes and the complete guided
+cloud setup flow remain unfinished. [Research integration](docs/RESEARCH_UPDATE_20261119.md).
+
 ## Command line
 
 `avpn` is the front end. Run it with no arguments in a terminal for the interactive

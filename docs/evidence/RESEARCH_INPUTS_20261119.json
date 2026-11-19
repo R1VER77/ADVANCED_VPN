@@ -1,0 +1,277 @@
+{
+  "schema": 1,
+  "scope": "new_supplied_sources_templates_and_claims_require_review_not_executed_results",
+  "current_files_after_cleanup": 81,
+  "new_or_changed_retained_files": [
+    {
+      "name": "0002-Add-Tamarin-models-for-VERIFICATION_PLAN-items-1-6.patch",
+      "bytes": 32325,
+      "sha256": "a9e4dd663b698125dce338ecbb2a16b544888e540cfddd3f06e1d156962b9afe"
+    },
+    {
+      "name": "0003-Pin-the-formal-models-to-the-crypto-code-with-test-v.patch",
+      "bytes": 18927,
+      "sha256": "2ca381672a353f1be7121461f16a5d96066dfa6c4b1a9d45e8d6b22d368599e2"
+    },
+    {
+      "name": "BITBOX02-SIM_BUILD_20261119.json",
+      "bytes": 1008,
+      "sha256": "aa3fec587381485c1218379b041436bf42267a5a6325e2963be8ae172ee123d8"
+    },
+    {
+      "name": "BITBOX02-SIM_EVIDENCE_20261119.json",
+      "bytes": 1271,
+      "sha256": "75d6257dffe00ccbddeabf7e90d5be2f07156783841138944a6c7dcacc67f783"
+    },
+    {
+      "name": "CANOKEY_PC_BUILD_20261119.json",
+      "bytes": 1859,
+      "sha256": "14bdd01cafa09571d0ff71c923246d83f51c14075b1052e5812089969108424c"
+    },
+    {
+      "name": "CANOKEY_PC_VPN_OPERATIONS_20261119.json",
+      "bytes": 3444,
+      "sha256": "9aef78a7394f3f69eade5f7491b4bfc3c78c801e0a3cbd1a05cf102a49f44c40"
+    },
+    {
+      "name": "DELIVERY_MANIFEST_20261119(1).md",
+      "bytes": 8055,
+      "sha256": "b279bce9eb8687967e7c6ca62caad5a63c335f27de3a0e8d36429c8077ad5f4c"
+    },
+    {
+      "name": "DELIVERY_MANIFEST_20261119(2).md",
+      "bytes": 8369,
+      "sha256": "8f4cae0510a514e0414cff9154970ecbdf93af6fcd0d9e75228e00369cc1081f"
+    },
+    {
+      "name": "DELIVERY_MANIFEST_20261119.md",
+      "bytes": 6257,
+      "sha256": "ec90cca0eefaf1fec4ad4ebe54afea6e5f4f7cb0614a6fde98ae848c5fda306b"
+    },
+    {
+      "name": "FORMAL_MODEL_VECTORS_20261119.json",
+      "bytes": 4168,
+      "sha256": "87cc2144adaf852bc470edd8aaa74b1cebb181beb0fd16cb3421faf3d90a45a6"
+    },
+    {
+      "name": "IMPLEMENTATION_PROGRESS_20261119_v2.md",
+      "bytes": 10181,
+      "sha256": "b1fc3895fbd7af994c57b78039a7f920e0cf5f38c2f86d781811949e8168c5e8"
+    },
+    {
+      "name": "IMPLEMENTATION_PROGRESS_20261119_v3.md",
+      "bytes": 8156,
+      "sha256": "88a390ccd0b588d825b3a2f7621628133f8dc899d44687486dff7775e2ffaf99"
+    },
+    {
+      "name": "IMPLEMENTATION_PROGRESS_20261119_v4.md",
+      "bytes": 6406,
+      "sha256": "44afb9d59dd1fc467d5d2b6cfea8590ac5859c378bb7120ba553c76f3bc4c4e6"
+    },
+    {
+      "name": "LEDGER-SPECULOS_BUILD_20261119.json",
+      "bytes": 1378,
+      "sha256": "42f81dc92a64a31cff778fc98249a6e90ae2eee3628b2ff6cbe611fd3091ec2d"
+    },
+    {
+      "name": "LEDGER-SPECULOS_EVIDENCE_20261119.json",
+      "bytes": 1892,
+      "sha256": "3b547c4e60af32ca040a24359b7cb42b586810a94f4205b8ead59805a66baece"
+    },
+    {
+      "name": "NITROKEY3-USBIP_BUILD_20261119.json",
+      "bytes": 1194,
+      "sha256": "8abf92d8a8837417378aa8fa09873c2b7b9f5fe844287d3e9750cb060467afce"
+    },
+    {
+      "name": "NITROKEY3-USBIP_EVIDENCE_20261119.json",
+      "bytes": 1955,
+      "sha256": "0403f8d35a256041f14b1e97630c5d06c08ecf670482ed3852fccc6476ea1c61"
+    },
+    {
+      "name": "ONLYKEY_STATUS_20261119.json",
+      "bytes": 921,
+      "sha256": "b3e240af09062b8f0cb83021d21ef8e8913b63e951b70bdfb73c766d1d2c0693"
+    },
+    {
+      "name": "PATCH_INSTRUCTIONS(1).md",
+      "bytes": 5006,
+      "sha256": "7647fb37e08aee48ddf9164e62d79dcafc6fa499d7d752e96ca634cdcbcee89f"
+    },
+    {
+      "name": "PATCH_INSTRUCTIONS.md",
+      "bytes": 2885,
+      "sha256": "ca53c061d8993c56c051f6da719a7cab932571d418e2aeb5c20f501bc5319273"
+    },
+    {
+      "name": "SEARCH_PROVIDERS_CONTRACT.md",
+      "bytes": 8028,
+      "sha256": "1907d89d366552d1e32d5ac3665b8df9e10ff2ac33179a53dbb746b18fb8f9e2"
+    },
+    {
+      "name": "SEARCH_PROVIDERS_TEST_20261119.json",
+      "bytes": 5895,
+      "sha256": "4e7c6008e9c230d0d950ae028d644a50a1dede0f8466ddb2adab5fff611a03b5"
+    },
+    {
+      "name": "SOLO2-PC_BUILD_20261119.json",
+      "bytes": 1095,
+      "sha256": "9d39b830ec5f1cc431dc7fa62bcf12b6ad3813e11be5fe5bb323efc04f928d9c"
+    },
+    {
+      "name": "SOLO2-PC_EVIDENCE_20261119.json",
+      "bytes": 2062,
+      "sha256": "dfe0f8b2251729c3a1093f2df63d64f1e707b8ec6317cab68e8ac5fe0fdfacb5"
+    },
+    {
+      "name": "TKEY-QEMU_BUILD_20261119.json",
+      "bytes": 1204,
+      "sha256": "f4c67ff3213b5d5dc70b2ca88523593633bec29d823d04d0ebc5fe4da0113024"
+    },
+    {
+      "name": "TKEY-QEMU_EVIDENCE_20261119.json",
+      "bytes": 1735,
+      "sha256": "d7bb0d93fecc229095c4bfce5447841f8b61995c6456990d4b973b164e7bdb46"
+    },
+    {
+      "name": "TRANSPORT_ADAPTER_TEST_20261119.json",
+      "bytes": 1403,
+      "sha256": "08dec3364e549e767f8784b5d144673cc173d6ec2d7643af1b9bba86fa250153"
+    },
+    {
+      "name": "TREZOR-EMU_BUILD_20261119.json",
+      "bytes": 1011,
+      "sha256": "f03bda77a9a1a64527d3bbd80f724f47a6ef4672782f4c1bee8df87f181ead54"
+    },
+    {
+      "name": "TREZOR-EMU_EVIDENCE_20261119.json",
+      "bytes": 1861,
+      "sha256": "aa87be638cb22912ccc57dbe29b35328d580b75fc283b192341f33b9e08cb14a"
+    },
+    {
+      "name": "build_compat_matrix_v4.py",
+      "bytes": 71802,
+      "sha256": "3ad8ce3250d3b2cc481b0c89dbf3ff847bf7715c79cee1da9d9ec12f607c50df"
+    },
+    {
+      "name": "canokey_backend.py",
+      "bytes": 23085,
+      "sha256": "c3c61b5462a5567ada272770f09012dde6b6e73c58694cd584ed4ab28e69d44c"
+    },
+    {
+      "name": "ctap2_protocol_test.py",
+      "bytes": 14409,
+      "sha256": "4662f138199f070cbe8a802ae27cf926c3a9a825b43cceb31715ef7a5e1a40f8"
+    },
+    {
+      "name": "decode_canokey_getinfo.py",
+      "bytes": 10134,
+      "sha256": "cd81907cdc4d23460e59f8c148c8d118a83764c1d63e17002d965c1d6f5c46f0"
+    },
+    {
+      "name": "decode_fido_mds_v2.py",
+      "bytes": 6508,
+      "sha256": "7bd9ff9bb6ca95629b5e380137aef48aa600cb12fa562b744330fa94a6af37ee"
+    },
+    {
+      "name": "device_backends.py",
+      "bytes": 65189,
+      "sha256": "44b89dec85e95567383c9d4cd071041613a4915417bd3f1b16a0cfa1b9b44238"
+    },
+    {
+      "name": "firmware_source_evidence.py",
+      "bytes": 27264,
+      "sha256": "538969fce84d2e56e049838a16474ec5c7a06b47c77d21c00a96dbdbcdb9c689"
+    },
+    {
+      "name": "formal_model_vectors.py",
+      "bytes": 12754,
+      "sha256": "b6e0dca6d5b5164ad15c77b4e584e7548acf5e44f316807ac5125ce4ce686bdb"
+    },
+    {
+      "name": "lab_runner.cpython-312.pyc",
+      "bytes": 31994,
+      "sha256": "0ea6a7c9af1eaf70a63fdab50b7b5daf073e5b6389621a6e8065298d90c7a150"
+    },
+    {
+      "name": "lab_runner.py",
+      "bytes": 34893,
+      "sha256": "b0b072e99e9d0fe803fb3754d731fe6244163ff17d1f6374df990cd7ff8f4cea"
+    },
+    {
+      "name": "mutation_fixture_results.json",
+      "bytes": 2724,
+      "sha256": "48da934ade72eb136e867d02251fb455970a564f62fa212aef1d4706a98c9b09"
+    },
+    {
+      "name": "mutation_fixtures.cpython-312.pyc",
+      "bytes": 21542,
+      "sha256": "574d7b45e15b82f3c75f95c8412e1b872bc61fc7b4244c0dfc43b22a8b83f8bf"
+    },
+    {
+      "name": "mutation_fixtures.py",
+      "bytes": 19450,
+      "sha256": "7523aa6e0e6f319d0800723131351cf881f6fbb4a2fdf9fddb88a7681e7675e9"
+    },
+    {
+      "name": "opentofu_indexer.cpython-312.pyc",
+      "bytes": 7533,
+      "sha256": "93601547a0634853c2ae7b8fea1ac1512ed59c7f1743b7d91a7a3f5cb15ffabd"
+    },
+    {
+      "name": "opentofu_indexer.py",
+      "bytes": 8329,
+      "sha256": "fad27d98acc8e3fac333bdae3b1dd41d00d5bca21284bd9ab3f0a7ff6f80f77a"
+    },
+    {
+      "name": "opentofu_registry_evidence.json",
+      "bytes": 1732,
+      "sha256": "70bfbf95dbb30b27cb5a4955aebad10d3731863ad882aec47a726520b27ef9c2"
+    },
+    {
+      "name": "opentofu_registry_index.json.gz",
+      "bytes": 96649,
+      "sha256": "570df4fc11eb763578ee23c53de75066f7029671f68448434b852c55dc4e6ef9"
+    },
+    {
+      "name": "parser_fuzz_scaffolding.cpython-312.pyc",
+      "bytes": 19889,
+      "sha256": "c1f9fec63d1730d25020eae0a7fe70eb581a814b830bdbe019dbf2c5f7b017a5"
+    },
+    {
+      "name": "parser_fuzz_scaffolding.py",
+      "bytes": 18721,
+      "sha256": "cd97ed8386b0d6e945c324e16af9a455372a78819d9b4fe62f6fcc9d2b7e8b9e"
+    },
+    {
+      "name": "search_providers.py",
+      "bytes": 11583,
+      "sha256": "cdcf35a4300f02fa9cb94b11f403338eeae780a23261e3ab474e00d9ad2a8bb2"
+    },
+    {
+      "name": "search_providers_test.py",
+      "bytes": 15616,
+      "sha256": "743230e1853ba15ea204cf6fe5e4dd00394daa02776dab4b85c37cd8d31b96cb"
+    },
+    {
+      "name": "simulate_against_vpn.cpython-312.pyc",
+      "bytes": 19489,
+      "sha256": "64fbce7ccd92d06800e27607d7320f106f4bb4c84dc1c10aaeed64ef00a848f3"
+    },
+    {
+      "name": "simulate_against_vpn.py",
+      "bytes": 24745,
+      "sha256": "56c04728f845d0e9546fecf85cf0346b07112c34cf0ca3a8fbbd6681ec0f7ebb"
+    },
+    {
+      "name": "transport_adapter_test.py",
+      "bytes": 12799,
+      "sha256": "e4aa1d12dbe4dbd1d6fc0afd38bdda56b2cf58680a72c5d3a5951669c56594c1"
+    },
+    {
+      "name": "versions_blacklist.json",
+      "bytes": 818,
+      "sha256": "b53bb50cd4ecffe012625328633158d136b643b87f63a93041731c9d8709e3da"
+    }
+  ]
+}

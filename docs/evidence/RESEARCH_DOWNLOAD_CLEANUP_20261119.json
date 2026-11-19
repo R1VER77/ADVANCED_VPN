@@ -1,0 +1,632 @@
+{
+  "schema": 1,
+  "scope": "byte_identical_download_duplicates_retained_in_folder_or_published_repository",
+  "observed_at_utc": "2026-11-19T06:15:18.973544+00:00",
+  "before_count": 100,
+  "after_count": 81,
+  "bytes_removed": 35803089,
+  "removed": [
+    {
+      "removed": "LEDGER-SPECULOS_EVIDENCE_20261119(1).json",
+      "retained": "LEDGER-SPECULOS_EVIDENCE_20261119.json",
+      "bytes": 1892,
+      "sha256": "3b547c4e60af32ca040a24359b7cb42b586810a94f4205b8ead59805a66baece"
+    },
+    {
+      "removed": "SEARCH_PROVIDERS_TEST_20261119(1).json",
+      "retained": "SEARCH_PROVIDERS_TEST_20261119.json",
+      "bytes": 5895,
+      "sha256": "4e7c6008e9c230d0d950ae028d644a50a1dede0f8466ddb2adab5fff611a03b5"
+    },
+    {
+      "removed": "build_compat_matrix_v4(1).py",
+      "retained": "build_compat_matrix_v4.py",
+      "bytes": 71802,
+      "sha256": "3ad8ce3250d3b2cc481b0c89dbf3ff847bf7715c79cee1da9d9ec12f607c50df"
+    },
+    {
+      "removed": "canokey_backend(1).py",
+      "retained": "canokey_backend.py",
+      "bytes": 23085,
+      "sha256": "c3c61b5462a5567ada272770f09012dde6b6e73c58694cd584ed4ab28e69d44c"
+    },
+    {
+      "removed": "canokey_backend(2).py",
+      "retained": "canokey_backend.py",
+      "bytes": 23085,
+      "sha256": "c3c61b5462a5567ada272770f09012dde6b6e73c58694cd584ed4ab28e69d44c"
+    },
+    {
+      "removed": "cypherpunk-vpn_0.10.2-1_amd64(1).deb",
+      "retained": "cypherpunk-vpn_0.10.2-1_amd64.deb",
+      "bytes": 35481708,
+      "sha256": "25e0301de9c07ad1109c56f1c3232eeb14fa212c445e9ee4aa2aa523e6666979"
+    },
+    {
+      "removed": "device_backends(1).py",
+      "retained": "device_backends.py",
+      "bytes": 65189,
+      "sha256": "44b89dec85e95567383c9d4cd071041613a4915417bd3f1b16a0cfa1b9b44238"
+    },
+    {
+      "removed": "main(1).rs",
+      "retained": "main.rs",
+      "bytes": 6088,
+      "sha256": "79dafcaa2968a56ead113d3808db42cc143778793e890fc356f91b531a29240c"
+    },
+    {
+      "removed": "pqc_sizes(1).c",
+      "retained": "pqc_sizes.c",
+      "bytes": 3942,
+      "sha256": "7b2198720a89e9510f0fe3d9566db68159efee851e25a3ac99bd03c22647dc29"
+    },
+    {
+      "removed": "search_providers(1).py",
+      "retained": "search_providers.py",
+      "bytes": 11583,
+      "sha256": "cdcf35a4300f02fa9cb94b11f403338eeae780a23261e3ab474e00d9ad2a8bb2"
+    },
+    {
+      "removed": "search_providers_test(1).py",
+      "retained": "search_providers_test.py",
+      "bytes": 15616,
+      "sha256": "743230e1853ba15ea204cf6fe5e4dd00394daa02776dab4b85c37cd8d31b96cb"
+    },
+    {
+      "removed": "transport_adapter_test(1).py",
+      "retained": "transport_adapter_test.py",
+      "bytes": 12799,
+      "sha256": "e4aa1d12dbe4dbd1d6fc0afd38bdda56b2cf58680a72c5d3a5951669c56594c1"
+    },
+    {
+      "removed": "transport_adapter_test(2).py",
+      "retained": "transport_adapter_test.py",
+      "bytes": 12799,
+      "sha256": "e4aa1d12dbe4dbd1d6fc0afd38bdda56b2cf58680a72c5d3a5951669c56594c1"
+    },
+    {
+      "removed": "WAN_2HOP_CLI.bin",
+      "retained_repository_path": "docs/evidence/WAN_2HOP_CLI.json",
+      "retained_git_commit": "ae7cd8c155f419a1ee91d0f8175060224344aa13",
+      "bytes": 3087,
+      "sha256": "ef51f9bc72d2fde737dd04204cefb96b8f98333e40eaaaafc36cd5825c9e4829"
+    },
+    {
+      "removed": "WF_REAL_PILOT.bin",
+      "retained_repository_path": "docs/evidence/WF_REAL_PILOT.json",
+      "retained_git_commit": "ae7cd8c155f419a1ee91d0f8175060224344aa13",
+      "bytes": 6211,
+      "sha256": "930389e60e7d914b8a92722666514af2921aabf4e7b53da29e077c65e4e9a73e"
+    },
+    {
+      "removed": "WF_REAL_RERUN.bin",
+      "retained_repository_path": "docs/evidence/WF_REAL_RERUN.json",
+      "retained_git_commit": "ae7cd8c155f419a1ee91d0f8175060224344aa13",
+      "bytes": 5078,
+      "sha256": "b6f1396340bc54e91bc19e4dcc4ba9f20b074ab4af483df20fd9f98f25dcb443"
+    },
+    {
+      "removed": "WF_REAL_RERUN2.bin",
+      "retained_repository_path": "docs/evidence/WF_REAL_RERUN2.json",
+      "retained_git_commit": "ae7cd8c155f419a1ee91d0f8175060224344aa13",
+      "bytes": 4241,
+      "sha256": "b39b2f1963974a419de3c0390e253bd5058a397ac93d48770401226a3c0ad204"
+    },
+    {
+      "removed": "WF_REAL_RERUN3.bin",
+      "retained_repository_path": "docs/evidence/WF_REAL_RERUN3.json",
+      "retained_git_commit": "ae7cd8c155f419a1ee91d0f8175060224344aa13",
+      "bytes": 46533,
+      "sha256": "ab2ae74cb3a1b0c5258e0971284f8a1dc983821d3dfa7e7b5bb34b5093270fe7"
+    },
+    {
+      "removed": "ZK_MEMBERSHIP.bin",
+      "retained_repository_path": "docs/evidence/ZK_MEMBERSHIP.json",
+      "retained_git_commit": "ae7cd8c155f419a1ee91d0f8175060224344aa13",
+      "bytes": 2456,
+      "sha256": "3ff7bd90fbd5d8354f073cb6a85b2dc4d80c3a1d67cf19483129c4baddc659ac"
+    }
+  ],
+  "before_inventory": [
+    {
+      "name": "0002-Add-Tamarin-models-for-VERIFICATION_PLAN-items-1-6.patch",
+      "size": 32325,
+      "sha256": "a9e4dd663b698125dce338ecbb2a16b544888e540cfddd3f06e1d156962b9afe"
+    },
+    {
+      "name": "0003-Pin-the-formal-models-to-the-crypto-code-with-test-v.patch",
+      "size": 18927,
+      "sha256": "2ca381672a353f1be7121461f16a5d96066dfa6c4b1a9d45e8d6b22d368599e2"
+    },
+    {
+      "name": "ADVANCED_VPN_FIDO2_Compatibility_Matrix.pdf",
+      "size": 398424,
+      "sha256": "ef62a07004a6d52f12e6587b8a3cd45388bb36a7ba959d7035478b78c1369f31"
+    },
+    {
+      "name": "ADVANCED_VPN_FIDO2_Compatibility_Matrix.xlsx",
+      "size": 30219,
+      "sha256": "6f6a3e9a9ae2ce8bb76726468a215f6c6976492682dc414da8e0e1aab1e624bc"
+    },
+    {
+      "name": "BITBOX02-SIM_BUILD_20261119.json",
+      "size": 1008,
+      "sha256": "aa3fec587381485c1218379b041436bf42267a5a6325e2963be8ae172ee123d8"
+    },
+    {
+      "name": "BITBOX02-SIM_EVIDENCE_20261119.json",
+      "size": 1271,
+      "sha256": "75d6257dffe00ccbddeabf7e90d5be2f07156783841138944a6c7dcacc67f783"
+    },
+    {
+      "name": "BUILD.json",
+      "size": 255,
+      "sha256": "a78aea962cdf489c6f75dbb1b88a95a8978912e0a049b57ac9af4d51fec5e69b"
+    },
+    {
+      "name": "CANOKEY_PC_BUILD_20261119.json",
+      "size": 1859,
+      "sha256": "14bdd01cafa09571d0ff71c923246d83f51c14075b1052e5812089969108424c"
+    },
+    {
+      "name": "CANOKEY_PC_VPN_OPERATIONS_20261119.json",
+      "size": 3444,
+      "sha256": "9aef78a7394f3f69eade5f7491b4bfc3c78c801e0a3cbd1a05cf102a49f44c40"
+    },
+    {
+      "name": "CYPHERPUNKS_Validation_Report.pdf",
+      "size": 883897,
+      "sha256": "a88562582f9b7912bf50247d5486a46dc10c499768f3031b359286453d8ad610"
+    },
+    {
+      "name": "CYPHERPUNKS_validation_bundle(1).zip",
+      "size": 1000213,
+      "sha256": "f0d3684e24345b22e4bca4c55e9398a1b27204d270b78c5ac52f33dfc9d17748"
+    },
+    {
+      "name": "CYPHERPUNKS_validation_bundle(2).zip",
+      "size": 1153118,
+      "sha256": "6d53412d39c4a2fe30051a1b0c208a155e01eb7914bcf05722ca470b4aaf1b2c"
+    },
+    {
+      "name": "CYPHERPUNKS_validation_bundle(3).zip",
+      "size": 1335329,
+      "sha256": "f4a7ffeb3a2dc4cfec75f6623453d16eaa018018a805eb9ae1670594ff3f9e5b"
+    },
+    {
+      "name": "CYPHERPUNKS_validation_bundle.zip",
+      "size": 678591,
+      "sha256": "3f2d439d92849d7edbd19d78e5007f1b6c4567635ba8f52639bbb41159d584b8"
+    },
+    {
+      "name": "DELIVERY_MANIFEST_20261119(1).md",
+      "size": 8055,
+      "sha256": "b279bce9eb8687967e7c6ca62caad5a63c335f27de3a0e8d36429c8077ad5f4c"
+    },
+    {
+      "name": "DELIVERY_MANIFEST_20261119(2).md",
+      "size": 8369,
+      "sha256": "8f4cae0510a514e0414cff9154970ecbdf93af6fcd0d9e75228e00369cc1081f"
+    },
+    {
+      "name": "DELIVERY_MANIFEST_20261119.md",
+      "size": 6257,
+      "sha256": "ec90cca0eefaf1fec4ad4ebe54afea6e5f4f7cb0614a6fde98ae848c5fda306b"
+    },
+    {
+      "name": "FORMAL_MODEL_VECTORS_20261119.json",
+      "size": 4168,
+      "sha256": "87cc2144adaf852bc470edd8aaa74b1cebb181beb0fd16cb3421faf3d90a45a6"
+    },
+    {
+      "name": "IMPLEMENTATION_PROGRESS_20261119.md",
+      "size": 17136,
+      "sha256": "8c18b63665dc7b29caca09a6f2d555cf745cd88df07dfac68773472c0dabcca8"
+    },
+    {
+      "name": "IMPLEMENTATION_PROGRESS_20261119_v2.md",
+      "size": 10181,
+      "sha256": "b1fc3895fbd7af994c57b78039a7f920e0cf5f38c2f86d781811949e8168c5e8"
+    },
+    {
+      "name": "IMPLEMENTATION_PROGRESS_20261119_v3.md",
+      "size": 8156,
+      "sha256": "88a390ccd0b588d825b3a2f7621628133f8dc899d44687486dff7775e2ffaf99"
+    },
+    {
+      "name": "IMPLEMENTATION_PROGRESS_20261119_v4.md",
+      "size": 6406,
+      "sha256": "44afb9d59dd1fc467d5d2b6cfea8590ac5859c378bb7120ba553c76f3bc4c4e6"
+    },
+    {
+      "name": "InRelease",
+      "size": 1017,
+      "sha256": "83ee525be27cdab1fe469a62bb5e2c3080670b68ef37c9dcc57453468b9b7cd8"
+    },
+    {
+      "name": "LEDGER-SPECULOS_BUILD_20261119.json",
+      "size": 1378,
+      "sha256": "42f81dc92a64a31cff778fc98249a6e90ae2eee3628b2ff6cbe611fd3091ec2d"
+    },
+    {
+      "name": "LEDGER-SPECULOS_EVIDENCE_20261119(1).json",
+      "size": 1892,
+      "sha256": "3b547c4e60af32ca040a24359b7cb42b586810a94f4205b8ead59805a66baece"
+    },
+    {
+      "name": "LEDGER-SPECULOS_EVIDENCE_20261119.json",
+      "size": 1892,
+      "sha256": "3b547c4e60af32ca040a24359b7cb42b586810a94f4205b8ead59805a66baece"
+    },
+    {
+      "name": "NITROKEY3-USBIP_BUILD_20261119.json",
+      "size": 1194,
+      "sha256": "8abf92d8a8837417378aa8fa09873c2b7b9f5fe844287d3e9750cb060467afce"
+    },
+    {
+      "name": "NITROKEY3-USBIP_EVIDENCE_20261119.json",
+      "size": 1955,
+      "sha256": "0403f8d35a256041f14b1e97630c5d06c08ecf670482ed3852fccc6476ea1c61"
+    },
+    {
+      "name": "ONLYKEY_STATUS_20261119.json",
+      "size": 921,
+      "sha256": "b3e240af09062b8f0cb83021d21ef8e8913b63e951b70bdfb73c766d1d2c0693"
+    },
+    {
+      "name": "PATCH_INSTRUCTIONS(1).md",
+      "size": 5006,
+      "sha256": "7647fb37e08aee48ddf9164e62d79dcafc6fa499d7d752e96ca634cdcbcee89f"
+    },
+    {
+      "name": "PATCH_INSTRUCTIONS.md",
+      "size": 2885,
+      "sha256": "ca53c061d8993c56c051f6da719a7cab932571d418e2aeb5c20f501bc5319273"
+    },
+    {
+      "name": "Packages",
+      "size": 731,
+      "sha256": "e8fca19a03e09a56220e04b12beca0b88bad373c613aa070bb0fb5f93bdcc976"
+    },
+    {
+      "name": "Packages.gz",
+      "size": 531,
+      "sha256": "99bacf0b5fa0baeb30079d7b59c776976a3e25c6438726e34d1d9f9077c27fb0"
+    },
+    {
+      "name": "REPOSITORY.json",
+      "size": 589,
+      "sha256": "e774929c3e57a32c18df38ac0dafa0c64c25dc1e5404b909acb2a6122862b607"
+    },
+    {
+      "name": "Release",
+      "size": 740,
+      "sha256": "a2a3fb6b8f32163980784ecf8ccb0027c663be3d26da3ed74155a85354733aee"
+    },
+    {
+      "name": "Release.gpg",
+      "size": 119,
+      "sha256": "acc7390aad8e70bc4cf4c804d6009b7f77dca288d9045381d63749b178c26ea5"
+    },
+    {
+      "name": "SEARCH_PROVIDERS_CONTRACT.md",
+      "size": 8028,
+      "sha256": "1907d89d366552d1e32d5ac3665b8df9e10ff2ac33179a53dbb746b18fb8f9e2"
+    },
+    {
+      "name": "SEARCH_PROVIDERS_TEST_20261119(1).json",
+      "size": 5895,
+      "sha256": "4e7c6008e9c230d0d950ae028d644a50a1dede0f8466ddb2adab5fff611a03b5"
+    },
+    {
+      "name": "SEARCH_PROVIDERS_TEST_20261119.json",
+      "size": 5895,
+      "sha256": "4e7c6008e9c230d0d950ae028d644a50a1dede0f8466ddb2adab5fff611a03b5"
+    },
+    {
+      "name": "SOLO2-PC_BUILD_20261119.json",
+      "size": 1095,
+      "sha256": "9d39b830ec5f1cc431dc7fa62bcf12b6ad3813e11be5fe5bb323efc04f928d9c"
+    },
+    {
+      "name": "SOLO2-PC_EVIDENCE_20261119.json",
+      "size": 2062,
+      "sha256": "dfe0f8b2251729c3a1093f2df63d64f1e707b8ec6317cab68e8ac5fe0fdfacb5"
+    },
+    {
+      "name": "TASK3_REPORT.md",
+      "size": 9269,
+      "sha256": "a3bbbed6aa8dfbb5f507bbcd7e36e2b8d3563b32ba8f8970083eb1979974ec36"
+    },
+    {
+      "name": "TKEY-QEMU_BUILD_20261119.json",
+      "size": 1204,
+      "sha256": "f4c67ff3213b5d5dc70b2ca88523593633bec29d823d04d0ebc5fe4da0113024"
+    },
+    {
+      "name": "TKEY-QEMU_EVIDENCE_20261119.json",
+      "size": 1735,
+      "sha256": "d7bb0d93fecc229095c4bfce5447841f8b61995c6456990d4b973b164e7bdb46"
+    },
+    {
+      "name": "TRANSPORT_ADAPTER_TEST_20261119.json",
+      "size": 1403,
+      "sha256": "08dec3364e549e767f8784b5d144673cc173d6ec2d7643af1b9bba86fa250153"
+    },
+    {
+      "name": "TREZOR-EMU_BUILD_20261119.json",
+      "size": 1011,
+      "sha256": "f03bda77a9a1a64527d3bbd80f724f47a6ef4672782f4c1bee8df87f181ead54"
+    },
+    {
+      "name": "TREZOR-EMU_EVIDENCE_20261119.json",
+      "size": 1861,
+      "sha256": "aa87be638cb22912ccc57dbe29b35328d580b75fc283b192341f33b9e08cb14a"
+    },
+    {
+      "name": "VALIDATION_REPORT.md",
+      "size": 5827,
+      "sha256": "22d4d3d02d3ce42aa991665a6264e83a5cbda4b8db567c545b87c637cefd7a73"
+    },
+    {
+      "name": "WAN_2HOP_CLI.bin",
+      "size": 3087,
+      "sha256": "ef51f9bc72d2fde737dd04204cefb96b8f98333e40eaaaafc36cd5825c9e4829"
+    },
+    {
+      "name": "WF_REAL_PILOT.bin",
+      "size": 6211,
+      "sha256": "930389e60e7d914b8a92722666514af2921aabf4e7b53da29e077c65e4e9a73e"
+    },
+    {
+      "name": "WF_REAL_RERUN.bin",
+      "size": 5078,
+      "sha256": "b6f1396340bc54e91bc19e4dcc4ba9f20b074ab4af483df20fd9f98f25dcb443"
+    },
+    {
+      "name": "WF_REAL_RERUN2.bin",
+      "size": 4241,
+      "sha256": "b39b2f1963974a419de3c0390e253bd5058a397ac93d48770401226a3c0ad204"
+    },
+    {
+      "name": "WF_REAL_RERUN3.bin",
+      "size": 46533,
+      "sha256": "ab2ae74cb3a1b0c5258e0971284f8a1dc983821d3dfa7e7b5bb34b5093270fe7"
+    },
+    {
+      "name": "ZK_MEMBERSHIP.bin",
+      "size": 2456,
+      "sha256": "3ff7bd90fbd5d8354f073cb6a85b2dc4d80c3a1d67cf19483129c4baddc659ac"
+    },
+    {
+      "name": "avpn_test_pir.py",
+      "size": 9362,
+      "sha256": "43ee20a10b0551c8906bff60b7a52956bd59e41dd0f70be338269959b8f80526"
+    },
+    {
+      "name": "avpn_test_wf.py",
+      "size": 12456,
+      "sha256": "9dbc0d7ac56b078858650de03dd7d48474939341a1037dce2d686ef618e67fa9"
+    },
+    {
+      "name": "build_compat_matrix_v4(1).py",
+      "size": 71802,
+      "sha256": "3ad8ce3250d3b2cc481b0c89dbf3ff847bf7715c79cee1da9d9ec12f607c50df"
+    },
+    {
+      "name": "build_compat_matrix_v4.py",
+      "size": 71802,
+      "sha256": "3ad8ce3250d3b2cc481b0c89dbf3ff847bf7715c79cee1da9d9ec12f607c50df"
+    },
+    {
+      "name": "canokey_backend(1).py",
+      "size": 23085,
+      "sha256": "c3c61b5462a5567ada272770f09012dde6b6e73c58694cd584ed4ab28e69d44c"
+    },
+    {
+      "name": "canokey_backend(2).py",
+      "size": 23085,
+      "sha256": "c3c61b5462a5567ada272770f09012dde6b6e73c58694cd584ed4ab28e69d44c"
+    },
+    {
+      "name": "canokey_backend.py",
+      "size": 23085,
+      "sha256": "c3c61b5462a5567ada272770f09012dde6b6e73c58694cd584ed4ab28e69d44c"
+    },
+    {
+      "name": "ctap2_protocol_test.py",
+      "size": 14409,
+      "sha256": "4662f138199f070cbe8a802ae27cf926c3a9a825b43cceb31715ef7a5e1a40f8"
+    },
+    {
+      "name": "cypherpunk-vpn_0.10.2-1_amd64(1).deb",
+      "size": 35481708,
+      "sha256": "25e0301de9c07ad1109c56f1c3232eeb14fa212c445e9ee4aa2aa523e6666979"
+    },
+    {
+      "name": "cypherpunk-vpn_0.10.2-1_amd64.deb",
+      "size": 35481708,
+      "sha256": "25e0301de9c07ad1109c56f1c3232eeb14fa212c445e9ee4aa2aa523e6666979"
+    },
+    {
+      "name": "decode_canokey_getinfo.py",
+      "size": 10134,
+      "sha256": "cd81907cdc4d23460e59f8c148c8d118a83764c1d63e17002d965c1d6f5c46f0"
+    },
+    {
+      "name": "decode_fido_mds_v2.py",
+      "size": 6508,
+      "sha256": "7bd9ff9bb6ca95629b5e380137aef48aa600cb12fa562b744330fa94a6af37ee"
+    },
+    {
+      "name": "device_backends(1).py",
+      "size": 65189,
+      "sha256": "44b89dec85e95567383c9d4cd071041613a4915417bd3f1b16a0cfa1b9b44238"
+    },
+    {
+      "name": "device_backends.py",
+      "size": 65189,
+      "sha256": "44b89dec85e95567383c9d4cd071041613a4915417bd3f1b16a0cfa1b9b44238"
+    },
+    {
+      "name": "downgrade-matrix.txt",
+      "size": 1182,
+      "sha256": "838088ebf605e234dd20420097951b1af0c43f1715cf8f75de2b81f358d607df"
+    },
+    {
+      "name": "fido_mds_full.json",
+      "size": 337408,
+      "sha256": "59087564aab2f391c08f057baa4b25569811f44f61b5ce397f479fef11d18c3d"
+    },
+    {
+      "name": "firmware_source_evidence.py",
+      "size": 27264,
+      "sha256": "538969fce84d2e56e049838a16474ec5c7a06b47c77d21c00a96dbdbcdb9c689"
+    },
+    {
+      "name": "formal_model_vectors.py",
+      "size": 12754,
+      "sha256": "b6e0dca6d5b5164ad15c77b4e584e7548acf5e44f316807ac5125ce4ce686bdb"
+    },
+    {
+      "name": "lab_runner.cpython-312.pyc",
+      "size": 31994,
+      "sha256": "0ea6a7c9af1eaf70a63fdab50b7b5daf073e5b6389621a6e8065298d90c7a150"
+    },
+    {
+      "name": "lab_runner.py",
+      "size": 34893,
+      "sha256": "b0b072e99e9d0fe803fb3754d731fe6244163ff17d1f6374df990cd7ff8f4cea"
+    },
+    {
+      "name": "main(1).rs",
+      "size": 6088,
+      "sha256": "79dafcaa2968a56ead113d3808db42cc143778793e890fc356f91b531a29240c"
+    },
+    {
+      "name": "main.rs",
+      "size": 6088,
+      "sha256": "79dafcaa2968a56ead113d3808db42cc143778793e890fc356f91b531a29240c"
+    },
+    {
+      "name": "mutation_fixture_results.json",
+      "size": 2724,
+      "sha256": "48da934ade72eb136e867d02251fb455970a564f62fa212aef1d4706a98c9b09"
+    },
+    {
+      "name": "mutation_fixtures.cpython-312.pyc",
+      "size": 21542,
+      "sha256": "574d7b45e15b82f3c75f95c8412e1b872bc61fc7b4244c0dfc43b22a8b83f8bf"
+    },
+    {
+      "name": "mutation_fixtures.py",
+      "size": 19450,
+      "sha256": "7523aa6e0e6f319d0800723131351cf881f6fbb4a2fdf9fddb88a7681e7675e9"
+    },
+    {
+      "name": "opentofu_indexer.cpython-312.pyc",
+      "size": 7533,
+      "sha256": "93601547a0634853c2ae7b8fea1ac1512ed59c7f1743b7d91a7a3f5cb15ffabd"
+    },
+    {
+      "name": "opentofu_indexer.py",
+      "size": 8329,
+      "sha256": "fad27d98acc8e3fac333bdae3b1dd41d00d5bca21284bd9ab3f0a7ff6f80f77a"
+    },
+    {
+      "name": "opentofu_registry_evidence.json",
+      "size": 1732,
+      "sha256": "70bfbf95dbb30b27cb5a4955aebad10d3731863ad882aec47a726520b27ef9c2"
+    },
+    {
+      "name": "opentofu_registry_index.json.gz",
+      "size": 96649,
+      "sha256": "570df4fc11eb763578ee23c53de75066f7029671f68448434b852c55dc4e6ef9"
+    },
+    {
+      "name": "parser_fuzz_scaffolding.cpython-312.pyc",
+      "size": 19889,
+      "sha256": "c1f9fec63d1730d25020eae0a7fe70eb581a814b830bdbe019dbf2c5f7b017a5"
+    },
+    {
+      "name": "parser_fuzz_scaffolding.py",
+      "size": 18721,
+      "sha256": "cd97ed8386b0d6e945c324e16af9a455372a78819d9b4fe62f6fcc9d2b7e8b9e"
+    },
+    {
+      "name": "pqc_sizes(1).c",
+      "size": 3942,
+      "sha256": "7b2198720a89e9510f0fe3d9566db68159efee851e25a3ac99bd03c22647dc29"
+    },
+    {
+      "name": "pqc_sizes.c",
+      "size": 3942,
+      "sha256": "7b2198720a89e9510f0fe3d9566db68159efee851e25a3ac99bd03c22647dc29"
+    },
+    {
+      "name": "search_providers(1).py",
+      "size": 11583,
+      "sha256": "cdcf35a4300f02fa9cb94b11f403338eeae780a23261e3ab474e00d9ad2a8bb2"
+    },
+    {
+      "name": "search_providers.py",
+      "size": 11583,
+      "sha256": "cdcf35a4300f02fa9cb94b11f403338eeae780a23261e3ab474e00d9ad2a8bb2"
+    },
+    {
+      "name": "search_providers_test(1).py",
+      "size": 15616,
+      "sha256": "743230e1853ba15ea204cf6fe5e4dd00394daa02776dab4b85c37cd8d31b96cb"
+    },
+    {
+      "name": "search_providers_test.py",
+      "size": 15616,
+      "sha256": "743230e1853ba15ea204cf6fe5e4dd00394daa02776dab4b85c37cd8d31b96cb"
+    },
+    {
+      "name": "simulate_against_vpn.cpython-312.pyc",
+      "size": 19489,
+      "sha256": "64fbce7ccd92d06800e27607d7320f106f4bb4c84dc1c10aaeed64ef00a848f3"
+    },
+    {
+      "name": "simulate_against_vpn.py",
+      "size": 24745,
+      "sha256": "56c04728f845d0e9546fecf85cf0346b07112c34cf0ca3a8fbbd6681ec0f7ebb"
+    },
+    {
+      "name": "task-3-downgrade-policy-and-signed-repo.patch",
+      "size": 51582,
+      "sha256": "c7cfc97b61e0caf79641cab855284f3fcdc0bd19d1a6fd60c6e5bfa8a620318a"
+    },
+    {
+      "name": "transport_adapter_test(1).py",
+      "size": 12799,
+      "sha256": "e4aa1d12dbe4dbd1d6fc0afd38bdda56b2cf58680a72c5d3a5951669c56594c1"
+    },
+    {
+      "name": "transport_adapter_test(2).py",
+      "size": 12799,
+      "sha256": "e4aa1d12dbe4dbd1d6fc0afd38bdda56b2cf58680a72c5d3a5951669c56594c1"
+    },
+    {
+      "name": "transport_adapter_test.py",
+      "size": 12799,
+      "sha256": "e4aa1d12dbe4dbd1d6fc0afd38bdda56b2cf58680a72c5d3a5951669c56594c1"
+    },
+    {
+      "name": "versions_blacklist.json",
+      "size": 818,
+      "sha256": "b53bb50cd4ecffe012625328633158d136b643b87f63a93041731c9d8709e3da"
+    },
+    {
+      "name": "whitepaper_content.py",
+      "size": 36122,
+      "sha256": "a9c7892b9d7486eca34c0928129ce113c196f775322ad064e9339e1c7a991f91"
+    },
+    {
+      "name": "whitepaper_content2.py",
+      "size": 28480,
+      "sha256": "aecca526eee8aa8d4261222704c1f8043bb6aa3e6504fe1866122871d90cc9c2"
+    }
+  ]
+}

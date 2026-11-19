@@ -89,6 +89,36 @@ async fn get_setup(branch: String, bridge: State<'_, Bridge>) -> Result<String, 
 }
 
 #[tauri::command]
+async fn provider_search(
+    query: String,
+    cursor: Option<String>,
+    filter: String,
+    bridge: State<'_, Bridge>,
+) -> Result<String, String> {
+    if query.len() > 256 || query.chars().any(|c| c < ' ' || c == '\u{7f}') {
+        return Err("invalid_search_query".into());
+    }
+    if !matches!(
+        filter.as_str(),
+        "all" | "reviewed_recipes" | "unreviewed" | "unavailable_non_compute"
+    ) {
+        return Err("invalid_search_filter".into());
+    }
+    if cursor
+        .as_ref()
+        .is_some_and(|c| c.is_empty() || c.len() > 512)
+    {
+        return Err("invalid_provider_cursor".into());
+    }
+    bridge
+        .call(
+            "SearchProviders",
+            &(query, cursor.unwrap_or_default(), filter),
+        )
+        .await
+}
+
+#[tauri::command]
 async fn preview_action(request: String, bridge: State<'_, Bridge>) -> Result<String, String> {
     if request.len() > 1_500_000 {
         return Err("action_too_large".into());
@@ -128,7 +158,8 @@ pub fn run() {
             preview_action,
             apply_action,
             get_operation,
-            cancel_operation
+            cancel_operation,
+            provider_search
         ])
         .run(tauri::generate_context!())
         .expect("cypherpunk_vpn desktop application");

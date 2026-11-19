@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "scope": "independent_comparison_to_primary_GitHub_registry_tree_not_compute_or_recipe_qualification",
+  "source_url": "https://api.github.com/repos/opentofu/registry/git/trees/ba3cab5eeeed40d49181f98189a972172dfa30b4?recursive=1",
+  "source_tree_sha": "ba3cab5eeeed40d49181f98189a972172dfa30b4",
+  "tree_entries": 69680,
+  "tree_truncated": false,
+  "providers": 4825,
+  "all_ids_and_paths_match": true,
+  "compressed_sha256": "570df4fc11eb763578ee23c53de75066f7029671f68448434b852c55dc4e6ef9",
+  "uncompressed_sha256": "47012468ee08e20632716ac1343c4543a0731183dc47af75a269d2873c10f991",
+  "upstream_extraction_sha256": "81ba6d732c243cb6ab5969cbdb6733f963bbfcf5a23d59ebe7f78f67208945bb",
+  "recipe_candidates_are_not_executable_reviews": true,
+  "blacklist_matches_upstream": true,
+  "blacklist_sha256": "b53bb50cd4ecffe012625328633158d136b643b87f63a93041731c9d8709e3da"
+}

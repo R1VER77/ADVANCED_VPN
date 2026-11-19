@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "scope": "ideal_MAC_model_inputs_pinned_to_actual_Rust_role_proof_bytes",
+  "model_sha256": "fc4d0d81d874e633e54ca773a2c9c8505f63bc1af87444b36b03d2f28a9cc5bc",
+  "exporter_label": "EXPORTER-advanced-vpn-cloak-v2",
+  "key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+  "exporter_hex": "202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f",
+  "roles": [
+    {
+      "role": "client",
+      "message_hex": "616476616e6365642d76706e2f636c6f616b2f76322f636c69656e7400202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f",
+      "proof_hex": "e34c90cf0f14496ff390b6fef11caceb0bc4a9c24c5c887f7cf18b222369b25b"
+    },
+    {
+      "role": "server",
+      "message_hex": "616476616e6365642d76706e2f636c6f616b2f76322f73657276657200202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f",
+      "proof_hex": "576e6eff2310fa0952a191a42cf2d1c2307cf5e41abccea7b4c550a54a1a41dd"
+    }
+  ]
+}

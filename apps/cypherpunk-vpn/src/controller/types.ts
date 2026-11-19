@@ -96,6 +96,23 @@ export const UNAVAILABLE = 'controller_unavailable' as const
 export const EVIDENCE_MAX_AGE = { cloak_confirmed_at: 3, carrier_handshake_at: 3, path_probe_at: 15 }
 
 export type SetupBranch = 'create' | 'join'
+export interface ProviderListing {
+  id: string
+  namespace: string
+  name: string
+  tier: 'recipe_candidate' | 'listed_only'
+  reviewed_recipe_candidate: boolean
+  recipe_available: boolean
+  can_launch_provisioning: boolean
+}
+export interface ProviderSearchPage {
+  schema: 1
+  index_sha256: string
+  total_matches: number
+  returned: number
+  next_cursor: string | null
+  results: ProviderListing[]
+}
 export type StepState = 'pending' | 'running' | 'waiting_for_user' | 'waiting_for_hardware' | 'blocked' | 'failed' | 'complete' | 'skipped'
 export interface SetupStep {
   id: string

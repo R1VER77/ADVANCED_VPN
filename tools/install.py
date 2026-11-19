@@ -869,6 +869,7 @@ def main():
         shutil.copy2(src, package / "tools" / src.name)
     shutil.copy2(ROOT / "tools/hardware-requirements.txt", package / "tools/hardware-requirements.txt")
     shutil.copy2(ROOT / "tools/preflight-policy.json", package / "tools/preflight-policy.json")
+    shutil.copytree(ROOT / "tools/provider_data", package / "tools/provider_data")
     for name in ["README.md", "LICENSE", "NOTICE", "SECURITY.md"]:
         shutil.copy2(ROOT / name, package / name)
     shutil.copytree(ROOT / "third_party", package / "third_party")

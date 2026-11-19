@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { ActionPlan, ActionRequest, Operation, SetupBranch, SetupSnapshot, Status } from './types'
+import type { ActionPlan, ActionRequest, Operation, ProviderSearchPage, SetupBranch, SetupSnapshot, Status } from './types'
 
 const MAX_RESPONSE = 256 * 1024
 
@@ -12,6 +12,14 @@ async function read<T>(command: string, args: Record<string, unknown> = {}): Pro
 }
 
 export const controller = {
+  async providers(query: string, cursor: string | null = null): Promise<ProviderSearchPage> {
+    const page = await read<ProviderSearchPage>('provider_search', { query, cursor, filter: 'all' })
+    if (!Array.isArray(page.results) || page.results.length > 50 || page.returned !== page.results.length
+      || !Number.isSafeInteger(page.total_matches) || page.total_matches < page.returned
+      || (page.next_cursor !== null && (typeof page.next_cursor !== 'string' || page.next_cursor.length > 512))
+      || page.results.some(row => !row || typeof row.id !== 'string' || row.id.length > 257)) throw new Error('invalid_provider_page')
+    return page
+  },
   async snapshot(): Promise<Status> {
     const status = await read<Status>('get_snapshot')
     if (!Number.isFinite(status.observed_at) || !Array.isArray(status.chain) || status.chain.length > 3

@@ -299,6 +299,33 @@ impl Controller {
         self.request(connection, header, "GetSetup", branch.into(), false)
             .await
     }
+    async fn search_providers(
+        &self,
+        query: &str,
+        cursor: &str,
+        filter: &str,
+        #[zbus(connection)] connection: &Connection,
+        #[zbus(header)] header: Header<'_>,
+    ) -> fdo::Result<String> {
+        if query.len() > 256
+            || query.chars().any(|c| c < ' ' || c == '\u{7f}')
+            || cursor.len() > 512
+            || !matches!(
+                filter,
+                "all" | "reviewed_recipes" | "unreviewed" | "unavailable_non_compute"
+            )
+        {
+            return Err(refused());
+        }
+        self.request(
+            connection,
+            header,
+            "SearchProviders",
+            serde_json::json!({"query": query, "cursor": if cursor.is_empty() { None } else { Some(cursor) }, "filter": filter}),
+            false,
+        )
+        .await
+    }
     async fn preview_action(
         &self,
         request: &str,

@@ -1,0 +1,69 @@
+{
+  "schema": 1,
+  "tool": "tamarin-prover 1.12.0, (C) David Basin, Cas Cremers, Jannik Dreier, Simon Meier, Ralf Sasse, Benedikt Schmidt, 2010-2023",
+  "maude": "3.5.1",
+  "date": "2026-11-19",
+  "models": {
+    "formal/cloak/cloak.spthy": {
+      "seconds": 0.4,
+      "exit_code": 0,
+      "lemmas": {
+        "executable": {
+          "kind": "exists-trace",
+          "result": "verified",
+          "steps": 11
+        },
+        "channel_binding": {
+          "kind": "all-traces",
+          "result": "verified",
+          "steps": 2
+        },
+        "key_holder_only": {
+          "kind": "all-traces",
+          "result": "verified",
+          "steps": 7
+        },
+        "server_confirmation": {
+          "kind": "all-traces",
+          "result": "verified",
+          "steps": 6
+        },
+        "no_reflection": {
+          "kind": "all-traces",
+          "result": "verified",
+          "steps": 1
+        }
+      }
+    }
+  },
+  "mutants": [
+    {
+      "model": "formal/cloak/cloak.spthy",
+      "lemma": "channel_binding",
+      "edits": 2,
+      "result": "falsified - found trace",
+      "seconds": 0.4
+    },
+    {
+      "model": "formal/cloak/cloak.spthy",
+      "lemma": "key_holder_only",
+      "edits": 1,
+      "result": "falsified - found trace",
+      "seconds": 0.4
+    },
+    {
+      "model": "formal/cloak/cloak.spthy",
+      "lemma": "no_reflection",
+      "edits": 1,
+      "result": "falsified - found trace",
+      "seconds": 0.4
+    }
+  ],
+  "not_proved": [
+    "DC-net sender anonymity as observational equivalence: --diff with XOR did not terminate, even on the two-party core; the argument is the hand proof in docs/DCNET_CONTROL_DESIGN.md section 6",
+    "DC-net per-round pad secrecy and an existence trace in the multi-round, MAC-authenticated model: did not terminate (single-round versions are proved)",
+    "The 4-member collusion model over full frames (all six pads) did not finish in 25 minutes; the proved model takes the colluders' view, their own pads stripped",
+    "The network chain's forward secrecy for an unbounded number of rounds did not terminate; it is proved unrolled to three rounds with one seizure",
+    "Re-blinding: secrecy of the KEM secret itself, and unlinkability across hop 1 (an equivalence): did not terminate; the construction stays review-pending"
+  ]
+}

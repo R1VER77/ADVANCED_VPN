@@ -2731,6 +2731,37 @@ mod tests {
         );
     }
     #[test]
+    fn formal_v2_proof_vectors_match_the_symbolic_model_inputs() {
+        let vectors: serde_json::Value =
+            serde_json::from_str(include_str!("../tools/testdata/formal/cloak-v2.json")).unwrap();
+        assert_eq!(
+            vectors["exporter_label"],
+            std::str::from_utf8(EXPORTER_LABEL).unwrap()
+        );
+        assert_eq!(
+            vectors["model_sha256"],
+            hex::encode(Sha256::digest(include_bytes!(
+                "../formal/cloak/cloak.spthy"
+            )))
+        );
+        let key: [u8; TOKEN_LEN] = hex::decode(vectors["key_hex"].as_str().unwrap())
+            .unwrap()
+            .try_into()
+            .unwrap();
+        let exporter: [u8; 32] = hex::decode(vectors["exporter_hex"].as_str().unwrap())
+            .unwrap()
+            .try_into()
+            .unwrap();
+        for row in vectors["roles"].as_array().unwrap() {
+            let role = row["role"].as_str().unwrap().as_bytes();
+            let message = hex::decode(row["message_hex"].as_str().unwrap()).unwrap();
+            let expected = row["proof_hex"].as_str().unwrap();
+            assert_eq!(hex::encode(role_proof(&key, &exporter, role)), expected);
+            assert_eq!(hex::encode(hmac_sha256(&key, &message)), expected);
+        }
+    }
+
+    #[test]
     fn audit_v2_proofs_are_role_key_and_exporter_separated() {
         let key = [7; TOKEN_LEN];
         let exporter = [8; 32];

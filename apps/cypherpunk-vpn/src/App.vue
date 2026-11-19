@@ -2,6 +2,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import BrandMark from './components/BrandMark.vue'
 import MapPane from './components/MapPane.vue'
+import ProviderSearch from './components/ProviderSearch.vue'
 import { controller } from './controller/real'
 import type { ActionPlan, ActionRequest, Operation, SetupBranch, SetupSnapshot, Status } from './controller/types'
 
@@ -156,6 +157,7 @@ onUnmounted(() => window.clearInterval(timer))
               </li>
             </ol>
           </details>
+          <ProviderSearch v-if="branch === 'create' && fresh" />
           <div v-if="branch === 'join'" class="import">
             <div v-if="fresh && setup?.device_request">
               <h3>Your public device request</h3>

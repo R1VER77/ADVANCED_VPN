@@ -14,16 +14,27 @@ The shipped policy does not retain administrator authorization.
 
 Public interface: `org.cypherpunk_vpn.Controller1`, object
 `/org/cypherpunk_vpn/Controller1`. Each response is a bounded JSON string with
-`schema: 1`. Tauri exposes only these six explicitly allowed commands:
+`schema: 1`. Tauri exposes only these seven explicitly allowed commands:
 
 | D-Bus method | Input | Result |
 |---|---|---|
 | GetSnapshot | none | public status |
 | GetSetup | create or join | deterministic checklist |
+| SearchProviders | query, cursor, filter | bounded local discovery page |
 | PreviewAction | strict action JSON | inert reviewed plan |
 | ApplyAction | 64-character plan ID | operation ID and progress |
 | GetOperation | caller-owned operation ID | progress |
 | CancelOperation | caller-owned operation ID | cancellation requested |
+
+`SearchProviders` uses observe authorization only and cannot create an action plan,
+download a plugin or provision a server. Query size is at most 256 UTF-8 bytes,
+cursor size at most 512 characters and a page contains at most 50 public entries.
+The D-Bus cursor is an empty string for the first page; the worker receives JSON null.
+Opaque cursors bind the index, query and filter; they are not authorization tokens.
+The worker loads only the digest-pinned index inside its authenticated application
+slot. Listing and review-candidate flags never enable provisioning. No reviewed
+OpenTofu recipes ship yet. The create screen supports local search and tentative
+selection, with that limit visible. Search does not log or transmit query text.
 
 `GetPlan` is an inherited-pipe lookup used inside the native broker, not a public
 D-Bus method. Before authorization the broker obtains the caller-owned stored plan

@@ -1,0 +1,335 @@
+{
+  "schema": 1,
+  "tool": "tamarin-prover 1.12.0, (C) David Basin, Cas Cremers, Jannik Dreier, Simon Meier, Ralf Sasse, Benedikt Schmidt, 2010-2023",
+  "maude": "3.5.1",
+  "date": "2026-11-19",
+  "models": {
+    "formal/cloak/cloak.spthy": {
+      "seconds": 0.3,
+      "exit_code": 0,
+      "lemmas": {
+        "executable": {
+          "kind": "exists-trace",
+          "result": "verified",
+          "steps": 11
+        },
+        "channel_binding": {
+          "kind": "all-traces",
+          "result": "verified",
+          "steps": 2
+        },
+        "key_holder_only": {
+          "kind": "all-traces",
+          "result": "verified",
+          "steps": 7
+        },
+        "server_confirmation": {
+          "kind": "all-traces",
+          "result": "verified",
+          "steps": 6
+        },
+        "no_reflection": {
+          "kind": "all-traces",
+          "result": "verified",
+          "steps": 1
+        }
+      }
+    },
+    "formal/dcnet/dcnet.spthy": {
+      "seconds": 41.3,
+      "exit_code": 0,
+      "lemmas": {
+        "keys_secret": {
+          "kind": "all-traces",
+          "result": "verified",
+          "steps": 13
+        },
+        "frame_authenticity": {
+          "kind": "all-traces",
+          "result": "verified",
+          "steps": 260
+        },
+        "cancellation": {
+          "kind": "all-traces",
+          "result": "verified",
+          "steps": 167
+        }
+      }
+    },
+    "formal/dcnet/dcnet_authenticity.spthy": {
+      "seconds": 32.1,
+      "exit_code": 0,
+      "lemmas": {
+        "keys_secret": {
+          "kind": "all-traces",
+          "result": "verified",
+          "steps": 13
+        },
+        "frame_authenticity": {
+          "kind": "all-traces",
+          "result": "verified",
+          "steps": 11
+        },
+        "executable_accept": {
+          "kind": "exists-trace",
+          "result": "verified",
+          "steps": 15
+        }
+      }
+    },
+    "formal/dcnet/dcnet_no_collusion.spthy": {
+      "seconds": 45.9,
+      "exit_code": 0,
+      "lemmas": {
+        "pad_secrecy_without_collusion": {
+          "kind": "all-traces",
+          "result": "verified",
+          "steps": 2288
+        }
+      }
+    },
+    "formal/dcnet/dcnet_collusion.spthy": {
+      "seconds": 1.5,
+      "exit_code": 0,
+      "lemmas": {
+        "honest_key_secret": {
+          "kind": "all-traces",
+          "result": "verified",
+          "steps": 2
+        },
+        "decodes_exactly": {
+          "kind": "all-traces",
+          "result": "verified",
+          "steps": 2
+        },
+        "executable": {
+          "kind": "exists-trace",
+          "result": "verified",
+          "steps": 3
+        },
+        "collusion_reveals_pad": {
+          "kind": "exists-trace",
+          "result": "verified",
+          "steps": 8
+        }
+      }
+    },
+    "formal/dcnet/dcnet_collusion_4.spthy": {
+      "seconds": 52.2,
+      "exit_code": 0,
+      "lemmas": {
+        "pad_derived_with_two_honest": {
+          "kind": "exists-trace",
+          "result": "verified",
+          "steps": 4
+        },
+        "pads_secret_with_three_honest": {
+          "kind": "all-traces",
+          "result": "verified",
+          "steps": 2788
+        },
+        "keys_secret_with_three_honest": {
+          "kind": "all-traces",
+          "result": "verified",
+          "steps": 5
+        }
+      }
+    },
+    "formal/dcnet/dcnet_ratchet.spthy": {
+      "seconds": 0.3,
+      "exit_code": 0,
+      "lemmas": {
+        "forward_secure_round1": {
+          "kind": "all-traces",
+          "result": "verified",
+          "steps": 5
+        },
+        "forward_secure_round2": {
+          "kind": "all-traces",
+          "result": "verified",
+          "steps": 6
+        },
+        "executable": {
+          "kind": "exists-trace",
+          "result": "verified",
+          "steps": 8
+        }
+      }
+    },
+    "formal/zk/forward_private_nullifiers.spthy": {
+      "seconds": 0.4,
+      "exit_code": 0,
+      "lemmas": {
+        "forward_private_epoch1": {
+          "kind": "all-traces",
+          "result": "verified",
+          "steps": 4
+        },
+        "forward_private_epoch2": {
+          "kind": "all-traces",
+          "result": "verified",
+          "steps": 5
+        },
+        "executable": {
+          "kind": "exists-trace",
+          "result": "verified",
+          "steps": 8
+        }
+      }
+    },
+    "formal/dcnet/dcnet_one_time_pads.spthy": {
+      "seconds": 0.3,
+      "exit_code": 0,
+      "lemmas": {
+        "pad_used_once": {
+          "kind": "all-traces",
+          "result": "verified",
+          "steps": 24
+        },
+        "pad_known_only_if_leaked": {
+          "kind": "all-traces",
+          "result": "verified",
+          "steps": 5
+        },
+        "executable": {
+          "kind": "exists-trace",
+          "result": "verified",
+          "steps": 4
+        }
+      }
+    },
+    "crates/avpn-mix-lane/tamarin/pq_sphinx_reblind.spthy": {
+      "seconds": 13.2,
+      "exit_code": 0,
+      "lemmas": {
+        "element_hidden": {
+          "kind": "all-traces",
+          "result": "verified",
+          "steps": 18
+        },
+        "pad_hidden": {
+          "kind": "all-traces",
+          "result": "verified",
+          "steps": 18
+        },
+        "executable": {
+          "kind": "exists-trace",
+          "result": "verified",
+          "steps": 7
+        },
+        "global_xor_reveals_pad": {
+          "kind": "exists-trace",
+          "result": "verified",
+          "steps": 5
+        }
+      }
+    }
+  },
+  "mutants": [
+    {
+      "model": "formal/cloak/cloak.spthy",
+      "lemma": "channel_binding",
+      "edits": 2,
+      "result": "falsified - found trace",
+      "seconds": 0.4
+    },
+    {
+      "model": "formal/cloak/cloak.spthy",
+      "lemma": "key_holder_only",
+      "edits": 1,
+      "result": "falsified - found trace",
+      "seconds": 0.4
+    },
+    {
+      "model": "formal/cloak/cloak.spthy",
+      "lemma": "no_reflection",
+      "edits": 1,
+      "result": "falsified - found trace",
+      "seconds": 0.5
+    },
+    {
+      "model": "formal/dcnet/dcnet_authenticity.spthy",
+      "lemma": "frame_authenticity",
+      "edits": 1,
+      "result": "falsified - found trace",
+      "seconds": 3.4
+    },
+    {
+      "model": "formal/dcnet/dcnet_authenticity.spthy",
+      "lemma": "frame_authenticity",
+      "edits": 3,
+      "result": "falsified - found trace",
+      "seconds": 31.9
+    },
+    {
+      "model": "formal/dcnet/dcnet.spthy",
+      "lemma": "cancellation",
+      "edits": 1,
+      "result": "MISSING (timeout)",
+      "seconds": 120.4
+    },
+    {
+      "model": "formal/dcnet/dcnet_no_collusion.spthy",
+      "lemma": "pad_secrecy_without_collusion",
+      "edits": 1,
+      "result": "falsified - found trace",
+      "seconds": 3.6
+    },
+    {
+      "model": "formal/dcnet/dcnet_collusion.spthy",
+      "lemma": "decodes_exactly",
+      "edits": 1,
+      "result": "falsified - found trace",
+      "seconds": 0.7
+    },
+    {
+      "model": "formal/dcnet/dcnet_collusion_4.spthy",
+      "lemma": "pads_secret_with_three_honest",
+      "edits": 1,
+      "result": "falsified - found trace",
+      "seconds": 3.4
+    },
+    {
+      "model": "formal/dcnet/dcnet_one_time_pads.spthy",
+      "lemma": "pad_used_once",
+      "edits": 1,
+      "result": "falsified - found trace",
+      "seconds": 0.3
+    },
+    {
+      "model": "formal/dcnet/dcnet_ratchet.spthy",
+      "lemma": "forward_secure_round1",
+      "edits": 1,
+      "result": "falsified - found trace",
+      "seconds": 0.4
+    },
+    {
+      "model": "formal/zk/forward_private_nullifiers.spthy",
+      "lemma": "forward_private_epoch1",
+      "edits": 1,
+      "result": "falsified - found trace",
+      "seconds": 0.4
+    },
+    {
+      "model": "formal/dcnet/dcnet_one_time_pads.spthy",
+      "lemma": "pad_known_only_if_leaked",
+      "edits": 1,
+      "result": "falsified - found trace",
+      "seconds": 0.4
+    },
+    {
+      "model": "crates/avpn-mix-lane/tamarin/pq_sphinx_reblind.spthy",
+      "lemma": "element_hidden",
+      "edits": 1,
+      "result": "falsified - found trace",
+      "seconds": 0.8
+    }
+  ],
+  "not_proved": [
+    "DC-net sender anonymity as observational equivalence: --diff with XOR did not terminate, even on the two-party core; the argument is the hand proof in docs/DCNET_CONTROL_DESIGN.md section 6",
+    "DC-net per-round pad secrecy and an existence trace in the multi-round, MAC-authenticated model: did not terminate (single-round versions are proved)",
+    "The 4-member collusion model over full frames (all six pads) did not finish in 25 minutes; the proved model takes the colluders' view, their own pads stripped",
+    "The network chain's forward secrecy for an unbounded number of rounds did not terminate; it is proved unrolled to three rounds with one seizure",
+    "Re-blinding: secrecy of the KEM secret itself, and unlinkability across hop 1 (an equivalence): did not terminate; the construction stays review-pending"
+  ]
+}
