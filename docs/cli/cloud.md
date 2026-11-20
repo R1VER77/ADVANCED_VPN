@@ -17,6 +17,9 @@ and `oci` command-line tools, and plain SSH for everything else.
     avpn cloud oci server --teardown [--name avpn-NAME]
     avpn cloud oci allow --apply --name avpn-NAME --security-list OCID --allow-from IP [--port N] [--protocol udp|tcp]
     avpn cloud oci allow --teardown --name avpn-NAME --security-list OCID
+    avpn cloud azure server --apply --allow-from IP --vault DIR [--name avpn-NAME] [--role ROLE] [--location L] \
+        [--size S] [--port N] [--admin-via avpn-RELAY]
+    avpn cloud azure server --teardown --vault DIR [--name avpn-NAME]
     avpn cloud host add --name avpn-NAME --ssh USER@HOST --key FILE [--provider P] [--shared]
     avpn cloud host setup --name avpn-NAME --out FILE [--role ROLE] [--replace] [--vault DIR]
     avpn cloud host bastion --name avpn-NAME --bastion-id OCID --instance-id OCID --host ALIAS \
@@ -216,6 +219,34 @@ What it does:
    and `aws allow --admin-ip` refuses, because no address is admitted.
 
 `aws relay --teardown` removes the endpoint and its group with the server.
+
+## avpn cloud azure server
+
+One chain server on Azure, made by OpenTofu (the pinned binary and the `azure-server`
+module; [setup flow](../GEMMA_SETUP_FLOW.md)). Sign in first with `az login`.
+
+- `--apply`: show the exact OpenTofu plan, then create it.
+- `--teardown`: destroy everything in its OpenTofu state (its resource group).
+- `--name avpn-NAME`: the resource group and tag (default `avpn-exit-az`).
+- `--role relay|middle|exit`: what it is in the chain (default `exit`; it sets the port).
+- `--location L`: the Azure region (default `swedencentral`).
+- `--size S`: the VM size (default `Standard_B1s`, one of Azure's free-services sizes).
+- `--port N`: the tunnel port (default by role).
+- `--allow-from IP`: the previous hop's public IPv4 (required with `--apply`).
+- `--admin-via avpn-RELAY`: the relay SSH goes through (default `avpn-relay`).
+- `--vault DIR`: the operator's Nitrokey vault, which holds the key that encrypts the
+  OpenTofu state and plan (`avpn help state-key`; one PIN + touch per run).
+- `--dry-run`, `--yes`: as above.
+
+What `--apply` creates, all in one tagged resource group:
+1. A network, a subnet and a firewall: the tunnel port from `--allow-from` only, SSH only
+   from the relay's address, everything else denied. No rule names your address.
+2. A static public address.
+3. A Trusted Launch VM (secure boot and a virtual TPM) running the newest Ubuntu 24.04,
+   with the first-boot hardening that keeps every log in RAM. `host setup` and `chain`
+   then seal its keys to the TPM, so it restarts on its own.
+4. An SSH config reaching it through the relay, itself reached through its Instance
+   Connect Endpoint, and an inventory record (`engine: tofu`).
 
 ## avpn cloud host add
 

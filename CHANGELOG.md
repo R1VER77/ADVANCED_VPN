@@ -6,6 +6,11 @@ measured figure in the docs names the version it was measured on.
 
 ## Unreleased
 
+- `avpn cloud azure server`: an Azure chain server made by OpenTofu (the `azure-server`
+  module, `hashicorp/azurerm` 5.13.0 locked): a Trusted Launch VM (secure boot, virtual
+  TPM, so its keys are TPM-sealed and it restarts unattended), the tunnel port from the
+  previous hop only, SSH only from the relay (administered through the relay's Instance
+  Connect Endpoint, never your address), a static address, teardown by its OpenTofu state.
 - OpenTofu provisioning, step 1 of the setup flow (D007): a pinned OpenTofu 1.13.9
   (`tools/tofu.py`; SHA256SUMS verified against OpenTofu's signing key, fingerprint
   cross-checked; refused unless the archive matches the pin), an `oci-server` module that

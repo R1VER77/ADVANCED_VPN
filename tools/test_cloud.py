@@ -1226,6 +1226,94 @@ class HealthTests(unittest.TestCase):
         self.assertEqual(len(notes), 1)
 
 
+class AzureServerTests(unittest.TestCase):
+    """`cloud azure server` through OpenTofu (D007 step 1): a Trusted Launch exit whose SSH
+    admits only the relay, reached through the relay's Instance Connect Endpoint."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        d = Path(self.tmp.name)
+        self.patches = [
+            mock.patch.object(cloud, "INVENTORY", d / "cloud.json"),
+            mock.patch.object(cloud, "azure_subscription", lambda: ("sub-1", "Azure for Students")),
+            mock.patch.object(cloud, "egress", lambda: "16.9.9.9"),
+            mock.patch.object(cloud, "tool", lambda name: "/usr/bin/" + name),
+        ]
+        for p in self.patches:
+            p.start()
+            self.addCleanup(p.stop)
+        (d / "relay-key").write_text("k")
+        cloud.save_inventory(dict(schema=1, resources={"avpn-relay": dict(
+            provider="aws", profile="flashbots", region="eu-north-1", public_ip="13.60.50.27", ssh_key=str(d / "relay-key"),
+            admin=dict(via="eice", instance="i-0d6", endpoint="eice-1", group="sg-1"))}))  # fmt: skip
+        self.calls = []
+        import tofu_run
+
+        def workspace(name, module, variables, provider):
+            self.calls.append(("workspace", module, variables, provider))
+            return d / "ws"
+
+        def plan(ws, key, destroy=False):
+            self.calls.append(("plan", destroy))
+            return {"delete" if destroy else "create": ["module.server.azurerm_linux_virtual_machine.this"]}
+
+        def apply(ws, key):
+            self.calls.append(("apply",))
+            return {"server": {"value": {"public_ip": "20.91.1.2", "private_ip": "10.77.110.4",
+                                         "vm_id": "/sub/vm", "resource_group": "avpn-exit-az"}}}  # fmt: skip
+
+        for name, fn in (("workspace", workspace), ("plan", plan), ("apply", apply),
+                         ("init", lambda ws, key: self.calls.append(("init",))),
+                         ("operator_key", lambda vault, ctl: bytes(32))):  # fmt: skip
+            p = mock.patch.object(tofu_run, name, fn)
+            p.start()
+            self.addCleanup(p.stop)
+        p = mock.patch.object(
+            cloud.subprocess, "run", lambda argv, **kw: Path(argv[-1] + ".pub").write_text("ssh-ed25519 AAAA")
+        )
+        p.start()
+        self.addCleanup(p.stop)
+
+    def run_cli(self, *argv):
+        return cloud.run(cloud.build_parser().parse_args(list(argv)))
+
+    def test_the_exit_admits_ssh_only_from_the_relay_and_is_reached_through_it(self):
+        r = self.run_cli("azure", "server", "--apply", "--yes", "--allow-from", "13.60.50.27", "--vault", "/v")
+        _, module, variables, provider = next(c for c in self.calls if c[0] == "workspace")
+        self.assertEqual(module, "azure-server")
+        self.assertEqual(provider, {"subscription": "sub-1"})
+        self.assertEqual(variables["admin_sources"], ["13.60.50.27/32"])
+        self.assertEqual(variables["tunnel_sources"], ["13.60.50.27/32"])
+        self.assertEqual(variables["port"], 4444)
+        self.assertFalse(variables["tcp_fallback"])
+        self.assertIn(("apply",), self.calls)
+        rec = json.loads(cloud.INVENTORY.read_text())["resources"]["avpn-exit-az"]
+        self.assertEqual((rec["engine"], rec["catalog"], rec["public_ip"]), ("tofu", "azure", "20.91.1.2"))
+        config = Path(rec["ssh_config"]).read_text()
+        self.assertIn("ProxyJump avpn-exit-az-relay", config)
+        self.assertIn("ec2-instance-connect open-tunnel --instance-id i-0d6", config)
+        self.assertIn("HostName 20.91.1.2", config)
+        self.assertEqual(oct(Path(rec["ssh_config"]).stat().st_mode & 0o777), "0o600")
+        self.assertIn("Trusted Launch", json.dumps(r["rows"]))
+
+    def test_a_dry_run_creates_nothing_and_teardown_destroys_the_state(self):
+        self.run_cli("azure", "server", "--apply", "--dry-run", "--allow-from", "13.60.50.27", "--vault", "/v")
+        self.assertNotIn(("apply",), self.calls)
+        self.assertNotIn("avpn-exit-az", json.loads(cloud.INVENTORY.read_text())["resources"])
+        self.run_cli("azure", "server", "--apply", "--yes", "--allow-from", "13.60.50.27", "--vault", "/v")
+        self.calls.clear()
+        self.run_cli("azure", "server", "--teardown", "--yes", "--vault", "/v")
+        self.assertIn(("plan", True), self.calls)
+        self.assertIn(("apply",), self.calls)
+        self.assertNotIn("avpn-exit-az", json.loads(cloud.INVENTORY.read_text())["resources"])
+
+    def test_an_unrecorded_relay_is_refused(self):
+        with self.assertRaisesRegex(cloud.CloudError, "admin-via"):
+            self.run_cli("azure", "server", "--apply", "--yes", "--allow-from", "13.60.50.27", "--vault", "/v",
+                         "--admin-via", "avpn-nope")  # fmt: skip
+
+
 class ChainTests(Stubbed):
     def setUp(self):
         super().setUp()

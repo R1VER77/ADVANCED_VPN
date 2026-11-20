@@ -18,6 +18,7 @@ Every apply and teardown prints its plan first. `--dry-run` stops after the plan
 """
 
 import argparse
+import base64
 import datetime
 import ipaddress
 import json
@@ -95,6 +96,7 @@ ANY = "0.0.0.0/0"
 CALLER_LOG = {
     "aws": "AWS CloudTrail keeps every caller's address for 90 days",
     "oci": "OCI Audit keeps every caller's address for 365 days",
+    "azure": "the Azure Activity Log keeps each management call, with its caller, for 90 days",
 }
 
 
@@ -2296,6 +2298,120 @@ def health(a):
     return rows
 
 
+AZURE_SIZE = "Standard_B1s"  # Azure free services: 750 hours a month for 12 months
+
+
+def azure_subscription():
+    """(subscription id, name) of the Azure CLI's current sign-in."""
+    got = call([tool("az"), "account", "show", "--output", "json"])
+    return got["id"], got.get("name", "")
+
+
+def relay_jump_config(name, relay_name, relay):
+    """SSH config lines reaching `name` through the chain's relay (itself reached through its
+    EC2 Instance Connect Endpoint): administration that never names your address."""
+    admin = eice_admin(relay)
+    if not admin:
+        raise CloudError("%s is not administered through an Instance Connect Endpoint" % relay_name)
+    tunnel = " ".join(shlex.quote(x) for x in [tool("aws"), "ec2-instance-connect", "open-tunnel", "--instance-id",
+                                                admin["instance"], "--profile", relay["profile"], "--region",
+                                                relay["region"]])  # fmt: skip
+    known = INVENTORY.parent / "ssh"
+    return (
+        "Host %s-relay\n  HostName %s\n  HostKeyAlias %s\n  User %s\n  ProxyCommand %s\n  IdentityFile %s\n"
+        "  IdentitiesOnly yes\n  IdentityAgent none\n  UserKnownHostsFile %s\n  ServerAliveInterval 15\n"
+        % (name, admin["instance"], relay["public_ip"], relay.get("ssh_user", "admin"), tunnel, relay["ssh_key"],
+           known / (relay_name + ".known_hosts"))
+    )  # fmt: skip
+
+
+def azure_server(a):
+    """`azure server --apply|--teardown`: one Trusted Launch VM through OpenTofu (the
+    azure-server module), administered through the relay; state encrypted with the vault's
+    key (one PIN + touch for the whole run)."""
+    import tofu_run
+
+    inv = load_inventory()
+    if a.teardown:
+        rec = inv["resources"].get(a.name)
+        if not rec or rec.get("engine") != "tofu":
+            raise CloudError("%s is not an OpenTofu-managed server" % a.name)
+        key = tofu_run.operator_key(a.vault, controller())
+        d = tofu_run.workspaces() / a.name
+        summary = tofu_run.plan(d, key, destroy=True)
+        rows = [dict(label=act, value=", ".join(x.split(".")[-2] for x in addrs)) for act, addrs in summary.items()]
+        if a.dry_run or not confirm(a, "Remove Azure %s" % a.name):
+            return rows
+        tofu_run.apply(d, key)
+        del inv["resources"][a.name]
+        save_inventory(inv)
+        return rows + [dict(label="removed", value="%s and its resource group" % a.name)]
+    if a.name in inv["resources"]:
+        raise CloudError("%s is already recorded; tear it down first" % a.name)
+    relay_name = a.admin_via
+    relay = inv["resources"].get(relay_name)
+    if not relay or not relay.get("public_ip"):
+        raise CloudError("--admin-via %s is not a recorded server with an address" % relay_name)
+    subscription, sub_name = azure_subscription()
+    key_path = ssh_key_dir(a.name)
+    if not key_path.exists():
+        subprocess.run([shutil.which("ssh-keygen") or "/usr/bin/ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C",
+                        a.name, "-f", str(key_path)], check=True)  # fmt: skip
+    port = a.port or ROLES[a.role]
+    user_data = first_boot_file()
+    try:
+        variables = dict(
+            name=a.name, location=a.location, size=a.size, port=port, tunnel_sources=a.allow_from,
+            tcp_fallback=port == FIRST_HOP_PORT, admin_sources=[relay["public_ip"] + "/32"],
+            ssh_public_key=Path(str(key_path) + ".pub").read_text().strip(),
+            user_data=base64.b64encode(user_data.read_bytes()).decode(),
+        )  # fmt: skip
+    finally:
+        user_data.unlink(missing_ok=True)
+    d = tofu_run.workspace(a.name, "azure-server", variables, dict(subscription=subscription))
+    key = tofu_run.operator_key(a.vault, controller())
+    tofu_run.init(d, key)
+    summary = tofu_run.plan(d, key)
+    rows = [
+        dict(label="subscription", value=sub_name),
+        dict(label="server", value="%s %s in %s, Trusted Launch (secure boot, vTPM)" % (a.name, a.size, a.location)),
+        dict(
+            label="firewall",
+            value="udp %d from %s; SSH 22 only from the relay %s (%s)"
+            % (port, ", ".join(a.allow_from), relay_name, relay["public_ip"]),
+        ),  # fmt: skip
+        dict(
+            label="cost",
+            value="Azure free services: %s 750 h/month for 12 months; outbound traffic beyond the free "
+            "allowance is billed to the subscription" % a.size,
+        ),  # fmt: skip
+    ] + [dict(label=act, value=", ".join(x.split(".")[-2] for x in addrs)) for act, addrs in summary.items()]
+    rows.append(caller_note("azure"))
+    if a.dry_run or not confirm(a, "Create Azure %s %s" % (a.role, a.name)):
+        return rows
+    out = tofu_run.apply(d, key)["server"]["value"]
+    config = INVENTORY.parent / "ssh" / (a.name + ".conf")
+    text = relay_jump_config(a.name, relay_name, relay) + (
+        "Host %s\n  HostName %s\n  User ubuntu\n  IdentityFile %s\n  IdentitiesOnly yes\n  IdentityAgent none\n"
+        "  StrictHostKeyChecking accept-new\n  UserKnownHostsFile %s\n  ProxyJump %s-relay\n  ConnectTimeout 30\n"
+        % (a.name, out["public_ip"], key_path, INVENTORY.parent / "ssh" / (a.name + ".known_hosts"), a.name)
+    )  # fmt: skip
+    tmp = config.with_suffix(".conf.tmp")
+    tmp.write_text(text)
+    tmp.chmod(0o600)
+    tmp.replace(config)
+    inv["resources"][a.name] = dict(
+        provider="azure", catalog="azure", engine="tofu", role=a.role, port=port, public_ip=out["public_ip"],
+        ssh="ubuntu@" + a.name, ssh_config=str(config), ssh_key=str(key_path), location=a.location,
+        subscription=subscription, vm=out["vm_id"], resource_group=out["resource_group"],
+        created=datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
+    )  # fmt: skip
+    save_inventory(inv)
+    return rows + [dict(label="public address", value="%s (udp %d)" % (out["public_ip"], port)),
+                   dict(label="ssh", value="through the relay: ssh -F %s %s" % (config, a.name)),
+                   dict(label="next", value="avpn cloud chain --apply")]  # fmt: skip
+
+
 def admin_target(hop, is_exit):
     """How to SSH to a hop once the chain is up: the exit by its tunnel address."""
     target = ssh_target(hop["record"])
@@ -2631,6 +2747,22 @@ def build_parser():
     forget.add_argument("--name", required=True, help="the recorded server")
     hl = s.add_parser("health", help="are the chain's servers running, locked or stopped, and the accounts healthy?")
     hl.add_argument("--notify", action="store_true", help="also show a desktop notification when something is wrong")
+    az = s.add_parser("azure", help="Azure servers, through OpenTofu")
+    az_s = az.add_subparsers(dest="kind", required=True)
+    azs = az_s.add_parser("server", help="one Trusted Launch VM (vTPM), administered through the relay")
+    mode = azs.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--apply", action="store_true", help="create the server")
+    mode.add_argument("--teardown", action="store_true", help="delete it and its resource group")
+    azs.add_argument("--name", default="avpn-exit-az", help="resource name and tag (avpn-*)")
+    azs.add_argument("--role", choices=sorted(ROLES), default="exit", help="what the server is in the chain")
+    azs.add_argument("--location", default="swedencentral", help="Azure region (default swedencentral)")
+    azs.add_argument("--size", default=AZURE_SIZE, help="VM size (default %s, a free-services size)" % AZURE_SIZE)
+    azs.add_argument("--port", type=int, help="tunnel port (default by role)")
+    azs.add_argument("--allow-from", action="append", default=[], help="previous hop's public IPv4")
+    azs.add_argument("--admin-via", default="avpn-relay", help="the relay SSH goes through (default avpn-relay)")
+    azs.add_argument("--vault", type=Path, required=True, help="the operator's Nitrokey vault (the state key)")
+    azs.add_argument("--dry-run", action="store_true", help="show the plan and stop")
+    azs.add_argument("--yes", action="store_true", help="do not ask for confirmation")
     ul = s.add_parser("unlock", help="unlock a server without a TPM after it restarts (Nitrokey PIN + touch)")
     ul.add_argument("name", help="the recorded server (avpn-*)")
     ul.add_argument("--vault", type=Path, help="the operator's Nitrokey vault (default: the chain's)")
@@ -2738,6 +2870,15 @@ def run(a):
         if a.kind == "bastion":
             return dict(title="Bastion for %s" % a.name, summary="recorded", rows=host_bastion(a))
         return dict(title="Set up %s" % a.name, summary="installed", rows=host_setup(a))
+    if a.provider == "azure" and a.kind == "server":
+        valid_name(a.name)
+        if a.apply:
+            if not a.allow_from:
+                raise CloudError("--allow-from is required: the previous hop's address")
+            a.allow_from = [single_ip(x) for x in a.allow_from]
+        title = ("Remove" if a.teardown else "Create") + " Azure %s" % a.name
+        rows = azure_server(a)
+        return dict(title=title, summary="plan" if a.dry_run else "done", rows=rows, dry_run=a.dry_run)
     if a.provider == "health":
         rows = health(a)
         bad = rows[-1]["value"] != "no problem found"

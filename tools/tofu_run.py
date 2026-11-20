@@ -23,6 +23,10 @@ MODULES = Path(__file__).resolve().parents[1] / "tofu" / "modules"
 # Per module: the provider's source (declared in the root too, or OpenTofu would infer a
 # default namespace the read-only lock file refuses) and its configuration.
 PROVIDERS = {
+    "azure-server": (
+        'azurerm = { source = "hashicorp/azurerm" }',
+        'provider "azurerm" {\n  features {}\n  subscription_id = %(subscription)s\n}\n',
+    ),
     "oci-server": (
         'oci = { source = "oracle/oci" }',
         'provider "oci" {\n  config_file_profile = %(profile)s\n  region = %(region)s\n}\n',
