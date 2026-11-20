@@ -59,6 +59,16 @@ if name == "oci":
             ("network", "subnet", "create"): {"id": "ocid1.subnet.1"},
             ("network", "route-table", "create"): {"id": "ocid1.rt.own"},
             ("compute", "instance", "launch"): {"id": "ocid1.instance.1"}}
+    if argv[:3] == ["compute", "instance", "launch"] and state.get("capacity_fail"):
+        state["capacity_fail"] -= 1
+        state.setdefault("launch_attempts", []).append(argv)
+        json.dump(state, open(os.environ["STUB_STATE"], "w"))
+        if state.get("rate_limited"):
+            fail('{"code": "TooManyRequests", "message": "Too many requests for the tenant"}')
+        fail('{"code": "InternalError", "message": "Out of host capacity."}')
+    if argv[:3] == ["compute", "instance", "launch"]:
+        state.setdefault("launch_attempts", []).append(argv)
+        json.dump(state, open(os.environ["STUB_STATE"], "w"))
     if argv[:3] == ["compute", "instance", "launch"] and "--user-data-file" in argv:
         state["oci_user_data"] = open(oflag("--user-data-file")).read()
         json.dump(state, open(os.environ["STUB_STATE"], "w"))
@@ -94,7 +104,7 @@ if name == "oci":
     if tuple(argv[:3]) in made:
         out({"data": made[tuple(argv[:3])]})
     if argv[:3] == ["compute", "instance", "list-vnics"]:
-        out({"data": [{"public-ip": "16.20.0.5"}]})
+        out({"data": [{"public-ip": "16.20.0.5", "private-ip": "10.0.254.7"}]})
     if argv[2:3] == ["get"] or argv[:3] == ["network", "route-table", "update"] or argv[2:3] in (["delete"], ["terminate"]) or argv[:3] == ["network", "security-list", "update"]:
         tags = state.get("oci_tags", {"avpn-managed": "true", "avpn-name": "avpn-exit"})
         out({"data": {"freeform-tags": tags, "lifecycle-state": "AVAILABLE"}})
@@ -856,6 +866,76 @@ class OciServerTests(Stubbed):
              ["network", "security-list", "delete"]],
         )  # fmt: skip
 
+    def test_a_server_behind_the_bastion_has_no_ssh_address_rule(self):
+        # Owner, 20 Nov 2026: an SSH rule for one address breaks behind a VPN. With --bastion
+        # the server goes in the bastion's VCN, admits SSH only from its private endpoint,
+        # runs the Bastion plugin, and is reached through renewed sessions.
+        state = json.loads(self.state.read_text())
+        state["oci_bastions"] = {"c": [{"id": "ocid1.bastion.b", "target-vcn-id": "ocid1.vcn.shared",
+                                        "private-endpoint-ip-address": "10.0.0.159"}]}  # fmt: skip
+        self.state.write_text(json.dumps(state))
+        self.run_cli("oci", "server", "--apply", "--yes", "--allow-from", "16.0.0.9", "--bastion", "ocid1.bastion.b")
+        subnet = self.oci_call("network", "subnet", "create")
+        self.assertEqual(subnet[subnet.index("--vcn-id") + 1], "ocid1.vcn.shared")  # the bastion's VCN
+        sl = self.oci_call("network", "security-list", "create")
+        ingress = json.loads(sl[sl.index("--ingress-security-rules") + 1])
+        ssh = [r["source"] for r in ingress if r.get("tcpOptions", {}).get("destinationPortRange", {}).get("min") == 22]
+        self.assertEqual(ssh, ["10.0.0.159/32"])
+        launch = self.oci_call("compute", "instance", "launch")
+        plugins = json.loads(launch[launch.index("--agent-config") + 1])["pluginsConfig"]
+        self.assertIn({"name": "Bastion", "desiredState": "ENABLED"}, plugins)
+        rec = json.loads(cloud.INVENTORY.read_text())["resources"]["avpn-exit"]
+        self.assertEqual(rec["bastion"]["id"], "ocid1.bastion.b")
+        self.assertEqual(rec["bastion"]["host"], "avpn-exit-bastion")
+        self.assertEqual(rec["ssh"], "ubuntu@avpn-exit")
+        config = Path(rec["ssh_config"]).read_text()
+        self.assertIn("ProxyJump avpn-exit-bastion", config)
+        self.assertEqual(cloud.ssh_config_user(rec["ssh_config"], "avpn-exit-bastion"), "PENDING")
+        self.assertEqual(oct(Path(rec["ssh_config"]).stat().st_mode & 0o777), "0o600")
+        with self.assertRaisesRegex(cloud.CloudError, "bastion's VCN"):
+            self.run_cli("oci", "server", "--apply", "--yes", "--name", "avpn-other", "--allow-from", "16.0.0.9",
+                         "--bastion", "ocid1.bastion.b", "--vcn", "ocid1.vcn.elsewhere")  # fmt: skip
+
+    def capacity(self, fails):
+        state = json.loads(self.state.read_text())
+        state["capacity_fail"] = fails
+        self.state.write_text(json.dumps(state))
+
+    def test_a_launch_without_capacity_keeps_its_network_and_a_second_apply_resumes(self):
+        # Live, 20 Nov 2026: Always Free A1 in me-dubai-1 answered "Out of host capacity".
+        self.capacity(1)
+        with self.assertRaisesRegex(cloud.CloudError, "no free capacity .* network is kept"):
+            self.run_cli("oci", "server", "--apply", "--yes", "--allow-from", "16.0.0.9", "--admin-ip", "18.0.0.4")
+        rec = json.loads(cloud.INVENTORY.read_text())["resources"]["avpn-exit"]
+        self.assertTrue(rec.get("subnet") and not rec.get("instance"))
+        made_before = [c[:3] for c in self.oci_calls() if c[2] == "create"]
+        self.run_cli("oci", "server", "--apply", "--yes", "--allow-from", "16.0.0.9", "--admin-ip", "18.0.0.4")
+        made_after = [c[:3] for c in self.oci_calls() if c[2] == "create"]
+        self.assertEqual(made_after, made_before)  # no second network
+        rec = json.loads(cloud.INVENTORY.read_text())["resources"]["avpn-exit"]
+        self.assertEqual(rec["instance"], "ocid1.instance.1")
+        self.assertEqual(rec["public_ip"], "16.20.0.5")
+        with self.assertRaisesRegex(cloud.CloudError, "already recorded"):  # a complete server is not relaunched
+            self.run_cli("oci", "server", "--apply", "--yes", "--allow-from", "16.0.0.9", "--admin-ip", "18.0.0.4")
+
+    def test_rate_limiting_is_waited_out_too(self):
+        state = json.loads(self.state.read_text())
+        state.update(capacity_fail=1, rate_limited=True)
+        self.state.write_text(json.dumps(state))
+        self.run_cli("oci", "server", "--apply", "--yes", "--allow-from", "16.0.0.9", "--admin-ip", "18.0.0.4",
+                     "--wait-capacity", "10")  # fmt: skip
+        self.assertEqual(len(json.loads(self.state.read_text())["launch_attempts"]), 2)
+
+    def test_wait_capacity_retries_across_fault_domains(self):
+        self.capacity(2)
+        self.run_cli("oci", "server", "--apply", "--yes", "--allow-from", "16.0.0.9", "--admin-ip", "18.0.0.4",
+                     "--wait-capacity", "10")  # fmt: skip
+        attempts = json.loads(self.state.read_text())["launch_attempts"]
+        self.assertEqual(len(attempts), 3)
+        domains = [a[a.index("--fault-domain") + 1] if "--fault-domain" in a else None for a in attempts]
+        self.assertEqual(domains, [None, "FAULT-DOMAIN-2", "FAULT-DOMAIN-3"])
+        self.assertTrue(json.loads(cloud.INVENTORY.read_text())["resources"]["avpn-exit"]["instance"])
+
     def test_teardown_deletes_recorded_parts_in_order_and_checks_tags(self):
         self.run_cli("oci", "server", "--apply", "--yes", "--allow-from", "16.0.0.9", "--admin-ip", "18.0.0.4")
         state = json.loads(self.state.read_text())
@@ -1052,6 +1132,98 @@ class BastionTests(Stubbed):
                          "--bastion-id", "ocid1.bastion.b", "--instance-id", "ocid1.instance.i")  # fmt: skip
         r = self.run_cli(*base, "--bastion-id", "ocid1.bastion.b", "--instance-id", "ocid1.instance.i")
         self.assertEqual(r["summary"], "recorded")
+
+
+class HealthTests(unittest.TestCase):
+    """`avpn cloud health` (owner, 20 Nov 2026): a stopped, reclaimed, locked or unreachable
+    server, and an account running out, must be obvious, with the fix."""
+
+    def run_health(self, ssh_line="active=active mode=operator unlocked=1", oci_state="RUNNING", plan=None,
+                   ssh_error=None):  # fmt: skip
+        inv = dict(schema=1, chain=dict(hops=["avpn-relay", "avpn-exit"]), resources={
+            "avpn-relay": dict(provider="aws", profile="p", region="eu-north-1", instance="i-1", role="relay"),
+            "avpn-exit": dict(provider="ssh", role="exit", key_protection="operator",
+                              bastion=dict(instance="ocid1.instance.x", oci_profile="DEFAULT"))})  # fmt: skip
+        plan = plan or {"accountPlanType": "FREE", "accountPlanStatus": "ACTIVE",
+                        "accountPlanRemainingCredits": {"amount": 106.3}, "accountPlanExpirationDate": "2099-01-01T00:00:00+00:00"}  # fmt: skip
+
+        class FakeAws:
+            def __init__(self, profile, region=None):
+                pass
+
+            def __call__(self, *args, parse=True):
+                return plan
+
+            def ec2(self, *args, parse=True):
+                return {"Reservations": [{"Instances": [{"State": {"Name": "running"}}]}]}
+
+        class FakeOci:
+            region, tenancy = "me-dubai-1", "ocid1.tenancy.t"
+
+            def __init__(self, profile="DEFAULT"):
+                pass
+
+            def __call__(self, *args):
+                if args[:3] == ("compute", "instance", "get"):
+                    return {"data": {"lifecycle-state": oci_state}}
+                return {"data": {"items": [{"plan-type": "FREE_TIER", "upgrade-state": "PROMO"}]}}
+
+        def fake_call(argv, parse=True, stdin=None):
+            if ssh_error:
+                raise cloud.CloudError(ssh_error)
+            return ("active=active mode=systemd-creds unlocked=0" if "relay" in " ".join(argv) else ssh_line) + "\n"
+
+        notes = []
+        with tempfile.TemporaryDirectory() as d, \
+                mock.patch.object(cloud, "INVENTORY", Path(d) / "cloud.json"), \
+                mock.patch.object(cloud, "Aws", FakeAws), mock.patch.object(cloud, "Oci", FakeOci), \
+                mock.patch.object(cloud, "remote", lambda n, r: ("ssh", "scp", [], n)), \
+                mock.patch.object(cloud, "call", fake_call), \
+                mock.patch.object(cloud, "notify_user", lambda t, b: notes.append((t, b))):  # fmt: skip
+            cloud.save_inventory(inv)
+            r = cloud.run(cloud.build_parser().parse_args(["health", "--notify"]))
+            saved = json.loads((Path(d) / "health.json").read_text())
+        return (
+            r,
+            {x["label"]: x["value"] for x in r["rows"] if x["label"]},
+            [x["value"] for x in r["rows"]],
+            saved,
+            notes,
+        )
+
+    def test_all_well_raises_nothing(self):
+        r, rows, _, saved, notes = self.run_health()
+        self.assertEqual(r["summary"], "healthy")
+        self.assertEqual(saved["problems"], [])
+        self.assertEqual(notes, [])
+        self.assertIn("106.3 USD credits left", rows["aws p"])
+        self.assertIn("FREE_TIER", rows["oci DEFAULT"])
+
+    def test_a_locked_exit_says_how_to_unlock_it(self):
+        r, rows, values, saved, notes = self.run_health(ssh_line="active=activating mode=operator unlocked=0")
+        self.assertEqual(r["summary"], "problems found")
+        self.assertIn("LOCKED", rows["avpn-exit"])
+        self.assertIn("fix: avpn cloud unlock avpn-exit", values)
+        self.assertEqual(len(notes), 1)
+        self.assertIn("avpn-exit: locked", notes[0][1])
+
+    def test_a_stopped_or_deleted_server_says_so_with_the_start_command(self):
+        _, rows, values, saved, _ = self.run_health(oci_state="STOPPED")
+        self.assertIn("stopped by its provider", rows["avpn-exit"])
+        fix = next(v for v in values if v.startswith("fix: oci compute instance action --action START"))
+        self.assertIn("then: avpn cloud unlock avpn-exit", fix)
+        _, rows, _, _, _ = self.run_health(oci_state="TERMINATED")
+        self.assertIn("no longer exists", rows["avpn-exit"])
+
+    def test_unreachable_and_accounts_running_out_are_problems(self):
+        _, rows, _, saved, _ = self.run_health(ssh_error="ssh: connect timed out")
+        self.assertIn("not reachable over SSH", rows["avpn-exit"])
+        low = {"accountPlanType": "FREE", "accountPlanStatus": "ACTIVE", "accountPlanRemainingCredits": {"amount": 4.0},
+               "accountPlanExpirationDate": "2026-11-25T00:00:00+00:00"}  # fmt: skip
+        _, _, _, saved, notes = self.run_health(plan=low)
+        self.assertTrue(any("only 4.0 USD" in x for x in saved["problems"]))
+        self.assertTrue(any("free plan ends in" in x for x in saved["problems"]))
+        self.assertEqual(len(notes), 1)
 
 
 class ChainTests(Stubbed):

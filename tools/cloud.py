@@ -939,6 +939,15 @@ def oci_server_plan(a, oc):
     size = "1 OCPU / 1 GB" if a.shape == "micro" else "%d OCPU / %d GB" % (a.ocpus, a.memory_gib)
     network = "own VCN %s with an internet gateway, all tagged %s" % (OCI_CIDR, a.name)
     shared = None
+    bastion = None
+    if getattr(a, "bastion", None):
+        # No SSH address rule (it breaks whenever your address changes, e.g. behind a VPN):
+        # SSH only from the bastion's private endpoint, through IAM-authorised sessions.
+        b = oc("bastion", "bastion", "get", "--bastion-id", a.bastion)["data"]
+        if a.vcn and a.vcn != b["target-vcn-id"]:
+            raise CloudError("--vcn must be the bastion's VCN; omit it to use that one")
+        a.vcn = b["target-vcn-id"]
+        bastion = dict(id=a.bastion, endpoint=b["private-endpoint-ip-address"], region=oc.region)
     if a.vcn:
         # A free tenancy has two VCNs. Inside an existing one, this server gets its own subnet,
         # route table and security list (tagged, and all a teardown removes); the VCN and its
@@ -967,25 +976,41 @@ def oci_server_plan(a, oc):
         dict(label="network", value=network),
         dict(
             label="firewall",
-            value="%s %d from %s; SSH 22 from %s" % (transports(port), port, ", ".join(a.allow_from), a.admin_ip),
+            value="%s %d from %s; SSH 22 %s"
+            % (
+                transports(port),
+                port,
+                ", ".join(a.allow_from),
+                "only from the OCI bastion's private endpoint %s (no address rule)" % bastion["endpoint"]
+                if bastion
+                else "from " + str(a.admin_ip),
+            ),
         ),
         dict(label="cost", value="Always Free: $0 within 2 micro instances or 2 OCPU / 12 GB of A1 per tenancy"),
     ]
-    if load_inventory()["resources"].get(a.name):
+    known = load_inventory()["resources"].get(a.name)
+    if known and known.get("subnet") and not known.get("instance"):
+        rows.append(dict(label="resume", value="%s's network exists without an instance: apply launches it" % a.name))
+    elif known:
         rows.append(dict(label="exists", value="%s is already recorded (apply refuses)" % a.name))
     rows.append(caller_note("oci"))
-    return dict(rows=rows, ad=ad, image=image["id"], shape=shape, port=port, shared=shared)
+    return dict(rows=rows, ad=ad, image=image["id"], shape=shape, port=port, shared=shared, bastion=bastion)
 
 
 def oci_server_apply(a, oc, plan):
     """Create the network, firewall and instance; record each id as it is created."""
     inv = load_inventory()
-    if a.name in inv["resources"]:
+    rec = inv["resources"].get(a.name)
+    # A launch that failed (Always Free A1 is often "Out of host capacity") leaves its network
+    # recorded and no instance: apply again resumes with that network instead of refusing.
+    resume = bool(rec) and rec.get("provider") == "oci" and rec.get("subnet") and not rec.get("instance")
+    if rec and not resume:
         raise CloudError("%s is already recorded; tear it down first" % a.name)
-    rec = dict(provider="oci", catalog="oci", profile=a.oci_profile, region=oc.region, compartment=oc.compartment)
-    rec.update(role=a.role, port=plan["port"], ssh_user="ubuntu", first_hop=a.role == "relay")
-    rec["created"] = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
-    inv["resources"][a.name] = rec
+    if not resume:
+        rec = dict(provider="oci", catalog="oci", profile=a.oci_profile, region=oc.region, compartment=oc.compartment)
+        rec.update(role=a.role, port=plan["port"], ssh_user="ubuntu", first_hop=a.role == "relay")
+        rec["created"] = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
+        inv["resources"][a.name] = rec
     tags = oc.tags(a.name)
     c = ["--compartment-id", oc.compartment]
     wait_ok = ["--wait-for-state", "AVAILABLE"]
@@ -994,37 +1019,42 @@ def oci_server_apply(a, oc, plan):
         rec.update(ids)
         save_inventory(inv)
 
-    shared = plan.get("shared")
-    if shared:
-        # Not recorded as `vcn`/`internet_gateway`: a teardown never reaches them.
-        record(vcn_shared=shared["vcn"])
-        route = [dict(destination="0.0.0.0/0", destinationType="CIDR_BLOCK", networkEntityId=shared["gateway"])]
-        rt = oc("network", "route-table", "create", *c, "--vcn-id", shared["vcn"], "--display-name", a.name,
-                "--route-rules", json.dumps(route), "--freeform-tags", tags, *wait_ok)["data"]  # fmt: skip
-        record(own_route_table=rt["id"])
-        vcn, route_table, cidr = {"id": shared["vcn"]}, rt["id"], shared["cidr"]
+    bastion = plan.get("bastion")
+    if resume:
+        subnet = {"id": rec["subnet"]}
     else:
-        vcn = oc("network", "vcn", "create", *c, "--cidr-blocks", json.dumps([OCI_CIDR]), "--display-name", a.name,
-                 "--freeform-tags", tags, *wait_ok)["data"]  # fmt: skip
-        record(vcn=vcn["id"], route_table=vcn["default-route-table-id"])
-        igw = oc("network", "internet-gateway", "create", *c, "--vcn-id", vcn["id"], "--is-enabled", "true",
-                 "--display-name", a.name, "--freeform-tags", tags, *wait_ok)["data"]  # fmt: skip
-        record(internet_gateway=igw["id"])
-        route = [dict(destination="0.0.0.0/0", destinationType="CIDR_BLOCK", networkEntityId=igw["id"])]
-        oc("network", "route-table", "update", "--rt-id", vcn["default-route-table-id"], "--route-rules",
-           json.dumps(route), "--force", *wait_ok)  # fmt: skip
-        route_table, cidr = vcn["default-route-table-id"], OCI_CIDR
-    egress = [dict(destination="0.0.0.0/0", protocol="all", isStateless=False)]
-    ingress = oci_ingress(plan["port"], a.allow_from, [a.admin_ip], tcp=plan["port"] == FIRST_HOP_PORT)
-    sl = oc("network", "security-list", "create", *c, "--vcn-id", vcn["id"], "--display-name", a.name,
-            "--egress-security-rules", json.dumps(egress), "--ingress-security-rules", json.dumps(ingress),
-            "--freeform-tags", tags, *wait_ok)["data"]  # fmt: skip
-    record(security_list=sl["id"], managed_list=True)
-    subnet = oc("network", "subnet", "create", *c, "--vcn-id", vcn["id"], "--cidr-block", cidr,
-                "--display-name", a.name, "--route-table-id", route_table,
-                "--security-list-ids", json.dumps([sl["id"]]), "--prohibit-public-ip-on-vnic", "false",
+        shared = plan.get("shared")
+        if shared:
+            # Not recorded as `vcn`/`internet_gateway`: a teardown never reaches them.
+            record(vcn_shared=shared["vcn"])
+            route = [dict(destination="0.0.0.0/0", destinationType="CIDR_BLOCK", networkEntityId=shared["gateway"])]
+            rt = oc("network", "route-table", "create", *c, "--vcn-id", shared["vcn"], "--display-name", a.name,
+                    "--route-rules", json.dumps(route), "--freeform-tags", tags, *wait_ok)["data"]  # fmt: skip
+            record(own_route_table=rt["id"])
+            vcn, route_table, cidr = {"id": shared["vcn"]}, rt["id"], shared["cidr"]
+        else:
+            vcn = oc("network", "vcn", "create", *c, "--cidr-blocks", json.dumps([OCI_CIDR]), "--display-name", a.name,
+                     "--freeform-tags", tags, *wait_ok)["data"]  # fmt: skip
+            record(vcn=vcn["id"], route_table=vcn["default-route-table-id"])
+            igw = oc("network", "internet-gateway", "create", *c, "--vcn-id", vcn["id"], "--is-enabled", "true",
+                     "--display-name", a.name, "--freeform-tags", tags, *wait_ok)["data"]  # fmt: skip
+            record(internet_gateway=igw["id"])
+            route = [dict(destination="0.0.0.0/0", destinationType="CIDR_BLOCK", networkEntityId=igw["id"])]
+            oc("network", "route-table", "update", "--rt-id", vcn["default-route-table-id"], "--route-rules",
+               json.dumps(route), "--force", *wait_ok)  # fmt: skip
+            route_table, cidr = vcn["default-route-table-id"], OCI_CIDR
+        egress = [dict(destination="0.0.0.0/0", protocol="all", isStateless=False)]
+        admin = [bastion["endpoint"] + "/32"] if bastion else [a.admin_ip]
+        ingress = oci_ingress(plan["port"], a.allow_from, admin, tcp=plan["port"] == FIRST_HOP_PORT)
+        sl = oc("network", "security-list", "create", *c, "--vcn-id", vcn["id"], "--display-name", a.name,
+                "--egress-security-rules", json.dumps(egress), "--ingress-security-rules", json.dumps(ingress),
                 "--freeform-tags", tags, *wait_ok)["data"]  # fmt: skip
-    record(subnet=subnet["id"])
+        record(security_list=sl["id"], managed_list=True)
+        subnet = oc("network", "subnet", "create", *c, "--vcn-id", vcn["id"], "--cidr-block", cidr,
+                    "--display-name", a.name, "--route-table-id", route_table,
+                    "--security-list-ids", json.dumps([sl["id"]]), "--prohibit-public-ip-on-vnic", "false",
+                    "--freeform-tags", tags, *wait_ok)["data"]  # fmt: skip
+        record(subnet=subnet["id"])
     key = ssh_key_dir(a.name)
     if not key.exists():
         subprocess.run(
@@ -1052,8 +1082,31 @@ def oci_server_apply(a, oc, plan):
               "--wait-for-state", "RUNNING"]  # fmt: skip
     if a.shape == "arm":
         launch += ["--shape-config", json.dumps(dict(ocpus=a.ocpus, memoryInGBs=a.memory_gib))]
+    if bastion:
+        # Managed SSH sessions need the Oracle Cloud Agent's Bastion plugin on the instance.
+        launch += ["--agent-config", json.dumps(dict(pluginsConfig=[dict(name="Bastion", desiredState="ENABLED")]))]
+    deadline = time.monotonic() + 60 * getattr(a, "wait_capacity", 0)
+    domains = ["FAULT-DOMAIN-1", "FAULT-DOMAIN-2", "FAULT-DOMAIN-3"]
+    attempt = 0
     try:
-        inst = oc(*launch)["data"]
+        while True:
+            try:
+                extra = ["--fault-domain", domains[attempt % 3]] if attempt else []
+                inst = oc(*launch, *extra)["data"]
+                break
+            except CloudError as e:
+                # Both are transient: no free host now, or the tenancy's API rate limit (live,
+                # 20 Nov 2026: a long capacity wait ended on "TooManyRequests").
+                busy = "TooManyRequests" in str(e) or "Too many requests" in str(e)
+                if "Out of host capacity" not in str(e) and not busy:
+                    raise
+                if time.monotonic() >= deadline:
+                    raise CloudError(
+                        "%s: no free capacity for %s right now (its network is kept); run the same --apply "
+                        "again later, or with --wait-capacity MINUTES" % (a.name, plan["shape"])
+                    ) from None
+                attempt += 1
+                time.sleep(300 if busy else 120)
     finally:
         user_data.unlink(missing_ok=True)
     record(instance=inst["id"], ssh_key=str(key))
@@ -1062,10 +1115,24 @@ def oci_server_apply(a, oc, plan):
     if not ip:
         raise CloudError("%s has no public address" % inst["id"])
     record(public_ip=ip)
+    if bastion:
+        private_ip = vnics[0].get("private-ip")
+        if not private_ip:
+            raise CloudError("%s has no private address for the bastion to reach" % inst["id"])
+        config = bastion_ssh_config(a.name, key, private_ip, bastion["region"])
+        record(
+            ssh="ubuntu@" + a.name,
+            ssh_config=str(config),
+            bastion=dict(id=bastion["id"], instance=inst["id"], user="ubuntu", host=a.name + "-bastion",
+                         public_key=str(key) + ".pub", oci_profile=a.oci_profile),
+        )  # fmt: skip
+        how = "through the OCI bastion: avpn cloud renews its session (ssh -F %s %s)" % (config, a.name)
+    else:
+        how = "ssh -i %s ubuntu@%s" % (key, ip)
     return [
         dict(label="instance", value="%s %s" % (inst["id"][-16:], plan["shape"])),
         dict(label="public address", value="%s (udp %d)" % (ip, plan["port"])),
-        dict(label="ssh", value="ssh -i %s ubuntu@%s" % (key, ip)),
+        dict(label="ssh", value=how),
         dict(label="next", value="avpn cloud chain --apply (or: avpn cloud host setup --name %s --out FILE)" % a.name),
     ]
 
@@ -1371,6 +1438,31 @@ def set_ssh_config_user(config, host, user):
     tmp.replace(config)
 
 
+def bastion_ssh_config(name, key, private_ip, region):
+    """An SSH config reaching `name` at its private address through an OCI bastion. The
+    bastion Host's User is a session OCID, written by ensure_bastion (PENDING until then)."""
+    d = INVENTORY.parent / "ssh"
+    d.mkdir(mode=0o700, parents=True, exist_ok=True)
+    common = (
+        "  IdentityFile %s\n  IdentitiesOnly yes\n  IdentityAgent none\n  StrictHostKeyChecking accept-new\n"
+        "  ServerAliveInterval 15\n  ServerAliveCountMax 3\n" % key
+    )
+    text = (
+        "Host %s-bastion\n  HostName host.bastion.%s.oci.oraclecloud.com\n  User PENDING\n%s"
+        "  UserKnownHostsFile %s\n"
+        "Host %s\n  HostName %s\n  User ubuntu\n%s  UserKnownHostsFile %s\n  ProxyJump %s-bastion\n"
+        "  ConnectTimeout 30\n"
+        % (name, region, common, d / (name + "-bastion.known_hosts"), name, private_ip, common,
+           d / (name + ".known_hosts"), name)
+    )  # fmt: skip
+    path = d / (name + ".conf")
+    tmp = path.with_suffix(".conf.tmp")
+    tmp.write_text(text)
+    tmp.chmod(0o600)
+    tmp.replace(path)
+    return path
+
+
 def ensure_bastion(name, record, now=None):
     """Make sure the OCI bastion session `name` is reached through is valid for a while."""
     b = record.get("bastion")
@@ -1434,16 +1526,18 @@ def setup_server(name, record, role, port, out, source, replace=False, source_ar
     """Install or upgrade the package on a recorded server and fetch its public request
     for `role`, with the tunnel `port` accepted by the host firewall. Returns
     (kept|new, TPM report)."""
-    ssh, scp, base, host = remote(name, record)
+    ssh, scp, base, host = tool("ssh"), tool("scp"), ssh_base(name, record), ssh_target(record)
 
     def reachable():
         try:
+            # A new server's bastion plugin takes minutes to start: retry the session too.
+            ensure_bastion(name, record)
             call([ssh, *base, host, "true"], parse=False)
             return True
         except CloudError:
             return False
 
-    wait("SSH on " + name, reachable, timeout=300, every=10)
+    wait("SSH on " + name, reachable, timeout=900 if record.get("bastion") else 300, every=10)
     # The binaries must match the server's processor: an ARM server (Ampere A1) gets the
     # ARM build, built on (or for) that architecture.
     machine = call([ssh, *base, host, "uname -m"], parse=False).strip()
@@ -2063,6 +2157,145 @@ def unlock(a):
     return [dict(label=a.name, value="unlocked until its next reboot; the VPN service is active")]
 
 
+# What `health` asks a running server over SSH (no secrets: states and counts only).
+HOST_HEALTH = r"""A=$(systemctl is-active advanced-vpn.service 2>/dev/null || true)
+M=$(sudo -n python3 -c 'import json;print(json.load(open("/etc/advanced-vpn/enrolled/protection.json"))["mode"])' 2>/dev/null || echo unknown)
+K=$(sudo -n sh -c 'ls /run/advanced-vpn-unlock 2>/dev/null | wc -l')
+echo "active=$A mode=$M unlocked=$K"
+"""
+CREDIT_FLOOR = 20  # USD: warn below this
+EXPIRY_WARN_DAYS = 30
+
+
+def notify_user(title, body):
+    """A desktop notification for the person running this command (nothing without a desktop)."""
+    exe = shutil.which("notify-send")
+    if not exe or not (os.environ.get("WAYLAND_DISPLAY") or os.environ.get("DISPLAY")):
+        return False
+    r = subprocess.run([exe, "--app-name=ADVANCED VPN", "--urgency=critical", title, body],
+                       capture_output=True, timeout=10, check=False)  # fmt: skip
+    return r.returncode == 0
+
+
+def server_health(name, rec, now=None):
+    """(state, problem or None, fix or None) for one recorded server."""
+    instance = rec.get("instance") or (rec.get("bastion") or {}).get("instance")
+    if rec.get("provider") == "aws" and instance:
+        found = Aws(rec["profile"], rec.get("region")).ec2("describe-instances", "--instance-ids", instance)
+        states = [i["State"]["Name"] for r in found.get("Reservations", []) for i in r["Instances"]]
+        state = states[0] if states else "gone"
+    elif instance and instance.startswith("ocid1.instance."):
+        profile = rec.get("profile") or (rec.get("bastion") or {}).get("oci_profile") or "DEFAULT"
+        state = Oci(profile)("compute", "instance", "get", "--instance-id", instance)["data"]["lifecycle-state"].lower()
+    else:
+        state = "unknown"
+    if state in ("stopped", "stopping"):
+        start = (
+            "aws ec2 start-instances --instance-ids %s --profile %s" % (instance, rec.get("profile"))
+            if rec.get("provider") == "aws"
+            else "oci compute instance action --action START --instance-id %s" % instance
+        )
+        then = ", then: avpn cloud unlock %s" % name if rec.get("key_protection") == "operator" else ""
+        return state, "stopped by its provider (free tiers stop idle servers)", start + then
+    if state in ("terminated", "terminating", "shutting-down", "gone"):
+        return state, "no longer exists", "create a new server and run avpn cloud chain --apply"
+    try:
+        ssh, scp, base, host = remote(name, rec)
+        line = call([ssh, *base, host, "bash", "-s"], parse=False, stdin=HOST_HEALTH).strip().splitlines()[-1]
+    except (CloudError, IndexError) as e:
+        return state, "not reachable over SSH (%s)" % str(e)[-80:], "check its firewall and admin path"
+    seen = dict(x.split("=", 1) for x in line.split() if "=" in x)
+    if seen.get("active") == "active":
+        return "running, VPN service active", None, None
+    if seen.get("mode") == "operator" and seen.get("unlocked") == "0":
+        return "running, keys LOCKED since a reboot", "locked: it cannot open its keys", "avpn cloud unlock " + name
+    return (
+        "running, VPN service %s" % (seen.get("active") or "unknown"),
+        "the VPN service is not running",
+        ("avpn cloud chain --apply (or check the server)"),
+    )
+
+
+def account_health(inv, now=None):
+    """Rows and problems for the accounts the servers run in: credits, expiry, free-tier reclaims."""
+    now = now or datetime.datetime.now(datetime.timezone.utc)
+    rows, problems = [], []
+    aws_profiles = sorted({r["profile"] for r in inv["resources"].values() if r.get("provider") == "aws"})
+    for profile in aws_profiles:
+        try:
+            plan = Aws(profile)("freetier", "get-account-plan-state")
+        except CloudError as e:
+            rows.append(dict(label="aws " + profile, value="plan unknown (%s)" % str(e)[-80:]))
+            continue
+        credits = (plan.get("accountPlanRemainingCredits") or {}).get("amount")
+        expires = plan.get("accountPlanExpirationDate")
+        value = "%s plan, %s" % (plan.get("accountPlanType"), plan.get("accountPlanStatus"))
+        if credits is not None:
+            value += ", %s USD credits left" % credits
+        if expires:
+            value += ", plan ends %s" % expires[:10]
+        rows.append(dict(label="aws " + profile, value=value))
+        if plan.get("accountPlanStatus") not in (None, "ACTIVE"):
+            problems.append("AWS %s plan is %s: its servers may stop" % (profile, plan.get("accountPlanStatus")))
+        if credits is not None and credits < CREDIT_FLOOR:
+            problems.append("AWS %s has only %s USD of credits left" % (profile, credits))
+        if expires:
+            left = datetime.datetime.fromisoformat(expires) - now
+            if left.days < EXPIRY_WARN_DAYS:
+                problems.append("AWS %s free plan ends in %d days (%s)" % (profile, max(left.days, 0), expires[:10]))
+    oci_profiles = sorted({(r.get("profile") or (r.get("bastion") or {}).get("oci_profile") or "DEFAULT")
+                           for r in inv["resources"].values()
+                           if r.get("provider") == "oci" or r.get("catalog") == "oci" or r.get("bastion")})  # fmt: skip
+    for profile in oci_profiles:
+        try:
+            oc = Oci(profile)
+            items = oc("osp-gateway", "subscription-service", "subscription", "list", "--osp-home-region",
+                       oc.region, "--compartment-id", oc.tenancy)["data"]["items"]  # fmt: skip
+        except (CloudError, KeyError) as e:
+            rows.append(dict(label="oci " + profile, value="plan unknown (%s)" % str(e)[-80:]))
+            continue
+        for it in items:
+            rows.append(dict(label="oci " + profile, value="%s (%s)" % (it.get("plan-type"), it.get("upgrade-state"))))
+            if it.get("plan-type") == "FREE_TIER":
+                rows.append(dict(label="", value="free tier: Oracle stops Always Free servers idle for 7 days "
+                                 "(CPU, network and memory under 20%); a VPN-only server can look idle"))  # fmt: skip
+    return rows, problems
+
+
+def health(a):
+    """`health`: whether each chain server runs, is locked, or was stopped, and whether the
+    accounts behind them are running out. Asks the providers, so it runs when you ask (or
+    the VPN tells you to), never on a timer from your address."""
+    inv = load_inventory()
+    names = (inv.get("chain") or {}).get("hops") or [n for n, r in inv["resources"].items() if r.get("role")]
+    rows, problems = [], []
+    for name in names:
+        rec = inv["resources"].get(name)
+        if not rec:
+            continue
+        try:
+            state, problem, fix = server_health(name, rec)
+        except CloudError as e:
+            state, problem, fix = "unknown", "could not ask its provider (%s)" % str(e)[-80:], None
+        rows.append(dict(label=name, value=("PROBLEM: %s; %s" % (problem, state)) if problem else state))
+        if fix:
+            rows.append(dict(label="", value="fix: " + fix))
+        if problem:
+            problems.append("%s: %s" % (name, problem))
+    more, account_problems = account_health(inv)
+    rows += more
+    problems += account_problems
+    result = dict(schema=1, checked=datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
+                  problems=problems)  # fmt: skip
+    path = INVENTORY.parent / "health.json"
+    path.write_text(json.dumps(result, indent=1))
+    path.chmod(0o600)
+    if getattr(a, "notify", False) and problems:
+        notify_user("VPN: %d problem%s" % (len(problems), "" if len(problems) == 1 else "s"), "\n".join(problems))
+    rows.append(dict(label="result", value="; ".join(problems) if problems else "no problem found"))
+    return rows
+
+
 def admin_target(hop, is_exit):
     """How to SSH to a hop once the chain is up: the exit by its tunnel address."""
     target = ssh_target(hop["record"])
@@ -2396,6 +2629,8 @@ def build_parser():
     hb.add_argument("--oci-profile", default="DEFAULT", help="the OCI CLI profile (default DEFAULT)")
     forget = h_s.add_parser("forget", help="drop a recorded server from the inventory (it is not changed)")
     forget.add_argument("--name", required=True, help="the recorded server")
+    hl = s.add_parser("health", help="are the chain's servers running, locked or stopped, and the accounts healthy?")
+    hl.add_argument("--notify", action="store_true", help="also show a desktop notification when something is wrong")
     ul = s.add_parser("unlock", help="unlock a server without a TPM after it restarts (Nitrokey PIN + touch)")
     ul.add_argument("name", help="the recorded server (avpn-*)")
     ul.add_argument("--vault", type=Path, help="the operator's Nitrokey vault (default: the chain's)")
@@ -2447,6 +2682,18 @@ def build_parser():
         help="previous hop's public IPv4, auto, or any (first hop only; the default for a relay)",
     )
     srv.add_argument("--admin-ip", default="auto", help="address allowed to SSH in (default: this machine)")
+    srv.add_argument(
+        "--wait-capacity",
+        type=int,
+        default=0,
+        metavar="MINUTES",
+        help="keep retrying a launch refused for lack of capacity (every 2 minutes, across fault domains)",
+    )
+    srv.add_argument(
+        "--bastion",
+        help="OCI bastion OCID: SSH only through it (no address rule; sessions renewed automatically); "
+        "the server goes in the bastion's VCN",
+    )
     srv.add_argument("--dry-run", action="store_true", help="show the plan and stop")
     srv.add_argument("--yes", action="store_true", help="do not ask for confirmation")
     allow = o_s.add_parser("allow", help="one ingress rule on a security list, from the previous hop only")
@@ -2491,6 +2738,10 @@ def run(a):
         if a.kind == "bastion":
             return dict(title="Bastion for %s" % a.name, summary="recorded", rows=host_bastion(a))
         return dict(title="Set up %s" % a.name, summary="installed", rows=host_setup(a))
+    if a.provider == "health":
+        rows = health(a)
+        bad = rows[-1]["value"] != "no problem found"
+        return dict(title="Health", summary="problems found" if bad else "healthy", rows=rows)
     if a.provider == "unlock":
         valid_name(a.name)
         return dict(title="Unlock %s" % a.name, summary="unlocked", rows=unlock(a))
@@ -2509,7 +2760,7 @@ def run(a):
             if not a.allow_from and a.role != "relay":
                 raise CloudError("--allow-from is required: the previous server's address")
             a.allow_from = tunnel_sources(a.allow_from or ["any"], first_hop=a.role == "relay")
-            a.admin_ip = single_ip(a.admin_ip)
+            a.admin_ip = None if getattr(a, "bastion", None) else single_ip(a.admin_ip)
             plan = oci_server_plan(a, oc)
             title = "Create OCI %s %s" % (a.role, a.name)
             if a.dry_run:

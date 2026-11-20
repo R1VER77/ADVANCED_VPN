@@ -28,6 +28,7 @@ Nothing. A read-only query never creates runtime files.
 
 - `not running`: the service is stopped. Start it with `avpn connect`.
 - `unknown` (`next: sudo avpn status`): you ran it as yourself; run it with `sudo`.
+- `detail: no answer through the chain since HH:MM` (a client): the chain stopped answering for a minute, or never answered after a start; a desktop notification says the same. A server may be stopped by its provider (free tiers stop idle servers), locked after a reboot, out of credits or unreachable. Traffic stays blocked meanwhile. `next` says to run `avpn cloud health` as yourself, which finds which and gives the fix.
 
 ## Files
 

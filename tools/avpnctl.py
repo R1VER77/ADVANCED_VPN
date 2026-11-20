@@ -1212,6 +1212,11 @@ def supervise(state, bin_dir, lab=False, whole=False):
         evidence = protection.Evidence()
         probe = protection.PathProbe(None if whole else "/run/netns/" + APP)
         probe.start()
+        # A chain that stops answering (a server stopped, reclaimed, locked after a reboot,
+        # out of credits) is made obvious: a desktop notice and a line in `avpn status`.
+        import chain_watch
+
+        watch = chain_watch.ChainWatch(chain_watch.desktop_notify)
     last_meter = 0
     # The optional daily cap is client-only: a server never stores byte counts.
     allowance = Allowance(
@@ -1395,6 +1400,8 @@ def supervise(state, bin_dir, lab=False, whole=False):
                     row["reason"] = "privacy_budget"
                 if evidence is not None:
                     row.update(verdict_fields(evidence, probe, rt, supervising=not budget_blocked))
+                    if not budget_blocked:
+                        row.update(watch.observe(time.time(), row))
                 save(rt / "status.json", row)
             time.sleep(0.25)
     finally:
@@ -1926,6 +1933,10 @@ def doctor(state, check_egress=False):
             if info["camouflaged"]
             else "re-sign: avpn cloud chain --apply, then enroll --replace",
         )
+    status = info.get("status") or {}
+    if str(status.get("detail", "")).startswith("no answer through the chain"):
+        # tools/chain_watch.py: a server stopped, reclaimed, locked or unreachable.
+        check("chain answering", False, "%s; next: %s" % (status["detail"], status.get("next", "avpn cloud health")))
     if info.get("protection") == "systemd-creds":
         from keyguard import tpm2_usable
 

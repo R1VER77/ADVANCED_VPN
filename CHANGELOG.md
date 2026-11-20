@@ -6,6 +6,16 @@ measured figure in the docs names the version it was measured on.
 
 ## Unreleased
 
+- A broken chain is obvious (owner, 20 November): when a connected client's chain stops
+  answering for a minute, or never answers after a start, a desktop notification and
+  `avpn status` say so and point to `avpn cloud health`, which finds whether a server was
+  stopped by its provider (free tiers stop idle servers), is locked after a reboot, gone or
+  unreachable, and whether AWS credits or a free plan are running out, each with its fix.
+  The providers are asked only on request, never on a timer from your address.
+- `avpn cloud oci server --bastion OCID`: an Oracle server administered only through its
+  bastion (no SSH address rule, sessions renewed automatically). A launch refused for lack
+  of capacity (or rate-limited) keeps its network and resumes on the next `--apply`, or
+  retries itself with `--wait-capacity MINUTES`.
 - The installer knows the server key rule: `install.py --apply --role relay|middle|exit
   --protect systemd-creds` first seals and opens a test credential with the TPM2 and refuses,
   before installing anything, when that fails; `--protect operator --unlock-key FILE` locks

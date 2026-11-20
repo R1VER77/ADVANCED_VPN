@@ -13,7 +13,7 @@ and `oci` command-line tools, and plain SSH for everything else.
     avpn cloud aws relay --teardown [--name avpn-NAME] [--profile P]
     avpn cloud aws allow --apply [--name avpn-NAME] [--allow-from IP|any ...] [--admin-ip IP] [--profile P]
     avpn cloud aws admin-endpoint --apply [--name avpn-NAME] [--profile P]
-    avpn cloud oci server --apply [--name avpn-NAME] [--role relay|middle|exit] [--shape micro|arm] ...
+    avpn cloud oci server --apply [--name avpn-NAME] [--role relay|middle|exit] [--shape micro|arm] [--bastion OCID] ...
     avpn cloud oci server --teardown [--name avpn-NAME]
     avpn cloud oci allow --apply --name avpn-NAME --security-list OCID --allow-from IP [--port N] [--protocol udp|tcp]
     avpn cloud oci allow --teardown --name avpn-NAME --security-list OCID
@@ -25,6 +25,7 @@ and `oci` command-line tools, and plain SSH for everything else.
     avpn cloud chain --apply --client-request FILE --vault DIR [--order A,B,C] [--allow-same-provider] \
         [--hours-per-day H] [--accept-cost]
     avpn cloud unlock avpn-NAME [--vault DIR]
+    avpn cloud health [--notify]
 
 Every `--apply` and `--teardown` first shows its plan and asks before changing
 anything. `--dry-run` stops after the plan. `--yes` skips the question; scripts
@@ -162,6 +163,8 @@ configured once with `oci setup config`.
 - `--vcn VCN`: put the server in an existing VCN instead of creating one (a free tenancy has only two). The server gets its own subnet (the next free /24 in the VCN), route table and security list, all tagged as its own; the VCN and its internet gateway are used and never changed, and a teardown removes only the server's own parts.
 - `--oci-profile NAME`: the profile in `~/.oci/config` (default `DEFAULT`). Its region must be the tenancy's home region.
 - `--port N`, `--allow-from IP`, `--admin-ip IP`: as for `aws relay`.
+- `--bastion OCID`: administer the server only through this OCI Bastion, with no SSH address rule (one breaks whenever your address changes, as behind a VPN). The server goes in the bastion's VCN (its own subnet); its security list admits SSH only from the bastion's private endpoint; the instance runs the Oracle Cloud Agent's Bastion plugin; an SSH config jumping through the bastion is written to `~/.config/advanced-vpn/ssh/NAME.conf`, and sessions are created and renewed automatically (`host bastion`). `--admin-ip` is then unused.
+- `--wait-capacity MINUTES`: Always Free A1 is often refused with "Out of host capacity". Keep retrying the launch every 2 minutes, across fault domains, for up to this long. Without it, a refused launch stops; its network stays recorded, and running the same `--apply` again later resumes with it (only the instance is launched).
 - `--dry-run`, `--yes`: as above.
 
 What `--apply` creates, all tagged with the name:
@@ -254,6 +257,23 @@ What it does on the server:
 
 Binaries are copied as built, so the server needs a C library at least as new as the
 build machine's (release builds need glibc 2.34: Debian 12+, Ubuntu 22.04+).
+
+## avpn cloud health
+
+Whether the chain's servers run, and why not. For each server: its provider's view
+(running, stopped by the provider, as free tiers do with idle servers, or gone), then over
+SSH whether the VPN service runs and whether its keys are locked since a reboot. For each
+account: AWS's free-plan credits and end date, Oracle's plan (a free tier stops Always
+Free servers idle for 7 days). Every problem comes with its fix (the start command, `avpn
+cloud unlock NAME`, …), and the result is kept in `~/.config/advanced-vpn/health.json`.
+
+- `--notify`: also show a desktop notification when something is wrong.
+
+It asks the providers, so it runs only when you ask, or when the VPN tells you to: when a
+connected client's chain stops answering for a minute (or never answers after a start),
+the client shows a desktop notification and `avpn status` shows the notice and this
+command. Checking on a timer from your own address would tie it to the servers in the
+providers' logs.
 
 ## avpn cloud unlock
 

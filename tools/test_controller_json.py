@@ -132,6 +132,20 @@ class ControllerJsonTests(unittest.TestCase):
         detail = next(c["detail"] for c in checks if c["check"] == "resolver isolation")
         self.assertEqual(detail, "hidden from protected apps: none present")
 
+    def test_doctor_shows_a_chain_that_stopped_answering(self):
+        # Owner, 20 Nov 2026: a stopped, reclaimed or locked server must be obvious.
+        import avpnctl
+        from unittest import mock
+
+        status = dict(state="supervising", detail="no answer through the chain since 10:00. A server may be stopped",
+                      next="on your computer, as yourself: avpn cloud health")  # fmt: skip
+        with mock.patch.object(avpnctl, "read_status", lambda state, default=None: status):
+            checks = {c["check"]: c for c in avpnctl.doctor(self.root / "client")}
+        self.assertFalse(checks["chain answering"]["ok"])
+        self.assertIn("avpn cloud health", checks["chain answering"]["detail"])
+        with mock.patch.object(avpnctl, "read_status", lambda state, default=None: dict(state="supervising")):
+            self.assertNotIn("chain answering", {c["check"] for c in avpnctl.doctor(self.root / "client")})
+
     def test_doctor_reports_missing_tools_instead_of_crashing(self):
         import avpnctl
 
