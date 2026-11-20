@@ -102,7 +102,11 @@ These governance items are not complete merely because this roadmap lists them.
   baseline; they remain open here.
 - [ ] Keep the long-term VPN keys on the hardware key (owner request, 19 November). Today
   the key only unseals a vault, so malware on the computer can copy the unlocked keys
-  whatever the PIN entry. Kernel WireGuard takes its static key as bytes and needs it at
+  whatever the PIN entry. **Phase 1 done** ([hardware-bound sessions](HARDWARE_BOUND_SESSIONS.md)):
+  every hop now refuses a hardware-protected client's leaves unless its FIDO2 key, touched
+  and PIN-unlocked, signed that session (at most 12 h), so copied keys stop working when the
+  session ends; verified on four emulated firmwares and in Tamarin. Phase 2 (per-session
+  keys, a short-lived signer) and the physical units remain. Kernel WireGuard takes its static key as bytes and needs it at
   every handshake (about every two minutes), so this needs a userspace data plane that asks
   the key for each X25519 operation without a touch: OpenPGP-card ECDH on Nitrokey 3,
   YubiKey, CanoKey and Ledger, SLIP-0017 on Trezor, or a TKey app; not FIDO2. It protects
@@ -147,7 +151,9 @@ These governance items are not complete merely because this roadmap lists them.
   joined CI: 15 models, 52 lemmas verified and 24 mutants falsified, each within the
   abstraction [its fidelity table](../formal/README.md) states. ProVerif then proved
   OHTTP and credit unlinkability (mutation-checked); the credit work found and closed an
-  issuer tagging attack (`unblind` now verifies). Kani harnesses and parser fuzzing remain.
+  issuer tagging attack (`unblind` now verifies). Hardware-bound sessions added a sixteenth
+  Tamarin model: 57 lemmas and 26 mutants in all (`docs/evidence/TAMARIN.json`). Kani
+  harnesses and parser fuzzing remain.
 - [x] Let the operator add a hardware post-quantum signature (19 November): an optional
   third signature half from an ML-DSA-44 FIDO2 credential on a separate key, required by
   every verifier once the operator's public file names it. Only Solo 2's Hacker build

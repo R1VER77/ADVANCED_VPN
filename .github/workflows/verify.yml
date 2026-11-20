@@ -200,8 +200,6 @@ jobs:
     # Tamarin proofs of the DC-net round core and the mix lane's re-blinding: every lemma
     # listed in tools/tamarin_check.py must end "verified" (a falsified, unfinished or
     # missing lemma fails). Releases pinned by the SHA-256 GitHub publishes for them.
-    # ProVerif proves the unlinkability equivalences (tools/proverif_check.py), built from
-    # the official 2.05 source release pinned by SHA-256 (no binary release for Linux).
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -222,16 +220,34 @@ jobs:
           echo "$HOME/bin" >> "$GITHUB_PATH"
       - name: Prove every model
         run: python3 tools/tamarin_check.py --timeout 900
+  formal-equivalences:
+    # ProVerif proves the unlinkability equivalences (tools/proverif_check.py). ProVerif ships
+    # no Linux binary, so it is built from the official 2.05 source release, pinned by
+    # SHA-256, and the build is cached under that hash: the large OCaml download happens only
+    # on a cache miss (a slow mirror once took 26 minutes over it). Its own job, so a slow
+    # build never holds back the Tamarin results.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - id: proverif-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/opt/proverif2.05
+          key: proverif-2.05-4871f53c32ab4a04669a060c4886ba5d9080496963fb980a9a62d2c429ceabc4-ubuntu-24.04-ocaml-4.14.1
       - name: ProVerif 2.05, built from the official source release
+        if: steps.proverif-cache.outputs.cache-hit != 'true'
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -q ocaml-nox
-          cd "$HOME/opt"
+          sudo apt-get update -qq
+          sudo apt-get install -y -q --no-install-recommends -o Acquire::Retries=5 ocaml-nox=4.14.1-1ubuntu1
+          mkdir -p "$HOME/opt" && cd "$HOME/opt"
           curl -fsSLo proverif.tgz https://bblanche.gitlabpages.inria.fr/proverif/proverif2.05.tar.gz
           printf '%s  %s\n' 4871f53c32ab4a04669a060c4886ba5d9080496963fb980a9a62d2c429ceabc4 proverif.tgz | sha256sum -c -
           tar -xzf proverif.tgz && (cd proverif2.05 && ./build -nointeract)
-          ln -s "$HOME/opt/proverif2.05/proverif" "$HOME/bin/proverif"
       - name: Prove every equivalence (unlinkability)
-        run: python3 tools/proverif_check.py --timeout 600
+        run: |
+          mkdir -p "$HOME/bin" && ln -sf "$HOME/opt/proverif2.05/proverif" "$HOME/bin/proverif"
+          PATH="$HOME/bin:$PATH" python3 tools/proverif_check.py --timeout 600
   linux-desktop:
     runs-on: ubuntu-24.04
     timeout-minutes: 45

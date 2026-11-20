@@ -38,6 +38,12 @@ Every model is also pinned to the code by `tools/formal_model_vectors.py`
 
 Each hybrid claim has mutants in `tools/tamarin_check.py` that remove one shared secret from
 the KDF; the prover must find the attack, so the proof depends on both halves.
+## Hardware-bound sessions (added 19 November 2026)
+
+| Model | Code | Proved | Abstracted or left out |
+|---|---|---|---|
+| `session/session_auth.spthy` | `tools/session_auth.py`, `src/session_auth.rs`, `src/tls.rs` `authenticated` | every accepted session was touched on the device for that identity and window unless the device key leaked; with the identity key copied, a session still needs a touch in its window; the identity (ML-DSA-65) signature is still required; a session nobody asked for needs both keys | the 12 h window and the clock as fresh window names; leaf, extension and WebAuthn bytes as one signed statement; TLS as a signature over the hop's nonce. Mutants: a hop that skips the statement; a statement without its window |
+
 ## Unlinkability (ProVerif, added 19 November 2026)
 
 `tools/proverif_check.py` proves each equivalence with ProVerif 2.05 (built in CI from the

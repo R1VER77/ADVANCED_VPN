@@ -6,6 +6,18 @@ measured figure in the docs names the version it was measured on.
 
 ## Unreleased
 
+- Hardware-bound sessions ([design](docs/HARDWARE_BOUND_SESSIONS.md)): a client protected by
+  a hardware key now has its FIDO2 key, touched and PIN-unlocked, sign each session (at most
+  12 hours), and every hop pinned to that key refuses leaves it did not authorize, so keys
+  copied off the computer stop working when the session ends. The connect's one PIN and
+  touch does both; renewal asks again an hour before the end and fails closed. Takes effect
+  when a client is enrolled again with its key; software-protected clients are unchanged.
+- Formal: ProVerif proves OHTTP and credit unlinkability; Tamarin proves hardware-bound
+  sessions. Credits now refuse an issuer's tagged blind signature (RFC 9474 Finalize).
+- Security keys are ranked (open firmware and on-device PIN entry preferred) and the P-256
+  CTAP PIN/UV channel is flagged on every key. An optional ML-DSA-44 FIDO2 credential on a
+  separate key adds a third operator signature half.
+
 - Traffic-analysis research: record relay-only wire-clock look-ahead, add fixed-window
   A/B scoring with whole-round holdouts and block-label permutation checks, and publish
   the 30 ms versus 5 ms result with its collection limitations. No defense default changes.

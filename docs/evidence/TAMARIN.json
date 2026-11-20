@@ -36,7 +36,7 @@
       }
     },
     "formal/link/link.spthy": {
-      "seconds": 8.6,
+      "seconds": 9.3,
       "exit_code": 0,
       "lemmas": {
         "executable": {
@@ -72,7 +72,7 @@
       }
     },
     "formal/kem_seal/kem_seal.spthy": {
-      "seconds": 4.8,
+      "seconds": 5.4,
       "exit_code": 0,
       "lemmas": {
         "executable": {
@@ -93,7 +93,7 @@
       }
     },
     "formal/ohttp/ohttp.spthy": {
-      "seconds": 0.7,
+      "seconds": 0.6,
       "exit_code": 0,
       "lemmas": {
         "executable": {
@@ -166,7 +166,7 @@
       }
     },
     "formal/dcnet/dcnet.spthy": {
-      "seconds": 44.6,
+      "seconds": 40.5,
       "exit_code": 0,
       "lemmas": {
         "keys_secret": {
@@ -187,7 +187,7 @@
       }
     },
     "formal/dcnet/dcnet_authenticity.spthy": {
-      "seconds": 30.7,
+      "seconds": 29.8,
       "exit_code": 0,
       "lemmas": {
         "keys_secret": {
@@ -208,7 +208,7 @@
       }
     },
     "formal/dcnet/dcnet_no_collusion.spthy": {
-      "seconds": 41.6,
+      "seconds": 40.6,
       "exit_code": 0,
       "lemmas": {
         "pad_secrecy_without_collusion": {
@@ -219,7 +219,7 @@
       }
     },
     "formal/dcnet/dcnet_collusion.spthy": {
-      "seconds": 1.8,
+      "seconds": 1.3,
       "exit_code": 0,
       "lemmas": {
         "honest_key_secret": {
@@ -245,7 +245,7 @@
       }
     },
     "formal/dcnet/dcnet_collusion_4.spthy": {
-      "seconds": 65.2,
+      "seconds": 46.8,
       "exit_code": 0,
       "lemmas": {
         "pad_derived_with_two_honest": {
@@ -266,7 +266,7 @@
       }
     },
     "formal/dcnet/dcnet_ratchet.spthy": {
-      "seconds": 0.3,
+      "seconds": 0.4,
       "exit_code": 0,
       "lemmas": {
         "forward_secure_round1": {
@@ -286,8 +286,39 @@
         }
       }
     },
+    "formal/session/session_auth.spthy": {
+      "seconds": 0.7,
+      "exit_code": 0,
+      "lemmas": {
+        "executable": {
+          "kind": "exists-trace",
+          "result": "verified",
+          "steps": 6
+        },
+        "device_authorized": {
+          "kind": "all-traces",
+          "result": "verified",
+          "steps": 12
+        },
+        "stolen_identity_needs_touch": {
+          "kind": "all-traces",
+          "result": "verified",
+          "steps": 12
+        },
+        "identity_still_required": {
+          "kind": "all-traces",
+          "result": "verified",
+          "steps": 6
+        },
+        "both_halves": {
+          "kind": "all-traces",
+          "result": "verified",
+          "steps": 15
+        }
+      }
+    },
     "formal/zk/forward_private_nullifiers.spthy": {
-      "seconds": 0.3,
+      "seconds": 0.4,
       "exit_code": 0,
       "lemmas": {
         "forward_private_epoch1": {
@@ -308,7 +339,7 @@
       }
     },
     "formal/dcnet/dcnet_one_time_pads.spthy": {
-      "seconds": 0.3,
+      "seconds": 0.2,
       "exit_code": 0,
       "lemmas": {
         "pad_used_once": {
@@ -329,7 +360,7 @@
       }
     },
     "crates/avpn-mix-lane/tamarin/pq_sphinx_reblind.spthy": {
-      "seconds": 8.4,
+      "seconds": 9.5,
       "exit_code": 0,
       "lemmas": {
         "element_hidden": {
@@ -357,18 +388,18 @@
   },
   "mutants": [
     {
-      "model": "formal/link/link.spthy",
-      "lemma": "psk_forward_secrecy",
+      "model": "formal/session/session_auth.spthy",
+      "lemma": "device_authorized",
       "edits": 1,
       "result": "falsified - found trace",
-      "seconds": 7.1
+      "seconds": 0.6
     },
     {
-      "model": "formal/link/link.spthy",
-      "lemma": "psk_forward_secrecy",
-      "edits": 1,
+      "model": "formal/session/session_auth.spthy",
+      "lemma": "stolen_identity_needs_touch",
+      "edits": 2,
       "result": "falsified - found trace",
-      "seconds": 7.8
+      "seconds": 1.0
     },
     {
       "model": "formal/link/link.spthy",
@@ -378,25 +409,39 @@
       "seconds": 7.3
     },
     {
+      "model": "formal/link/link.spthy",
+      "lemma": "psk_forward_secrecy",
+      "edits": 1,
+      "result": "falsified - found trace",
+      "seconds": 7.2
+    },
+    {
+      "model": "formal/link/link.spthy",
+      "lemma": "psk_forward_secrecy",
+      "edits": 1,
+      "result": "falsified - found trace",
+      "seconds": 6.9
+    },
+    {
       "model": "formal/kem_seal/kem_seal.spthy",
       "lemma": "context_binding",
       "edits": 1,
       "result": "falsified - found trace",
-      "seconds": 4.2
+      "seconds": 3.9
     },
     {
       "model": "formal/kem_seal/kem_seal.spthy",
       "lemma": "hybrid_confidentiality",
       "edits": 1,
       "result": "falsified - found trace",
-      "seconds": 2.7
+      "seconds": 2.6
     },
     {
       "model": "formal/kem_seal/kem_seal.spthy",
       "lemma": "hybrid_confidentiality",
       "edits": 1,
       "result": "falsified - found trace",
-      "seconds": 1.0
+      "seconds": 0.9
     },
     {
       "model": "formal/ohttp/ohttp.spthy",
@@ -424,14 +469,14 @@
       "lemma": "dual_signature_binding",
       "edits": 1,
       "result": "falsified - found trace",
-      "seconds": 0.9
+      "seconds": 1.0
     },
     {
       "model": "formal/cloak/cloak.spthy",
       "lemma": "channel_binding",
       "edits": 2,
       "result": "falsified - found trace",
-      "seconds": 0.3
+      "seconds": 0.2
     },
     {
       "model": "formal/cloak/cloak.spthy",
@@ -459,21 +504,21 @@
       "lemma": "frame_authenticity",
       "edits": 3,
       "result": "falsified - found trace",
-      "seconds": 26.1
+      "seconds": 27.1
     },
     {
       "model": "formal/dcnet/dcnet.spthy",
       "lemma": "cancellation",
       "edits": 1,
       "result": "falsified - found trace",
-      "seconds": 76.2
+      "seconds": 83.3
     },
     {
       "model": "formal/dcnet/dcnet_no_collusion.spthy",
       "lemma": "pad_secrecy_without_collusion",
       "edits": 1,
       "result": "falsified - found trace",
-      "seconds": 2.3
+      "seconds": 2.5
     },
     {
       "model": "formal/dcnet/dcnet_collusion.spthy",
@@ -522,7 +567,7 @@
       "lemma": "element_hidden",
       "edits": 1,
       "result": "falsified - found trace",
-      "seconds": 0.5
+      "seconds": 0.4
     }
   ],
   "not_proved": [

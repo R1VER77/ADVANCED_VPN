@@ -353,6 +353,40 @@ def operations(work, result, test_pin, device=udp_device, second_key=None):
         result["phases"]["signed_client_enrollment"] = dict(
             signed_bundle_imported=True, hybrid_delivery_verified=True, operator_signature_halves=3 if three else 2
         )
+        # Hardware-bound sessions (docs/HARDWARE_BOUND_SESSIONS.md): this key, touched and
+        # PIN-unlocked, signs the session; the exit pinned it at enrollment and checks it.
+        import session_auth
+
+        client_core = json.loads((lab / "client/profile.json").read_text())["core"]
+        exit_device = json.loads((lab / "exit/profile.json").read_text())["core"]["inner"].get("peer_device")
+        if exit_device is None:
+            raise AssertionError("the exit did not pin the hardware client's key")
+        secret, meta, session = managed_profile.authorize_session(client_core, lab / "client")
+        keys = managed_profile.load_keys(lab / "client", ["inner"], secret, meta)
+        rt = work / "session-runtime"
+        rt.mkdir(mode=0o700)
+        managed_profile.refresh_leaves(client_core, lab / "client", keys, out_dir=rt, session=session)
+        leaf = (rt / "inner-active-cert.der").read_bytes()
+        now = int(time.time())
+        session_auth.verify_leaf(exit_device, leaf, now)
+        refusals = {}
+        for name, check in (
+            ("expired", lambda: session_auth.verify_leaf(exit_device, leaf, session[3])),
+            ("plain_leaf", lambda: plain_leaf_refused(managed_profile, client_core, lab, keys, rt, exit_device, now)),
+        ):
+            try:
+                check()
+            except ValueError as error:
+                refusals[name] = str(error)
+        if set(refusals) != {"expired", "plain_leaf"}:
+            raise AssertionError("a session leaf was accepted where it must be refused")
+        result["phases"]["hardware_session_authorization"] = dict(
+            device_key_pinned_by_exit=exit_device["alg"],
+            leaf_verified=True,
+            refusals=refusals,
+            # Recorded so src/session_auth.rs re-verifies this key's real assertion in CI.
+            vector=dict(device=exit_device, leaf=leaf.hex(), now=now),
+        )
         with mock.patch("fido2.server.Fido2Server", EdOnlyServer):
             edvault = work / "ed25519-vault"
             try:
@@ -370,6 +404,14 @@ def operations(work, result, test_pin, device=udp_device, second_key=None):
                 result["phases"]["ed25519_credential"] = dict(
                     supported=True, actual_cose_algorithm=algorithm, assertion_verified=True
                 )
+
+
+def plain_leaf_refused(managed_profile, core, lab, keys, rt, device, now):
+    """A leaf rotated without a session: a hop that pins the key must refuse it."""
+    import session_auth
+
+    managed_profile.refresh_leaves(core, lab / "client", keys, out_dir=rt)
+    session_auth.verify_leaf(device, (rt / "inner-active-cert.der").read_bytes(), now)
 
 
 def worker(out, vpn_commit, backend="solo1-pc"):
@@ -532,7 +574,7 @@ def worker(out, vpn_commit, backend="solo1-pc"):
         result["stopped"] = time.time()
         result["production_source_sha256"] = {
             name: digest(ROOT / "tools" / name)
-            for name in ("keyguard.py", "managed_profile.py", "hardware_setup_test.py")
+            for name in ("keyguard.py", "managed_profile.py", "session_auth.py", "hardware_setup_test.py")
         }
         (out / "RESULT.json").write_text(json.dumps(result, indent=2) + "\n")
     return 0 if result["status"].startswith("passed") else 1

@@ -58,6 +58,13 @@ MODELS = {
         "keys_secret_with_three_honest",
     ],
     "formal/dcnet/dcnet_ratchet.spthy": ["forward_secure_round1", "forward_secure_round2", "executable"],
+    "formal/session/session_auth.spthy": [
+        "executable",
+        "device_authorized",
+        "stolen_identity_needs_touch",
+        "identity_still_required",
+        "both_halves",
+    ],
     "formal/zk/forward_private_nullifiers.spthy": [
         "forward_private_epoch1",
         "forward_private_epoch2",
@@ -83,6 +90,21 @@ DERIVCHECK_TIMEOUT = {"formal/kem_seal/kem_seal.spthy": 0}
 # Broken variants the prover must falsify, so a lemma cannot pass by being vacuous or
 # by not depending on what it is meant to protect: (model, [(text, replacement)], lemma).
 MUTANTS = [
+    # Hardware-bound sessions: a hop that skips the device's statement accepts copied keys.
+    (
+        "formal/session/session_auth.spthy",
+        [("      Eq(verify(statement, <'session', ipk, w>, dpk), true),\n", "")],
+        "device_authorized",
+    ),
+    # A statement that does not name its window keeps working after the window ends.
+    (
+        "formal/session/session_auth.spthy",
+        [
+            ("Out(sign(<'session', ipk, w>, dk))", "Out(sign(<'session', ipk>, dk))"),
+            ("verify(statement, <'session', ipk, w>, dpk)", "verify(statement, <'session', ipk>, dpk)"),
+        ],
+        "stolen_identity_needs_touch",
+    ),
     (
         "formal/link/link.spthy",
         [("ka = h(<psk, gx^~y, ~m, 'AtoB', th>)", "ka = h(<psk, 'AtoB', th>)")],

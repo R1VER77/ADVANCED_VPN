@@ -43,6 +43,7 @@ from managed_profile import (
     cloak_certificate,
     canonical,
     refresh_leaves,
+    authorize_session,
     request,
     load_keys,
     HardwareOperator,
@@ -1110,7 +1111,15 @@ def supervise(state, bin_dir, lab=False, whole=False):
     # One unlock (Nitrokey PIN+touch, TPM-bound systemd-creds, or explicit plaintext)
     # moves each key into a sealed memfd. No Python copy is kept: rotation reads the
     # key back from its descriptor only for the moment it signs a fresh leaf.
-    key_handles = {name: memory_fd(value) for name, value in load_keys(state, list(managed_identities(cfg))).items()}
+    # A hardware-protected client's one PIN and touch also signs this session's statement
+    # (docs/HARDWARE_BOUND_SESSIONS.md): every hop refuses leaves the key did not authorize.
+    secret = meta = session = None
+    if profile["role"] == "client" and json.loads(read_private(state / "protection.json"))["mode"] == "nitrokey":
+        secret, meta, session = authorize_session(cfg["core"], state)
+    key_handles = {
+        name: memory_fd(value) for name, value in load_keys(state, list(managed_identities(cfg)), secret, meta).items()
+    }
+    del secret
     if "cloak" in cfg:
         key_handles["token"] = memory_fd(cloak_token(fd_bytes(key_handles["wireguard"])))
         if cfg["cloak"]["role"] == "server":
@@ -1123,6 +1132,7 @@ def supervise(state, bin_dir, lab=False, whole=False):
         state,
         {n: fd_bytes(key_handles[n]) for n in ["outer", "middle", "inner"] if n in key_handles},
         out_dir=rt,
+        session=session,
     )
     bin_dir, device_dir = prepare_runtime(cfg, bin_dir, state, uid, gid, lab)
     front_dir = front_exe = None
@@ -1163,6 +1173,7 @@ def supervise(state, bin_dir, lab=False, whole=False):
     last_launch = {}
     backoff = {}
     last_refresh = time.monotonic()
+    retry_session = 0.0
     stop_reason = "disconnected"
     # The verdict a client's status carries (the GUI's "Connected"): fresh cloak and carrier
     # status plus a probe answered through the whole chain (tools/protection.py).
@@ -1232,17 +1243,30 @@ def supervise(state, bin_dir, lab=False, whole=False):
                 if meter_spent():
                     stop(children["carrier"])
                 last_meter = time.monotonic()
-            if time.monotonic() - last_refresh >= 21600 or rotate_requested:
-                refresh_leaves(
-                    cfg["core"],
-                    state,
-                    {n: fd_bytes(key_handles[n]) for n in ["outer", "middle", "inner"] if n in key_handles},
-                    out_dir=rt,
-                )
-                publish_runtime(cfg, device_dir, uid, gid)
-                if "core" in children:
-                    stop(children["core"])
-                last_refresh = time.monotonic()
+            # A hardware session is renewed an hour before it ends, with a fresh PIN and
+            # touch; if nobody answers, the leaves run out and every hop refuses them.
+            renew = session is not None and time.time() >= session[3] - 3600 and time.monotonic() >= retry_session
+            if renew or (session is None and time.monotonic() - last_refresh >= 21600) or rotate_requested:
+                renewed = True
+                if session is not None:
+                    try:
+                        _, _, session = authorize_session(cfg["core"], state)
+                    except Exception as e:  # no answer at the key: the current leaves stay
+                        print("hardware session not renewed: %s" % e, file=sys.stderr)
+                        retry_session = time.monotonic() + 300
+                        renewed = False
+                if renewed:
+                    refresh_leaves(
+                        cfg["core"],
+                        state,
+                        {n: fd_bytes(key_handles[n]) for n in ["outer", "middle", "inner"] if n in key_handles},
+                        out_dir=rt,
+                        session=session,
+                    )
+                    publish_runtime(cfg, device_dir, uid, gid)
+                    if "core" in children:
+                        stop(children["core"])
+                    last_refresh = time.monotonic()
                 rotate_requested = False
             current_preferences = (
                 json.loads(read_private(state / "preferences.json")) if (state / "preferences.json").exists() else {}

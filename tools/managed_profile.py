@@ -11,6 +11,7 @@ import re
 import shutil
 import stat
 import tempfile
+import time
 import zipfile
 from cryptography import x509
 
@@ -571,6 +572,14 @@ def _request_into(role, state, protect, vault, secret, meta):
         issued=dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
         protection=protect,
     )
+    if role == "client" and protect == "nitrokey":
+        # Hardware-bound sessions (docs/HARDWARE_BOUND_SESSIONS.md): every hop pins this
+        # key and refuses a session the key did not authorize.
+        from keyguard import credential_public
+        import session_auth
+
+        req["device_public"] = credential_public(vault)
+        session_auth.device_key(req["device_public"])  # an unusable algorithm is named now
     # (protection.json, written below, records whether systemd-creds is TPM-bound.)
     if role in CARRIER_ROLES:
         w = x25519.X25519PrivateKey.generate()
@@ -639,6 +648,12 @@ def load_request(raw, role):
         if role not in FIRST_HOP_ROLES:
             raise ValueError("only a first hop has an I2P destination")
         i2p.check_identity(base64.b64decode(r["i2p_destination"], validate=True))
+    if "device_public" in r:
+        import session_auth
+
+        if role != "client":
+            raise ValueError("only a client authorizes sessions with a hardware key")
+        session_auth.device_key(r["device_public"])
     return r, certs
 
 
@@ -960,6 +975,10 @@ def create(
                 server_name=NAMES[(peer_role, peer_lane)] + ".advanced-vpn.internal",
                 pin_kind="spki",
             )
+            if peer_role == "client" and "device_public" in reqs["client"][0]:
+                import session_auth
+
+                core[lane]["peer_device"] = session_auth.device_key(reqs["client"][0]["device_public"])
             if role == "client" and lane == "inner" and alternates:
                 # The client trusts every exit of the set; any one may terminate it.
                 peers = [reqs[x][1]["inner"] for x in exits]
@@ -1856,8 +1875,41 @@ def cloak_certificate(key_der, cover_name):
     )
 
 
-def refresh_leaves(config, root, keys=None, out_dir=None):
-    """Stable pinned identity; fresh TLS leaves. No CA signing key is used online."""
+def session_layers(config, root):
+    """{lane: SPKI SHA-256} of every identity this device presents (its pinned public keys)."""
+    out = {}
+    for role in ["outer", "middle", "inner"]:
+        if config.get(role):
+            cert = x509.load_der_x509_certificate(read_private(root / (role + "-cert.der")))
+            out[role] = hashlib.sha256(
+                cert.public_key().public_bytes(
+                    serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
+                )
+            ).hexdigest()
+    return out
+
+
+def authorize_session(config, root, now=None):
+    """One PIN and touch: the vault's hmac-secret and the key's signature over this
+    session's statement (docs/HARDWARE_BOUND_SESSIONS.md). Returns (secret, meta, session),
+    where session = (statement, assertion, not_before, not_after)."""
+    import session_auth
+    from keyguard import hardware_assertion
+
+    protection = json.loads(read_private(root / "protection.json"))
+    if protection["mode"] != "nitrokey":
+        raise ValueError("sessions are hardware-authorized only on a hardware-protected device")
+    now = int(time.time() if now is None else now)
+    not_before, not_after = now - 300, now - 300 + session_auth.MAX_SECONDS
+    statement = session_auth.authorization(session_layers(config, root), not_before, not_after)
+    secret, meta, assertion = hardware_assertion(Path(protection["vault"]), message=statement)
+    return secret, meta, (statement, assertion, not_before, not_after)
+
+
+def refresh_leaves(config, root, keys=None, out_dir=None, session=None):
+    """Stable pinned identity; fresh TLS leaves. No CA signing key is used online. With a
+    hardware `session` (authorize_session), each leaf carries its authorization and lives
+    exactly as long."""
     now = dt.datetime.now(dt.timezone.utc)
     for role in ["outer", "middle", "inner"]:
         i = config.get(role)
@@ -1874,15 +1926,24 @@ def refresh_leaves(config, root, keys=None, out_dir=None):
             serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
         ):
             raise ValueError("identity key mismatch")
+        not_before, not_after = now - dt.timedelta(minutes=5), now + dt.timedelta(hours=12)
+        if session is not None:
+            not_before = dt.datetime.fromtimestamp(session[2], dt.timezone.utc)
+            not_after = dt.datetime.fromtimestamp(session[3], dt.timezone.utc)
         b = (
             x509.CertificateBuilder()
             .subject_name(original.subject)
             .issuer_name(original.subject)
             .public_key(key.public_key())
             .serial_number(x509.random_serial_number())
-            .not_valid_before(now - dt.timedelta(minutes=5))
-            .not_valid_after(now + dt.timedelta(hours=12))
+            .not_valid_before(not_before)
+            .not_valid_after(not_after)
         )
+        if session is not None:
+            import session_auth
+
+            value = session_auth.extension_value(session[0], session[1])
+            b = b.add_extension(x509.UnrecognizedExtension(x509.ObjectIdentifier(session_auth.OID), value), False)
         for extension in original.extensions:
             b = b.add_extension(extension.value, extension.critical)
         from provision import digest_for

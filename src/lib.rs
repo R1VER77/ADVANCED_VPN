@@ -20,6 +20,8 @@ pub mod mesh;
 pub mod run;
 /// Post-startup confinement of the daemons (seccomp and Landlock).
 pub mod sandbox;
+/// Hardware session authorization: a client's FIDO2 key signs each session's leaves.
+pub mod session_auth;
 /// QUIC/TLS settings: hybrid-PQ key exchange, ML-DSA-65 only, pinning, layer sizes.
 pub mod tls;
 /// TUN devices and packet admission checks.

@@ -102,7 +102,19 @@ async fn classical_only_and_anonymous_clients_cannot_negotiate() {
 /// between the relay (server) and client outer identities, using this crate's
 /// own server/client configuration.
 async fn outer_handshake(algorithm: &str) -> bool {
-    let tmp = std::env::temp_dir().join(format!("avpn-auth-{}-{}", algorithm, std::process::id()));
+    session_handshake(algorithm, None).await
+}
+
+/// `outer_handshake`, optionally with hardware-bound sessions (docs/HARDWARE_BOUND_SESSIONS.md):
+/// the relay pins a client device key, and the client's leaf is rotated with a session
+/// authorization by that key (`authorized`), by another key (`other`), or with none (`plain`).
+async fn session_handshake(algorithm: &str, session: Option<&str>) -> bool {
+    let tmp = std::env::temp_dir().join(format!(
+        "avpn-auth-{}-{}-{}",
+        algorithm,
+        session.unwrap_or("none"),
+        std::process::id()
+    ));
     let status = std::process::Command::new("python3")
         .args([
             "tools/provision.py",
@@ -122,8 +134,32 @@ async fn outer_handshake(algorithm: &str) -> bool {
     let raw: serde_json::Value =
         serde_json::from_slice(&private_read(&tmp.join("client/config.json"), 65536).unwrap())
             .unwrap();
-    let ci: crate::config::Identity = serde_json::from_value(raw["outer"].clone()).unwrap();
-    let si = server_cfg.outer.clone().unwrap();
+    let mut ci: crate::config::Identity = serde_json::from_value(raw["outer"].clone()).unwrap();
+    let mut si = server_cfg.outer.clone().unwrap();
+    if let Some(mode) = session {
+        let leaf = tmp.join("client-session-leaf.der");
+        let out = std::process::Command::new("python3")
+            .args(["tools/session_auth_vectors.py", "leaf"])
+            .arg(&ci.cert)
+            .arg(&ci.key)
+            .arg(&leaf)
+            .arg(mode)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        // As `avpn init` pins a managed client: its own identity certificate as the root,
+        // its public key as the pin, and its device key.
+        let pins: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        si.peer_device = Some(serde_json::from_value(pins["device"].clone()).unwrap());
+        si.ca = pins["root"].as_str().unwrap().into();
+        si.pin_kind = crate::config::PinKind::Spki;
+        si.peer_sha256 = pins["spki_sha256"].as_str().unwrap().into();
+        ci.cert = leaf;
+    }
     // Classical material must already fail when the local configuration is built
     // (no ML-DSA signing key); otherwise the handshake itself must decide.
     let (Ok(server_tls), Ok(client_tls)) = (
@@ -171,6 +207,22 @@ async fn ml_dsa_identities_authenticate_and_classical_are_refused() {
     assert!(
         !outer_handshake("ecdsa").await,
         "a correctly pinned classical deployment must be refused"
+    );
+}
+
+#[tokio::test]
+async fn a_pinned_device_key_admits_only_the_sessions_it_authorized() {
+    assert!(
+        session_handshake("ml-dsa-65", Some("authorized")).await,
+        "a session the pinned key authorized must connect"
+    );
+    assert!(
+        !session_handshake("ml-dsa-65", Some("plain")).await,
+        "a leaf without a session authorization must be refused"
+    );
+    assert!(
+        !session_handshake("ml-dsa-65", Some("other")).await,
+        "a session authorized by another key must be refused"
     );
 }
 

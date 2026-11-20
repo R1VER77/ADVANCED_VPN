@@ -31,6 +31,20 @@ pub struct Identity {
     /// Mesh servers only: the SPKI pins of admitted members. Exactly one of
     /// `peer_sha256` / `peer_members` is non-empty.
     pub peer_members: Vec<String>,
+    #[serde(default)]
+    /// The peer client's FIDO2 key, when it enrolled with one: every leaf it presents must
+    /// carry a session authorization that key signed (docs/HARDWARE_BOUND_SESSIONS.md).
+    pub peer_device: Option<PeerDevice>,
+}
+
+#[derive(Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+/// A client's enrolled FIDO2 credential public key, as `crate::session_auth` verifies it.
+pub struct PeerDevice {
+    /// `es256` (an uncompressed P-256 point) or `eddsa` (a raw Ed25519 key).
+    pub alg: String,
+    /// The public key, lowercase hex.
+    pub public_hex: String,
 }
 #[derive(Clone, Deserialize, Serialize, Default, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -274,6 +288,28 @@ impl Config {
                 i.peer_members.is_empty() || i.pin_kind == PinKind::Spki,
                 "member pins cover public keys (spki)"
             );
+            if let Some(d) = &i.peer_device {
+                let hex_len = match d.alg.as_str() {
+                    "es256" => 130,
+                    "eddsa" => 64,
+                    _ => 0,
+                };
+                ensure!(
+                    hex_len > 0
+                        && d.public_hex.len() == hex_len
+                        && d.public_hex
+                            .bytes()
+                            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+                        && (d.alg != "es256" || d.public_hex.starts_with("04")),
+                    "a peer device key is es256 (uncompressed point) or eddsa, lowercase hex"
+                );
+                ensure!(
+                    self.role != "client"
+                        && i.peer_members.is_empty()
+                        && i.pin_kind == PinKind::Spki,
+                    "a hardware-authorized peer is one pinned client, on a server"
+                );
+            }
             // A client trusts one entry (its guard) and, on the inner layer only, the
             // set of exits it may fail over to (standby exits).
             let standby =
@@ -572,6 +608,7 @@ mod tests {
             server_name: "x.advanced-vpn.internal".into(),
             pin_kind: PinKind::Spki,
             peer_members: members,
+            peer_device: None,
         }
     }
     fn relay(members: Vec<Member>, accepted: Vec<String>) -> Config {
@@ -615,6 +652,60 @@ mod tests {
             exit: None,
             peer_ip: Some(ip.into()),
         }
+    }
+
+    #[test]
+    fn a_peer_device_key_is_one_well_formed_key_on_a_server_facing_one_client() {
+        let with = |alg: &str, public_hex: String| {
+            let mut c = relay(vec![], vec![]);
+            let mut i = identity(&pin(9), vec![]);
+            i.peer_device = Some(PeerDevice {
+                alg: alg.into(),
+                public_hex,
+            });
+            c.outer = Some(i);
+            c
+        };
+        let p256 = format!("04{}", "ab".repeat(64));
+        let ed = "cd".repeat(32);
+        let base = with("es256", p256.clone());
+        base.validate().unwrap();
+        with("eddsa", ed.clone()).validate().unwrap();
+        for bad in [
+            with("es256", ed.clone()),   // wrong length for the algorithm
+            with("eddsa", p256.clone()), // likewise
+            with("es256", format!("02{}", "ab".repeat(64))), // not an uncompressed point
+            with("es256", p256.to_uppercase()), // not lowercase hex
+            with("rs256", p256.clone()), // no such algorithm here
+        ] {
+            assert!(bad.validate().is_err());
+        }
+        let mut members = base.clone();
+        members.outer.as_mut().unwrap().peer_sha256 = String::new();
+        members.outer.as_mut().unwrap().peer_members = vec![pin(1), pin(2)];
+        assert!(
+            format!("{:#}", members.validate().unwrap_err()).contains("one pinned client"),
+            "a mesh member set is not one client"
+        );
+        // The same key on a client's own layer: a client does not check a peer device.
+        let mut client = relay(vec![], vec![]);
+        client.role = "client".into();
+        client.relay = Some("198.51.100.80:443".parse().unwrap());
+        client.outer = Some(identity(&pin(9), vec![]));
+        client.inner = Some(identity(&pin(8), vec![]));
+        client.exit = None;
+        client.tun = Some("avpn0".into());
+        client.local_ip = Some("10.77.0.2".into());
+        client.peer_ip = Some("10.77.0.1".into());
+        client.link_rate = None;
+        client.link_out = vec![];
+        client.validate().unwrap();
+        client.inner.as_mut().unwrap().peer_device =
+            base.outer.as_ref().unwrap().peer_device.clone();
+        assert!(
+            format!("{:#}", client.validate().unwrap_err()).contains("one pinned client"),
+            "only a server checks a client's key"
+        );
     }
 
     #[test]

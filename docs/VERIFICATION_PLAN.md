@@ -140,6 +140,22 @@ pad from hop 2's X25519 element. Model: `crates/avpn-mix-lane/tamarin/pq_sphinx_
   has no XOR). Secrecy of the KEM secret itself also did not terminate.
 - An external cryptographer's review (gate G3 of the cutover) is still required; no security claim rests on §2.3 until both are done.
 
+### 9. Hardware-bound sessions (`tools/session_auth.py`, `src/session_auth.rs`)
+
+A hardware-protected client's FIDO2 key signs each session (at most 12 h) after a touch and
+the PIN; every hop that pinned the key refuses leaves without it
+([design](HARDWARE_BOUND_SESSIONS.md)).
+
+- **Proved (Tamarin, in CI, `formal/session/session_auth.spthy`):** every accepted session
+  was touched on the device for that identity key and window unless the device key leaked;
+  with the identity key copied off the computer, a session still needs a touch in its
+  window; the ML-DSA-65 identity is still required; a session nobody asked for needs both
+  keys. Mutants: a hop that skips the device's statement, and a statement without its
+  window, are each falsified.
+- **The code side:** shared vectors (`tools/testdata/session_auth.json`) on which the Python
+  reference and the Rust verifier agree, each check mutation-tested in both; real
+  assertions from the emulated Solo 1, Solo 2, CanoKey and TKey firmware.
+
 ## Not formal, and where it is covered instead
 
 - Traffic analysis (constant-rate stream, per-hop shaping, the mix lane against a global adversary): measured in the labs (`docs/evidence/`), not provable symbolically.

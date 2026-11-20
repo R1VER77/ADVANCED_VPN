@@ -140,6 +140,11 @@ provider or physical-device qualification. Every FIDO2 key's PIN/UV channel on U
 P-256 (CTAP PIN/UV 1 and 2): since 19 November it is flagged rather than blocking, and
 keys are ranked, open firmware with the PIN entered on the device first
 ([ranking](docs/DEVICE_COMPATIBILITY_VALIDATION.md#ranking-and-the-usb-channel-owner-decision-19-november-2026)).
+Entering the PIN on the device protects the PIN, not the keys the computer then holds, so
+a hardware-protected client's key also signs each session (at most 12 hours) and every
+hop refuses leaves it did not authorize: keys copied off the computer stop working when
+the session ends ([hardware-bound sessions](docs/HARDWARE_BOUND_SESSIONS.md); emulated
+firmware and Tamarin so far, physical units pending).
 
 The firmware lab has verified the VPN key/signing/enrollment operations on pinned
 Solo 1 and CanoKey virtual builds; [results and limits](docs/DEVICE_COMPATIBILITY_VALIDATION.md)

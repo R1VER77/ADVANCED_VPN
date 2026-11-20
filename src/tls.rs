@@ -267,6 +267,10 @@ pub fn authenticated(c: &quinn::Connection, i: &Identity) -> Result<(Duration, S
             "peer is not an admitted member"
         );
     }
+    if let Some(device) = &i.peer_device {
+        let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
+        crate::session_auth::verify(device, cert.as_ref(), now)?;
+    }
     let peer = certificate_lifetime(cert)?;
     let own = certificate_lifetime(&private_read(&i.cert, 16384)?)?;
     Ok((peer.min(own), digest))

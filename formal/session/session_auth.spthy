@@ -1,0 +1,102 @@
+// session_auth.spthy - Tamarin model of hardware-bound sessions
+// (docs/HARDWARE_BOUND_SESSIONS.md). Companion to tools/session_auth.py and
+// src/session_auth.rs.
+//
+// MODELED: a client has a long-term identity key (ML-DSA-65, used in TLS) on its computer and
+// a FIDO2 key whose private key never leaves the device. A hop pins both at enrollment. For
+// each session window the device, after a touch, signs a statement naming the identity key
+// and the window; the client's leaf carries it. The hop accepts a handshake only if the
+// identity key signed the hop's fresh challenge (TLS CertificateVerify) AND the device signed
+// a statement naming that identity key for the hop's current window. Malware may copy the
+// identity key off the computer (leak_identity) and may record every statement; the device
+// key may be extracted (leak_device), a stronger attack. Windows are fresh names that the
+// hop opens one at a time; a statement for one window says nothing about another.
+// ABSTRACTED: the 12 h window and the clock as fresh window names; the leaf, the extension
+// and the WebAuthn byte layout as one signed statement <'session', identity key, window>;
+// TLS as a signature over the hop's nonce. ES256/EdDSA and ML-DSA-65 are the signing builtin.
+//
+// LEMMAS:
+//  0. executable                  an honest authorized session is accepted.
+//  1. device_authorized           every accepted session was touched on the device for that
+//                                 identity key and that window, unless the device key leaked.
+//  2. stolen_identity_needs_touch with the identity key copied, an accepted session in a
+//                                 window still needs a touch in that window (or the device key).
+//  3. identity_still_required     every accepted session was signed by the identity key,
+//                                 unless that key leaked (the post-quantum half holds alone).
+//  4. both_halves                 accepting a session nobody honest asked for needs both keys.
+theory session_auth
+begin
+
+builtins: signing
+
+restriction equality:
+  "All x y #i. Eq(x, y) @i ==> x = y"
+
+rule client:
+  [ Fr(~ik), Fr(~dk) ]
+  --[ Client(pk(~ik), pk(~dk)) ]->
+  [ !Identity(~ik), !Device(~dk, pk(~ik)), !Pinned(pk(~ik), pk(~dk)), Out(<pk(~ik), pk(~dk)>) ]
+
+rule leak_identity:
+  [ !Identity(ik) ]
+  --[ IdentityLeaked(pk(ik)) ]->
+  [ Out(ik) ]
+
+rule leak_device:
+  [ !Device(dk, ipk) ]
+  --[ DeviceLeaked(pk(dk)) ]->
+  [ Out(dk) ]
+
+// The hop's clock opens a new window; it is public.
+rule window:
+  [ Fr(~w) ]
+  --[ WindowOpened(~w) ]->
+  [ !Window(~w), Out(~w) ]
+
+// The user touches the key for a window; the device signs the statement for its identity.
+rule touch:
+  [ !Device(dk, ipk), !Window(w) ]
+  --[ Touched(ipk, pk(dk), w) ]->
+  [ Out(sign(<'session', ipk, w>, dk)) ]
+
+// The client starts a session: the hop's nonce signed by the identity key.
+rule client_handshake:
+  [ !Identity(ik), In(n) ]
+  --[ IdentitySigned(pk(ik), n) ]->
+  [ Out(sign(<'tls', n>, ik)) ]
+
+rule hop_challenge:
+  [ !Pinned(ipk, dpk), !Window(w), Fr(~n) ]
+  --[ Challenge(~n) ]->
+  [ Waiting(ipk, dpk, w, ~n), Out(~n) ]
+
+rule hop_accept:
+  [ Waiting(ipk, dpk, w, n), In(<tls, statement>) ]
+  --[ Eq(verify(tls, <'tls', n>, ipk), true),
+      Eq(verify(statement, <'session', ipk, w>, dpk), true),
+      Accepted(ipk, dpk, w, n) ]->
+  []
+
+lemma executable:
+  exists-trace
+  "Ex ipk dpk w n #i. Accepted(ipk, dpk, w, n) @i
+     & not (Ex #l. IdentityLeaked(ipk) @l) & not (Ex #l. DeviceLeaked(dpk) @l)"
+
+lemma device_authorized:
+  "All ipk dpk w n #i. Accepted(ipk, dpk, w, n) @i ==>
+     (Ex #t. Touched(ipk, dpk, w) @t & #t < #i) | (Ex #l. DeviceLeaked(dpk) @l)"
+
+lemma stolen_identity_needs_touch:
+  "All ipk dpk w n #i #l. Accepted(ipk, dpk, w, n) @i & IdentityLeaked(ipk) @l ==>
+     (Ex #t. Touched(ipk, dpk, w) @t) | (Ex #d. DeviceLeaked(dpk) @d)"
+
+lemma identity_still_required:
+  "All ipk dpk w n #i. Accepted(ipk, dpk, w, n) @i ==>
+     (Ex #s. IdentitySigned(ipk, n) @s & #s < #i) | (Ex #l. IdentityLeaked(ipk) @l)"
+
+lemma both_halves:
+  "All ipk dpk w n #i. Accepted(ipk, dpk, w, n) @i
+     & not (Ex #s. IdentitySigned(ipk, n) @s) & not (Ex #t. Touched(ipk, dpk, w) @t) ==>
+     (Ex #a. IdentityLeaked(ipk) @a) & (Ex #b. DeviceLeaked(dpk) @b)"
+
+end
