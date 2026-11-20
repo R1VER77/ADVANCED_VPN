@@ -1,5 +1,6 @@
 """`avpn cloud` against recorded provider CLIs: exact calls, safety rules, teardown scope."""
 
+import datetime
 import json
 import os
 import re
@@ -69,6 +70,16 @@ if name == "oci":
         out({"data": state.get("oci_logs", {}).get(oflag("--log-group-id"), [])})
     if argv[:3] == ["network", "vtap", "list"]:
         out({"data": state.get("oci_vtaps", {}).get(oflag("--compartment-id"), [])})
+    if argv[:3] == ["bastion", "session", "get"]:
+        found = state.get("oci_sessions", {}).get(oflag("--session-id"))
+        if not found:
+            fail("ServiceError: NotAuthorizedOrNotFound")
+        out({"data": found})
+    if argv[:3] == ["bastion", "session", "create-managed-ssh"]:
+        made = state.setdefault("oci_created_sessions", [])
+        made.append(argv)
+        json.dump(state, open(os.environ["STUB_STATE"], "w"))
+        out({"data": {"resources": [{"entity-type": "bastionsession", "identifier": "ocid1.bastionsession.new%d" % len(made)}]}})
     if argv[:3] == ["bastion", "bastion", "list"]:
         out({"data": [{"id": b["id"]} for b in state.get("oci_bastions", {}).get(oflag("--compartment-id"), [])]})
     if argv[:3] == ["bastion", "bastion", "get"]:
@@ -956,6 +967,91 @@ class AuditTests(Stubbed):
         self.assertEqual(r["findings"], 0)
         r, rows = self.audit(audit={"guardduty list-detectors": {"DetectorIds": ["d1"]}})
         self.assertTrue(rows["aws guardduty"].startswith("FOUND"))
+
+
+class BastionTests(Stubbed):
+    """An OCI bastion session lasts at most 3 hours; a server behind one must stay reachable
+    (`cloud unlock` after a reboot), so the session is renewed when it is gone or ending."""
+
+    def setUp(self):
+        super().setUp()
+        d = Path(self.tmp.name)
+        cfg = d / "oci-config"
+        cfg.write_text("[DEFAULT]\ntenancy=ocid1.tenancy.t\nregion=me-dubai-1\n")
+        self.cfg = mock.patch.dict(os.environ, OCI_CLI_CONFIG_FILE=str(cfg), AVPN_SSH=str(d / "ssh"), STUB_DIR=str(d))
+        self.cfg.start()
+        (d / "ssh").write_text(SSH_STUB)
+        (d / "ssh").chmod(0o755)
+        self.ssh_config = d / "exit.conf"
+        self.ssh_config.write_text(
+            "Host avpn-bastion\n  HostName host.bastion.example\n  User ocid1.bastionsession.old\n"
+            "Host avpn-exit\n  HostName 10.0.1.88\n  User ubuntu\n  ProxyJump avpn-bastion\n"
+        )
+        (d / "k.pub").write_text("ssh-ed25519 AAAA")
+        cloud._bastion_fresh.clear()
+        cloud.save_inventory(dict(schema=1, resources={"avpn-exit": dict(
+            provider="ssh", public_ip="16.40.0.2", ssh="ubuntu@avpn-exit", ssh_config=str(self.ssh_config),
+            ssh_key=str(d / "k"), role="exit",
+            bastion=dict(id="ocid1.bastion.b", instance="ocid1.instance.i", user="ubuntu", host="avpn-bastion",
+                         public_key=str(d / "k.pub"), oci_profile="DEFAULT"))}))  # fmt: skip
+        self.now = 1_800_000_000
+
+    def tearDown(self):
+        self.cfg.stop()
+        super().tearDown()
+
+    def session(self, age_minutes, state="ACTIVE"):
+        created = datetime.datetime.fromtimestamp(self.now - age_minutes * 60, datetime.timezone.utc)
+        self.set_state(dict(oci_sessions={"ocid1.bastionsession.old": {
+            "lifecycle-state": state, "time-created": created.isoformat(), "session-ttl-in-seconds": 10800}}))  # fmt: skip
+
+    def ensure(self):
+        rec = cloud.load_inventory()["resources"]["avpn-exit"]
+        cloud.ensure_bastion("avpn-exit", rec, now=self.now)
+        return json.loads(self.state.read_text()).get("oci_created_sessions", [])
+
+    def test_a_fresh_session_is_kept(self):
+        self.session(age_minutes=30)
+        self.assertEqual(self.ensure(), [])
+        self.assertEqual(cloud.ssh_config_user(self.ssh_config, "avpn-bastion"), "ocid1.bastionsession.old")
+
+    def test_an_expired_or_ending_or_deleted_session_is_replaced_and_the_config_updated(self):
+        for age, state in ((181, "ACTIVE"), (170, "ACTIVE"), (30, "DELETED")):
+            with self.subTest(age=age, state=state):
+                cloud._bastion_fresh.clear()
+                cloud.set_ssh_config_user(self.ssh_config, "avpn-bastion", "ocid1.bastionsession.old")
+                self.session(age_minutes=age, state=state)
+                made = self.ensure()
+                self.assertEqual(len(made), 1)
+                argv = made[0]
+                for flag, value in (("--bastion-id", "ocid1.bastion.b"), ("--target-resource-id", "ocid1.instance.i"),
+                                    ("--target-os-username", "ubuntu"), ("--session-ttl", "10800")):  # fmt: skip
+                    self.assertEqual(argv[argv.index(flag) + 1], value)
+                self.assertEqual(cloud.ssh_config_user(self.ssh_config, "avpn-bastion"), "ocid1.bastionsession.new1")
+                self.assertEqual(cloud.ssh_config_user(self.ssh_config, "avpn-exit"), "ubuntu")  # untouched
+                self.assertEqual(oct(self.ssh_config.stat().st_mode & 0o777), "0o600")
+        # Cached connections for the old session are closed.
+        self.assertIn("-O exit avpn-bastion", (Path(self.tmp.name) / "log.ssh").read_text())
+
+    def test_it_runs_once_per_command_and_through_remote(self):
+        self.session(age_minutes=200)
+        rec = cloud.load_inventory()["resources"]["avpn-exit"]
+        with mock.patch.object(cloud.time, "time", lambda: self.now):
+            cloud.remote("avpn-exit", rec)
+            cloud.remote("avpn-exit", rec)
+        self.assertEqual(len(json.loads(self.state.read_text())["oci_created_sessions"]), 1)
+
+    def test_host_bastion_checks_what_it_records(self):
+        d = Path(self.tmp.name)
+        self.session(age_minutes=30)
+        base = ["host", "bastion", "--name", "avpn-exit", "--host", "avpn-bastion", "--public-key", str(d / "k.pub")]
+        with self.assertRaisesRegex(cloud.CloudError, "bastion OCID"):
+            self.run_cli(*base, "--bastion-id", "ocid1.instance.x", "--instance-id", "ocid1.instance.i")
+        with self.assertRaisesRegex(cloud.CloudError, "no Host nope"):
+            self.run_cli("host", "bastion", "--name", "avpn-exit", "--host", "nope", "--public-key", str(d / "k.pub"),
+                         "--bastion-id", "ocid1.bastion.b", "--instance-id", "ocid1.instance.i")  # fmt: skip
+        r = self.run_cli(*base, "--bastion-id", "ocid1.bastion.b", "--instance-id", "ocid1.instance.i")
+        self.assertEqual(r["summary"], "recorded")
 
 
 class ChainTests(Stubbed):

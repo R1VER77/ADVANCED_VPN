@@ -2162,6 +2162,9 @@ def authorize_session(config, root, now=None):
     return secret, meta, (statement, assertion, not_before, not_after)
 
 
+SIGNER = Path(__file__).resolve().parent / "session_signer.py"
+
+
 def sign_session(config, root, carry=(), runner=None):
     """Phase 2 (docs/HARDWARE_BOUND_SESSIONS.md): fresh ML-DSA-65 session keys for this
     device's layers, certified by tools/session_signer.py, a separate short-lived process
@@ -2184,16 +2187,33 @@ def sign_session(config, root, carry=(), runner=None):
         carry=list(carry),
     )
     if runner is None:
-        signer = Path(__file__).resolve().parent / "session_signer.py"
-        r = subprocess.run(  # noqa: S603 (this interpreter, a fixed script, JSON on stdin)
-            [sys.executable, "-E", "-s", str(signer)],
-            input=json.dumps(request).encode(),
-            capture_output=True,
-            timeout=300,
-            check=False,
-        )
+        # The request goes on a pipe of its own; stdin and stderr stay the caller's, so the
+        # signer can ask for the PIN on the terminal and say "touch the key" where it is
+        # seen (live laptop, 20 Nov 2026: with the request on stdin it found no terminal and
+        # refused). The reply, or the refusal, comes back on stdout.
+        read_end, write_end = os.pipe()
+        try:
+            p = subprocess.Popen(  # noqa: S603 (this interpreter, a fixed script)
+                [sys.executable, "-E", "-s", str(SIGNER), "--request-fd", str(read_end)],
+                pass_fds=(read_end,),
+                stdout=subprocess.PIPE,
+            )
+        finally:
+            os.close(read_end)
+        with os.fdopen(write_end, "wb") as w:
+            w.write(json.dumps(request).encode())
+        try:
+            out, _ = p.communicate(timeout=300)
+        except subprocess.TimeoutExpired:
+            p.kill()
+            p.communicate()
+            raise RuntimeError("session not signed: no touch within 5 minutes") from None
+        r = subprocess.CompletedProcess(p.args, p.returncode, out, b"")
         if r.returncode != 0:
-            last = (r.stderr.decode(errors="replace").strip().splitlines() or ["no reason given"])[-1]
+            try:
+                last = json.loads(r.stdout)["error"]
+            except (ValueError, KeyError, TypeError):
+                last = "no reason given"
             raise RuntimeError("session not signed: " + last)
         reply = json.loads(r.stdout)
     else:

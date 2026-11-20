@@ -1327,7 +1327,107 @@ def check_glibc(name, have, need):
 
 def remote(name, record):
     """(ssh, scp, base options, target) for one recorded server."""
+    ensure_bastion(name, record)
     return tool("ssh"), tool("scp"), ssh_base(name, record), ssh_target(record)
+
+
+# OCI bastion sessions last at most 3 hours. A server reached through one (recorded with
+# `host bastion`) gets a fresh session whenever the one in its SSH config is gone or has
+# less than this left: `cloud unlock` must work whenever the server restarts, not only
+# within 3 hours of the last login.
+BASTION_MARGIN = 20 * 60
+BASTION_TTL = 10800
+_bastion_fresh = set()
+
+
+def ssh_config_user(config, host):
+    """The User of `Host host` in an SSH config file, or None."""
+    current = None
+    for line in Path(config).read_text().splitlines():
+        words = line.split()
+        if words[:1] == ["Host"]:
+            current = words[1:]
+        elif current == [host] and words[:1] == ["User"] and len(words) == 2:
+            return words[1]
+    return None
+
+
+def set_ssh_config_user(config, host, user):
+    """Replace the User of `Host host` in an SSH config file (kept private, written atomically)."""
+    lines, current, done = [], None, False
+    for line in Path(config).read_text().splitlines(keepends=True):
+        words = line.split()
+        if words[:1] == ["Host"]:
+            current = words[1:]
+        elif current == [host] and words[:1] == ["User"] and not done:
+            line = line[: len(line) - len(line.lstrip())] + "User " + user + "\n"
+            done = True
+        lines.append(line)
+    if not done:
+        raise CloudError("no User line for Host %s in %s" % (host, config))
+    tmp = Path(str(config) + ".tmp")
+    tmp.write_text("".join(lines))
+    tmp.chmod(0o600)
+    tmp.replace(config)
+
+
+def ensure_bastion(name, record, now=None):
+    """Make sure the OCI bastion session `name` is reached through is valid for a while."""
+    b = record.get("bastion")
+    if not b or name in _bastion_fresh:
+        return
+    oc = Oci(b.get("oci_profile", "DEFAULT"))
+    config = record["ssh_config"]
+    session = ssh_config_user(config, b["host"])
+    now = time.time() if now is None else now
+    fresh = False
+    if session and session.startswith("ocid1.bastionsession."):
+        try:
+            data = oc("bastion", "session", "get", "--session-id", session)["data"]
+            created = datetime.datetime.fromisoformat(data["time-created"]).timestamp()
+            left = created + int(data["session-ttl-in-seconds"]) - now
+            fresh = data.get("lifecycle-state") == "ACTIVE" and left > BASTION_MARGIN
+        except (CloudError, KeyError, ValueError):
+            fresh = False
+    if not fresh:
+        stamp = datetime.datetime.fromtimestamp(now, datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        made = oc("bastion", "session", "create-managed-ssh", "--bastion-id", b["id"],
+                  "--target-resource-id", b["instance"], "--target-os-username", b["user"],
+                  "--ssh-public-key-file", b["public_key"], "--session-ttl", str(BASTION_TTL),
+                  "--display-name", "%s-%s" % (name, stamp), "--wait-for-state", "SUCCEEDED",
+                  "--max-wait-seconds", "600")  # fmt: skip
+        resources = (made.get("data") or {}).get("resources") or []
+        session = next((r.get("identifier") for r in resources if r.get("identifier")), None)
+        if not session:
+            raise CloudError("the OCI bastion did not return a session for %s" % name)
+        set_ssh_config_user(config, b["host"], session)
+        # Connections cached for the old session would outlive it: close them.
+        for host in (b["host"], ssh_target(record).rsplit("@", 1)[-1]):
+            subprocess.run([tool("ssh"), "-F", str(config), "-O", "exit", host], capture_output=True, timeout=30)
+    _bastion_fresh.add(name)
+
+
+def host_bastion(a):
+    """`host bastion`: record that a server is reached through an OCI bastion, so its
+    sessions are renewed automatically."""
+    inv = load_inventory()
+    record = inv["resources"].get(a.name)
+    if not record or not record.get("ssh_config"):
+        raise CloudError("%s is not a recorded host with an SSH config (host add --ssh-config)" % a.name)
+    if ssh_config_user(record["ssh_config"], a.host) is None:
+        raise CloudError("no Host %s with a User line in %s" % (a.host, record["ssh_config"]))
+    key = Path(a.public_key).expanduser().resolve()
+    if not key.is_file():
+        raise CloudError("no public key at %s" % key)
+    for value, kind in ((a.bastion_id, "bastion"), (a.instance_id, "instance")):
+        if not value.startswith("ocid1.%s." % kind):
+            raise CloudError("--%s-id must be an OCI %s OCID" % (kind, kind))
+    record["bastion"] = dict(id=a.bastion_id, instance=a.instance_id, user=a.user, host=a.host,
+                             public_key=str(key), oci_profile=a.oci_profile)  # fmt: skip
+    save_inventory(inv)
+    _bastion_fresh.discard(a.name)
+    ensure_bastion(a.name, record)
+    return [dict(label=a.name, value="through OCI bastion %s...; sessions renewed automatically" % a.bastion_id[:32])]
 
 
 def setup_server(name, record, role, port, out, source, replace=False, source_arm=None, unlock_pub=None):
@@ -2286,6 +2386,14 @@ def build_parser():
         help="where it runs: a free tier (oci, aws, azure, gcp), own, or a paid host key from avpn cloud suggest",
     )
     add.add_argument("--shared", action="store_true", help="it also runs other things: leave its journal alone")
+    hb = h_s.add_parser("bastion", help="record that a server is reached through an OCI bastion (sessions renewed)")
+    hb.add_argument("--name", required=True, help="the recorded server")
+    hb.add_argument("--bastion-id", required=True, help="the OCI bastion's OCID")
+    hb.add_argument("--instance-id", required=True, help="the server's OCI instance OCID")
+    hb.add_argument("--host", required=True, help="the bastion's Host alias in the server's SSH config")
+    hb.add_argument("--public-key", required=True, help="the SSH public key a session admits")
+    hb.add_argument("--user", default="ubuntu", help="the login user on the server (default ubuntu)")
+    hb.add_argument("--oci-profile", default="DEFAULT", help="the OCI CLI profile (default DEFAULT)")
     forget = h_s.add_parser("forget", help="drop a recorded server from the inventory (it is not changed)")
     forget.add_argument("--name", required=True, help="the recorded server")
     ul = s.add_parser("unlock", help="unlock a server without a TPM after it restarts (Nitrokey PIN + touch)")
@@ -2380,6 +2488,8 @@ def run(a):
             return dict(title="Add server %s" % a.name, summary="recorded", rows=host_add(a))
         if a.kind == "forget":
             return dict(title="Forget server %s" % a.name, summary="forgotten", rows=host_forget(a))
+        if a.kind == "bastion":
+            return dict(title="Bastion for %s" % a.name, summary="recorded", rows=host_bastion(a))
         return dict(title="Set up %s" % a.name, summary="installed", rows=host_setup(a))
     if a.provider == "unlock":
         valid_name(a.name)

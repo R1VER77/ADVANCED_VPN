@@ -303,7 +303,64 @@ class Signer(unittest.TestCase):
                 )
                 self.assertNotEqual(r.returncode, 0)
                 self.assertIn(reason, r.stderr)
-                self.assertEqual(r.stdout, "")
+                self.assertIn(reason, json.loads(r.stdout)["error"])  # for the supervisor
+
+    def test_the_signer_keeps_the_terminal_for_the_pin_and_the_touch_prompt(self):
+        # Live laptop, 20 Nov 2026: `sudo avpnctl connect` in a terminal failed with "no
+        # terminal ... for the PIN", because the request was the signer's stdin. The real
+        # launch path runs here under a pseudo-terminal with a probe in the signer's place.
+        import os
+        import pty
+        import subprocess
+
+        here = Path(__file__).resolve().parent
+        with tempfile.TemporaryDirectory() as d:
+            probe = Path(d) / "probe.py"
+            probe.write_text(
+                "import json, os, sys\n"
+                "assert sys.argv[1] == '--request-fd'\n"
+                "req = json.loads(os.fdopen(int(sys.argv[2])).read())\n"
+                "print('STDIN_TTY=%s touch the key' % os.isatty(0), file=sys.stderr, flush=True)\n"
+                "if os.environ.get('PROBE_REFUSE'):\n"
+                "    sys.stdout.write(json.dumps({'error': 'RuntimeError: refused by probe'})); sys.exit(1)\n"
+                "sys.stdout.write(json.dumps({'leaves': {l: '00' for l in req['lanes']}, 'carry': {},"
+                " 'not_before': 1, 'not_after': 2}))\n"
+            )
+            caller = (
+                "import sys; sys.path.insert(0, sys.argv[1]); import managed_profile as mp; from pathlib import Path\n"
+                "mp.SIGNER = Path(sys.argv[2])\n"
+                "try:\n"
+                "    r = mp.sign_session({'inner': {'cert': 'x'}}, sys.argv[3], carry=[])\n"
+                "    print('RESULT', sorted(r['leaves']), r['not_after'], flush=True)\n"
+                "except RuntimeError as e:\n"
+                "    print('REFUSED', e, flush=True)\n"
+            )
+            for refuse, want in (
+                ("", "RESULT ['inner'] 2"),
+                ("1", "REFUSED session not signed: RuntimeError: refused by probe"),
+            ):
+                main, child = pty.openpty()
+                env = dict(os.environ, PROBE_REFUSE=refuse)
+                p = subprocess.Popen(
+                    [sys.executable, "-c", caller, str(here), str(probe), d],
+                    stdin=child, stdout=child, stderr=child, env=env, close_fds=True,
+                )  # fmt: skip
+                os.close(child)
+                out = b""
+                while True:
+                    try:
+                        chunk = os.read(main, 4096)
+                    except OSError:
+                        break
+                    if not chunk:
+                        break
+                    out += chunk
+                p.wait(timeout=60)
+                os.close(main)
+                text = out.decode(errors="replace")
+                with self.subTest(refuse=refuse):
+                    self.assertIn("STDIN_TTY=True touch the key", text)  # on the terminal, seen
+                    self.assertIn(want, text)
 
 
 if __name__ == "__main__":

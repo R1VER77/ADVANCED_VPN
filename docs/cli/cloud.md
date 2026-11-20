@@ -19,6 +19,8 @@ and `oci` command-line tools, and plain SSH for everything else.
     avpn cloud oci allow --teardown --name avpn-NAME --security-list OCID
     avpn cloud host add --name avpn-NAME --ssh USER@HOST --key FILE [--provider P] [--shared]
     avpn cloud host setup --name avpn-NAME --out FILE [--role ROLE] [--replace] [--vault DIR]
+    avpn cloud host bastion --name avpn-NAME --bastion-id OCID --instance-id OCID --host ALIAS \
+        --public-key FILE [--user U] [--oci-profile NAME]
     avpn cloud host forget --name avpn-NAME
     avpn cloud chain --apply --client-request FILE --vault DIR [--order A,B,C] [--allow-same-provider] \
         [--hours-per-day H] [--accept-cost]
@@ -268,8 +270,26 @@ What it does:
 2. Unwraps it with the Nitrokey (PIN + touch), bound to your own copy of that server's request, so a server cannot have another server's data key unwrapped for it.
 3. Sends the data key to the server on stdin (`avpn server-unlock`), where it is held in RAM until the next reboot, and restarts the VPN service.
 
-It needs SSH to the server, through the path `host add` recorded (for OCI, the bastion).
+It needs SSH to the server, through the path `host add` recorded; an OCI bastion session is
+renewed first if needed (`host bastion`).
 Servers sealed to a TPM2 restart on their own and are refused here.
+
+## avpn cloud host bastion
+
+Record that a server is reached through an OCI Bastion (its SSH config jumps through a Host
+whose User is a bastion session). Sessions last at most 3 hours; from then on, before any
+SSH to the server, this tool checks the session in the SSH config and, if it is gone or has
+less than 20 minutes left, creates a managed SSH session for 3 hours and writes its OCID into
+that Host's User line (closing connections cached for the old one). So `cloud unlock` works
+whenever the server restarts.
+
+- `--name avpn-NAME`: the recorded server (added with `host add --ssh-config`).
+- `--bastion-id OCID`: the bastion.
+- `--instance-id OCID`: the server's instance.
+- `--host ALIAS`: the bastion's Host in the server's SSH config.
+- `--public-key FILE`: the SSH public key each session admits (its private key is the one the config uses).
+- `--user U`: the login user on the server (default `ubuntu`).
+- `--oci-profile NAME`: the OCI CLI profile (default `DEFAULT`); its region must be the bastion's.
 
 ## avpn cloud host forget
 

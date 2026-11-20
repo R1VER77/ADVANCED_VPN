@@ -182,6 +182,18 @@ class ServerUnlockCommand(Base):
         self.assertFalse(mp.server_locked(state))
 
 
+class LockedMessage(Base):
+    def test_a_locked_server_says_how_to_unlock_it_and_library_errors_stay_terse(self):
+        # Live exit, 20 Nov 2026: the refusal said only "Locked".
+        import avpnctl
+
+        state, _ = self.server()
+        with self.assertRaises(mp.Locked) as caught:
+            mp.load_keys(state, ["inner"])
+        self.assertIn("avpn cloud unlock", avpnctl.refusal_detail(caught.exception))
+        self.assertEqual(avpnctl.refusal_detail(OSError("/secret/path")), "")
+
+
 class LabChain(unittest.TestCase):
     """The real request -> init -> enroll flow with an exit locked to the operator: the
     signing unwraps its data key, enroll re-stores the carrier and link keys under it, and

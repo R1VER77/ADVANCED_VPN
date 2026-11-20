@@ -6,6 +6,12 @@ measured figure in the docs names the version it was measured on.
 
 ## Unreleased
 
+- Fixed (owner's first physical connect, 20 November): `sudo avpnctl connect` in a terminal
+  failed for a hardware-protected client, because the session signer had no terminal for the
+  PIN ([incident](docs/INCIDENTS.md)). A locked server's refusal now says how to unlock it.
+- `avpn cloud host bastion`: a server reached through an OCI Bastion gets a new session
+  (3 hours) whenever the recorded one is gone or ending, so `avpn cloud unlock` and every
+  other SSH work at any time.
 - Servers without a TPM no longer keep plain keys ([design](docs/HARDWARE_BOUND_SESSIONS.md),
   servers without a TPM). Setup tests the host first: keys are sealed to its TPM2 when
   systemd-creds can use one, otherwise locked to the operator's Nitrokey (`--protect

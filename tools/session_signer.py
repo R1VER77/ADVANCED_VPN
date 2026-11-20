@@ -9,7 +9,10 @@ asked for, certifies each session key with its layer's identity, prints the leav
 exits: the identity exists in plaintext for those seconds, in this process alone, and the
 kernel reclaims the memory when it ends.
 
-Request (JSON on stdin): {"state": DIR, "lanes": {lane: session SPKI hex}, "carry": [names]}.
+Request (JSON on the descriptor given by --request-fd, else stdin): {"state": DIR, "lanes":
+{lane: session SPKI hex}, "carry": [names]}. The supervisor uses --request-fd so that stdin
+and stderr stay its own: the PIN prompt needs the terminal, the touch prompt must be seen.
+A refusal is {"error": "..."} on stdout (and on stderr), with a non-zero exit.
 `carry` names keys the data plane still takes long-term (the WireGuard key and its siblings
 until phase 2's per-session carrier); they are returned as they are today.
 Reply (JSON on stdout): {"leaves": {lane: DER hex}, "carry": {name: hex}, "not_before",
@@ -102,13 +105,28 @@ def sign(state: Path, lanes: dict, carry=(), now=None) -> dict:
     )
 
 
-def main() -> int:
+def main(argv=None) -> int:
     """Read one request, sign it, reply, exit."""
+    import os
+
+    argv = sys.argv[1:] if argv is None else argv
     hardening = harden()
-    request = json.loads(sys.stdin.read())
-    if set(request) != {"state", "lanes", "carry"}:
-        raise ValueError("unexpected signer request")
-    reply = sign(Path(request["state"]), request["lanes"], request["carry"])
+    try:
+        if argv[:1] == ["--request-fd"] and len(argv) == 2:
+            with os.fdopen(int(argv[1]), "rb") as f:
+                request = json.loads(f.read())
+        elif not argv:
+            request = json.loads(sys.stdin.read())
+        else:
+            raise ValueError("usage: session_signer.py [--request-fd N]")
+        if set(request) != {"state", "lanes", "carry"}:
+            raise ValueError("unexpected signer request")
+        reply = sign(Path(request["state"]), request["lanes"], request["carry"])
+    except Exception as e:  # one refusal, its reason for the supervisor and the person
+        reason = "%s: %s" % (type(e).__name__, e)
+        print(reason, file=sys.stderr)
+        sys.stdout.write(json.dumps(dict(error=reason)))
+        return 1
     reply["hardening"] = hardening
     sys.stdout.write(json.dumps(reply))
     return 0

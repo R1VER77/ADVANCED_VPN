@@ -1650,6 +1650,15 @@ def hand_to_invoker(path):
     os.chmod(path, 0o644)
 
 
+def refusal_detail(e):
+    """Only the controller's own refusals carry a message; anything else is reported by type
+    alone, so no library error text (paths, arguments) is echoed. A locked server's refusal
+    says how to unlock it (found on the live exit, 20 Nov 2026: it said only "Locked")."""
+    from managed_profile import Locked
+
+    return str(e)[:200] if type(e) in (RuntimeError, ValueError, Locked) else ""
+
+
 def pipe_only(args):
     """Secret output (servers' data keys) goes to a pipe as JSON, never to a terminal."""
     if not getattr(args, "json", False) or sys.stdout.isatty():
@@ -2583,9 +2592,7 @@ if __name__ == "__main__":
                 traceback.print_exc()
                 if isinstance(e, subprocess.CalledProcessError):
                     print(e.stderr, file=sys.stderr)
-        # Only the controller's own refusals carry a message; anything else is reported
-        # by type alone, so no library error text (paths, arguments) is echoed.
-        detail = str(e)[:200] if type(e) in (RuntimeError, ValueError) else ""
+        detail = refusal_detail(e)
         if "--json" in sys.argv:
             print(json.dumps(dict(ok=False, error=type(e).__name__, message=detail or None)))
         print(

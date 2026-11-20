@@ -67,9 +67,26 @@ private vulnerability reporting (see [SECURITY.md](../SECURITY.md)).
 - **How found:** the owner, reading the chain summary's `PLAINTEXT KEYS` on 20 November.
 - **Fix:** keys of hosts without a usable TPM2 are now locked to the operator's Nitrokey
   (above, and docs/HARDWARE_BOUND_SESSIONS.md), and plain or host-key-only keys are replaced,
-  never re-wrapped: deleting a file on a cloud disk does not erase earlier copies. The exit
-  gets new keys when the chain is rebuilt with this release, and the client enrolls that
-  chain, so the old keys open nothing.
+  never re-wrapped: deleting a file on a cloud disk does not erase earlier copies. Done live
+  on 20 November (chain 20261120T092141Z): the exit made new keys, none of them in plain
+  files; with its RAM-held data key removed it refused to start (`Locked`) until
+  `avpn cloud unlock` (PIN + touch); the client enrolled the new chain, so the old keys
+  open nothing.
+
+### A hardware-protected client could not connect from a terminal (found 20 Nov 2026)
+- **What:** phase 2 of hardware-bound sessions runs a short-lived signer for the PIN and
+  touch. The supervisor gave it the request on stdin, so the signer saw no terminal and,
+  outside a desktop session or the systemd service, refused: `sudo avpnctl connect` failed
+  with "no terminal, desktop session or systemd password agent for the PIN". Its "touch the
+  key" message also went to a captured pipe instead of the person.
+- **Not affected:** the service (`systemctl start advanced-vpn`, PIN through `avpn unlock`)
+  and the desktop dialog; no key or session was weakened: it failed closed.
+- **How found:** the owner's first connect with a physical Nitrokey after phase 2. Every test
+  supplied the PIN and touch through stubs or emulated firmware, never a terminal.
+- **Fix:** the request goes on a pipe of its own (`--request-fd`); stdin and stderr stay the
+  caller's; the reply and refusals come back on stdout. `tools/test_session_auth.py` runs the
+  real launch path under a pseudo-terminal and fails on the old one.
+
 
 ### Mesh descriptor signatures could never be verified (found 20 Nov 2026)
 - **What:** `tools/mesh.py` imported ML-DSA-65 from `cryptography...asymmetric.ml_dsa`, a
