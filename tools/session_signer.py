@@ -107,10 +107,20 @@ def sign(state: Path, lanes: dict, carry=(), now=None) -> dict:
 
 def main(argv=None) -> int:
     """Read one request, sign it, reply, exit."""
-    import os
-
     argv = sys.argv[1:] if argv is None else argv
     hardening = harden()
+    # stdout carries only the reply: anything printed while signing (a library's touch
+    # prompt) goes to stderr, where the person sees it.
+    reply_out, sys.stdout = sys.stdout, sys.stderr
+    try:
+        return _main(argv, hardening, reply_out)
+    finally:
+        sys.stdout = reply_out
+
+
+def _main(argv, hardening, out):
+    import os
+
     try:
         if argv[:1] == ["--request-fd"] and len(argv) == 2:
             with os.fdopen(int(argv[1]), "rb") as f:
@@ -125,10 +135,12 @@ def main(argv=None) -> int:
     except Exception as e:  # one refusal, its reason for the supervisor and the person
         reason = "%s: %s" % (type(e).__name__, e)
         print(reason, file=sys.stderr)
-        sys.stdout.write(json.dumps(dict(error=reason)))
+        out.write(json.dumps(dict(error=reason)))
+        out.flush()
         return 1
     reply["hardening"] = hardening
-    sys.stdout.write(json.dumps(reply))
+    out.write(json.dumps(reply))
+    out.flush()
     return 0
 
 

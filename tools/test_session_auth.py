@@ -335,14 +335,29 @@ class Signer(unittest.TestCase):
                 "except RuntimeError as e:\n"
                 "    print('REFUSED', e, flush=True)\n"
             )
-            for refuse, want in (
-                ("", "RESULT ['inner'] 2"),
-                ("1", "REFUSED session not signed: RuntimeError: refused by probe"),
-            ):
+            # The real signer's main(), whose sign() prints a prompt to stdout as keyguard's
+            # touch prompt did (live laptop, 20 Nov 2026: that line broke the JSON reply).
+            real = Path(d) / "real_main.py"
+            real.write_text(
+                "import sys; sys.path.insert(0, %r)\n"
+                "import session_signer\n"
+                "def sign(state, lanes, carry):\n"
+                "    print('Touch your hardware key when it flashes.', flush=True)\n"
+                "    return {'leaves': {l: '00' for l in lanes}, 'carry': {}, 'not_before': 1, 'not_after': 3}\n"
+                "session_signer.sign = sign\n"
+                "sys.exit(session_signer.main())\n" % str(here)
+            )
+            prompt = "STDIN_TTY=True touch the key"
+            cases = (
+                ("", "RESULT ['inner'] 2", probe, prompt),
+                ("1", "REFUSED session not signed: RuntimeError: refused by probe", probe, prompt),
+                ("", "RESULT ['inner'] 3", real, "Touch your hardware key when it flashes."),
+            )
+            for refuse, want, signer, seen in cases:
                 main, child = pty.openpty()
                 env = dict(os.environ, PROBE_REFUSE=refuse)
                 p = subprocess.Popen(
-                    [sys.executable, "-c", caller, str(here), str(probe), d],
+                    [sys.executable, "-c", caller, str(here), str(signer), d],
                     stdin=child, stdout=child, stderr=child, env=env, close_fds=True,
                 )  # fmt: skip
                 os.close(child)
@@ -358,8 +373,8 @@ class Signer(unittest.TestCase):
                 p.wait(timeout=60)
                 os.close(main)
                 text = out.decode(errors="replace")
-                with self.subTest(refuse=refuse):
-                    self.assertIn("STDIN_TTY=True touch the key", text)  # on the terminal, seen
+                with self.subTest(refuse=refuse, signer=signer.name):
+                    self.assertIn(seen, text)  # on the terminal, seen
                     self.assertIn(want, text)
 
 

@@ -324,11 +324,13 @@ def client(credential_id=None, require=None, exclude=None):
             return pinentry()
 
         def prompt_up(self):
-            print("Touch your hardware key when it flashes.", flush=True)
+            # Prompts are for the person, on stderr: stdout carries results (the session
+            # signer's reply; live laptop, 20 Nov 2026: this line broke its JSON).
+            print("Touch your hardware key when it flashes.", file=sys.stderr, flush=True)
 
         def request_uv(self, permissions, rp_id):
             # The key verifies the user itself (its own PIN pad or screen).
-            print("Verify on your hardware key (enter its PIN there if it asks).", flush=True)
+            print("Verify on your hardware key (enter its PIN there if it asks).", file=sys.stderr, flush=True)
             return True
 
     device = found[0]

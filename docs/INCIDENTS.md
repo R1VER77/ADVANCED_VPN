@@ -86,6 +86,12 @@ private vulnerability reporting (see [SECURITY.md](../SECURITY.md)).
 - **Fix:** the request goes on a pipe of its own (`--request-fd`); stdin and stderr stay the
   caller's; the reply and refusals come back on stdout. `tools/test_session_auth.py` runs the
   real launch path under a pseudo-terminal and fails on the old one.
+- **Then (same day, next connect):** with the PIN prompt fixed, the connect failed with
+  `JSONDecodeError`: keyguard printed "Touch your hardware key" to stdout, the signer's reply
+  channel, so the person never saw it and the reply was corrupt. Prompts now go to stderr,
+  and the signer sends anything printed while it signs to stderr, keeping stdout for the
+  reply alone; the same test runs the real signer's `main` with a stdout-printing `sign`
+  and fails without that.
 
 
 ### Mesh descriptor signatures could never be verified (found 20 Nov 2026)
