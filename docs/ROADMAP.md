@@ -27,8 +27,11 @@ of the validated checkpoint. It preserves the remaining main-plan acceptance gat
   run is required.
   [Fresh-control analysis tooling](WF_REPLICATION.md) now retains complete failed-load
   windows and fits secondary resource references on training rounds only. Recorder,
-  protection-validity checks and the counterbalanced runner are implemented; fresh
-  controlled capture and cross-environment qualification remain open.
+  protection-validity checks and the counterbalanced runner are implemented. The frozen
+  run completed on 20 November ([result](WF_REPLICATION.md)): defended accuracy is near
+  chance with no corrected signal, but the local gate failed on upper bounds (up to 12.1%),
+  load success (−6 to −7 points) and one unprotected sample window per arm; defaults stay.
+  Cross-environment qualification remains open.
 - [ ] Validate the busy-CPU fix on held-out days, networks and devices, with confidence
   intervals, negative results and load failures reported alongside positive results.
 - [ ] Expand beyond the current small closed-world experiment to larger monitored and
@@ -81,6 +84,14 @@ These governance items are not complete merely because this roadmap lists them.
 
 ## 3. Installation and guided setup
 
+**The setup flow (owner, 20 November, [D007](DECISIONS.md), [design](GEMMA_SETUP_FLOW.md)):**
+one ordered, Gemma-led conversation. (1) Provisioning through pinned OpenTofu modules,
+with the hardware-key work inside it; (2) when it completes, the GUI appears; (3) each later
+launch checks for a viable profile: none leads back to provisioning, otherwise choose one
+or add another. The open items below are the parts of that flow, in that order: hardware
+keys, then OpenTofu provisioning, then the profile store and GUI, with Gemma leading
+throughout.
+
 - [x] Deliver shared read-only preflight, current-evidence setup progress and confirmed,
   narrowly scoped hardware repairs. A command succeeding is not proof a repair worked.
 - [x] Physically test the four connected Nitrokey, YubiKey, Trezor and Ledger units
@@ -131,14 +142,22 @@ These governance items are not complete merely because this roadmap lists them.
   Native candidate lifecycle trials passed on [four Debian/Ubuntu releases](evidence/NATIVE_PACKAGE_MATRIX_20261118.json)
   and [Fedora/Rocky](evidence/NATIVE_RPM_MATRIX_20261118.json). Production signing,
   provenance, publication and full protection/recovery qualification remain open.
-- [ ] Add a GUI driven by the same typed controller checks, with honest progress,
-  actionable failure states and explicit review of privileged or billable changes.
-- [ ] Evaluate an optional local Gemma assistant against the deterministic setup engine.
-  Use versioned official provider documentation and tested adapters for changing flows;
-  model training is not a substitute for current documentation. Keep credentials and
-  PINs outside model context, bound its tools, and reserve approval for the user.
 - [ ] Broaden cloud provisioning through pinned OpenTofu modules and retain bring-your-own
   SSH hosts. Provider actions need resource previews, cost information and clean teardown.
+  This is step 1 of the flow, and the hardware-key items above run inside it.
+- [ ] A profile store: the client holds more than one enrolled chain with an active
+  selection, and a viability check (verified, current, protection intact, servers healthy)
+  that decides what each launch shows.
+- [ ] The GUI ([`apps/cypherpunk-vpn`](../apps/cypherpunk-vpn)) appears when provisioning
+  completes, and on later launches offers the viable profiles or adding one. It stays driven
+  by the same typed controller checks, with honest progress, actionable failure states
+  (including a chain that stops answering) and explicit review of privileged or billable
+  changes.
+- [ ] Gemma-centric setup (D007): a local Gemma model leads the whole flow conversationally,
+  trained for the conversation and tool calls over the narrowed provider catalog, its facts
+  from the versioned catalog and provider documentation (training is not a substitute for
+  current documentation). It calls only the engine's typed tools; credentials and PINs stay
+  outside its context; approval stays with the person; the flow works without it.
 - [ ] Add local search across the full OpenTofu registry. Only reviewed, pinned,
   VPN-capable recipes may provision; enforce encrypted saved plans/state, exact-plan
   review, operation ownership and recovery. Listing is not live-provider qualification.

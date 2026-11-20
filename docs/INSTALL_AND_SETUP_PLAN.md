@@ -162,8 +162,29 @@ Acceptance:
   - a real-key smoke test before each release.
 - **Firmware updates** stay a manual, confirmed action with the vendor's tool.
 
+### Phase 5: one Gemma-led setup flow (owner, 20 Nov, [D007](DECISIONS.md))
+Phases 3 and 4 are not separate tools for the person: they are steps of one conversation,
+led by a local Gemma model in the app ([design](GEMMA_SETUP_FLOW.md)).
+- **First launch:** the hardware key (phase 4 and the setup engine), then a provider from
+  the narrowed catalog or an own SSH host, then the OpenTofu plan, cost and apply (phase 3),
+  then signing the chain and enrolling this device.
+- **Then the GUI appears** (`apps/cypherpunk-vpn`), showing the new profile.
+- **Every later launch:** a viable profile (verified, current, protection intact, servers
+  healthy) is offered to choose; adding another starts the flow again; none starts it.
+- **Needs:** a client profile store (more than one enrolled chain, one active); typed tools
+  over the setup engine, cloud planner and OpenTofu wrappers for Gemma to call; approval in a
+  native dialog; the same flow without the model.
+
+Acceptance:
+- a new user reaches a working chain on a catalog provider through the conversation alone,
+  with every privileged or billable step approved outside the model;
+- adversarial tests: the model cannot run an unlisted action, skip an approval or see a
+  PIN or cloud credential.
+
 ## Order and coordination
-- **Order:** 1 → 2 → 3 → 4. Phase 1 needs no Rust build, so it can proceed during measurement runs.
+- **Order:** 1 → 2 → 3 → 4 → 5, and from 20 Nov phase 5 sets the target: phase 3 (OpenTofu,
+  with the key work of phase 4 inside it) first, then the profile store and GUI, with Gemma
+  leading throughout. Phase 1 needs no Rust build, so it can proceed during measurement runs.
 - **Rust builds** (phase 1b, the `avpn preflight` subcommand wiring) wait until the CPU-sensitive measurement on the build host has finished.
 - **`hwkey.py`, `setup_flow.py` and `setup_cli.py`** are consolidated in this branch. The
   preflight registry and controller use the same diagnostics; no separate session handoff

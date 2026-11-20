@@ -84,3 +84,40 @@ its ordinary suite ran 610 tests with 21 explicit skips. The expanded recorder,
 protocol and acceptance cases are recorded with the main implementation progress.
 Numerical cases need the optional NumPy/scikit-learn environment. Unit fixtures do
 not replace positive-control measurements.
+
+## Result: the frozen run of 20 November 2026 (cloud host)
+
+The full six-round, 720-attempt schedule ran to completion on one GCP VM (europe-west4,
+one network), frozen from source commit `efb2bc4` (manifest `2a500356…`, run `3a593e94…`),
+then analysed with 1,000 permutations (NumPy 2.5.4, scikit-learn 1.9.1). Every capture
+window was valid: kernel timestamps, zero drops, bracketed heartbeats, underlay audit
+passed. Raw captures stay private (an archive is kept with the owner).
+
+| Arm | Both directions | Upstream only | Downstream only | Loads succeeded | Median load |
+|---|---|---|---|---|---|
+| undefended | **100%** (Holm p 0.009) | 97.1% (0.009) | 99.6% (0.009) | 240/240 | 1.24 s |
+| relay30 | 3.8% [2.9, 4.6] (1.0) | 8.3% [5.0, **12.1**] (0.18) | 5.8% [2.9, 9.2] (0.92) | 235/240 | 3.27 s |
+| relay5 | 8.3% [5.4, **11.7**] (0.18) | 7.1% [4.2, **10.4**] (0.52) | 3.8% [2.9, 4.6] (1.0) | 234/240 | 2.70 s |
+
+Primary k-FP accuracy over 20 sites (chance 5%), with the round-bootstrap 95% interval and
+the Holm-adjusted p value across the nine primary views.
+
+What it shows:
+- The attack works on this setup: the undefended control is identified almost perfectly in
+  every view, so the defended results are not a weak classifier.
+- Both defended arms bring accuracy to near chance, and no defended view keeps a
+  statistically significant signal after correction (all Holm p ≥ 0.18).
+
+The frozen local acceptance gate nevertheless **failed**, on three checks for each arm:
+- **Classifier upper bound** (the 95% upper bound must not exceed chance + 5 points, 10%):
+  relay30 upstream reaches 12.1%; relay5 both-directions 11.7% and upstream 10.4%. A faint
+  residual signal cannot be excluded at this sample size.
+- **Load success non-inferiority** (the lower bound of the success difference must be
+  ≥ −5 points): relay30 −6.3, relay5 −7.1 points. The defence loses about 2–3% of loads, and
+  adds a median 1.4–1.9 s per load.
+- **Sampled protection**: one window per arm had unprotected samples, 2 and 1 of 6,232.
+
+So defaults stay unchanged (`promotes_default: false`), and this run does not qualify as an
+external replication: one host, one network and closed-world sites remain the limits listed
+above.
+
