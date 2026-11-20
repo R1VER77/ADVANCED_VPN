@@ -111,6 +111,15 @@ enum Cmd {
     /// Answer the Nitrokey PIN prompt after boot.
     #[command(disable_help_flag = true)]
     Unlock(Rest),
+    /// Operator: create the unlock key for servers without a TPM2 (once).
+    #[command(disable_help_flag = true)]
+    UnlockKey(Rest),
+    /// Operator: unwrap such servers' data keys (to a pipe).
+    #[command(disable_help_flag = true)]
+    Unwrap(Rest),
+    /// Server without a TPM2: accept its data key until the next reboot.
+    #[command(disable_help_flag = true)]
+    ServerUnlock(Rest),
     /// Remove the kill switch (--allow-cleartext).
     #[command(disable_help_flag = true)]
     Reset(Rest),
@@ -149,6 +158,9 @@ impl Cmd {
             Cmd::Rotate(r) => ("rotate", r.args),
             Cmd::Guard(r) => ("guard", r.args),
             Cmd::Unlock(r) => ("unlock", r.args),
+            Cmd::UnlockKey(r) => ("unlock-key", r.args),
+            Cmd::Unwrap(r) => ("unwrap", r.args),
+            Cmd::ServerUnlock(r) => ("server-unlock", r.args),
             Cmd::Reset(r) => ("reset", r.args),
             Cmd::Cloud(r) => ("cloud", r.args),
             Cmd::Mesh(r) => ("mesh", r.args),
@@ -258,6 +270,13 @@ fn run(cli: Cli, theme: Theme) -> i32 {
     };
     match action {
         "run" | "unlock" | "mix" => return exec(&ctrl, action, &args),
+        // The terminal (a PIN prompt) or the pipes (a data key, printed only as JSON to a
+        // pipe) belong to the controller, which also keeps --json.
+        "unlock-key" | "unwrap" | "server-unlock" => {
+            let err = ctrl.command(cli.json, action, &args).exec();
+            eprintln!("avpn: cannot run the controller: {err}");
+            return 1;
+        }
         _ if takes_terminal(action, cli.json, std::io::stdin().is_terminal()) => {
             return exec(&ctrl, action, &args);
         }

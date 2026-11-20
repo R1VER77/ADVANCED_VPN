@@ -6,6 +6,15 @@ measured figure in the docs names the version it was measured on.
 
 ## Unreleased
 
+- Servers without a TPM no longer keep plain keys ([design](docs/HARDWARE_BOUND_SESSIONS.md),
+  servers without a TPM). Setup tests the host first: keys are sealed to its TPM2 when
+  systemd-creds can use one, otherwise locked to the operator's Nitrokey (`--protect
+  operator`): encrypted under a data key that only the operator can unwrap, held in RAM until
+  the next reboot. The chain's signing touch also unlocks such servers; after a reboot,
+  `avpn cloud unlock NAME`. Plain keys and keys sealed with the host key alone are no longer
+  made, and existing ones are replaced at the next `chain` (new keys, so clients enroll the
+  new chain). New commands: `avpn unlock-key`, `avpn unwrap`, `avpn server-unlock`,
+  `avpn cloud unlock`; `avpn init --emit-unlock`; `avpn cloud host setup --vault`.
 - Fixed (found upgrading the owner's laptop, 20 November): `install.py --adopt-legacy`
   refused every installation whose venv names the system interpreter (all source and
   pre-bundled-runtime installs), and so did a source install's own new slot; exactly those

@@ -672,6 +672,57 @@ def kem_open(private, value, context):
     return AESGCM(key).decrypt(unb64(value["nonce"]), unb64(value["ciphertext"]), context)
 
 
+# Operator-unlocked server keys (docs/HARDWARE_BOUND_SESSIONS.md, "Servers without a TPM"):
+# a server's private keys are encrypted at rest under a random data key; the data key is
+# wrapped to the operator's unlock key, whose private half is sealed in the operator's
+# hardware vault. The server cannot open its own keys after a reboot: the operator
+# unwraps the data key with a PIN and touch and sends it into the server's RAM.
+SERVER_UNLOCK = b"advanced-vpn/server-unlock/v1"
+DATA_KEY = 32
+
+
+def unlock_context(role, certificates):
+    """What a server's wrapped data key is bound to: its role and its identity
+    certificates (the request's `certificates`, base64 by lane). The operator computes
+    it from its own copy of the request, so a server cannot have another server's data
+    key unwrapped for it."""
+    digest = hashlib.sha256(json.dumps(certificates, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    return SERVER_UNLOCK + b"|" + role.encode() + b"|" + digest.encode()
+
+
+def _server_header(name, binding):
+    return json.dumps(
+        dict(schema=1, domain="advanced-vpn/server-key", role=name, binding_sha256=hashlib.sha256(binding).hexdigest()),
+        sort_keys=True,
+    ).encode()
+
+
+def _server_key(data_key):
+    if len(data_key) != DATA_KEY:
+        raise ValueError("wrong data key")
+    return HKDF(algorithm=hashes.SHA256(), length=32, salt=None, info=b"advanced-vpn/server-key/v1").derive(data_key)
+
+
+def lock_bytes(data_key, name, binding, value):
+    """Encrypt one server key under the data key, bound to its name and public value."""
+    nonce = os.urandom(12)
+    header = _server_header(name, binding)
+    return dict(
+        schema=1,
+        aad=b64(header),
+        nonce=b64(nonce),
+        ciphertext=b64(AESGCM(_server_key(data_key)).encrypt(nonce, value, header)),
+    )
+
+
+def unlock_bytes(data_key, name, binding, value):
+    """Decrypt one server key; fails unless the data key, name and public value all match."""
+    header = _server_header(name, binding)
+    if value.get("schema") != 1 or unb64(value["aad"]) != header:
+        raise ValueError("envelope binding mismatch")
+    return AESGCM(_server_key(data_key)).decrypt(unb64(value["nonce"]), unb64(value["ciphertext"]), header)
+
+
 def tpm2_usable():
     """True only when systemd can really use the TPM2 (device, driver and TSS2 libraries)."""
     try:

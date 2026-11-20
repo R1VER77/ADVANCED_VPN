@@ -11,7 +11,7 @@ bundle per device.
         [--hours-per-day H] [--accept-cost] [--daily-limit-mib N] \
         [--dns-blocklist FILE] [--dns-allowlist FILE] [--dns-recursive] [--cover-name NAME] \
         [--standby-exit NAME=IP:PORT ...] [--rotate-seconds MIN,MAX] \
-        [--front i2p] [--front-hops 1|2|3]
+        [--front i2p] [--front-hops 1|2|3] [--emit-unlock]
 
 ## Options
 
@@ -23,6 +23,7 @@ bundle per device.
 - `--request ROLE=FILE`: repeat once for the client and once for every server in the chain.
 - `--vault DIR`: production. Signs with the Nitrokey's FIDO2 Ed25519 credential plus the ML-DSA-65 operator key sealed in the vault (PIN + touch).
 - `--software-operator DIR`: LAB ONLY. Plaintext operator keys.
+- `--emit-unlock` (with `--json`, output to a pipe): the same PIN and touch that signs also unwraps the data key of every server whose request locks its keys to the operator, printed as `unlock` in the JSON result. `avpn cloud chain` uses it to hand each such server its data key; it refuses to print to a terminal.
 - `--pq-vault DIR` (with `--vault`): adds a third signature half, a non-exportable ML-DSA-44
   FIDO2 credential on a **second, separate key**, so the operator itself stays on its locked
   key. Today only a Solo 2 Hacker (unlocked) offers ML-DSA-44 in FIDO2. Create it once with

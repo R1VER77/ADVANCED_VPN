@@ -18,10 +18,11 @@ and `oci` command-line tools, and plain SSH for everything else.
     avpn cloud oci allow --apply --name avpn-NAME --security-list OCID --allow-from IP [--port N] [--protocol udp|tcp]
     avpn cloud oci allow --teardown --name avpn-NAME --security-list OCID
     avpn cloud host add --name avpn-NAME --ssh USER@HOST --key FILE [--provider P] [--shared]
-    avpn cloud host setup --name avpn-NAME --out FILE [--role ROLE] [--replace]
+    avpn cloud host setup --name avpn-NAME --out FILE [--role ROLE] [--replace] [--vault DIR]
     avpn cloud host forget --name avpn-NAME
     avpn cloud chain --apply --client-request FILE --vault DIR [--order A,B,C] [--allow-same-provider] \
         [--hours-per-day H] [--accept-cost]
+    avpn cloud unlock avpn-NAME [--vault DIR]
 
 Every `--apply` and `--teardown` first shows its plan and asks before changing
 anything. `--dry-run` stops after the plan. `--yes` skips the question; scripts
@@ -239,16 +240,36 @@ request. `chain` does this for every hop; use it on its own to prepare one serve
 - `--out FILE`: where to save the public request. Give it to `avpn init`.
 - `--role relay|middle|exit`: the role to make keys for (default: its recorded role).
 - `--replace`: replace keys made for another role. Without it, a role change is refused.
+- `--vault DIR`: the operator's Nitrokey vault. A server without a usable TPM2 locks its keys to the vault's unlock key (made on first use: PIN + touch); without `--vault`, such a server is refused.
 
 What it does on the server:
 1. Installs `nftables`, `python3-venv` and the TSS2 runtime libraries. Without TSS2, systemd-creds would silently fall back to the host key.
 2. Unless the host is shared, first of all: keeps every log in RAM (`avpn help retention`). That covers the journal, syslog daemons, `/var/log`, login databases and swap. Otherwise `sshd` would keep a persistent record of the admin's address, which is your address. A shared host is only marked as shared, and `doctor` reports it.
 3. On images that reject by default (OCI's Ubuntu), accepts the tunnel port in the host firewall, and saves it unless the host is shared (saving would also persist its other runtime rules).
 4. Installs or upgrades the package (the service is not enabled).
-5. Keeps the keys when they were made for the same role; otherwise runs `avpnctl request --role ROLE --protect systemd-creds`, sealing them to host + TPM2 when the TPM is usable.
+5. Tests the host first: it seals and opens a throwaway credential with systemd-creds using the host and TPM2 key. If that works, the keys are sealed to the TPM2 (protection `systemd-creds`) and the server restarts unattended. If not (systemd older than 250, as on Ubuntu 22.04, or no TPM, as on OCI's Always Free shapes), they are locked to the operator's Nitrokey (protection `operator`, `avpn help request`): the server cannot open them after a reboot until you run `avpn cloud unlock`. Keys are never stored as plain files, nor sealed with the host key alone, whose secret sits on the same disk.
+6. Keeps existing keys only when they were made for the same role and are protected that way: sealed to a TPM2, or locked to this operator's unlock key. Anything weaker is replaced with new keys, not re-wrapped, because copies may survive on the disk or in its backups; the client then enrolls the new chain.
 
 Binaries are copied as built, so the server needs a C library at least as new as the
 build machine's (release builds need glibc 2.34: Debian 12+, Ubuntu 22.04+).
+
+## avpn cloud unlock
+
+Start a server whose keys are locked to the operator, after it has restarted (a reboot,
+a provider's maintenance). Until then it does not run, and the chain through it is down.
+
+    avpn cloud unlock avpn-exit
+
+- `avpn-NAME`: the recorded server.
+- `--vault DIR`: the operator's Nitrokey vault (default: the one the chain was signed with).
+
+What it does:
+1. Reads the server's wrapped data key (ciphertext) over SSH.
+2. Unwraps it with the Nitrokey (PIN + touch), bound to your own copy of that server's request, so a server cannot have another server's data key unwrapped for it.
+3. Sends the data key to the server on stdin (`avpn server-unlock`), where it is held in RAM until the next reboot, and restarts the VPN service.
+
+It needs SSH to the server, through the path `host add` recorded (for OCI, the bastion).
+Servers sealed to a TPM2 restart on their own and are refused here.
 
 ## avpn cloud host forget
 
@@ -283,10 +304,11 @@ spheres.
 
 What `--apply` does:
 1. Firewalls of managed servers (`aws relay`, `oci server`): the first hop's UDP 443 (the HTTP/3 camouflage in front of WireGuard) and TCP 443 (its TLS fallback, for paths below 1448 bytes) open to any address, and any older WireGuard port rule removed; each later hop's port (4445 middle, 4444 exit) only from the previous server; SSH from here for setup.
-2. Installs or upgrades every server and fetches its request for its role. A server whose role changes gets new keys.
-3. Signs the whole chain once: `avpnctl init` with your client request and every server's.
-4. Enrolls and restarts each server, exit first, and checks it is running.
-5. Removes SSH from your address. From then on you administer the servers while connected: the other hops admit SSH from the exit's address (which is where your traffic now comes from), and the exit answers at `10.77.0.1`, its own address inside the tunnel, which needs no firewall rule. The exit's public address does not work from inside the tunnel, because cloud servers do not hold it locally. So no rule names you. Rerun `chain` (or `aws allow --admin-ip auto`) to get back in when you are not connected.
+2. Makes the operator's unlock key in the vault if it is not there yet (PIN + touch, once ever).
+3. Installs or upgrades every server and fetches its request for its role (`host setup`). A server whose role changes, or whose keys are not TPM-sealed or locked to this operator, gets new keys.
+4. Signs the whole chain once: `avpnctl init` with your client request and every server's. The same PIN and touch unwraps the data key of every server locked to the operator, into this process's memory only.
+5. Enrolls and restarts each server, exit first, and checks it is running. A locked server first receives its data key over SSH, on stdin.
+6. Removes SSH from your address. From then on you administer the servers while connected: the other hops admit SSH from the exit's address (which is where your traffic now comes from), and the exit answers at `10.77.0.1`, its own address inside the tunnel, which needs no firewall rule. The exit's public address does not work from inside the tunnel, because cloud servers do not hold it locally. So no rule names you. Rerun `chain` (or `aws allow --admin-ip auto`) to get back in when you are not connected.
 
 Every chain is padded to constant cells on every hop, every link between two servers
 is a paced, encrypted constant-rate stream (per-hop shaping), and the client's link to

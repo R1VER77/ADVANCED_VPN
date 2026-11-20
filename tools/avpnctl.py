@@ -48,6 +48,9 @@ from managed_profile import (
     load_keys,
     HardwareOperator,
     SoftwareOperator,
+    server_locked,
+    server_unlock,
+    unlock_items,
 )
 
 APP = "avpn-app"
@@ -1647,6 +1650,19 @@ def hand_to_invoker(path):
     os.chmod(path, 0o644)
 
 
+def pipe_only(args):
+    """Secret output (servers' data keys) goes to a pipe as JSON, never to a terminal."""
+    if not getattr(args, "json", False) or sys.stdout.isatty():
+        raise SystemExit("this prints secret data keys: run it with --json and send its output to a pipe")
+
+
+def operator_from(args):
+    """The operator for unlock-key/unwrap: the Nitrokey vault, or a lab's software keys."""
+    if bool(args.vault) == bool(args.software_operator):
+        raise SystemExit("give exactly one of --vault or --software-operator")
+    return HardwareOperator(args.vault) if args.vault else SoftwareOperator(args.software_operator.resolve())
+
+
 def emit(args, message, **data):
     """Print one command result: human text, or a single JSON object with --json."""
     if getattr(args, "json", False):
@@ -1753,6 +1769,8 @@ def device_info(state):
     if protection:
         info["protection"] = protection["mode"]
         info["creds_key"] = protection.get("creds_key")
+        if protection["mode"] == "operator":
+            info["locked"] = server_locked(state)
     if info["enrolled"]:
         profile = load_profile(state)
         preferences = read_json_private(state / "preferences.json", {})
@@ -1908,6 +1926,14 @@ def doctor(state, check_egress=False):
             info.get("creds_key") == "host+tpm2",
             "sealed with " + str(info.get("creds_key")) + ("; TPM2 usable now" if tpm else "; no usable TPM2"),
         )
+    elif info.get("protection") == "operator":
+        check(
+            "keys unlocked by the operator",
+            not info.get("locked"),
+            "sealed to the operator's Nitrokey; "
+            + ("LOCKED since boot: run avpn cloud unlock NAME on the operator's computer" if info.get("locked")
+               else "unlocked until the next reboot"),
+        )  # fmt: skip
     elif info.get("protection"):
         # Bug 9a: a host whose systemd cannot seal with systemd-creds falls back to
         # plain keys, so say what that means and what to do about it, not just "none".
@@ -1989,10 +2015,12 @@ def build_parser():
     )
     rq.add_argument(
         "--protect",
-        choices=["nitrokey", "systemd-creds", "none"],
+        choices=["nitrokey", "systemd-creds", "operator", "none"],
         required=True,
-        help="how the private keys are sealed at rest",
+        help="how the private keys are sealed at rest (operator: a server without a TPM, whose keys only the "
+        "operator's Nitrokey unlocks, after every reboot)",
     )
+    rq.add_argument("--unlock-key", type=Path, help="with --protect operator: the operator's unlock public key file")
     rq.add_argument(
         "--insecure-plaintext-keys",
         action="store_true",
@@ -2004,6 +2032,23 @@ def build_parser():
         help="Nitrokey vault (nitrokey protection; default /etc/advanced-vpn/vault, created if missing)",
     )
     rq.add_argument("--out", type=Path, required=True, help="public request file to copy to the operator")
+    uk = s.add_parser(
+        "unlock-key", help="operator: create the unlock key for servers without a TPM (once; PIN + touch)"
+    )
+    uk.add_argument("--vault", type=Path, help="Nitrokey vault (the operator's)")
+    uk.add_argument("--software-operator", type=Path, help="LAB ONLY: plaintext operator keys in this directory")
+    uw = s.add_parser("unwrap", help="operator: unwrap servers' data keys (PIN + touch); output only to a pipe")
+    uw.add_argument("--vault", type=Path, help="Nitrokey vault (the operator's)")
+    uw.add_argument("--software-operator", type=Path, help="LAB ONLY: plaintext operator keys in this directory")
+    uw.add_argument(
+        "--request", action="append", required=True,
+        help="NAME=PATH: your own copy of the server's request (its role and identities bind the unwrap)",
+    )  # fmt: skip
+    uw.add_argument(
+        "--wrapped", action="append", default=[],
+        help="NAME=PATH: the server's current unlock record (its protection.json), if not the request's own",
+    )  # fmt: skip
+    s.add_parser("server-unlock", help="server: accept the operator's data key on stdin, held in RAM until reboot")
     init = s.add_parser("init", help="operator: sign a chain from the devices' public requests")
     init.add_argument("--out", type=Path, required=True, help="new directory for the signed bundles")
     init.add_argument(
@@ -2020,6 +2065,10 @@ def build_parser():
     init.add_argument(
         "--request", action="append", required=True, help="ROLE=PATH for the client and every server in the chain"
     )
+    init.add_argument(
+        "--emit-unlock", action="store_true",
+        help="also unwrap the data keys of operator-unlocked servers with the same touch, printed to a pipe only",
+    )  # fmt: skip
     signer = init.add_mutually_exclusive_group(required=True)
     signer.add_argument("--vault", type=Path, help="Nitrokey vault: hardware-signed operator (production)")
     signer.add_argument("--software-operator", type=Path, help="LAB ONLY: plaintext operator keys in this directory")
@@ -2254,7 +2303,10 @@ def dispatch(a):
                 "read. Use --protect nitrokey or systemd-creds; for a test device add --insecure-plaintext-keys."
             )
         vault = device_vault(a.vault) if a.protect == "nitrokey" else a.vault
-        req = request(a.role, a.state.resolve(), a.protect, vault)
+        if (a.protect == "operator") != (a.unlock_key is not None):
+            raise SystemExit("--unlock-key goes with --protect operator, and only with it")
+        unlock_public = a.unlock_key.read_bytes() if a.unlock_key else None
+        req = request(a.role, a.state.resolve(), a.protect, vault, unlock_public=unlock_public)
         a.out.write_bytes(canonical(req))
         hand_to_invoker(a.out)
         emit(
@@ -2295,6 +2347,9 @@ def dispatch(a):
         signer_impl = (
             HardwareOperator(a.vault, a.pq_vault) if a.vault else SoftwareOperator(a.software_operator.resolve())
         )
+        if a.emit_unlock:
+            pipe_only(a)
+            signer_impl.pending_unwrap = unlock_items(requests)
         dns_arg = (
             dict(
                 upstream="1.1.1.1:853",
@@ -2333,7 +2388,49 @@ def dispatch(a):
             rate=rate,
             rate_reason=why,
             monthly_gib_per_hop=round(rate_cost_gib(rate, a.hours_per_day, links)),
+            **(dict(unlock={k: v.hex() for k, v in (signer_impl.unwrapped or {}).items()}) if a.emit_unlock else {}),
         )
+        return
+    if a.action == "unlock-key":
+        op = operator_from(a)
+        public = op.create_unlock_key()
+        emit(
+            a,
+            "The operator's unlock key exists (%s...). Servers without a TPM lock their keys to it."
+            % hashlib.sha256(public).hexdigest()[:16],
+            unlock_public_sha256=hashlib.sha256(public).hexdigest(),
+            path=str(
+                (a.vault or a.software_operator) / ("operator-unlock.pub" if a.vault else "offline/operator-unlock.pub")
+            ),
+        )
+        return
+    if a.action == "unwrap":
+        pipe_only(a)
+        items = {}
+        for item in a.request:
+            name, path = item.split("=", 1)
+            r = json.loads(Path(path).read_bytes())
+            items[name] = [r.get("unlock"), r["role"], r["certificates"]]
+        for item in a.wrapped:
+            name, path = item.split("=", 1)
+            if name not in items:
+                raise SystemExit("--wrapped %s has no --request %s" % (name, name))
+            items[name][0] = json.loads(Path(path).read_bytes())["unlock"]
+        missing = [n for n, v in items.items() if not v[0]]
+        if missing:
+            raise SystemExit("no unlock record for: " + ", ".join(missing))
+        keys = operator_from(a).unwrap({n: tuple(v) for n, v in items.items()})
+        emit(a, "unwrapped %d data key(s)" % len(keys), unlock={k: v.hex() for k, v in keys.items()})
+        return
+    if a.action == "server-unlock":
+        root_guard(False)
+        text = sys.stdin.read(200).strip()
+        try:
+            data_key = bytes.fromhex(text)
+        except ValueError:
+            raise SystemExit("expected the data key as hex on stdin") from None
+        names = server_unlock(a.state.resolve(), data_key)
+        emit(a, "Unlocked %d key(s) until the next reboot." % len(names), unlocked=names)
         return
     if a.action == "enroll":
         rt_info = runtime_dir(a.state, create=False) / "controller.json"

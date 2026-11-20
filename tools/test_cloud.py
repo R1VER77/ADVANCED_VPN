@@ -968,11 +968,19 @@ class ChainTests(Stubbed):
         ctl = d / "avpnctl"
         ctl.write_text(
             "#!" + sys.executable + "\nimport json, os, sys\na = sys.argv[1:]\n"
+            "if 'unlock-key' in a:\n"
+            "    v = a[a.index('--vault') + 1]\n    os.makedirs(v, exist_ok=True)\n"
+            "    open(os.path.join(v, 'operator-unlock.pub'), 'wb').write(b'U' * 1216)\n"
+            "    print(json.dumps({'ok': True}))\n    sys.exit(0)\n"
+            "if 'unwrap' in a:\n"
+            "    open(os.environ['STUB_LOG'] + '.unwrap', 'w').write(json.dumps(a))\n"
+            "    name = a[a.index('--request') + 1].split('=')[0]\n"
+            "    print(json.dumps({'ok': True, 'unlock': {name: 'cd' * 32}}))\n    sys.exit(0)\n"
             "open(os.environ['STUB_LOG'] + '.ctl', 'w').write(json.dumps(a))\n"
             "out = a[a.index('--out') + 1]\nos.makedirs(out)\n"
             "for r in ['client', 'relay', 'middle', 'exit']:\n    open(os.path.join(out, r + '.avpn'), 'w').write(r)\n"
             "open(os.path.join(out, 'operator.pub'), 'w').write('pub')\n"
-            "print(json.dumps({'ok': True}))\n"
+            "print(json.dumps({'ok': True, 'unlock': json.loads(os.environ.get('STUB_UNLOCK', '{}'))}))\n"
         )
         ctl.chmod(0o755)
         self.extra = mock.patch.dict(
@@ -1082,6 +1090,58 @@ class ChainTests(Stubbed):
         self.assertTrue(inv["resources"]["avpn-relay"]["first_hop"])
         self.assertFalse(inv["resources"]["avpn-exit"]["first_hop"])
 
+    def operator_exit_chain(self, data_key):
+        self.add_exit()
+        env = dict(STUB_PROTECT="operator tpm2=no creds_key=None", STUB_UNLOCK=json.dumps({"exit": data_key}))
+        with mock.patch.dict(os.environ, env):
+            return self.chain()
+
+    def test_an_exit_without_a_tpm_gets_its_data_key_on_stdin_only_before_it_starts(self):
+        data_key = "ab" * 32
+        r = self.operator_exit_chain(data_key)
+        self.assertEqual(r["summary"], "built")
+        d = Path(self.tmp.name)
+        # The signing call asked for the unwrap (same touch), and the key came back on its pipe.
+        init = json.loads(Path(os.environ["STUB_LOG"] + ".ctl").read_text())
+        self.assertIn("--emit-unlock", init)
+        self.assertEqual((d / "unlock-stdin").read_text().strip(), data_key)  # only the exit's
+        log = (d / "log.ssh").read_text()
+        self.assertNotIn(data_key, log)  # never in a command line
+        self.assertNotIn(data_key, json.dumps(json.loads(cloud.INVENTORY.read_text())))
+        self.assertFalse(any(data_key in p.read_text(errors="ignore") for p in d.rglob("*") if p.is_file()
+                             and p.name != "unlock-stdin"))  # fmt: skip
+        # Unlocked before it was enrolled and started.
+        lines = log.splitlines()
+        unlocked = next(i for i, x in enumerate(lines) if x.endswith("server-unlock") and "16.40.0.2" in x)
+        enrolled = next(i for i, x in enumerate(lines) if x.endswith("bash -s") and "16.40.0.2" in x)
+        self.assertLess(unlocked, enrolled)
+        self.assertIn("locked to the operator's Nitrokey", json.dumps(r["rows"]))
+        rec = json.loads(cloud.INVENTORY.read_text())["resources"]["avpn-exit"]
+        self.assertEqual(rec["key_protection"], "operator")
+        self.assertTrue(Path(rec["request"]).is_file())
+
+    def test_unlock_binds_to_your_copy_of_the_request_and_restarts_the_server(self):
+        self.operator_exit_chain("ab" * 32)
+        d = Path(self.tmp.name)
+        (d / "unlock-stdin").unlink()
+        r = self.run_cli("unlock", "avpn-exit")
+        self.assertEqual(r["summary"], "unlocked")
+        unwrap = json.loads(Path(os.environ["STUB_LOG"] + ".unwrap").read_text())
+        rec = json.loads(cloud.INVENTORY.read_text())["resources"]["avpn-exit"]
+        # Role and identities come from your own copy of the request; only the wrapped key
+        # (ciphertext) comes from the server.
+        self.assertIn("avpn-exit=" + rec["request"], unwrap)
+        self.assertTrue(any(x.startswith("avpn-exit=") for x in unwrap[unwrap.index("--wrapped") + 1 :][:1]))
+        self.assertEqual(unwrap[unwrap.index("--vault") + 1], str((d / "vault").resolve()))
+        self.assertEqual((d / "unlock-stdin").read_text().strip(), "cd" * 32)
+        self.assertIn("systemctl restart advanced-vpn.service", (d / "enroll-script.sh").read_text())
+        # A server that does not lock to the operator (here: a TPM-sealed relay) is not "unlocked".
+        inv = cloud.load_inventory()
+        inv["resources"]["avpn-relay"]["key_protection"] = "systemd-creds"
+        cloud.save_inventory(inv)
+        with self.assertRaisesRegex(cloud.CloudError, "does not lock its keys"):
+            self.run_cli("unlock", "avpn-relay")
+
     def test_setup_ssh_from_here_is_opened_then_removed(self):
         self.add_exit()
         self.chain()
@@ -1123,6 +1183,7 @@ class ChainTests(Stubbed):
         lines = err.getvalue().splitlines()
         for step in [
             "Open the firewalls",
+            "Check the operator's unlock key",
             "Install avpn-relay as the relay",
             "Install avpn-exit as the exit",
             "Sign the chain",
@@ -1161,6 +1222,7 @@ class ChainTests(Stubbed):
             ev[0]["plan"],
             [
                 "Open the firewalls",
+                "Check the operator's unlock key",
                 "Install avpn-relay as the relay",
                 "Install avpn-exit as the exit",
                 "Sign the chain",
@@ -1170,8 +1232,9 @@ class ChainTests(Stubbed):
             ],
         )
         states = [(e["step"], e["state"]) for e in ev[1:]]
-        self.assertEqual([i for i, st in states if st == "done"], list(range(7)), states)
-        self.assertIn((3, "wait"), states)
+        self.assertEqual([i for i, st in states if st == "done"], list(range(8)), states)
+        self.assertIn((1, "wait"), states)  # the unlock key, made once (PIN + touch)
+        self.assertIn((4, "wait"), states)  # the signature
         self.assertTrue(all(i == j for (i, st), (j, _) in zip(states, states[1:], strict=False) if st == "run"), states)
         self.assertEqual(err.getvalue().count("\n"), len(ev))  # nothing else on stderr
 
@@ -1190,7 +1253,7 @@ class ChainTests(Stubbed):
             with self.assertRaises(cloud.CloudError):
                 self.chain()
         ev = self.events(err.getvalue())
-        self.assertEqual(ev[-1], {"step": 2, "state": "fail", "note": "avpn-exit did not install"})
+        self.assertEqual(ev[-1], {"step": 3, "state": "fail", "note": "avpn-exit did not install"})
 
     def test_the_plan_names_tcp_for_the_first_hop_only(self):
         self.add_exit()
@@ -1294,8 +1357,10 @@ echo "$(basename "$0") $*" >> "$STUB_LOG.ssh"
 case "$*" in
   *" true") exit 0 ;;
   *"getconf GNU_LIBC_VERSION") echo "glibc ${STUB_GLIBC:-2.41}" ;;
-  *"bash -s -- "*) cat > "$STUB_DIR/remote-script.sh"; echo "keys=new"; echo "protection=systemd-creds tpm2=yes creds_key=host+tpm2" ;;
-  *"bash -s") cat > "$STUB_DIR/enroll-script.sh"; echo active ;;
+  *"bash -s -- "*) cat > "$STUB_DIR/remote-script.sh"; echo "keys=new"; echo "protection=${STUB_PROTECT:-systemd-creds tpm2=yes creds_key=host+tpm2}" ;;
+  *"bash -s") cat > "$STUB_DIR/enroll-script.sh"; echo "$(basename "$0") enrolled" >> "$STUB_LOG.ssh"; echo active ;;
+  *"server-unlock") cat >> "$STUB_DIR/unlock-stdin"; echo '{"ok": true, "unlocked": ["inner"]}' ;;
+  *"cat /etc/advanced-vpn/enrolled/protection.json") echo '{"mode": "operator", "unlock": {"from": "server"}}' ;;
 esac
 """
 SCP_STUB = r"""#!/bin/sh
@@ -1379,12 +1444,16 @@ class HostSetupTests(unittest.TestCase):
         self.assertTrue({n.split("/")[0] for n in names} <= {s.split("/")[0] for s in install.SOURCES} | {"target"})
         script = (self.d / "remote-script.sh").read_text()
         self.assertIn("libtss2", script)
-        # Bug 9a: the protection is chosen by a live probe of systemd-creds, not
-        # hard-coded, and falls back to plain keys (loudly) on hosts that cannot seal.
+        # The protection is chosen by a live probe of TPM2 sealing, not hard-coded: a host
+        # without one locks its keys to the operator's Nitrokey, never to plain files or
+        # the host key alone (owner decision, 20 Nov 2026).
         self.assertIn("PROTECT=systemd-creds", script)
+        self.assertIn("PROTECT=operator", script)
+        self.assertIn("--with-key=host+tpm2", script)
+        self.assertNotIn("--with-key=host ", script)
         self.assertIn('request --role "$ROLE" --protect "$PROTECT"', script)
-        self.assertIn("--insecure-plaintext-keys", script)
-        self.assertIn("PLAIN FILES", script)
+        self.assertNotIn("--insecure-plaintext-keys", script)
+        self.assertNotIn("PROTECT=none", script)
         self.assertIn("replace them to make it a", script)
         # Root-run Python must not leave root-owned caches behind in the user's temp tree.
         self.assertIn("python3 -B /tmp/avpn-src/tools/install.py", script)
@@ -1447,7 +1516,13 @@ if role in ("client", "relay", "exit"):
 if role in ("relay", "exit"):
     req.update(cloak_spki_sha256="00", i2p_destination="d")
 json.dump(req, open(e + "/request.json", "w"))
-json.dump({"mode": protect, "creds_key": "host"}, open(e + "/protection.json", "w"))
+if protect == "operator":
+    import hashlib
+    pub = open(a[a.index("--unlock-key") + 1], "rb").read()
+    prot = {"mode": "operator", "unlock": {"operator_unlock_sha256": hashlib.sha256(pub).hexdigest()}}
+else:
+    prot = {"mode": protect, "creds_key": "host+tpm2" if protect == "systemd-creds" else None}
+json.dump(prot, open(e + "/protection.json", "w"))
 """
 
 
@@ -1497,18 +1572,21 @@ class HostScriptTests(unittest.TestCase):
         ]:
             self.script = self.script.replace(path, str(self.root) + path)
         self.env = dict(os.environ, ROOT=str(self.root), PATH="%s:%s" % (stubs, os.environ["PATH"]))
+        self.systemd_creds_stub(self.PIPE_ONLY_CREDS)  # a host whose TPM2 seals, unless a test says not
 
     def tearDown(self):
         self.tmp.cleanup()
 
-    def setup(self, role, replace="no", shared="no", port="41194"):
+    def setup(self, role, replace="no", shared="no", port="41194", unlock=None):
         import shutil
         import subprocess
 
         shutil.copy(self.root / "keep.tgz", self.tgz)  # the script deletes it when done
+        if unlock is not None:  # the operator's unlock public key, uploaded by setup_server
+            (self.root / "tmp/avpn-unlock.pub").write_bytes(unlock)
 
         return subprocess.run(
-            ["bash", "-s", "--", role, port, replace, shared],
+            ["bash", "-s", "--", role, port, replace, shared, "yes" if unlock is not None else "no"],
             input=self.script,
             capture_output=True,
             text=True,
@@ -1561,18 +1639,58 @@ class HostScriptTests(unittest.TestCase):
         stub.write_text(body)
         stub.chmod(0o755)
 
-    def test_a_host_that_cannot_seal_falls_back_to_plain_keys_loudly(self):
-        # Bug 9a: systemd 249 (Ubuntu 22.04, the free OCI exit) cannot run systemd-creds.
-        # The setup must still complete, with plainly stored keys that say so.
+    def test_a_host_without_a_tpm_locks_its_keys_to_the_operator(self):
+        # Bug 9a, then the owner's decision (20 Nov 2026): a host that cannot seal to a TPM2
+        # (the free OCI exit: Ubuntu 22.04, systemd 249, no vTPM) locks its keys to the
+        # operator's Nitrokey; it never stores them as plain files.
         self.systemd_creds_stub("#!/bin/sh\nexit 1\n")
-        r = self.setup("relay")
+        r = self.setup("exit", unlock=b"U" * 1216)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("keys=new", r.stdout)
-        self.assertIn("--protect none", self.log())
-        self.assertIn("--insecure-plaintext-keys", self.log())
-        self.assertIn("PLAIN FILES", r.stderr)
-        self.assertIn("systemd 250+", r.stderr)
-        self.assertTrue(r.stdout.strip().splitlines()[-1].startswith("protection=none "), r.stdout)
+        self.assertIn("--protect operator --unlock-key", self.log())
+        self.assertNotIn("--protect none", self.log())
+        self.assertIn("avpn cloud unlock", r.stderr)
+        self.assertTrue(r.stdout.strip().splitlines()[-1].startswith("protection=operator "), r.stdout)
+        self.assertFalse((self.root / "tmp/avpn-unlock.pub").exists())
+
+    def test_a_host_without_a_tpm_and_no_unlock_key_is_refused(self):
+        self.systemd_creds_stub("#!/bin/sh\nexit 1\n")
+        r = self.setup("exit")
+        self.assertEqual(r.returncode, 4, r.stdout)
+        self.assertIn("--vault", r.stderr)
+        self.assertEqual(self.requested(), 0)
+
+    def test_weak_keys_are_replaced_not_kept(self):
+        # Owner (20 Nov 2026): keys that were plain, sealed with the host key alone, or locked
+        # to another operator are replaced; copies may survive on the disk or its backups.
+        unlock = b"U" * 1216
+        prot = self.root / "etc/advanced-vpn/enrolled/protection.json"
+        self.assertEqual(self.setup("exit", unlock=unlock).returncode, 0)
+        for weak in (
+            {"mode": "none"},
+            {"mode": "systemd-creds", "creds_key": "host"},
+            {"mode": "operator", "unlock": {"operator_unlock_sha256": "0" * 64}},
+        ):
+            with self.subTest(weak=weak):
+                prot.write_text(json.dumps(weak))
+                before = self.requested()
+                r = self.setup("exit", unlock=unlock)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertIn("keys=renewed", r.stdout)
+                self.assertEqual(self.requested(), before + 1)
+        # Strong keys are kept: TPM-sealed, or locked to this operator's unlock key.
+        self.assertIn("keys=kept", self.setup("exit", unlock=unlock).stdout)
+        self.systemd_creds_stub("#!/bin/sh\nexit 1\n")
+        self.setup("exit", replace="yes", unlock=unlock)
+        prot.write_text(
+            json.dumps(
+                {
+                    "mode": "operator",
+                    "unlock": {"operator_unlock_sha256": __import__("hashlib").sha256(unlock).hexdigest()},
+                }
+            )
+        )
+        self.assertIn("keys=kept", self.setup("exit", unlock=unlock).stdout)
 
     # A systemd-creds that works like the real one through a pipe, and refuses any file
     # argument: the probe must never write a file. (A root-written file in the sticky /tmp
@@ -1599,10 +1717,10 @@ class HostScriptTests(unittest.TestCase):
     def test_a_probe_that_does_not_round_trip_falls_back(self):
         # Exit codes alone are not proof: a credential must decrypt to what was sealed.
         self.systemd_creds_stub('#!/bin/sh\n[ "$1" = encrypt ] && cat >/dev/null\necho garbage\nexit 0\n')
-        r = self.setup("relay")
+        r = self.setup("relay", unlock=b"U" * 1216)
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("--protect none", self.log())
-        self.assertIn("PLAIN FILES", r.stderr)
+        self.assertIn("--protect operator", self.log())
+        self.assertNotIn("--protect systemd-creds", self.log())
 
     def test_same_role_keeps_keys_and_another_role_needs_replace(self):
         self.assertEqual(self.setup("relay").returncode, 0)

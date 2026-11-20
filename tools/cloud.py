@@ -1125,7 +1125,7 @@ def oci_teardown_apply(a, oc, plan):
 # The TSS2 runtime libraries let systemd-creds actually use the TPM; without them it
 # silently falls back to the host key. Keys are kept when the role is unchanged.
 HOST_SETUP = r"""set -e
-ROLE=$1 PORT=$2 REPLACE=$3 SHARED=$4
+ROLE=$1 PORT=$2 REPLACE=$3 SHARED=$4 UNLOCK=${5:-no}
 E=/etc/advanced-vpn/enrolled
 # No retained data, first: a dedicated server keeps every log in RAM before anything
 # else runs (tools/retention.py). A shared host's logging belongs to its other
@@ -1178,47 +1178,71 @@ if r["role"] in ("client", "relay", "exit"):
 if r["role"] in ("relay", "exit"):
     need += ["cloak_spki_sha256", "i2p_destination"]
 print("yes" if all(k in r for k in need) else "no")' $E/request.json 2>/dev/null || echo no)
-if [ -n "$HAVE" ] && [ "$HAVE" = "$ROLE" ] && [ "$CURRENT" = yes ]; then
+# Keys are kept only if they are protected the way this release requires: sealed to a
+# TPM2, or locked to this operator's unlock key. Plain or host-key-only keys are
+# replaced, not re-wrapped: copies of them may survive on the disk or in its backups.
+STRONG=$(sudo -n python3 -c '
+import hashlib, json, sys
+p = json.load(open(sys.argv[1]))
+ok = p.get("mode") == "systemd-creds" and p.get("creds_key") == "host+tpm2"
+if p.get("mode") == "operator" and sys.argv[2] == "yes":
+    ok = p["unlock"]["operator_unlock_sha256"] == hashlib.sha256(open("/tmp/avpn-unlock.pub", "rb").read()).hexdigest()
+print("yes" if ok else "no")' $E/protection.json "$UNLOCK" 2>/dev/null || echo no)
+if [ -n "$HAVE" ] && [ "$HAVE" = "$ROLE" ] && [ "$CURRENT" = yes ] && [ "$STRONG" = yes ]; then
   echo "keys=kept"
 elif [ -n "$HAVE" ] && [ "$HAVE" != "$ROLE" ] && [ "$REPLACE" != yes ]; then
   echo "this server has keys for role $HAVE; replace them to make it a $ROLE" >&2; exit 3
 else
   sudo -n systemctl stop advanced-vpn.service 2>/dev/null || true
   sudo -n rm -rf $E
-  # Bug 9a: systemd-creds sealing needs a new enough systemd (250+; Ubuntu 22.04's 249
-  # cannot), and the TSS2 libraries this script installs. Probe it — encrypt and
-  # decrypt a throwaway credential with the host key — instead of trusting a version
-  # number, and fall back to plainly stored keys, reported loudly, when the probe
-  # fails. avpnctl still picks the TPM (host+tpm2) when systemd-analyze reports one.
+  # The host is tested first (docs/HARDWARE_BOUND_SESSIONS.md, servers without a TPM):
+  # keys are sealed to its TPM2 when systemd-creds can really use one (systemd 250+, a
+  # TPM, the TSS2 libraries this script installs), probed by sealing and opening a
+  # throwaway credential rather than trusted from a version number. Otherwise they are
+  # locked to the operator's Nitrokey (operator protection): the server cannot open
+  # them after a reboot until the operator unlocks it. Never plain files, and never the
+  # host key alone, whose secret sits on the same disk as the keys.
   # The probe runs through a pipe, never a file: a root-written file in the sticky /tmp
   # could not be removed by this (unprivileged) script, and under `set -e` that failed
   # removal would abort the setup on exactly the hosts where sealing works.
-  PROTECT=systemd-creds
+  PROTECT=
   PROBE_ARGS=
   if command -v systemd-creds >/dev/null 2>&1 \
-     && [ "$(printf avpn | sudo -n systemd-creds encrypt --with-key=host --name=avpn-probe - - 2>/dev/null \
+     && [ "$(printf avpn | sudo -n systemd-creds encrypt --with-key=host+tpm2 --name=avpn-probe - - 2>/dev/null \
             | sudo -n systemd-creds decrypt --name=avpn-probe - - 2>/dev/null)" = avpn ]; then
-    :
+    PROTECT=systemd-creds
+  elif [ "$UNLOCK" = yes ]; then
+    PROTECT=operator
+    PROBE_ARGS="--unlock-key /tmp/avpn-unlock.pub"
+    echo "NOTE: no usable TPM2 here (systemd $(systemctl --version 2>/dev/null | head -1 | awk '{print $2}')): the keys are locked to the operator's Nitrokey; unlock after each reboot with avpn cloud unlock." >&2
   else
-    PROTECT=none
-    PROBE_ARGS="--insecure-plaintext-keys"
-    echo "WARNING: this host cannot seal keys with systemd-creds (systemd $(systemctl --version 2>/dev/null | head -1))." >&2
-    echo "WARNING: the VPN keys on this server will be PLAIN FILES, readable by root only." >&2
-    echo "WARNING: prefer a host with systemd 250+ (Debian 12/13), or use full-disk encryption here." >&2
+    echo "this host cannot seal keys to a TPM2 (systemd $(systemctl --version 2>/dev/null | head -1 | awk '{print $2}')); give the operator's vault (--vault) to lock them to its Nitrokey instead" >&2
+    exit 4
   fi
   sudo -n /opt/advanced-vpn/bin/avpnctl request --role "$ROLE" --protect "$PROTECT" $PROBE_ARGS --out /root/request.json >/dev/null
   if [ "$HAVE" = "$ROLE" ]; then echo "keys=renewed"; else echo "keys=new"; fi
 fi
 sudo -n cat $E/request.json > /tmp/avpn-request.json
+sudo -n rm -f /tmp/avpn-unlock.pub
 echo "protection=$(sudo -n python3 -c 'import json;print(json.load(open("/etc/advanced-vpn/enrolled/protection.json")).get("mode"))' 2>/dev/null || echo unknown) tpm2=$(systemd-analyze has-tpm2 >/dev/null 2>&1 && echo yes || echo no) creds_key=$(sudo -n python3 -c 'import json;print(json.load(open("/etc/advanced-vpn/enrolled/protection.json")).get("creds_key"))')"
 sudo -n rm -rf /tmp/avpn-src /tmp/avpn-src.tgz
 """.replace("@@HARDEN@@", retention.HARDEN.rstrip("\n"))
+
+# Restart an unlocked server's service and report whether it runs.
+HOST_RESTART = r"""set -e
+sudo -n systemctl reset-failed advanced-vpn.service 2>/dev/null || true
+sudo -n systemctl restart advanced-vpn.service
+sleep 3
+systemctl is-active advanced-vpn.service
+"""
 
 # Install a signed bundle on a server and (re)start it: bash -s -- (bundle on stdin is not used).
 HOST_ENROLL = r"""set -e
 sudo -n systemctl stop advanced-vpn.service 2>/dev/null || true
 sudo -n /opt/advanced-vpn/bin/avpnctl enroll /tmp/avpn-bundle.avpn --operator-key /tmp/avpn-operator.pub --replace >/dev/null
 rm -f /tmp/avpn-bundle.avpn /tmp/avpn-operator.pub
+# A locked server may have hit the unit's start limit while it waited for its unlock.
+sudo -n systemctl reset-failed advanced-vpn.service 2>/dev/null || true
 sudo -n systemctl restart advanced-vpn.service
 sleep 3
 systemctl is-active advanced-vpn.service
@@ -1306,7 +1330,7 @@ def remote(name, record):
     return tool("ssh"), tool("scp"), ssh_base(name, record), ssh_target(record)
 
 
-def setup_server(name, record, role, port, out, source, replace=False, source_arm=None):
+def setup_server(name, record, role, port, out, source, replace=False, source_arm=None, unlock_pub=None):
     """Install or upgrade the package on a recorded server and fetch its public request
     for `role`, with the tunnel `port` accepted by the host firewall. Returns
     (kept|new, TPM report)."""
@@ -1337,6 +1361,10 @@ def setup_server(name, record, role, port, out, source, replace=False, source_ar
         call([scp, "-q", *base, str(tgz), host + ":/tmp/avpn-src.tgz"], parse=False)
     args = [role, str(port), "yes" if replace else "no"]
     args.append("yes" if record.get("shared") else "no")
+    # The operator's unlock key: a host without a usable TPM2 locks its keys to it.
+    if unlock_pub is not None:
+        call([scp, "-q", *base, str(unlock_pub), host + ":/tmp/avpn-unlock.pub"], parse=False)
+    args.append("yes" if unlock_pub is not None else "no")
     report = call([ssh, *base, host, "bash", "-s", "--", *args], parse=False, stdin=HOST_SETUP)
     out.parent.mkdir(parents=True, exist_ok=True)
     call([scp, "-q", *base, host + ":/tmp/avpn-request.json", str(out)], parse=False)
@@ -1360,8 +1388,9 @@ def host_setup(a):
     if role not in ROLES:
         raise CloudError("give --role relay|middle|exit for %s" % a.name)
     port = record["port"] if record.get("role") == role and record.get("port") else ROLES[role]
+    unlock_pub = ensure_unlock_key(a.vault) if getattr(a, "vault", None) else None
     keys, protection, tpm = setup_server(a.name, record, role, port, a.out, a.source, replace=a.replace,
-                                        source_arm=getattr(a, "source_arm", None))  # fmt: skip
+                                        source_arm=getattr(a, "source_arm", None), unlock_pub=unlock_pub)  # fmt: skip
     record.update(role=role, port=port, request=str(a.out), key_protection=protection)
     save_inventory(inv)
     return [
@@ -1757,6 +1786,7 @@ def chain_apply(a, plan):
     n = len(hops)
     progress = Progress(
         ["Open the firewalls"]
+        + ["Check the operator's unlock key"]
         + ["Install %s as the %s" % (h["name"], h["role"]) for h in hops]
         + ["Sign the chain"]
         + ["Start %s" % h["name"] for h in reversed(hops)]
@@ -1782,14 +1812,19 @@ def chain_steps(a, hops, progress, n):
     progress.run(0)
     for h in hops:
         set_firewall(h["name"], h["record"], h["port"], h["sources"], sorted(set(h["ssh"]) | {me}))
+    # 1b. The operator's unlock key, made once (PIN + touch the first time only): a server
+    # without a usable TPM2 locks its keys to it (docs/HARDWARE_BOUND_SESSIONS.md).
+    unlock_pub = ensure_unlock_key(a.vault, progress, 1)
     # 2. Install or upgrade each server and collect its request for its role.
     requests = {}
     for k, h in enumerate(hops):
         out = work / "requests" / (h["role"] + ".req")
-        progress.run(1 + k, "packages and keys; a few minutes")
+        progress.run(2 + k, "packages and keys; a few minutes")
         keys, protection, tpm = setup_server(h["name"], h["record"], h["role"], h["port"], out, a.source,
-                                             replace=True, source_arm=getattr(a, "source_arm", None))  # fmt: skip
+                                             replace=True, source_arm=getattr(a, "source_arm", None),
+                                             unlock_pub=unlock_pub)  # fmt: skip
         h["record"]["key_protection"] = protection
+        h["record"]["request"] = str(out)
         requests[h["role"]] = out
         done.append(
             dict(
@@ -1798,7 +1833,12 @@ def chain_steps(a, hops, progress, n):
                 % (
                     h["role"],
                     keys,
-                    "PLAINTEXT KEYS; " + tpm if protection == "none" else tpm,
+                    "PLAINTEXT KEYS; " + tpm
+                    if protection == "none"
+                    else "keys locked to the operator's Nitrokey (unlock after each reboot: avpn cloud unlock %s)"
+                    % h["name"]
+                    if protection == "operator"
+                    else tpm,
                 ),
             )
         )
@@ -1818,26 +1858,36 @@ def chain_steps(a, hops, progress, n):
             argv += ["--" + role, endpoint[role]]
     argv += ["--request", "client=%s" % Path(a.client_request).resolve()]
     argv += [x for role, f in requests.items() for x in ("--request", "%s=%s" % (role, f))]
-    progress.wait(n + 1, "enter the Nitrokey PIN, then touch the key")
-    call(argv, parse=False)
+    # The same PIN and touch also unwraps the data keys of servers locked to the
+    # operator: printed to this pipe only, held in this process's memory only.
+    argv += ["--emit-unlock"]
+    progress.wait(n + 2, "enter the Nitrokey PIN, then touch the key")
+    signed = json.loads(call(argv, parse=False).strip().splitlines()[-1])
+    data_keys = signed.get("unlock") or {}
     bundles = work / "bundles"
     # 4. Enroll and start, exit first, so each hop's next hop is already up.
     for k, h in enumerate(reversed(hops)):
-        progress.run(n + 2 + k)
+        progress.run(n + 3 + k)
         ssh, scp, base, host = remote(h["name"], h["record"])
+        if h["role"] in data_keys:
+            send_data_key(h["name"], h["record"], data_keys[h["role"]])
         call([scp, "-q", *base, str(bundles / (h["role"] + ".avpn")), host + ":/tmp/avpn-bundle.avpn"], parse=False)
         call([scp, "-q", *base, str(bundles / "operator.pub"), host + ":/tmp/avpn-operator.pub"], parse=False)
         state = call([ssh, *base, host, "bash", "-s"], parse=False, stdin=HOST_ENROLL).strip().splitlines()
         if not state or state[-1] != "active":
             raise CloudError("%s did not start after enrolling" % h["name"])
     # 5. SSH only through the chain from now on.
-    progress.run(2 * n + 2, "from now on: while connected")
+    progress.run(2 * n + 3, "from now on: while connected")
     for h in hops:
         set_firewall(h["name"], h["record"], h["port"], h["sources"], h["ssh"])
     inv = load_inventory()
     for h in hops:
         inv["resources"][h["name"]].update(role=h["role"], port=h["port"], first_hop=h is hops[0])
-    inv["chain"] = dict(hops=[h["name"] for h in hops], created=stamp, bundles=str(bundles))
+    for h in hops:
+        inv["resources"][h["name"]].update(request=h["record"]["request"], key_protection=h["record"]["key_protection"])
+    inv["chain"] = dict(
+        hops=[h["name"] for h in hops], created=stamp, bundles=str(bundles), vault=str(Path(a.vault).resolve())
+    )
     save_inventory(inv)
     client = bundles / "client.avpn"
     return (
@@ -1856,6 +1906,61 @@ def chain_steps(a, hops, progress, n):
             for k, h in enumerate(hops)
         ]
     )
+
+
+def ensure_unlock_key(vault, progress=None, step=None):
+    """The operator's unlock public key file, made on first use (PIN + touch once)."""
+    pub = Path(vault).resolve() / "operator-unlock.pub"
+    if not pub.exists():
+        if progress is not None:
+            progress.wait(step, "first time only: enter the Nitrokey PIN, then touch the key")
+        call([*controller(), "--json", "unlock-key", "--vault", str(vault)], parse=False)
+    elif progress is not None:
+        progress.run(step, "present")
+    if not pub.exists():
+        raise CloudError("the operator's unlock key was not created in %s" % vault)
+    return pub
+
+
+def send_data_key(name, record, data_key_hex):
+    """Hand a server its data key over SSH (stdin, never argv or a file); it holds it in RAM."""
+    ssh, scp, base, host = remote(name, record)
+    out = call([ssh, *base, host, "sudo -n /opt/advanced-vpn/bin/avpnctl --json server-unlock"], parse=False,
+               stdin=data_key_hex + "\n")  # fmt: skip
+    if not json.loads(out.strip().splitlines()[-1]).get("ok"):
+        raise CloudError("%s did not accept its data key" % name)
+
+
+def unlock(a):
+    """`unlock NAME`: after a server without a TPM restarts, unwrap its data key with the
+    operator's Nitrokey (PIN + touch) and start it again. The unwrap is bound to your own
+    copy of that server's request, not to anything the server sends back."""
+    inv = load_inventory()
+    record = inv["resources"].get(a.name)
+    if not record:
+        raise CloudError("%s is not recorded" % a.name)
+    if record.get("key_protection") != "operator":
+        raise CloudError("%s does not lock its keys to the operator (%s)" % (a.name, record.get("key_protection")))
+    request = Path(record.get("request") or "")
+    if not request.is_file():
+        raise CloudError("your copy of %s's request is missing (%s); rebuild the chain" % (a.name, request))
+    vault = a.vault or (inv.get("chain") or {}).get("vault")
+    if not vault:
+        raise CloudError("give --vault (the operator's Nitrokey vault)")
+    ssh, scp, base, host = remote(a.name, record)
+    current = call([ssh, *base, host, "sudo -n cat /etc/advanced-vpn/enrolled/protection.json"], parse=False)
+    with tempfile.TemporaryDirectory() as d:
+        wrapped = Path(d) / "protection.json"
+        wrapped.write_text(current)
+        print("Unlock %s: enter the Nitrokey PIN, then touch the key." % a.name, file=sys.stderr, flush=True)
+        out = call([*controller(), "--json", "unwrap", "--vault", str(vault), "--request", "%s=%s" % (a.name, request),
+                    "--wrapped", "%s=%s" % (a.name, wrapped)], parse=False)  # fmt: skip
+    data_key = json.loads(out.strip().splitlines()[-1])["unlock"][a.name]
+    send_data_key(a.name, record, data_key)
+    state = call([ssh, *base, host, "bash", "-s"], parse=False, stdin=HOST_RESTART).strip().splitlines()
+    if not state or state[-1] != "active":
+        raise CloudError("%s accepted its data key but its service did not start" % a.name)
+    return [dict(label=a.name, value="unlocked until its next reboot; the VPN service is active")]
 
 
 def admin_target(hop, is_exit):
@@ -2164,6 +2269,10 @@ def build_parser():
     setup.add_argument("--out", type=Path, required=True, help="where to save the server's public request")
     setup.add_argument("--role", choices=sorted(ROLES), help="the server's role (default: its recorded role)")
     setup.add_argument("--replace", action="store_true", help="replace keys made for another role")
+    setup.add_argument(
+        "--vault", type=Path,
+        help="the operator's Nitrokey vault: a host without a usable TPM2 locks its keys to its unlock key",
+    )  # fmt: skip
     add = h_s.add_parser("add", help="record a server you already have (any provider, or your own machine)")
     add.add_argument("--name", required=True, help="a name for it (avpn-*)")
     add.add_argument("--ssh", required=True, help="USER@HOST (a sudo user), or a host alias with --ssh-config")
@@ -2179,6 +2288,9 @@ def build_parser():
     add.add_argument("--shared", action="store_true", help="it also runs other things: leave its journal alone")
     forget = h_s.add_parser("forget", help="drop a recorded server from the inventory (it is not changed)")
     forget.add_argument("--name", required=True, help="the recorded server")
+    ul = s.add_parser("unlock", help="unlock a server without a TPM after it restarts (Nitrokey PIN + touch)")
+    ul.add_argument("name", help="the recorded server (avpn-*)")
+    ul.add_argument("--vault", type=Path, help="the operator's Nitrokey vault (default: the chain's)")
     ch = s.add_parser("chain", help="join the recorded servers into one multi-hop chain")
     ch.add_argument("--apply", action="store_true", required=True, help="build (or rebuild) the chain")
     ch.add_argument("--client-request", type=Path, required=True, help="the client device's public request")
@@ -2269,6 +2381,9 @@ def run(a):
         if a.kind == "forget":
             return dict(title="Forget server %s" % a.name, summary="forgotten", rows=host_forget(a))
         return dict(title="Set up %s" % a.name, summary="installed", rows=host_setup(a))
+    if a.provider == "unlock":
+        valid_name(a.name)
+        return dict(title="Unlock %s" % a.name, summary="unlocked", rows=unlock(a))
     if a.provider == "chain":
         plan = chain_plan(a)
         title = "Build a %d-hop chain" % len(plan["hops"])

@@ -106,6 +106,21 @@ pub const TOPICS: &[Topic] = &[
         body: include_str!("../../../docs/cli/unlock.md"),
     },
     Topic {
+        name: "unlock-key",
+        summary: "operator: create the unlock key for servers without a TPM2",
+        body: include_str!("../../../docs/cli/unlock-key.md"),
+    },
+    Topic {
+        name: "unwrap",
+        summary: "operator: unwrap the data keys of servers locked to you",
+        body: include_str!("../../../docs/cli/unwrap.md"),
+    },
+    Topic {
+        name: "server-unlock",
+        summary: "on a server without a TPM2: accept its data key until reboot",
+        body: include_str!("../../../docs/cli/server-unlock.md"),
+    },
+    Topic {
         name: "reset",
         summary: "remove the kill switch",
         body: include_str!("../../../docs/cli/reset.md"),

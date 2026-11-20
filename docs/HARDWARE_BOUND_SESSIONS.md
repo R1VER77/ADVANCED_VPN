@@ -145,6 +145,51 @@ can run. Running it in a Qubes vault VM (qrexec service, key attached there) nee
 transport for the same request and reply; it is not built or tested yet. Neither removes the
 session keys and plaintext that any VPN running on this computer holds.
 
+## Servers without a TPM: keys locked to the operator (20 November 2026)
+
+The same principle on the servers. A server seals its keys to its TPM2 when systemd-creds can
+use one; the free OCI exit could not (Ubuntu 22.04's systemd 249, and no vTPM on the Always
+Free shapes), so its keys were plain root-only files: a disk snapshot or backup held them.
+Sealing with systemd's host key alone would not help, because that key sits on the same
+disk. The owner chose the strongest option that needs no new hardware and no spend:
+
+1. **Test the host first.** `avpn cloud host setup` (and `chain`) seal and open a throwaway
+   credential with the host and TPM2 key. If that works, the keys are sealed to the TPM2 and
+   the server restarts unattended. Otherwise they are locked to the operator.
+2. **Locked to the operator** (`--protect operator`, `managed_profile`, `keyguard.lock_bytes`):
+   the server encrypts each key under a fresh random data key (AES-256-GCM, bound to the
+   key's name and published public value) and never stores the data key. It wraps it to the
+   operator's unlock key (hybrid X25519 + ML-KEM-768, `keyguard.kem_seal`), bound to the
+   server's role and identity certificates, and the wrapped copy travels in its public
+   request.
+3. **The operator's unlock key** is made once in the Nitrokey vault (`avpn unlock-key`); its
+   private half is sealed under the vault's hmac-secret, like the operator's ML-DSA-65 key.
+4. **Unlocking:** the chain's one signing PIN and touch also unwraps every locked server's
+   data key (`init --emit-unlock`), into memory only, and the chain hands each server its key
+   over SSH on stdin before enrolling it. The server keeps it in `/run` (RAM) until the next
+   reboot. After a reboot it stays down until `avpn cloud unlock NAME` (PIN + touch) does the
+   same again. The unwrap is bound to the operator's own copy of that server's request, so a
+   compromised server cannot get another server's data key unwrapped for it.
+5. **Never weaker keys kept.** Keys that were plain, sealed with the host key alone, or locked
+   to another operator are replaced with new ones, not re-wrapped: copies may survive on the
+   disk or in its backups (the owner's decision when fixing the exit).
+
+What it does not do: a running server's keys are in its memory, as on every server, and
+root on the running server can read them; the provider of a VM can read its memory. What it
+removes is the server's ability to use its keys after a restart without the operator, and
+every copy at rest: disk snapshots, backups and a stolen volume hold only ciphertext.
+
+**Evidence.** `tools/test_operator_unlock.py`, with real cryptography and no stubs on the
+sealing, KEM or bindings: no plaintext key on disk; a locked server refuses to load its
+keys; a wrong key, a key file rolled back to another key of the same name, a data key
+wrapped for another server, and a server locked to another operator are each refused; the
+real request, init and enroll flow with a locked exit, then a simulated reboot; one touch
+both signs and unwraps; the `server-unlock` command. Seven mutants, one per check, each fail
+the tests. `tools/test_cloud.py` runs the real host setup script: a host without a TPM locks
+to the operator or is refused, never plain; weak keys are replaced; the chain delivers the
+data key on stdin only, before the server starts, and `cloud unlock` binds to the local
+request.
+
 ## Gates
 
 - Python and Rust verify the same vectors; every refusal is tested with real signatures.

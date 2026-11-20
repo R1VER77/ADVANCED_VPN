@@ -55,6 +55,22 @@ private vulnerability reporting (see [SECURITY.md](../SECURITY.md)).
 
 ## Fixed
 
+### The OCI exit kept its private keys as plain files (14–20 Nov 2026)
+- **What:** a server whose systemd could not seal with systemd-creds fell back, by design and
+  with a loud warning (Bug 9a), to plain root-only key files. The owner's exit (OCI Always
+  Free, Ubuntu 22.04, systemd 249, no vTPM, a host shared with another workload) ran that
+  way from 14 November: its TLS identity, KEM, paced-link, WireGuard and cloak keys were
+  readable by root on that host and by anyone with its disk, a snapshot or a backup.
+- **Not affected:** the relay (TPM2-sealed), the client (Nitrokey), and traffic secrecy
+  against anyone without those keys. Someone holding them could impersonate the exit to a
+  client that trusts it, or decrypt the link keys sent to it in a chain bundle.
+- **How found:** the owner, reading the chain summary's `PLAINTEXT KEYS` on 20 November.
+- **Fix:** keys of hosts without a usable TPM2 are now locked to the operator's Nitrokey
+  (above, and docs/HARDWARE_BOUND_SESSIONS.md), and plain or host-key-only keys are replaced,
+  never re-wrapped: deleting a file on a cloud disk does not erase earlier copies. The exit
+  gets new keys when the chain is rebuilt with this release, and the client enrolls that
+  chain, so the old keys open nothing.
+
 ### Mesh descriptor signatures could never be verified (found 20 Nov 2026)
 - **What:** `tools/mesh.py` imported ML-DSA-65 from `cryptography...asymmetric.ml_dsa`, a
   module the pinned library (cryptography 49/50, `mldsa`) does not have. Every real

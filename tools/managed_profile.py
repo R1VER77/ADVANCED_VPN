@@ -407,7 +407,21 @@ PEER = {
     ("exit", "inner"): ("client", "inner"),
 }
 CARRIER_ROLES = ("client", "relay", "exit")  # any of these may terminate WireGuard
-PROTECTIONS = ("nitrokey", "systemd-creds", "none")
+PROTECTIONS = ("nitrokey", "systemd-creds", "operator", "none")
+# Operator-unlocked servers (keyguard.lock_bytes): the data key that opens the keys lives
+# only here, in RAM, from the operator's unlock until the next reboot.
+UNLOCK_DIR = Path("/run/advanced-vpn-unlock")
+
+
+def unlock_path(state):
+    """Where a server's data key is held once the operator has unlocked it (RAM only)."""
+    return UNLOCK_DIR / hashlib.sha256(str(Path(state).resolve()).encode()).hexdigest()[:16]
+
+
+class Locked(RuntimeError):
+    """An operator-unlocked server whose keys the operator has not unlocked since boot."""
+
+
 PLAINTEXT = {
     "outer": "outer-key.der",
     "middle": "middle-key.der",
@@ -485,6 +499,14 @@ def store_keys(state, keys, secret=None, meta=None):
                 state / (name + "-key.sealed.json"),
                 canonical(seal_bytes(secret, meta, name, binding(state, name), value)),
             )
+        elif mode == "operator":
+            from keyguard import lock_bytes
+
+            # At request the fresh data key is passed in; afterwards (enroll re-stores the
+            # carrier and link keys) it is the one the operator unlocked into RAM.
+            data_key = secret if secret is not None else _unlocked_data_key(state)
+            locked = lock_bytes(data_key, name, binding(state, name), value)
+            atomic(state / (name + "-key.locked.json"), canonical(locked))
         elif mode == "systemd-creds":
             target = state / (name + "-key.cred")
             if target.exists():
@@ -516,17 +538,81 @@ def load_keys(state, names, secret=None, meta=None):
         }
     if mode == "systemd-creds":
         return {n: creds_decrypt("advanced-vpn-" + n, state / (n + "-key.cred")) for n in names}
+    if mode == "operator":
+        from keyguard import unlock_bytes
+
+        data_key = secret if secret is not None else _unlocked_data_key(state)
+        return {
+            n: unlock_bytes(data_key, n, binding(state, n), json.loads(read_private(state / (n + "-key.locked.json"))))
+            for n in names
+        }
     return {n: read_private(state / PLAINTEXT[n]) for n in names}
+
+
+def _unlocked_data_key(state):
+    path = unlock_path(state)
+    if not path.exists():
+        raise Locked(
+            "this server's keys are locked (they are sealed to the operator's Nitrokey and it has restarted "
+            "since the last unlock): on the operator's computer run  avpn cloud unlock NAME"
+        )
+    return read_private(path)
+
+
+def server_unlock(state, data_key):
+    """Server: accept the operator's data key, once it opens every key here, and hold it in
+    RAM (UNLOCK_DIR, a tmpfs) until the next reboot. Nothing is written for a wrong key."""
+    from keyguard import DATA_KEY, unlock_bytes
+
+    state = Path(state)
+    protection = json.loads(read_private(state / "protection.json"))
+    if protection["mode"] != "operator":
+        raise ValueError("this server's keys are not operator-unlocked (%s)" % protection["mode"])
+    if len(data_key) != DATA_KEY:
+        raise ValueError("wrong data key length")
+    names = sorted(f.name[: -len("-key.locked.json")] for f in state.glob("*-key.locked.json"))
+    if not names:
+        raise ValueError("no locked keys here")
+    for n in names:
+        try:
+            unlock_bytes(data_key, n, binding(state, n), json.loads(read_private(state / (n + "-key.locked.json"))))
+        except Exception as e:  # InvalidTag and binding errors: one refusal
+            raise ValueError("that data key does not open this server's keys") from e
+    UNLOCK_DIR.mkdir(mode=0o700, exist_ok=True)
+    os.chmod(UNLOCK_DIR, 0o700)
+    from keyguard import atomic
+
+    atomic(unlock_path(state), data_key)
+    return names
+
+
+def server_locked(state):
+    """True for an operator-unlocked server not unlocked since boot; None if not that mode."""
+    protection = json.loads(read_private(Path(state) / "protection.json"))
+    if protection["mode"] != "operator":
+        return None
+    try:
+        os.stat(unlock_path(state))
+        return False
+    except FileNotFoundError:
+        return True
+    except PermissionError:  # not root: the RAM-only unlock directory is root's
+        return None
 
 
 def forget_key(state, name):
     """Delete every stored form of private key `name` (sealed, credential, plaintext)."""
-    for f in [state / (name + "-key.sealed.json"), state / (name + "-key.cred"), state / PLAINTEXT[name]]:
+    for f in [
+        state / (name + "-key.sealed.json"),
+        state / (name + "-key.cred"),
+        state / (name + "-key.locked.json"),
+        state / PLAINTEXT[name],
+    ]:
         if f.exists():
             f.unlink()
 
 
-def request(role, state, protect, vault=None):
+def request(role, state, protect, vault=None, unlock_public=None):
     """Generate this device's private keys locally and protect them immediately.
     Returns the public enrollment request; no private key leaves the device.
 
@@ -539,6 +625,15 @@ def request(role, state, protect, vault=None):
         raise ValueError("unknown role or protection")
     if (protect == "nitrokey") != (vault is not None):
         raise ValueError("a hardware vault is required exactly for nitrokey protection")
+    if (protect == "operator") != (unlock_public is not None):
+        raise ValueError("the operator's unlock key is required exactly for operator protection")
+    if protect == "operator":
+        from keyguard import KEM_PUBLIC
+
+        if role == "client":
+            raise ValueError("operator protection is for servers; a client unlocks with its own key")
+        if len(unlock_public) != KEM_PUBLIC:
+            raise ValueError("not an operator unlock key")
     state = Path(state)
     if state.exists():
         raise ValueError("this device already has keys in %s; reset it before generating new ones" % state)
@@ -549,7 +644,9 @@ def request(role, state, protect, vault=None):
         secret, meta = hardware_secret(vault)
     tmp = Path(tempfile.mkdtemp(prefix=".avpn-request-", dir=state.parent))
     try:
-        req = _request_into(role, tmp, protect, vault, secret, meta)
+        if protect == "operator":
+            secret = os.urandom(32)  # the data key: never written here, only wrapped
+        req = _request_into(role, tmp, protect, vault, secret, meta, unlock_public)
         os.rename(tmp, state)  # the device only exists once every key is sealed
     except BaseException:
         shutil.rmtree(tmp, ignore_errors=True)
@@ -557,7 +654,7 @@ def request(role, state, protect, vault=None):
     return req
 
 
-def _request_into(role, state, protect, vault, secret, meta):
+def _request_into(role, state, protect, vault, secret, meta, unlock_public=None):
     """Build one device's keys inside `state` (a private temporary directory)."""
     from keyguard import kem_keypair, b64
 
@@ -612,8 +709,21 @@ def _request_into(role, state, protect, vault, secret, meta):
         # clients are signed its b32 address; the private keys stay protected here.
         keys["i2p"], identity = i2p.destination_keys()
         req["i2p_destination"] = b64(identity)
+    if protect == "operator":
+        # The data key, wrapped to the operator's unlock key and bound to this server's
+        # role and identities, travels in the public request: only the operator's
+        # Nitrokey can unwrap it (docs/HARDWARE_BOUND_SESSIONS.md, servers without a TPM).
+        from keyguard import kem_seal, unlock_context
+
+        req["unlock"] = dict(
+            schema=1,
+            operator_unlock_sha256=hashlib.sha256(unlock_public).hexdigest(),
+            wrapped=kem_seal(unlock_public, secret, unlock_context(role, req["certificates"])),
+        )
     put(state / "request.json", canonical(req))
     protection = dict(schema=1, mode=protect, vault=str(vault.resolve()) if vault else None)
+    if protect == "operator":
+        protection["unlock"] = req["unlock"]
     if protect == "systemd-creds":
         from keyguard import tpm2_usable
 
@@ -675,6 +785,12 @@ def _load_request(raw, role):
         if role not in FIRST_HOP_ROLES:
             raise ValueError("only a first hop has an I2P destination")
         i2p.check_identity(base64.b64decode(r["i2p_destination"], validate=True))
+    if "unlock" in r:
+        u = r["unlock"]
+        if role == "client" or u.get("schema") != 1 or not re.fullmatch("[0-9a-f]{64}", u["operator_unlock_sha256"]):
+            raise ValueError("bad unlock record")
+        if set(u["wrapped"]) != {"schema", "ephemeral", "mlkem", "nonce", "ciphertext"}:
+            raise ValueError("bad wrapped data key")
     if "device_public" in r:
         import session_auth
 
@@ -684,8 +800,43 @@ def _load_request(raw, role):
     return r, certs
 
 
+UNLOCK_ROLE = "operator-unlock"
+
+
+def unwrap_server_keys(private, items, unlock_public):
+    """Unwrap servers' data keys with the operator's unlock key. `items` maps a name to
+    (the server's unlock record, its role, its certificates), the role and certificates
+    taken from the operator's own copy of that server's request: a data key wrapped for
+    another server does not open (keyguard.unlock_context)."""
+    from keyguard import kem_open, unlock_context
+
+    want = hashlib.sha256(unlock_public).hexdigest()
+    out = {}
+    for name, (record, role, certificates) in items.items():
+        if record.get("operator_unlock_sha256") != want:
+            raise ValueError("%s's keys are locked to another operator's unlock key" % name)
+        try:
+            out[name] = kem_open(private, record["wrapped"], unlock_context(role, certificates))
+        except Exception as e:  # InvalidTag, malformed envelope: one refusal
+            raise ValueError("%s's data key does not open for that server with this unlock key" % name) from e
+    return out
+
+
+def unlock_items(requests):
+    """{role: (unlock record, role, certificates)} for every request that carries one."""
+    out = {}
+    for role, raw in requests.items():
+        r = json.loads(raw) if isinstance(raw, (bytes, str)) else raw
+        if "unlock" in r:
+            out[role] = (r["unlock"], r["role"], r["certificates"])
+    return out
+
+
 class SoftwareOperator:
     """TEST/LAB ONLY: operator keys as plaintext files. Production uses the Nitrokey."""
+
+    pending_unwrap = None
+    unwrapped = None
 
     def __init__(self, directory):
         self.directory = directory
@@ -719,8 +870,30 @@ class SoftwareOperator:
             mldsa65=base64.b64encode(self.pq.public_key().public_bytes(raw, fmt)).decode(),
         )
 
+    def unlock_public(self):
+        """The operator's unlock public key (servers without a TPM wrap their data key to it)."""
+        p = self.directory / "offline" / "operator-unlock.pub"
+        return read_private(p) if p.exists() else None
+
+    def create_unlock_key(self):
+        """TEST/LAB: the unlock key pair as plaintext files (the hardware operator seals it)."""
+        from keyguard import kem_keypair
+
+        if self.unlock_public() is None:
+            private, public = kem_keypair()
+            put(self.directory / "offline" / "operator-unlock.key", private)
+            put(self.directory / "offline" / "operator-unlock.pub", public)
+        return self.unlock_public()
+
+    def unwrap(self, items):
+        """Unwrap servers' data keys (see unwrap_server_keys)."""
+        private = read_private(self.directory / "offline" / "operator-unlock.key")
+        return unwrap_server_keys(private, items, self.unlock_public())
+
     def sign(self, message):
         """Sign `message` with both halves of the hybrid operator key (no hardware third half)."""
+        if self.pending_unwrap:
+            self.unwrapped = self.unwrap(self.pending_unwrap)
         classical = dict(kind="ed25519", signature=base64.b64encode(self.classical.sign(message)).decode())
         return classical, self.pq.sign(message), None
 
@@ -729,6 +902,11 @@ class HardwareOperator:
     """Classical half: the non-exportable FIDO2 credential signs (PIN + touch).
     PQ half: an ML-DSA-65 key sealed under that credential's hmac-secret; one
     assertion yields both, so the ML-DSA key is plaintext only in memory."""
+
+    # Set before sign(): {name: (unlock record, role, certificates)}; the same PIN and
+    # touch that signs then unwraps those servers' data keys into `unwrapped`.
+    pending_unwrap = None
+    unwrapped = None
 
     def __init__(self, vault, pq_vault=None):
         self.vault = vault.resolve()
@@ -776,8 +954,51 @@ class HardwareOperator:
                 serialization.Encoding.DER, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()
             )
             atomic(sealed, canonical(seal_bytes(secret, meta, "operator-mldsa65", public, der)))
+        if self.pending_unwrap:
+            private, public = self._unlock_private(secret, meta)
+            self.unwrapped = unwrap_server_keys(private, self.pending_unwrap, public)
         hardware_pq = pq_signer_assertion(self.pq_vault, message) if self.pq_vault is not None else None
         return dict(kind="fido2", **assertion), key.sign(message), hardware_pq
+
+    def unlock_public(self):
+        """The operator's unlock public key, or None before create_unlock_key."""
+        p = self.vault / "operator-unlock.pub"
+        return read_private(p) if p.exists() else None
+
+    def create_unlock_key(self):
+        """Make the operator's unlock key once (one PIN + touch): a hybrid X25519 + ML-KEM-768
+        key pair whose private half is sealed under this vault's hardware secret."""
+        from keyguard import hardware_secret, kem_keypair, seal_bytes, atomic
+
+        if self.unlock_public() is not None:
+            return self.unlock_public()
+        secret, meta = hardware_secret(self.vault)
+        private, public = kem_keypair()
+        atomic(
+            self.vault / "operator-unlock.sealed.json",
+            canonical(seal_bytes(secret, meta, UNLOCK_ROLE, public, private)),
+        )
+        atomic(self.vault / "operator-unlock.pub", public)
+        return public
+
+    def _unlock_private(self, secret, meta):
+        from keyguard import open_bytes
+
+        public = self.unlock_public()
+        if public is None:
+            raise ValueError(
+                "no operator unlock key in %s; run: avpnctl unlock-key --vault %s" % (self.vault, self.vault)
+            )
+        sealed = json.loads(read_private(self.vault / "operator-unlock.sealed.json"))
+        return open_bytes(secret, meta, UNLOCK_ROLE, public, sealed), public
+
+    def unwrap(self, items):
+        """Unwrap servers' data keys with one PIN + touch (see unwrap_server_keys)."""
+        from keyguard import hardware_secret
+
+        secret, meta = hardware_secret(self.vault)
+        private, public = self._unlock_private(secret, meta)
+        return unwrap_server_keys(private, items, public)
 
 
 def signature_members(operator):
@@ -2071,16 +2292,25 @@ def lab_setup(
     protect = protect or {}
     roles = ["client"] + CHAINS[hops]
     standby = list(standby or [])
+    signer = operator or SoftwareOperator(root / "operator-keys")
+
+    def unlock_key(mode):
+        return signer.create_unlock_key() if mode == "operator" else None
+
     for role in roles:
         mode = protect.get(role, "none")
-        request(role, root / role, mode, vault if mode == "nitrokey" else None)
+        request(role, root / role, mode, vault if mode == "nitrokey" else None, unlock_public=unlock_key(mode))
     for name, _ in standby:
-        request("exit", root / name, protect.get(name, "none"), None)
+        mode = protect.get(name, "none")
+        request("exit", root / name, mode, None, unlock_public=unlock_key(mode))
     ops = root / "operator"
-    signer = operator or SoftwareOperator(root / "operator-keys")
+    requests = {r: read_private(root / r / "request.json") for r in roles + [n for n, _ in standby]}
+    # Servers locked to the operator: the signing also unwraps their data keys, which the
+    # chain then hands to each server before it enrolls (cloud.chain_steps).
+    signer.pending_unwrap = unlock_items(requests) or None
     create(
         ops,
-        {r: read_private(root / r / "request.json") for r in roles + [n for n, _ in standby]},
+        requests,
         relay if hops > 1 else None,
         exit_address,
         signer,
@@ -2098,6 +2328,8 @@ def lab_setup(
         front=front,
         front_hops=front_hops,
     )
+    for name, data_key in (signer.unwrapped or {}).items():
+        server_unlock(root / name, data_key)
     for name in roles + [n for n, _ in standby]:
         enroll(ops / (name + ".avpn"), ops / "operator.pub", root / name)
     return ops
