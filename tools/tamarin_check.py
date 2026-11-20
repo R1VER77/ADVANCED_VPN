@@ -63,6 +63,7 @@ MODELS = {
         "device_authorized",
         "stolen_identity_needs_touch",
         "identity_still_required",
+        "stolen_session_key_expires",
         "both_halves",
     ],
     "formal/zk/forward_private_nullifiers.spthy": [
@@ -93,17 +94,29 @@ MUTANTS = [
     # Hardware-bound sessions: a hop that skips the device's statement accepts copied keys.
     (
         "formal/session/session_auth.spthy",
-        [("      Eq(verify(statement, <'session', ipk, w>, dpk), true),\n", "")],
+        [("      Eq(verify(statement, <'session', spk, w>, dpk), true),\n", "")],
         "device_authorized",
     ),
     # A statement that does not name its window keeps working after the window ends.
     (
         "formal/session/session_auth.spthy",
         [
-            ("Out(sign(<'session', ipk, w>, dk))", "Out(sign(<'session', ipk>, dk))"),
-            ("verify(statement, <'session', ipk, w>, dpk)", "verify(statement, <'session', ipk>, dpk)"),
+            ("sign(<'session', pk(~sk), w>, dk)", "sign(<'session', pk(~sk)>, dk)"),
+            ("verify(statement, <'session', spk, w>, dpk)", "verify(statement, <'session', spk>, dpk)"),
         ],
         "stolen_identity_needs_touch",
+    ),
+    # A certificate without its window, and a statement that does not name the session key:
+    # a session key taken from the data plane then outlives its window.
+    (
+        "formal/session/session_auth.spthy",
+        [
+            ("sign(<'cert', pk(~sk), w>, ik)", "sign(<'cert', pk(~sk)>, ik)"),
+            ("verify(cert, <'cert', spk, w>, ipk)", "verify(cert, <'cert', spk>, ipk)"),
+            ("sign(<'session', pk(~sk), w>, dk)", "sign(<'session', w>, dk)"),
+            ("verify(statement, <'session', spk, w>, dpk)", "verify(statement, <'session', w>, dpk)"),
+        ],
+        "stolen_session_key_expires",
     ),
     (
         "formal/link/link.spthy",
@@ -368,8 +381,9 @@ def main():
                         "terminate; it is proved unrolled to three rounds with one seizure",
                         "Re-blinding: secrecy of the KEM secret itself, and unlinkability across hop 1 "
                         "(an equivalence): did not terminate; the construction stays review-pending",
-                        "Oblivious control plane: unlinkability (an equivalence) is not modelled, and "
-                        "freshness is a restriction in formal/ohttp, exercised by tools/test_ohttp.py",
+                        "Oblivious control plane: freshness is a restriction in formal/ohttp, exercised by "
+                        "tools/test_ohttp.py; unlinkability, an equivalence, is proved in ProVerif instead "
+                        "(formal/ohttp/ohttp_unlinkability.pv, tools/proverif_check.py)",
                     ],
                 ),
                 indent=2,

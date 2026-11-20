@@ -16,6 +16,11 @@ single-shot HPKE without the exporter that RFC 9458 derives the response key fro
 the client puts a fresh reply key inside its encrypted request and the gateway seals
 the response to it. Requests carry a timestamp and a nonce; the gateway refuses stale
 or replayed ones.
+
+The timestamp would otherwise link a member's requests: a clock off by a steady offset is
+recognizable beside the gateway's own. It is therefore read from a synchronized clock
+(tools/timesync.py, Tails' htpdate method) and rounded down to a 30-second bucket, so
+members send the same value; the gateway refuses any other.
 """
 
 import base64
@@ -35,6 +40,7 @@ RESPONSE_INFO = b"advanced-vpn/ohttp/v1 response"
 MLKEM_PUBLIC = 1184
 PUBLIC = MLKEM_PUBLIC + 32
 FRESH_SECONDS = 60
+BUCKET = 30  # timestamps are whole buckets of the synchronized clock
 MAX_BODY = 1 << 20
 
 
@@ -85,14 +91,19 @@ def header(key_id):
     return struct.pack(">BHHH", key_id, KEM_ID, KDF_ID, AEAD_ID)
 
 
-def encapsulate(gateway_public, key_id, method, path, body=b""):
-    """Client: seal one request to the gateway. Returns (wire bytes, reply private key)."""
+def encapsulate(gateway_public, key_id, method, path, body=b"", now=None):
+    """Client: seal one request to the gateway. Returns (wire bytes, reply private key).
+    `now` defaults to the synchronized clock (timesync.now), which refuses to guess."""
     if len(body) > MAX_BODY:
         raise ValueError("request too large")
+    if now is None:
+        import timesync
+
+        now = timesync.now()
     reply_private, reply_public = keypair()
     inner = json.dumps(
         dict(
-            t=int(time.time()),
+            t=int(now // BUCKET) * BUCKET,
             nonce=os.urandom(16).hex(),
             method=method,
             path=path,
@@ -113,8 +124,9 @@ class Gateway:
         self.private, self.key_id = private, key_id
         self.seen = {}
         # The replay cache lives in memory. So that a restart cannot reopen the freshness
-        # window to replays, nothing sent before this gateway started is accepted (to the
-        # second: requests carry whole-second times); a client caught by a restart retries.
+        # window to replays, nothing timestamped before this gateway started is accepted;
+        # timestamps are 30-second buckets, so for up to 30 s after a restart requests are
+        # refused and a client retries in the next bucket.
         self.started = int(time.time() if started is None else started)
 
     def open(self, wire, now=None):
@@ -134,6 +146,8 @@ class Gateway:
             reply = base64.b64decode(inner["reply"], validate=True)
         except (KeyError, TypeError, ValueError) as e:
             raise Refused("malformed request") from e
+        if t % BUCKET:
+            raise Refused("timestamp is not a whole bucket of the synchronized clock")
         if abs(now - t) > FRESH_SECONDS:
             raise Refused("stale request")
         if t < self.started:

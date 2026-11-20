@@ -57,7 +57,7 @@ Ledger). That is the common ground.
   this phase. They reach only the entry's carrier, inside which both TLS layers refuse
   without a fresh authorization. Phase 2 makes them per-session.
 
-## Status (19 November 2026): phase 1 implemented
+## Status (19 November 2026): phase 1 implemented (superseded in part by phase 2 below)
 
 - **Code.** `tools/session_auth.py` (statement, extension, reference verifier);
   `managed_profile.authorize_session` (the connect's one PIN and touch also signs the
@@ -80,21 +80,59 @@ Ledger). That is the common ground.
 - **Open.** Physical Nitrokey 3, YubiKey, Trezor and Ledger runs (they need the owner);
   a live chain on the lab's network namespaces.
 
-## Phase 2: no long-term key in the data plane
+## Phase 2: no long-term identity in the VPN's processes (implemented 20 November 2026)
 
 The owner's follow-up (the YubiKey-Guide's agent-and-card model, Qubes' split keys): the
-data-plane processes should hold only per-session keys, and the long-term identity should be
-in plaintext only inside a short-lived signer.
+VPN's long-running processes hold only per-session keys; the long-term identity is in
+plaintext only inside a short-lived signer.
 
-1. Each session gets fresh TLS keys, in memory only; the hops pin the long-term identity as
-   their issuer instead of the leaf's own key.
-2. A separate signer process, sandboxed, with locked memory excluded from core dumps,
-   unseals the long-term ML-DSA-65 key only after the hardware approves, certifies the
-   session keys, erases the key and exits: seconds, about twice a day.
-3. The WireGuard carrier key, its PSK and the cloak token become per-session too.
+1. **Session keys.** At connect and at each renewal the supervisor makes a fresh ML-DSA-65
+   key per layer, in memory (`managed_profile.sign_session`); the data plane receives only
+   these, as sealed memfds.
+2. **The signer** (`tools/session_signer.py`) is a separate process for those seconds: it
+   makes itself undumpable (no core dumps, no ptrace by same-user processes) and locks its
+   memory where the kernel allows; it gets the session public keys on stdin, asks the key
+   for one touch and its PIN (the statement now names the session keys), unseals only the
+   identities, certifies each session key under its layer's identity, prints the leaves
+   and exits. The kernel reclaims its memory on exit.
+3. **Every hop** (`src/tls.rs`, `issued_by_pinned`) accepts a leaf for a key other than the
+   pinned identity only if the pinned identity signed it, and only where a device key is
+   pinned, so the session authorization is mandatory for it.
+4. **Still long-term:** the WireGuard carrier key, its PSK and the cloak token, which the
+   signer returns as before. They reach only the entry's carrier; making them per-session
+   needs the entry to accept a new carrier key each session, and is the next step.
 
-Root-level malware present while the signer runs can still read it; only a separate signing
-VM, or a key that holds ML-DSA itself (today Solo 2's Hacker build), removes that.
+**Evidence.** Six Rust QUIC handshake tests, among them: a session key certified by the
+identity and named by the device connects; without a pinned device key, or certified by
+another identity (also when the hop trusts that one too), or with a statement naming the
+identity instead, it is refused; removing the signature check or the device-key condition
+fails them. Signer tests: the leaves carry the session keys and are issued by the
+identities, the supervisor receives no identity, the process is undumpable with core dumps
+off, and malformed or unprotected requests are refused. The real firmware of Solo 1, Solo
+2, CanoKey and TKey signed sessions whose session-key leaves the exit accepted (lab phase
+`hardware_session_authorization`, `session_key_certified_by_identity`). Tamarin adds
+`stolen_session_key_expires`: a session key taken from the data plane is accepted only in
+its own window, unless both long-term keys leaked (mutant falsified).
+
+## A signer process, a separate VM, or both
+
+They protect against different malware, and the signer is built so that both are possible:
+its whole interface is one JSON request on stdin and one reply on stdout.
+
+| Where the identity is unsealed | Who can still read it while it is | Who can read the session keys |
+|---|---|---|
+| Before phase 2: the VPN's long-running processes | anyone who reads those processes' memory, for the whole session (an exploit of the network-facing data plane, root, a crash dump) | the same |
+| Phase 2: the short-lived signer process (implemented) | root on this computer, during those seconds about twice a day; not the data plane, not same-user processes (undumpable), not crash dumps | root, or an exploit of the data plane, until the session ends (at most 12 h) |
+| Phase 2 inside a separate signing VM (Qubes-style split, not implemented) | only someone who controls the hypervisor or that VM; root in the VPN's own VM cannot | as above: the VPN's VM still holds them |
+
+A separate VM goes beyond the process because a VM boundary holds against root in the
+other VM, which a process boundary does not. It only helps where the host itself is small
+and trusted, as in Qubes OS, where everyday software runs in VMs and the hardware key is
+attached to the signing VM; on an ordinary desktop, root on the host reads every VM's
+memory. So the two combine rather than compete: the signer is the unit, the VM is where it
+can run. Running it in a Qubes vault VM (qrexec service, key attached there) needs only a
+transport for the same request and reply; it is not built or tested yet. Neither removes the
+session keys and plaintext that any VPN running on this computer holds.
 
 ## Gates
 

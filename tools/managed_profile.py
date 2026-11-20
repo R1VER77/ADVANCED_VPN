@@ -1906,6 +1906,58 @@ def authorize_session(config, root, now=None):
     return secret, meta, (statement, assertion, not_before, not_after)
 
 
+def sign_session(config, root, carry=(), runner=None):
+    """Phase 2 (docs/HARDWARE_BOUND_SESSIONS.md): fresh ML-DSA-65 session keys for this
+    device's layers, certified by tools/session_signer.py, a separate short-lived process
+    that alone unseals the long-term identities, after the hardware key's touch and PIN.
+    Returns dict(keys={lane: session key PKCS#8}, leaves={lane: DER}, carry={name: bytes},
+    not_before, not_after). `runner` replaces the subprocess in tests."""
+    import subprocess
+    import sys
+
+    lanes = [lane for lane in ["outer", "middle", "inner"] if config.get(lane)]
+    session = {lane: mldsa.MLDSA65PrivateKey.generate() for lane in lanes}
+    request = dict(
+        state=str(Path(root).resolve()),
+        lanes={
+            lane: k.public_key()
+            .public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)
+            .hex()
+            for lane, k in session.items()
+        },
+        carry=list(carry),
+    )
+    if runner is None:
+        signer = Path(__file__).resolve().parent / "session_signer.py"
+        r = subprocess.run(  # noqa: S603 (this interpreter, a fixed script, JSON on stdin)
+            [sys.executable, "-E", "-s", str(signer)],
+            input=json.dumps(request).encode(),
+            capture_output=True,
+            timeout=300,
+            check=False,
+        )
+        if r.returncode != 0:
+            last = (r.stderr.decode(errors="replace").strip().splitlines() or ["no reason given"])[-1]
+            raise RuntimeError("session not signed: " + last)
+        reply = json.loads(r.stdout)
+    else:
+        reply = runner(request)
+    if set(reply["leaves"]) != set(lanes) or set(reply["carry"]) != set(carry):
+        raise ValueError("the signer answered for other keys")
+    return dict(
+        keys={
+            lane: k.private_bytes(
+                serialization.Encoding.DER, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()
+            )
+            for lane, k in session.items()
+        },
+        leaves={lane: bytes.fromhex(v) for lane, v in reply["leaves"].items()},
+        carry={name: bytes.fromhex(v) for name, v in reply["carry"].items()},
+        not_before=int(reply["not_before"]),
+        not_after=int(reply["not_after"]),
+    )
+
+
 def refresh_leaves(config, root, keys=None, out_dir=None, session=None):
     """Stable pinned identity; fresh TLS leaves. No CA signing key is used online. With a
     hardware `session` (authorize_session), each leaf carries its authorization and lives

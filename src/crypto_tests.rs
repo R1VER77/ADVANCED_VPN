@@ -143,7 +143,7 @@ async fn session_handshake(algorithm: &str, session: Option<&str>) -> bool {
             .arg(&ci.cert)
             .arg(&ci.key)
             .arg(&leaf)
-            .arg(mode)
+            .arg(mode.strip_suffix("-no-device").unwrap_or(mode))
             .output()
             .unwrap();
         assert!(
@@ -158,7 +158,11 @@ async fn session_handshake(algorithm: &str, session: Option<&str>) -> bool {
         si.ca = pins["root"].as_str().unwrap().into();
         si.pin_kind = crate::config::PinKind::Spki;
         si.peer_sha256 = pins["spki_sha256"].as_str().unwrap().into();
+        if mode == "session-no-device" {
+            si.peer_device = None;
+        }
         ci.cert = leaf;
+        ci.key = pins["key"].as_str().unwrap().into();
     }
     // Classical material must already fail when the local configuration is built
     // (no ML-DSA signing key); otherwise the handshake itself must decide.
@@ -223,6 +227,31 @@ async fn a_pinned_device_key_admits_only_the_sessions_it_authorized() {
     assert!(
         !session_handshake("ml-dsa-65", Some("other")).await,
         "a session authorized by another key must be refused"
+    );
+}
+
+/// Phase 2: the client presents a fresh session key certified by its pinned identity.
+#[tokio::test]
+async fn a_session_key_is_admitted_only_when_its_identity_and_device_both_vouch_for_it() {
+    assert!(
+        session_handshake("ml-dsa-65", Some("session")).await,
+        "a session key certified by the identity and named by the device must connect"
+    );
+    assert!(
+        !session_handshake("ml-dsa-65", Some("session-no-device")).await,
+        "without a pinned device key, only the identity key itself is accepted"
+    );
+    assert!(
+        !session_handshake("ml-dsa-65", Some("session-other-identity")).await,
+        "a session key certified by another ML-DSA-65 key must be refused"
+    );
+    assert!(
+        !session_handshake("ml-dsa-65", Some("session-names-identity")).await,
+        "the device's statement must name the session key itself"
+    );
+    assert!(
+        !session_handshake("ml-dsa-65", Some("session-extra-root")).await,
+        "a session key certified by another trusted identity is not the pinned peer's"
     );
 }
 

@@ -48,16 +48,27 @@ while True:
     if marker in b:hit=True
 """
 MEMBER_SCRIPT = r"""
-import json,sys,urllib.request
+import json,sys,time,urllib.request
 sys.path.insert(0,sys.argv[1])
-import mesh
+import mesh,timesync
+# The lab's namespaces have no internet, so no time pools: the lab host's clock stands in
+# (the synchronization itself: tools/test_ohttp.py and a live check).
+timesync.now=time.time
 cfg=json.loads(sys.argv[2])
 entry=mesh.beacon_entry(cfg)
 out={}
-status,doc=mesh.beacon_call(entry,"POST","/gossip",json.dumps({"descriptor":{"note":sys.argv[3]},"hop":0}).encode())
-out["gossip"]=[status,doc]
+# Key consistency: until other beacons vouch for the gateway key, the route may only fetch
+# the directory. One beacon cannot be vouched for; tools/test_gateway_consistency.py covers
+# the check, and here the route is then taken as verified.
 status,doc=mesh.beacon_call(entry,"GET","/descriptors")
 out["descriptors"]=[status,len(doc.get("descriptors",[]))]
+try:
+    mesh.beacon_call(entry,"POST","/gossip",b"{}");out["unverified_gossip"]="sent"
+except mesh.GatewayKeyRefused:
+    out["unverified_gossip"]="refused"
+mesh.gateway_verified=lambda e:True
+status,doc=mesh.beacon_call(entry,"POST","/gossip",json.dumps({"descriptor":{"note":sys.argv[3]},"hop":0}).encode())
+out["gossip"]=[status,doc]
 status,doc=mesh.beacon_call(entry,"GET","/health")
 out["health"]=[status,doc]
 req=urllib.request.Request(cfg["relay"]+"/relay",data=b"\x01"*600)
@@ -122,7 +133,13 @@ def main():
                          "10.82.0.2", "--port", "8787", "--gateway-key", state / "gateway.key"], "beacon")  # fmt: skip
         spawn("relay", [sys.executable, ROOT / "tools/ohttp_relay.py", "--gateway", "http://10.82.0.2:8787",
                         "--host", "10.81.0.1", "--port", "8788"], "relay")  # fmt: skip
+        started = time.time()
         time.sleep(2)
+        # A gateway refuses requests timestamped before it started; they are 30-second
+        # buckets, so the member waits for the next bucket, as a client does after a restart.
+        import ohttp
+
+        time.sleep(max(0.0, (started // ohttp.BUCKET + 1) * ohttp.BUCKET - time.time() + 0.5))
         # The member learns the gateway key out of band (here: the operator reads it).
         cfg_raw = tb.run("ip", "netns", "exec", "av-beacon", "curl", "-s", "http://10.82.0.2:8787/ohttp-config",
                          timeout=10).stdout  # fmt: skip
@@ -155,6 +172,8 @@ def main():
             problems.append("the relay saw the request in the clear")
         if member["health"][0] != 200 or member["descriptors"][0] != 200 or member["gossip"][0] != 200:
             problems.append("the member did not get answers")
+        if member["unverified_gossip"] != "refused":
+            problems.append("an unverified oblivious route carried more than a directory fetch")
         if member["forged"] == "accepted":
             problems.append("a forged request was accepted")
         if member["direct_to_beacon"] != "unreachable":

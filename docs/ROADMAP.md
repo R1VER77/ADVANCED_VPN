@@ -105,8 +105,11 @@ These governance items are not complete merely because this roadmap lists them.
   whatever the PIN entry. **Phase 1 done** ([hardware-bound sessions](HARDWARE_BOUND_SESSIONS.md)):
   every hop now refuses a hardware-protected client's leaves unless its FIDO2 key, touched
   and PIN-unlocked, signed that session (at most 12 h), so copied keys stop working when the
-  session ends; verified on four emulated firmwares and in Tamarin. Phase 2 (per-session
-  keys, a short-lived signer) and the physical units remain. Kernel WireGuard takes its static key as bytes and needs it at
+  session ends; verified on four emulated firmwares and in Tamarin. **Phase 2 done** (20
+  November): the VPN's processes hold only per-session keys, certified by a short-lived,
+  undumpable signer that alone unseals the identities; a stolen session key works only in
+  its window. Remaining: per-session carrier (WireGuard, cloak) keys, a Qubes-style signing
+  VM transport, and the physical units. Kernel WireGuard takes its static key as bytes and needs it at
   every handshake (about every two minutes), so this needs a userspace data plane that asks
   the key for each X25519 operation without a touch: OpenPGP-card ECDH on Nitrokey 3,
   YubiKey, CanoKey and Ledger, SLIP-0017 on Trezor, or a TKey app; not FIDO2. It protects

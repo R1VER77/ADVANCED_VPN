@@ -361,17 +361,30 @@ def operations(work, result, test_pin, device=udp_device, second_key=None):
         exit_device = json.loads((lab / "exit/profile.json").read_text())["core"]["inner"].get("peer_device")
         if exit_device is None:
             raise AssertionError("the exit did not pin the hardware client's key")
-        secret, meta, session = managed_profile.authorize_session(client_core, lab / "client")
-        keys = managed_profile.load_keys(lab / "client", ["inner"], secret, meta)
-        rt = work / "session-runtime"
-        rt.mkdir(mode=0o700)
-        managed_profile.refresh_leaves(client_core, lab / "client", keys, out_dir=rt, session=session)
-        leaf = (rt / "inner-active-cert.der").read_bytes()
+        # Phase 2: fresh session keys, certified by the short-lived signer (run in this
+        # process here, where the lab's device and PIN substitutes apply).
+        import session_signer
+        from cryptography import x509
+
+        signed = managed_profile.sign_session(
+            client_core,
+            lab / "client",
+            runner=lambda r: session_signer.sign(Path(r["state"]), r["lanes"], r["carry"]),
+        )
+        leaf = signed["leaves"]["inner"]
+        identity = x509.load_der_x509_certificate((lab / "client/inner-cert.der").read_bytes())
+        parsed = x509.load_der_x509_certificate(leaf)
+        identity.public_key().verify(parsed.signature, parsed.tbs_certificate_bytes)
+        if parsed.public_key() == identity.public_key():
+            raise AssertionError("the session leaf carries the long-term identity key")
         now = int(time.time())
         session_auth.verify_leaf(exit_device, leaf, now)
+        keys = managed_profile.load_keys(lab / "client", ["inner"], *keyguard.hardware_secret(vault))
+        rt = work / "session-runtime"
+        rt.mkdir(mode=0o700)
         refusals = {}
         for name, check in (
-            ("expired", lambda: session_auth.verify_leaf(exit_device, leaf, session[3])),
+            ("expired", lambda: session_auth.verify_leaf(exit_device, leaf, signed["not_after"])),
             ("plain_leaf", lambda: plain_leaf_refused(managed_profile, client_core, lab, keys, rt, exit_device, now)),
         ):
             try:
@@ -382,6 +395,7 @@ def operations(work, result, test_pin, device=udp_device, second_key=None):
             raise AssertionError("a session leaf was accepted where it must be refused")
         result["phases"]["hardware_session_authorization"] = dict(
             device_key_pinned_by_exit=exit_device["alg"],
+            session_key_certified_by_identity=True,
             leaf_verified=True,
             refusals=refusals,
             # Recorded so src/session_auth.rs re-verifies this key's real assertion in CI.
@@ -574,7 +588,13 @@ def worker(out, vpn_commit, backend="solo1-pc"):
         result["stopped"] = time.time()
         result["production_source_sha256"] = {
             name: digest(ROOT / "tools" / name)
-            for name in ("keyguard.py", "managed_profile.py", "session_auth.py", "hardware_setup_test.py")
+            for name in (
+                "keyguard.py",
+                "managed_profile.py",
+                "session_auth.py",
+                "session_signer.py",
+                "hardware_setup_test.py",
+            )
         }
         (out / "RESULT.json").write_text(json.dumps(result, indent=2) + "\n")
     return 0 if result["status"].startswith("passed") else 1

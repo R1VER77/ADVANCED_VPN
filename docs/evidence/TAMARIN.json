@@ -5,7 +5,7 @@
   "date": "2026-11-19",
   "models": {
     "formal/cloak/cloak.spthy": {
-      "seconds": 0.3,
+      "seconds": 0.5,
       "exit_code": 0,
       "lemmas": {
         "executable": {
@@ -36,7 +36,7 @@
       }
     },
     "formal/link/link.spthy": {
-      "seconds": 9.3,
+      "seconds": 11.9,
       "exit_code": 0,
       "lemmas": {
         "executable": {
@@ -72,7 +72,7 @@
       }
     },
     "formal/kem_seal/kem_seal.spthy": {
-      "seconds": 5.4,
+      "seconds": 6.3,
       "exit_code": 0,
       "lemmas": {
         "executable": {
@@ -93,7 +93,7 @@
       }
     },
     "formal/ohttp/ohttp.spthy": {
-      "seconds": 0.6,
+      "seconds": 1.0,
       "exit_code": 0,
       "lemmas": {
         "executable": {
@@ -119,7 +119,7 @@
       }
     },
     "formal/credits/credits.spthy": {
-      "seconds": 0.3,
+      "seconds": 0.4,
       "exit_code": 0,
       "lemmas": {
         "executable": {
@@ -140,7 +140,7 @@
       }
     },
     "formal/enrollment/enrollment.spthy": {
-      "seconds": 1.3,
+      "seconds": 1.6,
       "exit_code": 0,
       "lemmas": {
         "executable": {
@@ -166,7 +166,7 @@
       }
     },
     "formal/dcnet/dcnet.spthy": {
-      "seconds": 40.5,
+      "seconds": 48.2,
       "exit_code": 0,
       "lemmas": {
         "keys_secret": {
@@ -187,7 +187,7 @@
       }
     },
     "formal/dcnet/dcnet_authenticity.spthy": {
-      "seconds": 29.8,
+      "seconds": 29.5,
       "exit_code": 0,
       "lemmas": {
         "keys_secret": {
@@ -208,7 +208,7 @@
       }
     },
     "formal/dcnet/dcnet_no_collusion.spthy": {
-      "seconds": 40.6,
+      "seconds": 42.7,
       "exit_code": 0,
       "lemmas": {
         "pad_secrecy_without_collusion": {
@@ -219,7 +219,7 @@
       }
     },
     "formal/dcnet/dcnet_collusion.spthy": {
-      "seconds": 1.3,
+      "seconds": 1.7,
       "exit_code": 0,
       "lemmas": {
         "honest_key_secret": {
@@ -245,7 +245,7 @@
       }
     },
     "formal/dcnet/dcnet_collusion_4.spthy": {
-      "seconds": 46.8,
+      "seconds": 49.3,
       "exit_code": 0,
       "lemmas": {
         "pad_derived_with_two_honest": {
@@ -287,33 +287,38 @@
       }
     },
     "formal/session/session_auth.spthy": {
-      "seconds": 0.7,
+      "seconds": 2.0,
       "exit_code": 0,
       "lemmas": {
         "executable": {
           "kind": "exists-trace",
           "result": "verified",
-          "steps": 6
+          "steps": 8
         },
         "device_authorized": {
           "kind": "all-traces",
           "result": "verified",
-          "steps": 12
+          "steps": 17
         },
         "stolen_identity_needs_touch": {
           "kind": "all-traces",
           "result": "verified",
-          "steps": 12
+          "steps": 16
         },
         "identity_still_required": {
           "kind": "all-traces",
           "result": "verified",
-          "steps": 6
+          "steps": 11
+        },
+        "stolen_session_key_expires": {
+          "kind": "all-traces",
+          "result": "verified",
+          "steps": 36
         },
         "both_halves": {
           "kind": "all-traces",
           "result": "verified",
-          "steps": 15
+          "steps": 28
         }
       }
     },
@@ -339,7 +344,7 @@
       }
     },
     "formal/dcnet/dcnet_one_time_pads.spthy": {
-      "seconds": 0.2,
+      "seconds": 0.3,
       "exit_code": 0,
       "lemmas": {
         "pad_used_once": {
@@ -360,7 +365,7 @@
       }
     },
     "crates/avpn-mix-lane/tamarin/pq_sphinx_reblind.spthy": {
-      "seconds": 9.5,
+      "seconds": 8.9,
       "exit_code": 0,
       "lemmas": {
         "element_hidden": {
@@ -392,49 +397,56 @@
       "lemma": "device_authorized",
       "edits": 1,
       "result": "falsified - found trace",
-      "seconds": 0.6
+      "seconds": 1.1
     },
     {
       "model": "formal/session/session_auth.spthy",
       "lemma": "stolen_identity_needs_touch",
       "edits": 2,
       "result": "falsified - found trace",
-      "seconds": 1.0
+      "seconds": 1.4
+    },
+    {
+      "model": "formal/session/session_auth.spthy",
+      "lemma": "stolen_session_key_expires",
+      "edits": 4,
+      "result": "falsified - found trace",
+      "seconds": 1.2
     },
     {
       "model": "formal/link/link.spthy",
       "lemma": "psk_forward_secrecy",
       "edits": 1,
       "result": "falsified - found trace",
-      "seconds": 7.3
+      "seconds": 7.6
     },
     {
       "model": "formal/link/link.spthy",
       "lemma": "psk_forward_secrecy",
       "edits": 1,
       "result": "falsified - found trace",
-      "seconds": 7.2
+      "seconds": 8.0
     },
     {
       "model": "formal/link/link.spthy",
       "lemma": "psk_forward_secrecy",
       "edits": 1,
       "result": "falsified - found trace",
-      "seconds": 6.9
+      "seconds": 7.7
     },
     {
       "model": "formal/kem_seal/kem_seal.spthy",
       "lemma": "context_binding",
       "edits": 1,
       "result": "falsified - found trace",
-      "seconds": 3.9
+      "seconds": 4.7
     },
     {
       "model": "formal/kem_seal/kem_seal.spthy",
       "lemma": "hybrid_confidentiality",
       "edits": 1,
       "result": "falsified - found trace",
-      "seconds": 2.6
+      "seconds": 3.1
     },
     {
       "model": "formal/kem_seal/kem_seal.spthy",
@@ -448,42 +460,42 @@
       "lemma": "response_binding",
       "edits": 1,
       "result": "falsified - found trace",
-      "seconds": 0.6
+      "seconds": 0.8
     },
     {
       "model": "formal/ohttp/ohttp.spthy",
       "lemma": "request_secrecy",
       "edits": 1,
       "result": "falsified - found trace",
-      "seconds": 0.5
+      "seconds": 0.8
     },
     {
       "model": "formal/credits/credits.spthy",
       "lemma": "no_double_spend",
       "edits": 1,
       "result": "falsified - found trace",
-      "seconds": 0.3
+      "seconds": 0.4
     },
     {
       "model": "formal/enrollment/enrollment.spthy",
       "lemma": "dual_signature_binding",
       "edits": 1,
       "result": "falsified - found trace",
-      "seconds": 1.0
+      "seconds": 0.9
     },
     {
       "model": "formal/cloak/cloak.spthy",
       "lemma": "channel_binding",
       "edits": 2,
       "result": "falsified - found trace",
-      "seconds": 0.2
+      "seconds": 0.4
     },
     {
       "model": "formal/cloak/cloak.spthy",
       "lemma": "key_holder_only",
       "edits": 1,
       "result": "falsified - found trace",
-      "seconds": 0.2
+      "seconds": 0.3
     },
     {
       "model": "formal/cloak/cloak.spthy",
@@ -497,42 +509,42 @@
       "lemma": "frame_authenticity",
       "edits": 1,
       "result": "falsified - found trace",
-      "seconds": 2.4
+      "seconds": 2.9
     },
     {
       "model": "formal/dcnet/dcnet_authenticity.spthy",
       "lemma": "frame_authenticity",
       "edits": 3,
       "result": "falsified - found trace",
-      "seconds": 27.1
+      "seconds": 28.2
     },
     {
       "model": "formal/dcnet/dcnet.spthy",
       "lemma": "cancellation",
       "edits": 1,
       "result": "falsified - found trace",
-      "seconds": 83.3
+      "seconds": 85.4
     },
     {
       "model": "formal/dcnet/dcnet_no_collusion.spthy",
       "lemma": "pad_secrecy_without_collusion",
       "edits": 1,
       "result": "falsified - found trace",
-      "seconds": 2.5
+      "seconds": 2.4
     },
     {
       "model": "formal/dcnet/dcnet_collusion.spthy",
       "lemma": "decodes_exactly",
       "edits": 1,
       "result": "falsified - found trace",
-      "seconds": 0.5
+      "seconds": 0.4
     },
     {
       "model": "formal/dcnet/dcnet_collusion_4.spthy",
       "lemma": "pads_secret_with_three_honest",
       "edits": 1,
       "result": "falsified - found trace",
-      "seconds": 2.7
+      "seconds": 2.8
     },
     {
       "model": "formal/dcnet/dcnet_one_time_pads.spthy",
@@ -553,14 +565,14 @@
       "lemma": "forward_private_epoch1",
       "edits": 1,
       "result": "falsified - found trace",
-      "seconds": 0.3
+      "seconds": 0.4
     },
     {
       "model": "formal/dcnet/dcnet_one_time_pads.spthy",
       "lemma": "pad_known_only_if_leaked",
       "edits": 1,
       "result": "falsified - found trace",
-      "seconds": 0.2
+      "seconds": 0.3
     },
     {
       "model": "crates/avpn-mix-lane/tamarin/pq_sphinx_reblind.spthy",
@@ -576,6 +588,6 @@
     "The 4-member collusion model over full frames (all six pads) did not finish in 25 minutes; the proved model takes the colluders' view, their own pads stripped",
     "The network chain's forward secrecy for an unbounded number of rounds did not terminate; it is proved unrolled to three rounds with one seizure",
     "Re-blinding: secrecy of the KEM secret itself, and unlinkability across hop 1 (an equivalence): did not terminate; the construction stays review-pending",
-    "Oblivious control plane: unlinkability (an equivalence) is not modelled, and freshness is a restriction in formal/ohttp, exercised by tools/test_ohttp.py"
+    "Oblivious control plane: freshness is a restriction in formal/ohttp, exercised by tools/test_ohttp.py; unlinkability, an equivalence, is proved in ProVerif instead (formal/ohttp/ohttp_unlinkability.pv, tools/proverif_check.py)"
   ]
 }

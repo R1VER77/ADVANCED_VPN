@@ -23,10 +23,14 @@
    the JSON encoding are not modelled. Request contents are the adversary's choice, the same
    in both worlds: a body that names its member links by content, which no transport hides.
 
-   NOT MODELED (outside a symbolic model): sizes and timing. In particular each request
-   carries the member's clock reading to the second (`t`), and the gateway sees it beside
-   its own clock, so a member whose clock is skewed by a consistent offset is linkable by
-   that offset. Lengths and timing are traffic-analysis questions for the labs.
+   NOT MODELED (outside a symbolic model): sizes and timing. Each request carries a clock
+   reading (`t`), which the gateway sees beside its own clock: read from the member's own
+   clock it would link a member skewed by a steady offset. It is therefore a 30-second
+   bucket of a synchronized clock (tools/timesync.py, Tails' htpdate method: the median of
+   three independent server pools), the same for synchronized members; the gateway refuses
+   any other value (tools/test_ohttp.py, TimeSync). What remains is a member caught at a
+   bucket boundary, and a member that cannot synchronize, which sends nothing. Lengths and
+   timing are traffic-analysis questions for the labs.
 
    MUTANTS (edits in tools/proverif_check.py; each must fail to prove):
    - a member keeps one reply key for all its requests;

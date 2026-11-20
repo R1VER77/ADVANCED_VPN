@@ -88,14 +88,14 @@ That deviation is exactly what needs proving.
 - Request and response secrecy against the relay (Tamarin).
 - **Response binding**: a response cannot be swapped onto another request (Tamarin).
 - **Freshness**: the 60 s window and the nonce cache accept each request at most once (Tamarin, stateful), across restarts too: the cache lives in memory, so a gateway refuses anything sent before it started (`test_a_restarted_gateway_refuses_replays_of_earlier_requests`).
-- **Unlinkability**: the gateway cannot tell whether two requests came from the same client, and the relay learns nothing but sizes and times (ProVerif, observational equivalence). **Proved** (`formal/ohttp/ohttp_unlinkability.pv`), given that every member uses the same gateway key; mutants that reuse a reply key or give each member its own gateway key fail. Not covered: the request's whole-second clock reading, which links a member with a consistently skewed clock.
+- **Unlinkability**: the gateway cannot tell whether two requests came from the same client, and the relay learns nothing but sizes and times (ProVerif, observational equivalence). **Proved** (`formal/ohttp/ohttp_unlinkability.pv`), given that every member uses the same gateway key; mutants that reuse a reply key or give each member its own gateway key fail. That condition is enforced by `mesh.check_gateway_key` (two independent beacons must show the gateway operator's signed key; equivocation refused). The request's clock reading is a 30-second bucket of a synchronized clock (`tools/timesync.py`, Tails' htpdate method), so a skewed member clock no longer links; the gateway refuses other values.
 - Operator separation (relay and gateway run by different operators) is an assumption of the property, and the code already enforces it (`mesh.beacon_entry`).
 
 ### 5. Blind-RSA credits (`tools/mesh_tokens.py`)
 
 Chaum blind RSA with a full-domain hash, issued by the mesh and spent at relays.
 
-- **Unlinkability** of issuance and spending: a signer who sees every issuance cannot tell which one a spend came from (ProVerif, with the blind-signature equational theory). **Proved** (`formal/credits/credits_unlinkability.pv`), given one trusted key per epoch. The equational theory cannot express RSA's multiplicative tagging attack, so `unblind` verifies each signature before the credit is kept (RFC 9474 Finalize), and `tools/test_mesh_tokens.py` shows the attack on the real arithmetic being refused.
+- **Unlinkability** of issuance and spending: a signer who sees every issuance cannot tell which one a spend came from (ProVerif, with the blind-signature equational theory). **Proved** (`formal/credits/credits_unlinkability.pv`), given one trusted key per epoch: the ledger enforces one key per epoch at redemption; an issuance client, when one exists, must check it too. The equational theory cannot express RSA's multiplicative tagging attack, so `unblind` verifies each signature before the credit is kept (RFC 9474 Finalize), and `tools/test_mesh_tokens.py` shows the attack on the real arithmetic being refused.
 - **No double spending**: a token is accepted at most once across every relay sharing the spent set (Tamarin, with a persistent set). The code side: a redemption holds an exclusive lock while it re-reads, checks and records the spend; eight racing processes accept exactly one (`test_racing_processes_accept_exactly_one_redemption`). Relays that do not share a ledger file still need the mesh's gossiped spent set.
 - One-more unforgeability is a computational property that symbolic tools cannot prove. It rests on the RSA blind-signature literature, so the plan also replaces our FDH construction with RFC 9474's RSABSSA (SHA-384, PSS, deterministic) from a reviewed library. Then the computational argument is the published one and the model covers the protocol around it.
 - **Not post-quantum.** RSA blind signatures fall to a quantum adversary, and one who can forge credits never needs to break a tunnel. The credits move to a lattice-based blind signature (a reviewed implementation, once one exists) before the project describes itself as post-quantum throughout. The protocol model above carries over unchanged; only the signature's equational theory changes.
@@ -150,8 +150,10 @@ the PIN; every hop that pinned the key refuses leaves without it
   was touched on the device for that identity key and window unless the device key leaked;
   with the identity key copied off the computer, a session still needs a touch in its
   window; the ML-DSA-65 identity is still required; a session nobody asked for needs both
-  keys. Mutants: a hop that skips the device's statement, and a statement without its
-  window, are each falsified.
+  keys; and (phase 2, per-session keys certified by a short-lived signer) a session key
+  taken from the data plane works only in its own window. Mutants: a hop that skips the
+  device's statement, a statement without its window, and a certificate and statement
+  that do not bind the session key to its window, are each falsified.
 - **The code side:** shared vectors (`tools/testdata/session_auth.json`) on which the Python
   reference and the Rust verifier agree, each check mutation-tested in both; real
   assertions from the emulated Solo 1, Solo 2, CanoKey and TKey firmware.

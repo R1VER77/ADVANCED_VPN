@@ -199,24 +199,38 @@ def main():
 def handshake_leaf(cert_path, key_path, out_path, mode):
     """For src/crypto_tests.rs: turn a provisioned client identity into a managed one (its
     own self-signed certificate as the hop's root, pinned by public key, as `avpn init`
-    does) and rotate its leaf the way refresh_leaves does, with a session authorization
-    signed by a fresh software key (`authorized`), none (`plain`), or by a key other than
-    the one printed (`other`). Prints {device, root, spki_sha256} for the hop to pin."""
+    does) and rotate its leaf. Modes, by what the leaf carries:
+
+    - `authorized`: the identity key, re-signed, with a statement by the pinned device key;
+    - `plain`: the identity key, no statement; `other`: a statement by another device key;
+    - `session`: a fresh session key certified by the identity (phase 2), statement naming it;
+    - `session-other-identity`: a session key certified by a different ML-DSA-65 key;
+    - `session-names-identity`: a session key whose statement names the identity instead;
+    - `session-extra-root`: the hop also trusts a second identity under the same name, and
+      that one certified the session key (the pin must still decide).
+
+    Prints {device, root, spki_sha256, key} for the hop to pin and the client to use."""
     import time
 
     original = x509.load_der_x509_certificate(Path(cert_path).read_bytes())
     identity = serialization.load_der_private_key(Path(key_path).read_bytes(), password=None)
     now = int(time.time())
     nb, na = now - 300, now - 300 + sa.MAX_SECONDS
-    statement = sa.authorization({"outer": sa.spki_sha256(spki(identity))}, nb, na)
+    leaf_key, issuer_key, named = identity, identity, identity
+    if mode.startswith("session"):
+        leaf_key = mldsa.MLDSA65PrivateKey.generate()
+        named = identity if mode == "session-names-identity" else leaf_key
+        if mode in ("session-other-identity", "session-extra-root"):
+            issuer_key = mldsa.MLDSA65PrivateKey.generate()
+    statement = sa.authorization({"outer": sa.spki_sha256(spki(named))}, nb, na)
     pinned, signer = SoftKey("es256"), SoftKey("es256")
-    if mode == "authorized":
+    if mode != "other":
         signer = pinned
     b = (
         x509.CertificateBuilder()
         .subject_name(original.subject)
         .issuer_name(original.subject)
-        .public_key(identity.public_key())
+        .public_key(leaf_key.public_key())
         .serial_number(x509.random_serial_number())
         .not_valid_before(dt.datetime.fromtimestamp(nb, dt.timezone.utc))
         .not_valid_after(dt.datetime.fromtimestamp(na, dt.timezone.utc))
@@ -224,22 +238,39 @@ def handshake_leaf(cert_path, key_path, out_path, mode):
     if mode != "plain":
         value = sa.extension_value(statement, signer.assert_(statement))
         b = b.add_extension(x509.UnrecognizedExtension(x509.ObjectIdentifier(sa.OID), value), False)
-    Path(out_path).write_bytes(b.sign(identity, None).public_bytes(serialization.Encoding.DER))
+    for extension in original.extensions:
+        b = b.add_extension(extension.value, extension.critical)
+    Path(out_path).write_bytes(b.sign(issuer_key, None).public_bytes(serialization.Encoding.DER))
     Path(out_path).chmod(0o600)
-    root = Path(str(out_path) + ".root")
-    root.write_bytes(
-        x509.CertificateBuilder()
-        .subject_name(original.subject)
-        .issuer_name(original.subject)
-        .public_key(identity.public_key())
-        .serial_number(x509.random_serial_number())
-        .not_valid_before(dt.datetime.fromtimestamp(nb, dt.timezone.utc))
-        .not_valid_after(dt.datetime.fromtimestamp(nb + 86400, dt.timezone.utc))
-        .sign(identity, None)
-        .public_bytes(serialization.Encoding.DER)
+    key = Path(str(out_path) + ".key")
+    key.write_bytes(
+        leaf_key.private_bytes(
+            serialization.Encoding.DER, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()
+        )
     )
+    key.chmod(0o600)
+
+    def self_signed(key):
+        return (
+            x509.CertificateBuilder()
+            .subject_name(original.subject)
+            .issuer_name(original.subject)
+            .public_key(key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(dt.datetime.fromtimestamp(nb, dt.timezone.utc))
+            .not_valid_after(dt.datetime.fromtimestamp(nb + 86400, dt.timezone.utc))
+            .sign(key, None)
+            .public_bytes(serialization.Encoding.DER)
+        )
+
+    root = Path(str(out_path) + ".root")
+    root.write_bytes(self_signed(identity) + (self_signed(issuer_key) if mode == "session-extra-root" else b""))
     root.chmod(0o600)
-    print(json.dumps(dict(device=pinned.device(), root=str(root), spki_sha256=sa.spki_sha256(spki(identity)))))
+    print(
+        json.dumps(
+            dict(device=pinned.device(), root=str(root), spki_sha256=sa.spki_sha256(spki(identity)), key=str(key))
+        )
+    )
 
 
 if __name__ == "__main__":

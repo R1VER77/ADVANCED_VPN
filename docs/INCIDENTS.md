@@ -55,6 +55,23 @@ private vulnerability reporting (see [SECURITY.md](../SECURITY.md)).
 
 ## Fixed
 
+### Mesh descriptor signatures could never be verified (found 20 Nov 2026)
+- **What:** `tools/mesh.py` imported ML-DSA-65 from `cryptography...asymmetric.ml_dsa`, a
+  module the pinned library (cryptography 49/50, `mldsa`) does not have. Every real
+  `verify_descriptor` call raised `SystemExit` instead of returning; `keyguard mesh-sign`
+  imported the same name, so signed publishing failed too. The claim that unverified
+  descriptors never enter a directory held only because nothing could be verified.
+- **Not affected:** the VPN's data plane, enrollment and the TLS layers (they use
+  `cryptography`'s `mldsa` or Rust). Beacons refused malformed descriptors before
+  reaching the signature check.
+- **How found:** building gateway key consistency on descriptor signatures. Every mesh test
+  replaced `verify_descriptor` with a stub, so no test had ever run it.
+- **Fix:** the right module (`MLDSA65PublicKey`, a 32-byte seed or PKCS#8 for signing), and
+  `tools/test_gateway_consistency.py`, which signs and verifies real descriptors with no
+  stub and fails on the old import. Still open: `operator.pub` for the mesh is documented as
+  written by `avpn init`, whose `operator.pub` is the operator's JSON public file, not a raw
+  ML-DSA key; the mesh's own node key is a placeholder until enrollment returns it.
+
 ### Pad tools could reuse a one-time pad; the information-theoretic claim overstated its proof (16 Nov 2026)
 - **What:** an independent audit (16 Nov 2026) found four state bugs in the pad and identity
   tools, each reproduced by a counterexample on the pushed code:

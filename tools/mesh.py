@@ -111,11 +111,13 @@ def load_operator_key() -> bytes:
 
 
 def _mldsa():
-    """ML-DSA-65 from the hash-locked environment (cryptography >= 43)."""
+    """ML-DSA-65 from the hash-locked environment (cryptography 49/50: `mldsa`). The module
+    was named `ml_dsa` here until 20 November 2026, which the pinned library never had:
+    every real verification raised SystemExit, hidden by tests that stubbed it out."""
     try:
-        from cryptography.hazmat.primitives.asymmetric.ml_dsa import MLDSAPrivateKey, MLDSAPublicKey
+        from cryptography.hazmat.primitives.asymmetric.mldsa import MLDSA65PrivateKey, MLDSA65PublicKey
 
-        return MLDSAPrivateKey, MLDSAPublicKey
+        return MLDSA65PrivateKey, MLDSA65PublicKey
     except Exception as e:  # pragma: no cover - environment dependent
         raise SystemExit(
             "ML-DSA-65 unavailable: run inside the hash-locked environment "
@@ -418,6 +420,8 @@ def cmd_publish(args) -> dict:
     if not node_desc.exists():
         return {"ok": False, "error": "NoNode", "hint": "run avpn mesh offer first"}
     d = json.loads(node_desc.read_text())
+    if getattr(args, "gateway_key", None):
+        d = attach_gateway(d, args.gateway_key)
     now = int(time.time())
     d["published"] = now
     d["expires"] = now + DESCRIPTOR_TTL_SECONDS
@@ -544,6 +548,85 @@ def gossip_descriptor(descriptor: dict, hop: int = 0) -> dict:
     return {"sent": sent, "beacons": len(beacons)}
 
 
+# Key consistency for oblivious routes (RFC 9458 section 7). Unlinkability through a
+# gateway holds only if every member encrypts to the same gateway key
+# (formal/ohttp/ohttp_unlinkability.pv; its per-member-key mutant links). A gateway that
+# handed each member its own key would link their requests, so a member uses an oblivious
+# route only after beacons of other operators have shown it the gateway operator's own
+# signed descriptor naming that same key. Two different keys signed by one operator are
+# equivocation, and both signed descriptors are the proof.
+GATEWAY_FIELD = "ohttp_gateway"
+MIN_GATEWAY_WITNESSES = 2
+
+
+class GatewayKeyRefused(ValueError):
+    """An oblivious route whose gateway key is not shown to be everyone's."""
+
+
+def attach_gateway(descriptor: dict, gateway_key: Path) -> dict:
+    """Name this beacon's oblivious gateway key in its descriptor, so the operator's
+    signature commits to it and gossip shows every member the same one."""
+    import ohttp
+
+    _, public = ohttp.load_private(gateway_key.read_bytes())
+    return {**descriptor, GATEWAY_FIELD: {"key_id": 1, "public": base64.b64encode(public).decode()}}
+
+
+def gateway_checks_path() -> Path:
+    """Verified gateway keys, by gateway operator."""
+    return MESH_DIR / "gateway-checks.json"
+
+
+def gateway_claims(entry: dict, batches) -> dict:
+    """{(key_id, public): {witness, ...}}: the gateway keys that the route's gateway
+    operator signed, as seen through beacons other than that gateway. `batches` is
+    [(source, descriptors)], one per beacon answered."""
+    claims = {}
+    for source, descriptors in batches:
+        if source == entry["gateway_operator"]:
+            continue  # the gateway cannot vouch for itself
+        for d in descriptors:
+            if d.get("node_id") != entry["gateway_operator"] or GATEWAY_FIELD not in d:
+                continue
+            if validate(d) or not verify_descriptor(d):
+                continue
+            g = d[GATEWAY_FIELD]
+            claims.setdefault((int(g["key_id"]), g["public"]), set()).add(source)
+    return claims
+
+
+def check_gateway_key(entry: dict, batches, minimum: int = MIN_GATEWAY_WITNESSES) -> list:
+    """The witnesses to an oblivious route's gateway key; raises GatewayKeyRefused."""
+    claims = gateway_claims(entry, batches)
+    if len(claims) > 1:
+        raise GatewayKeyRefused(
+            "gateway operator %s signed %d different keys: equivocation" % (entry["gateway_operator"], len(claims))
+        )
+    mine = (int(entry["key_id"]), entry["gateway_public"])
+    if claims and mine not in claims:
+        raise GatewayKeyRefused("this route's gateway key is not the one its operator published")
+    witnesses = sorted(claims.get(mine, ()))
+    if len(witnesses) < minimum:
+        raise GatewayKeyRefused(
+            "only %d other beacon(s) vouch for this gateway key; %d are needed" % (len(witnesses), minimum)
+        )
+    return witnesses
+
+
+def gateway_verified(entry: dict, now: float | None = None) -> bool:
+    """Whether this route's gateway key was verified within the descriptor lifetime."""
+    path = gateway_checks_path()
+    if not path.exists():
+        return False
+    record = json.loads(path.read_text()).get(entry["gateway_operator"])
+    now = time.time() if now is None else now
+    return bool(
+        record
+        and record["key"] == [int(entry["key_id"]), entry["gateway_public"]]
+        and now - record["checked"] <= DESCRIPTOR_TTL_SECONDS
+    )
+
+
 def beacon_entry(entry):
     """A configured beacon: a direct http(s) URL, or an oblivious route
     {"relay": URL, "gateway_public": B64, "key_id": N, "relay_operator": "!..",
@@ -578,6 +661,11 @@ def beacon_call(entry, method, path, body=b""):
         )
         with urllib.request.urlopen(req, timeout=10) as r:  # noqa: S310 (scheme checked by beacon_url)
             return r.status, json.loads(r.read())
+    if (method, path) != ("GET", "/descriptors") and not gateway_verified(entry):
+        # Unverified, a route may only fetch the public directory (which is how its key
+        # gets verified): anything else could be linked by a gateway that gave this member
+        # its own key. `avpn mesh nodes --fetch` checks the key against other beacons.
+        raise GatewayKeyRefused("this oblivious route's gateway key is not verified yet; fetch descriptors first")
     import ohttp
 
     wire, reply = ohttp.encapsulate(base64.b64decode(entry["gateway_public"]), int(entry["key_id"]), method, path, body)
@@ -604,12 +692,32 @@ def fetch_from_beacons() -> int:
     beacons = [beacon_entry(u) for u in json.loads(cfg.read_text())]
     added = 0
     directory = {d["node_id"]: d for d in load_directory()}
+    answered = []
     for entry in beacons:
         try:
             _, batch = beacon_call(entry, "GET", "/descriptors")
         except (OSError, ValueError):
             continue  # an unreachable beacon is skipped, never fatal
-        for d in batch.get("descriptors", []):
+        answered.append((entry, batch.get("descriptors", [])))
+    # Each oblivious route's gateway key, checked against what the other beacons show.
+    batches = [(e["gateway_operator"] if isinstance(e, dict) else e, ds) for e, ds in answered]
+    path = gateway_checks_path()
+    checks = json.loads(path.read_text()) if path.exists() else {}
+    for entry, _ in answered:
+        if not isinstance(entry, dict):
+            continue
+        try:
+            witnesses = check_gateway_key(entry, batches)
+        except GatewayKeyRefused as e:
+            checks.pop(entry["gateway_operator"], None)
+            print("oblivious route refused: %s" % e, file=sys.stderr)
+            continue
+        checks[entry["gateway_operator"]] = dict(
+            key=[int(entry["key_id"]), entry["gateway_public"]], witnesses=witnesses, checked=int(time.time())
+        )
+    # Descriptors are signed one by one, so they are kept whichever beacon carried them.
+    for _entry, descriptors in answered:
+        for d in descriptors:
             if d.get("node_id") in directory:
                 continue  # duplicate suppression
             if validate(d) or not verify_descriptor(d):
@@ -617,6 +725,10 @@ def fetch_from_beacons() -> int:
             directory[d["node_id"]] = d
             added += 1
     MESH_DIR.mkdir(parents=True, exist_ok=True)
+    checks_tmp = path.with_suffix(".tmp")
+    checks_tmp.write_text(json.dumps(checks))
+    os.chmod(checks_tmp, 0o600)
+    checks_tmp.replace(path)
     tmp = directory_path().with_suffix(".tmp")
     tmp.write_text(json.dumps({"schema": SCHEMA, "descriptors": list(directory.values())}))
     os.chmod(tmp, 0o600)
@@ -783,6 +895,11 @@ def main() -> int:
     sp.add_argument("--publish", action="store_true")
     sp.add_argument("--dry-run", action="store_true")
     sp.add_argument("--yes", action="store_true")
+    sp.add_argument(
+        "--gateway-key",
+        type=Path,
+        help="this beacon's oblivious gateway key (mesh_beacon --gateway-key): its public half is signed into the descriptor",
+    )
 
     sub.add_parser("quota")
 

@@ -107,8 +107,8 @@ import ohttp  # noqa: E402
 
 gateway_private, gateway_public = ohttp.keypair()
 key_id = 1  # integer key id; encapsulate/Gateway pack it with the suite ids
-wire, reply_private = ohttp.encapsulate(gateway_public, key_id, "POST", "/v1/vector", b"request-body")
-gateway = ohttp.Gateway(gateway_private, key_id)
+wire, reply_private = ohttp.encapsulate(gateway_public, key_id, "POST", "/v1/vector", b"request-body", now=time.time())
+gateway = ohttp.Gateway(gateway_private, key_id, started=time.time() - 2 * ohttp.BUCKET)
 opened = gateway.open(wire)
 expect(
     opened[0] == "POST" and opened[1] == "/v1/vector" and opened[2] == b"request-body",

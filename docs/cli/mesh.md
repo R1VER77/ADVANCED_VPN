@@ -33,6 +33,18 @@ is no account.
         country): one legal order never reaches both ends. The middle does
         not count. --allow-same-jurisdiction lifts that rule.
 
+    avpn mesh publish [--dry-run] [--gateway-key PATH]
+        Sign this node's descriptor with your hardware key and gossip it.
+        A beacon that answers oblivious requests adds --gateway-key (the
+        file it serves with): the public key is signed into the descriptor,
+        so every member can check they were given the same one.
+
+    Oblivious routes (beacons.json entries with a relay and a gateway key)
+    are checked for key consistency: --fetch compares the configured key
+    with the gateway operator's own signed descriptor as at least two other
+    beacons show it. Until then the route only fetches the directory;
+    a different key, or two signed keys from one operator, refuses it.
+
     avpn mesh quota
         Contribution credits: earned relaying, spent on chains, today's
         balance. Private-group credits only until the public pool's VOPRF

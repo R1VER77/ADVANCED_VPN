@@ -43,7 +43,7 @@ from managed_profile import (
     cloak_certificate,
     canonical,
     refresh_leaves,
-    authorize_session,
+    sign_session,
     request,
     load_keys,
     HardwareOperator,
@@ -51,6 +51,7 @@ from managed_profile import (
 )
 
 APP = "avpn-app"
+LAYER_KEYS = ("outer", "middle", "inner")
 # Smallest underlay link MTU the HTTP/3 cloak can use: a 1420-byte QUIC UDP payload in an IPv4+UDP packet.
 UNDERLAY_MIN_MTU = 1448
 TUN = "avpn0"
@@ -1111,15 +1112,31 @@ def supervise(state, bin_dir, lab=False, whole=False):
     # One unlock (Nitrokey PIN+touch, TPM-bound systemd-creds, or explicit plaintext)
     # moves each key into a sealed memfd. No Python copy is kept: rotation reads the
     # key back from its descriptor only for the moment it signs a fresh leaf.
-    # A hardware-protected client's one PIN and touch also signs this session's statement
-    # (docs/HARDWARE_BOUND_SESSIONS.md): every hop refuses leaves the key did not authorize.
-    secret = meta = session = None
+    # A hardware-protected client never holds its long-term identities here
+    # (docs/HARDWARE_BOUND_SESSIONS.md): each session gets fresh layer keys, which a
+    # short-lived signer process certifies after the key's touch and PIN, and every hop
+    # refuses leaves the key did not authorize.
+    names = list(managed_identities(cfg))
+    key_handles = {}
+    session_end = None
+
+    def install_session(signed):
+        for lane, key in signed["keys"].items():
+            if lane in key_handles:
+                os.close(key_handles[lane])
+            key_handles[lane] = memory_fd(key)
+            leaf = rt / (lane + "-active-cert.der")  # supervisor: RAM-only runtime dir
+            atomic(leaf, signed["leaves"][lane])
+            cfg["core"][lane]["cert"] = str(leaf)
+        return signed["not_after"]
+
     if profile["role"] == "client" and json.loads(read_private(state / "protection.json"))["mode"] == "nitrokey":
-        secret, meta, session = authorize_session(cfg["core"], state)
-    key_handles = {
-        name: memory_fd(value) for name, value in load_keys(state, list(managed_identities(cfg)), secret, meta).items()
-    }
-    del secret
+        signed = sign_session(cfg["core"], state, carry=[n for n in names if n not in LAYER_KEYS])
+        key_handles.update({name: memory_fd(value) for name, value in signed.pop("carry").items()})
+        session_end = install_session(signed)
+        del signed
+    else:
+        key_handles.update({name: memory_fd(value) for name, value in load_keys(state, names).items()})
     if "cloak" in cfg:
         key_handles["token"] = memory_fd(cloak_token(fd_bytes(key_handles["wireguard"])))
         if cfg["cloak"]["role"] == "server":
@@ -1127,13 +1144,13 @@ def supervise(state, bin_dir, lab=False, whole=False):
             cert = rt / "cloak-cert.der"
             atomic(cert, cloak_certificate(fd_bytes(key_handles["cloak"]), cfg["cloak"]["cover_name"]))
             cfg["cloak"]["cert"] = str(cert)
-    refresh_leaves(
-        cfg["core"],
-        state,
-        {n: fd_bytes(key_handles[n]) for n in ["outer", "middle", "inner"] if n in key_handles},
-        out_dir=rt,
-        session=session,
-    )
+    if session_end is None:
+        refresh_leaves(
+            cfg["core"],
+            state,
+            {n: fd_bytes(key_handles[n]) for n in LAYER_KEYS if n in key_handles},
+            out_dir=rt,
+        )
     bin_dir, device_dir = prepare_runtime(cfg, bin_dir, state, uid, gid, lab)
     front_dir = front_exe = None
     if "front" in cfg:
@@ -1245,24 +1262,24 @@ def supervise(state, bin_dir, lab=False, whole=False):
                 last_meter = time.monotonic()
             # A hardware session is renewed an hour before it ends, with a fresh PIN and
             # touch; if nobody answers, the leaves run out and every hop refuses them.
-            renew = session is not None and time.time() >= session[3] - 3600 and time.monotonic() >= retry_session
-            if renew or (session is None and time.monotonic() - last_refresh >= 21600) or rotate_requested:
+            renew = session_end is not None and time.time() >= session_end - 3600 and time.monotonic() >= retry_session
+            if renew or (session_end is None and time.monotonic() - last_refresh >= 21600) or rotate_requested:
                 renewed = True
-                if session is not None:
+                if session_end is not None:
                     try:
-                        _, _, session = authorize_session(cfg["core"], state)
+                        session_end = install_session(sign_session(cfg["core"], state))
                     except Exception as e:  # no answer at the key: the current leaves stay
                         print("hardware session not renewed: %s" % e, file=sys.stderr)
                         retry_session = time.monotonic() + 300
                         renewed = False
-                if renewed:
+                else:
                     refresh_leaves(
                         cfg["core"],
                         state,
-                        {n: fd_bytes(key_handles[n]) for n in ["outer", "middle", "inner"] if n in key_handles},
+                        {n: fd_bytes(key_handles[n]) for n in LAYER_KEYS if n in key_handles},
                         out_dir=rt,
-                        session=session,
                     )
+                if renewed:
                     publish_runtime(cfg, device_dir, uid, gid)
                     if "core" in children:
                         stop(children["core"])

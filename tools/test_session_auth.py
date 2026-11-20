@@ -194,5 +194,117 @@ class Enrollment(unittest.TestCase):
             self.enroll("nitrokey", credential_class=RS256)
 
 
+class Signer(unittest.TestCase):
+    """Phase 2: tools/session_signer.py certifies fresh session keys; the supervisor
+    (managed_profile.sign_session) never holds the long-term identities."""
+
+    def client(self):
+        from unittest import mock
+
+        import keyguard
+        import managed_profile as mp
+
+        soft = SoftKey("es256")
+        secret = bytes(range(32))
+        meta = dict(salt=keyguard.b64(bytes(32)), credential=keyguard.b64(b"record"), counter=0)
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        (root / "vault").mkdir()
+        patches = [
+            mock.patch.object(keyguard, "hardware_secret", lambda v: (secret, meta)),
+            mock.patch.object(
+                keyguard,
+                "hardware_assertion",
+                lambda v, message=None, salt2=None: (secret, meta, soft.assert_(message)),
+            ),
+            mock.patch.object(keyguard, "credential_public", lambda v: cose(ES256, soft.key.public_key())),
+        ]
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+        mp.lab_setup(root, "198.51.100.1:443", "203.0.113.2:4433", protect={"client": "nitrokey"}, vault=root / "vault")
+        profiles = {r: json.loads((root / r / "profile.json").read_text()) for r in ("client", "relay", "exit")}
+        return root, profiles, soft
+
+    def test_session_keys_are_certified_by_the_identity_and_accepted_by_each_hop(self):
+        import time
+
+        import managed_profile as mp
+        import session_signer
+
+        root, profiles, soft = self.client()
+        core = profiles["client"]["core"]
+        requests = []
+
+        def in_process(request):
+            requests.append(request)
+            return session_signer.sign(Path(request["state"]), request["lanes"], request["carry"])
+
+        signed = mp.sign_session(core, root / "client", carry=["wireguard"], runner=in_process)
+        self.assertEqual(set(signed["keys"]), {"outer", "inner"})
+        self.assertEqual(set(signed["carry"]), {"wireguard"})
+        self.assertEqual(set(requests[0]), {"state", "lanes", "carry"})  # public keys only
+        now = time.time()
+        for hop, lane in (("relay", "outer"), ("exit", "inner")):
+            leaf = x509.load_der_x509_certificate(signed["leaves"][lane])
+            session_key = serialization.load_der_private_key(signed["keys"][lane], password=None)
+            identity = x509.load_der_x509_certificate((root / "client" / (lane + "-cert.der")).read_bytes())
+            spki = serialization.PublicFormat.SubjectPublicKeyInfo
+            self.assertEqual(
+                leaf.public_key().public_bytes(serialization.Encoding.DER, spki),
+                session_key.public_key().public_bytes(serialization.Encoding.DER, spki),
+            )
+            self.assertNotEqual(
+                leaf.public_key().public_bytes(serialization.Encoding.DER, spki),
+                identity.public_key().public_bytes(serialization.Encoding.DER, spki),
+            )
+            identity.public_key().verify(leaf.signature, leaf.tbs_certificate_bytes)  # issued by the identity
+            self.assertEqual(leaf.issuer, identity.subject)
+            sa.verify_leaf(profiles[hop]["core"][lane]["peer_device"], signed["leaves"][lane], now)
+            self.assertEqual(int(leaf.not_valid_after_utc.timestamp()), signed["not_after"])
+
+    def test_a_signer_that_answers_for_other_keys_is_refused(self):
+        import managed_profile as mp
+        import session_signer
+
+        root, profiles, _ = self.client()
+
+        def extra(request):
+            reply = session_signer.sign(Path(request["state"]), request["lanes"], ["wireguard"])
+            return reply
+
+        with self.assertRaisesRegex(ValueError, "other keys"):
+            mp.sign_session(profiles["client"]["core"], root / "client", carry=[], runner=extra)
+
+    def test_the_signer_process_is_undumpable_and_refuses_bad_requests(self):
+        import subprocess
+
+        here = Path(__file__).resolve().parent
+        probe = (
+            "import ctypes, resource, session_signer; h = session_signer.harden(); "
+            "print(ctypes.CDLL(None).prctl(3, 0, 0, 0, 0), resource.getrlimit(resource.RLIMIT_CORE), h['dumpable'])"
+        )
+        r = subprocess.run([sys.executable, "-c", probe], cwd=here, capture_output=True, text=True, check=True)
+        self.assertEqual(r.stdout.split(), ["0", "(0,", "0)", "False"])
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "protection.json").write_text(json.dumps(dict(schema=1, mode="none", vault=None)))
+            (Path(d) / "protection.json").chmod(0o600)
+            for request, reason in (
+                (dict(state=d, lanes={}, carry=[], extra=1), "unexpected signer request"),
+                (dict(state=d, lanes={"inner": "00"}, carry=[]), "hardware-protected device"),
+            ):
+                r = subprocess.run(
+                    [sys.executable, str(here / "session_signer.py")],
+                    input=json.dumps(request),
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertNotEqual(r.returncode, 0)
+                self.assertIn(reason, r.stderr)
+                self.assertEqual(r.stdout, "")
+
+
 if __name__ == "__main__":
     unittest.main()

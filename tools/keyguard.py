@@ -813,7 +813,8 @@ def mesh_sign(vault, envelope_path, cert_path, descriptor_path):
     preferred, any hmac-secret token works), verifiable offline with
     verify_assertion(). The key is scrubbed best-effort before returning."""
     sys.path.insert(0, str(Path(__file__).resolve().parent))
-    from cryptography.hazmat.primitives.asymmetric.ml_dsa import MLDSAPrivateKey
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.mldsa import MLDSA65PrivateKey
     from mesh import canonical
 
     envelope = json.loads(read_private(envelope_path))
@@ -823,7 +824,13 @@ def mesh_sign(vault, envelope_path, cert_path, descriptor_path):
     secret, meta, assertion = hardware_assertion(vault, message)
     key = open_bytes(secret, meta, MESH_ROLE, cert, envelope)
     try:
-        priv = MLDSAPrivateKey.from_private_bytes(key)
+        # The sealed key is the 32-byte ML-DSA-65 seed, or a PKCS#8 key.
+        if len(key) == 32:
+            priv = MLDSA65PrivateKey.from_seed_bytes(key)
+        else:
+            priv = serialization.load_der_private_key(key, password=None)
+            if not isinstance(priv, MLDSA65PrivateKey):
+                raise ValueError("the mesh operator key is not ML-DSA-65")
         descriptor["signature"] = b64(priv.sign(message))
     finally:
         key = b"\x00" * len(key)  # best-effort scrub; CPython gives no guarantee

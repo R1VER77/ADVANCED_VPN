@@ -1,8 +1,8 @@
 {
   "schema": 1,
-  "generated_utc": "2026-11-19T23:14:54Z",
+  "generated_utc": "2026-11-20T00:31:19Z",
   "purpose": "Pin the VERIFICATION_PLAN item 1-6 Tamarin models to the real crypto code: every abstract function the models use (h, senc, sign, aenc) is anchored to a concrete implementation value or refusal recorded here.",
-  "repo_commit": "e8d65df33de7326b237d61a2ef61eb0f1c7689d9",
+  "repo_commit": "f9e473e0e7a61728d3de24df6eecfd0e105be48f",
   "vectors": {
     "kem_seal": {
       "implementation": "tools/keyguard.py::kem_seal/kem_open/_kem_key",
@@ -17,7 +17,7 @@
       "kdf": {
         "function": "HKDF-SHA256, length 32, salt none",
         "info_format": "b'advanced-vpn/hybrid-kem/v1|' + context + b'|' + sha256(ephemeral || mlkem_ct || recipient_public)",
-        "info_hex_sample": "616476616e6365642d76706e2f6879627269642d6b656d2f76317c636c69656e747cb4880573d220284015426a1bedfd6e05f5493ec5057bca0351e98f0dfd30d21e",
+        "info_hex_sample": "616476616e6365642d76706e2f6879627269642d6b656d2f76317c636c69656e747c917cdcc672b37c2d89b2eac263a43896a35dea797b4b709af947aa182b2bfcdb",
         "key_material": "x25519_shared || mlkem768_shared (both shared secrets; the hybrid_compatibility abstraction)"
       },
       "aead": "AES-256-GCM, 12-byte nonce, associated data = context (the context_binding anchor)",
@@ -52,7 +52,7 @@
     },
     "credits": {
       "implementation": "tools/mesh_tokens.py::blind/sign_blinded/unblind/verify",
-      "issuer_id": "!961d2fc1",
+      "issuer_id": "!86c48821",
       "fdh": {
         "function": "Hash `token` to an integer in [1, n) with SHA-256 in counter mode.\n\n    Deterministic and domain-separated for this credit scheme; the digest\n    stream is interpreted big-endian and reduced modulo n. The result is\n    coprime to n except with negligible probability, which the caller\n    tolerates (verification simply fails for a bad draw).",
         "key_bits": 3072,

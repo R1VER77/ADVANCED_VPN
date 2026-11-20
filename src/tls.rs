@@ -230,6 +230,39 @@ pub fn certificate_lifetime(cert: &[u8]) -> Result<Duration> {
         (parsed.validity().not_after.timestamp() - now) as u64,
     ))
 }
+/// Whether the pinned identity (the certificate in this layer's authority file whose
+/// SubjectPublicKeyInfo hashes to `peer_sha256`) signed `leaf`, with ML-DSA-65.
+fn issued_by_pinned(leaf: &[u8], i: &Identity) -> Result<bool> {
+    let (_, parsed) =
+        parse_x509_certificate(leaf).map_err(|_| anyhow::anyhow!("invalid peer certificate"))?;
+    let raw = private_read(&i.ca, 262144)?;
+    let mut rest = raw.as_slice();
+    while !rest.is_empty() {
+        let (remainder, issuer) =
+            parse_x509_certificate(rest).map_err(|_| anyhow::anyhow!("invalid CA bundle"))?;
+        rest = remainder;
+        let spki = issuer.tbs_certificate.subject_pki.raw;
+        if format!("{:x}", Sha256::digest(spki)) != i.peer_sha256 {
+            continue;
+        }
+        let public = issuer
+            .tbs_certificate
+            .subject_pki
+            .subject_public_key
+            .data
+            .as_ref();
+        let signed = parsed.tbs_certificate.as_ref();
+        let signature = parsed.signature_value.data.as_ref();
+        // webpki has already chained the leaf to some certificate in the authority file;
+        // this binds it to the pinned one, should that file ever hold more than one.
+        return Ok(pq_signatures()
+            .all
+            .iter()
+            .any(|a| a.verify_signature(public, signed, signature).is_ok()));
+    }
+    Ok(false)
+}
+
 /// Verify a finished handshake (ALPN, hybrid-PQ group, pinned peer) and return how long
 /// the peer's leaf stays valid plus the matched peer pin. On a mesh server the peer may
 /// carry any admitted member's pin; everywhere else it must be the one pinned peer.
@@ -258,8 +291,14 @@ pub fn authenticated(c: &quinn::Connection, i: &Identity) -> Result<(Duration, S
             parsed.tbs_certificate.subject_pki.raw
         }
     };
-    let digest = format!("{:x}", Sha256::digest(pinned_bytes));
+    let mut digest = format!("{:x}", Sha256::digest(pinned_bytes));
     if i.peer_members.is_empty() {
+        if digest != i.peer_sha256 && i.peer_device.is_some() && issued_by_pinned(cert, i)? {
+            // A per-session key certified by the pinned identity
+            // (docs/HARDWARE_BOUND_SESSIONS.md, phase 2): accepted only where a device key is
+            // pinned, so the session authorization checked below is mandatory for it.
+            digest = i.peer_sha256.clone();
+        }
         ensure!(digest == i.peer_sha256, "peer revoked or not pinned");
     } else {
         ensure!(
