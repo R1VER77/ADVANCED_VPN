@@ -120,6 +120,9 @@ enum Cmd {
     /// Server without a TPM2: accept its data key until the next reboot.
     #[command(disable_help_flag = true)]
     ServerUnlock(Rest),
+    /// Operator: release the OpenTofu state key from the vault (to a pipe).
+    #[command(disable_help_flag = true)]
+    StateKey(Rest),
     /// Remove the kill switch (--allow-cleartext).
     #[command(disable_help_flag = true)]
     Reset(Rest),
@@ -161,6 +164,7 @@ impl Cmd {
             Cmd::UnlockKey(r) => ("unlock-key", r.args),
             Cmd::Unwrap(r) => ("unwrap", r.args),
             Cmd::ServerUnlock(r) => ("server-unlock", r.args),
+            Cmd::StateKey(r) => ("state-key", r.args),
             Cmd::Reset(r) => ("reset", r.args),
             Cmd::Cloud(r) => ("cloud", r.args),
             Cmd::Mesh(r) => ("mesh", r.args),
@@ -272,7 +276,7 @@ fn run(cli: Cli, theme: Theme) -> i32 {
         "run" | "unlock" | "mix" => return exec(&ctrl, action, &args),
         // The terminal (a PIN prompt) or the pipes (a data key, printed only as JSON to a
         // pipe) belong to the controller, which also keeps --json.
-        "unlock-key" | "unwrap" | "server-unlock" => {
+        "unlock-key" | "unwrap" | "server-unlock" | "state-key" => {
             let err = ctrl.command(cli.json, action, &args).exec();
             eprintln!("avpn: cannot run the controller: {err}");
             return 1;

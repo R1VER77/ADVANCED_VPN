@@ -285,5 +285,43 @@ class HardwareOperatorTouches(unittest.TestCase):
         self.assertIn("inner", mp.load_keys(state, ["inner"]))
 
 
+class StateKey(HardwareOperatorTouches):
+    """The OpenTofu state key (tools/tofu_run.py): sealed in the vault, one touch per use."""
+
+    def test_the_state_key_is_sealed_stable_and_opens_only_with_the_vault(self):
+        op = mp.HardwareOperator(self.vault)
+        key = op.state_key()
+        self.assertEqual(len(key), 32)
+        self.assertEqual(self.touches, 1)
+        self.assertEqual(op.state_key(), key)  # the same key, another touch
+        self.assertEqual(self.touches, 2)
+        for f in self.vault.iterdir():
+            self.assertNotIn(key, f.read_bytes(), f.name)
+            self.assertNotIn(key.hex().encode(), f.read_bytes(), f.name)
+        sealed = json.loads((self.vault / "tofu-state.sealed.json").read_text())
+        with self.assertRaises(Exception):
+            keyguard.open_bytes(bytes(32), self.meta, mp.STATE_KEY_ROLE, mp.STATE_KEY_BINDING, sealed)
+
+    def test_the_controller_releases_it_to_a_pipe_only(self):
+        import subprocess
+
+        here = Path(__file__).resolve().parent
+        argv = [sys.executable, "-B", str(here / "avpnctl.py"), "--json", "state-key", "--software-operator",
+                str(self.root / "op")]  # fmt: skip
+        r = subprocess.run(argv, capture_output=True, text=True, timeout=120, check=False)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        first = json.loads(r.stdout.strip().splitlines()[-1])["key"]
+        again = json.loads(subprocess.run(argv, capture_output=True, text=True, timeout=120).stdout.strip())["key"]
+        self.assertEqual(len(bytes.fromhex(first)), 32)
+        self.assertEqual(first, again)
+        import tofu_run
+
+        fake = Path(self.root / "ctl")
+        fake.write_text("#!/bin/sh\nshift 3\nexec %s -B %s --json state-key --software-operator %s\n"
+                        % (sys.executable, here / "avpnctl.py", self.root / "op"))  # fmt: skip
+        fake.chmod(0o700)
+        self.assertEqual(tofu_run.operator_key(self.vault, [str(fake)]).hex(), first)
+
+
 if __name__ == "__main__":
     unittest.main()

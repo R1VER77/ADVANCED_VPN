@@ -38,6 +38,7 @@ Setup:
 - `unlock-key`: operator only; create the unlock key that servers without a TPM2 lock their keys to
 - `unwrap`: operator only; unwrap such servers' data keys (used by `cloud unlock`)
 - `server-unlock`: on such a server, accept its data key until the next reboot
+- `state-key`: operator only; release the OpenTofu state key from the vault to the provisioner
 - `enroll`: install this device's signed bundle
 - `cloud`: find free servers, create or record them, and join them into one chain (`cloud suggest`, `cloud chain`)
 - `mesh`: publish a node descriptor, verify the volunteer mesh directory, or select a multi-operator chain (`mesh descriptor`, `mesh directory`, `mesh select`)

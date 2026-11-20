@@ -6,6 +6,14 @@ measured figure in the docs names the version it was measured on.
 
 ## Unreleased
 
+- OpenTofu provisioning, step 1 of the setup flow (D007): a pinned OpenTofu 1.13.9
+  (`tools/tofu.py`; SHA256SUMS verified against OpenTofu's signing key, fingerprint
+  cross-checked; refused unless the archive matches the pin), an `oci-server` module that
+  mirrors `cloud oci server` (provider `oracle/oci` 9.12.1, hashes locked for amd64 and
+  arm64), and a workspace runner (`tools/tofu_run.py`): read-only lock file, an exact saved
+  plan, state and plans encrypted by OpenTofu with a key sealed in the operator's Nitrokey
+  vault (`avpn state-key`), passed only in the environment. A live read-only plan matched
+  the hand-written path resource for resource.
 - A broken chain is obvious (owner, 20 November): when a connected client's chain stops
   answering for a minute, or never answers after a start, a desktop notification and
   `avpn status` say so and point to `avpn cloud health`, which finds whether a server was

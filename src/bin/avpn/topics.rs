@@ -121,6 +121,11 @@ pub const TOPICS: &[Topic] = &[
         body: include_str!("../../../docs/cli/server-unlock.md"),
     },
     Topic {
+        name: "state-key",
+        summary: "operator: release the OpenTofu state key from the vault",
+        body: include_str!("../../../docs/cli/state-key.md"),
+    },
+    Topic {
         name: "reset",
         summary: "remove the kill switch",
         body: include_str!("../../../docs/cli/reset.md"),

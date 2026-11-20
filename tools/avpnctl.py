@@ -2069,6 +2069,11 @@ def build_parser():
         help="NAME=PATH: the server's current unlock record (its protection.json), if not the request's own",
     )  # fmt: skip
     s.add_parser("server-unlock", help="server: accept the operator's data key on stdin, held in RAM until reboot")
+    sk = s.add_parser(
+        "state-key", help="operator: the OpenTofu state key, sealed in the vault (PIN + touch); pipe only"
+    )
+    sk.add_argument("--vault", type=Path, help="Nitrokey vault (the operator's)")
+    sk.add_argument("--software-operator", type=Path, help="LAB ONLY: plaintext operator keys in this directory")
     init = s.add_parser("init", help="operator: sign a chain from the devices' public requests")
     init.add_argument("--out", type=Path, required=True, help="new directory for the signed bundles")
     init.add_argument(
@@ -2446,6 +2451,10 @@ def dispatch(a):
             raise SystemExit("no unlock record for: " + ", ".join(missing))
         keys = operator_from(a).unwrap({n: tuple(v) for n, v in items.items()})
         emit(a, "unwrapped %d data key(s)" % len(keys), unlock={k: v.hex() for k, v in keys.items()})
+        return
+    if a.action == "state-key":
+        pipe_only(a)
+        emit(a, "OpenTofu state key released to this pipe", key=operator_from(a).state_key().hex())
         return
     if a.action == "server-unlock":
         root_guard(False)

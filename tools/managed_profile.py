@@ -801,6 +801,9 @@ def _load_request(raw, role):
 
 
 UNLOCK_ROLE = "operator-unlock"
+# The OpenTofu state key's envelope: its role, and the public value it is bound to.
+STATE_KEY_ROLE = "tofu-state"
+STATE_KEY_BINDING = b"advanced-vpn/tofu-state/v1"
 
 
 def unwrap_server_keys(private, items, unlock_public):
@@ -889,6 +892,13 @@ class SoftwareOperator:
         """Unwrap servers' data keys (see unwrap_server_keys)."""
         private = read_private(self.directory / "offline" / "operator-unlock.key")
         return unwrap_server_keys(private, items, self.unlock_public())
+
+    def state_key(self):
+        """TEST/LAB: the OpenTofu state key as a plaintext file (the hardware operator seals it)."""
+        path = self.directory / "offline" / "tofu-state.key"
+        if not path.exists():
+            put(path, os.urandom(32))
+        return read_private(path)
 
     def sign(self, message):
         """Sign `message` with both halves of the hybrid operator key (no hardware third half)."""
@@ -999,6 +1009,20 @@ class HardwareOperator:
         secret, meta = hardware_secret(self.vault)
         private, public = self._unlock_private(secret, meta)
         return unwrap_server_keys(private, items, public)
+
+    def state_key(self):
+        """The key that encrypts OpenTofu's state and saved plans (tools/tofu_run.py): 32
+        random bytes sealed under this vault's hardware secret, made on first use. One PIN +
+        touch returns it; it is never written in the clear."""
+        from keyguard import hardware_secret, seal_bytes, open_bytes, atomic
+
+        sealed = self.vault / "tofu-state.sealed.json"
+        secret, meta = hardware_secret(self.vault)
+        if sealed.exists():
+            return open_bytes(secret, meta, STATE_KEY_ROLE, STATE_KEY_BINDING, json.loads(read_private(sealed)))
+        key = os.urandom(32)
+        atomic(sealed, canonical(seal_bytes(secret, meta, STATE_KEY_ROLE, STATE_KEY_BINDING, key)))
+        return key
 
 
 def signature_members(operator):

@@ -46,7 +46,7 @@ BINARIES = [
     "cypherpunk-controller",
     "cypherpunk-bootguard",
 ]
-SOURCES = ["tools", "deploy", "third_party", "docs/cli", "docs/OFFLINE_INSTALLATION.md", "docs/SIGNED_REPOSITORY.md", "docs/SUPPORT_MATRIX.md",
+SOURCES = ["tools", "tofu/modules", "deploy", "third_party", "docs/cli", "docs/OFFLINE_INSTALLATION.md", "docs/SIGNED_REPOSITORY.md", "docs/SUPPORT_MATRIX.md",
            "docs/NAME_MIGRATION.md", "README.md", "LICENSE", "NOTICE", "SECURITY.md"]  # fmt: skip
 PACKAGE_OWNER = Path("/var/lib/cypherpunk-vpn/package-owner")
 PACKAGE_OWNER_BYTES = b"cypherpunk-vpn package ownership v1\n"
@@ -86,6 +86,13 @@ def next_servers_step(home=None):
     return HAVE_SERVERS if resources else SUGGEST
 
 
+def _package_filter(info):
+    """Leave out bytecode caches and OpenTofu's local provider downloads (`.terraform/`);
+    keep the provider lock files (`.terraform.lock.hcl`)."""
+    parts = Path(info.name).parts
+    return None if "__pycache__" in parts or ".terraform" in parts else info
+
+
 def pack(root, out, runtime=None):
     """Write the release package: SOURCES plus target/release/BINARIES, no caches."""
     import tarfile
@@ -99,7 +106,7 @@ def pack(root, out, runtime=None):
             raise FileNotFoundError("build first: %s/target/release/%s is missing" % (root, name))
     with tarfile.open(out, "w:gz") as tar:
         for name in SOURCES:
-            tar.add(root / name, arcname=name, filter=lambda i: None if "__pycache__" in i.name else i)
+            tar.add(root / name, arcname=name, filter=_package_filter)
         for name in BINARIES:
             tar.add(root / "target/release" / name, arcname="target/release/" + name)
         if runtime is not None:
@@ -249,7 +256,7 @@ def _build_user(data, python, stage):
     for name in SOURCES:
         src = ROOT / name
         if src.is_dir():
-            shutil.copytree(src, stage / name, ignore=shutil.ignore_patterns("__pycache__"))
+            shutil.copytree(src, stage / name, ignore=shutil.ignore_patterns("__pycache__", ".terraform"))
         else:
             shutil.copy2(src, stage / name)
     runtime = available_runtime()
