@@ -22,7 +22,18 @@ class ArtifactGate(unittest.TestCase):
             dynamic = struct.pack("<IIQQQQQQ", 2, 4, 192, 0x2000, 0, 16, 16, 8)
             clean = bytes(header) + load + dynamic + bytes(16) + struct.pack("<QQ", 0, 0)
             path.write_bytes(clean)
-            self.assertFalse(elf_static.verify(path)["interpreter"])
+            self.assertFalse(elf_static.verify(path, 62)["interpreter"])
+            # The architecture must be the one expected: an x86-64 artifact is not AArch64's,
+            # and an AArch64 one passes only where AArch64 is expected.
+            with self.assertRaisesRegex(ValueError, "architecture"):
+                elf_static.verify(path, elf_static.MACHINES["aarch64"])
+            arm = bytearray(clean)
+            struct.pack_into("<H", arm, 18, elf_static.MACHINES["aarch64"])
+            path.write_bytes(arm)
+            self.assertFalse(elf_static.verify(path, elf_static.MACHINES["aarch64"])["interpreter"])
+            with self.assertRaisesRegex(ValueError, "architecture"):
+                elf_static.verify(path, 62)
+            path.write_bytes(clean)
             broken = [b"not an ELF", clean[:80], clean[:-1]]
             loader = bytearray(clean)
             struct.pack_into("<I", loader, 120, 3)
@@ -40,4 +51,4 @@ class ArtifactGate(unittest.TestCase):
                 with self.subTest(case=number):
                     path.write_bytes(value)
                     with self.assertRaises(ValueError):
-                        elf_static.verify(path)
+                        elf_static.verify(path, 62)

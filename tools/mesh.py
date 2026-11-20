@@ -33,12 +33,21 @@ DESCRIPTOR_TTL_SECONDS = 7 * 24 * 3600
 GOSSIP_HOP_LIMIT = 3
 MESH_DIR = Path(os.environ.get("AVPN_MESH_DIR", Path.home() / ".config" / "advanced-vpn" / "mesh"))
 CLOUD = os.environ.get("AVPN_CLOUD", "/opt/advanced-vpn/bin/avpn-cloud")
-OPERATOR_KEY = Path(os.environ.get("AVPN_OPERATOR_KEY", Path.home() / ".config" / "advanced-vpn" / "operator.pub"))
 KEYGUARD = os.environ.get("AVPN_KEYGUARD", "/opt/advanced-vpn/tools/keyguard.py")
 VAULT = Path(os.environ.get("AVPN_VAULT", Path.home() / ".config" / "advanced-vpn" / "vault"))
-OPERATOR_ENVELOPE = Path(
-    os.environ.get("AVPN_MESH_ENVELOPE", Path.home() / ".config" / "advanced-vpn" / "mesh" / "operator-key.sealed.json")
+# The member's identity is the operator's own ML-DSA-65 key from `avpn init --vault`: its
+# public half beside the vault, its private half sealed under the vault's FIDO2 credential
+# (managed_profile.HardwareOperator). AVPN_OPERATOR_KEY may instead name a raw public key or
+# the operator.pub file `avpn init` writes into the bundles.
+OPERATOR_KEY = Path(os.environ.get("AVPN_OPERATOR_KEY", VAULT / "operator-mldsa65.pub"))
+OPERATOR_ENVELOPE = Path(os.environ.get("AVPN_MESH_ENVELOPE", VAULT / "operator-mldsa65.sealed.json"))
+# The role its envelope is bound to: the operator's (HardwareOperator) or a separately
+# sealed mesh key (keyguard mesh-seal).
+OPERATOR_ROLE = os.environ.get(
+    "AVPN_MESH_ROLE",
+    "operator-mldsa65" if OPERATOR_ENVELOPE.name == "operator-mldsa65.sealed.json" else "mesh-operator",
 )
+MLDSA65_PUBLIC = 1952
 
 # Always-free capacity a member can contribute. Ranked by free egress: egress is
 # what a relay burns. egress_gib_month=0 means "unsuitable as a relay".
@@ -97,17 +106,27 @@ def member_id(public_key_bytes: bytes) -> str:
     return "!" + hashlib.sha256(public_key_bytes).hexdigest()[:8]
 
 
-def load_operator_key() -> bytes:
-    """The member's public identity: operator.pub written by `avpn init`.
+def load_operator_key(path: Path | None = None) -> bytes:
+    """The member's public identity: the raw ML-DSA-65 public key of the operator that
+    `avpn init` made, read from the vault's operator-mldsa65.pub, or from the operator.pub
+    JSON (schema 2 or 3) that `avpn init` writes into the bundles.
 
     The matching secret stays sealed under the hardware token; this file is
     public. Refuse anything that is not a private, user-owned file.
     """
-    p = OPERATOR_KEY
+    p = path or OPERATOR_KEY
     st = p.lstat()
     if not p.is_file() or st.st_uid != os.geteuid() or (st.st_mode & 0o077):
         raise SystemExit(f"refusing {p}: must be a regular file owned by you, mode 0600")
-    return p.read_bytes().strip()
+    raw = p.read_bytes()
+    if raw.lstrip().startswith(b"{"):
+        doc = json.loads(raw)
+        if doc.get("schema") not in (2, 3) or "mldsa65" not in doc:
+            raise SystemExit(f"refusing {p}: not an operator public file")
+        raw = base64.b64decode(doc["mldsa65"], validate=True)
+    if len(raw) != MLDSA65_PUBLIC:
+        raise SystemExit(f"refusing {p}: not an ML-DSA-65 public key")
+    return raw
 
 
 def _mldsa():
@@ -447,9 +466,8 @@ def cmd_publish(args) -> dict:
         return {
             "ok": False,
             "error": "NoSealedOperatorKey",
-            "hint": f"seal the operator key once: keyguard.py mesh-seal --vault {VAULT} "
-            f"--key <operator.key> --cert {OPERATOR_KEY} --envelope {OPERATOR_ENVELOPE} "
-            "--remove-plaintext",
+            "hint": f"no sealed operator key at {OPERATOR_ENVELOPE}: `avpn init --vault {VAULT}` creates it "
+            "on its first signature (or point AVPN_MESH_ENVELOPE at one made by keyguard.py mesh-seal)",
         }
     MESH_DIR.mkdir(parents=True, exist_ok=True)
     tmp = MESH_DIR / ".publish.tmp"
@@ -464,6 +482,8 @@ def cmd_publish(args) -> dict:
             str(VAULT),
             "--envelope",
             str(OPERATOR_ENVELOPE),
+            "--role",
+            OPERATOR_ROLE,
             "--cert",
             str(OPERATOR_KEY),
             "--descriptor",
@@ -627,6 +647,35 @@ def gateway_verified(entry: dict, now: float | None = None) -> bool:
     )
 
 
+# The relay's clock, per relay URL: (offset to add to this host's clock, when measured).
+# Sealed requests carry a timestamp the gateway sees; taken from the relay, which already
+# knows this member and sees only ciphertext, it reveals nothing to the gateway that the
+# relay's own address does not, and no third party is asked the time (docs: ohttp.py).
+RELAY_CLOCK_SECONDS = 3600
+_relay_clock: dict = {}
+
+
+def _date_offset(headers, before, after):
+    import email.utils
+
+    date = headers.get("Date")
+    if not date:
+        raise ValueError("the relay sent no Date")
+    return email.utils.parsedate_to_datetime(date).timestamp() - (before + after) / 2
+
+
+def relay_clock(relay: str) -> float:
+    """This host's time on the relay's clock: GET /time when the last reading is old."""
+    offset, at = _relay_clock.get(relay, (None, 0.0))
+    if offset is None or time.monotonic() - at > RELAY_CLOCK_SECONDS:
+        before = time.time()
+        req = urllib.request.Request(relay + "/time", method="GET")  # noqa: S310 (scheme checked by beacon_url)
+        with urllib.request.urlopen(req, timeout=10) as r:  # noqa: S310 (as above)
+            offset = _date_offset(r.headers, before, time.time())
+        _relay_clock[relay] = (offset, time.monotonic())
+    return time.time() + offset
+
+
 def beacon_entry(entry):
     """A configured beacon: a direct http(s) URL, or an oblivious route
     {"relay": URL, "gateway_public": B64, "key_id": N, "relay_operator": "!..",
@@ -668,12 +717,24 @@ def beacon_call(entry, method, path, body=b""):
         raise GatewayKeyRefused("this oblivious route's gateway key is not verified yet; fetch descriptors first")
     import ohttp
 
-    wire, reply = ohttp.encapsulate(base64.b64decode(entry["gateway_public"]), int(entry["key_id"]), method, path, body)
+    wire, reply = ohttp.encapsulate(
+        base64.b64decode(entry["gateway_public"]),
+        int(entry["key_id"]),
+        method,
+        path,
+        body,
+        now=relay_clock(entry["relay"]),
+    )
     req = urllib.request.Request(  # noqa: S310 (scheme checked by beacon_url)
         entry["relay"] + "/relay", data=wire, headers={"Content-Type": "message/ohttp-req"}
     )
+    before = time.time()
     with urllib.request.urlopen(req, timeout=20) as r:  # noqa: S310 (scheme checked by beacon_url)
         status, answer = ohttp.decapsulate(r.read(), reply)
+        try:  # every answer refreshes the relay's clock
+            _relay_clock[entry["relay"]] = (_date_offset(r.headers, before, time.time()), time.monotonic())
+        except ValueError:
+            pass
     return status, json.loads(answer)
 
 

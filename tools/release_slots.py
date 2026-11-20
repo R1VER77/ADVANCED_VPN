@@ -169,12 +169,32 @@ class Store:
                 raise ValueError("unsafe upgrade lock")
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
             self.locked = True
+            self.sweep_stale_stages()
             self.recover()
             self.recover_adoption()
             yield self
         finally:
             self.locked = False
             os.close(fd)
+
+    def sweep_stale_stages(self):
+        """Remove staging directories that an interrupted install left behind. Under the
+        exclusive lock no other install is running, so every one belongs to a dead process
+        (tools/test_install.py kills upgrades mid-way). Only this user's own real
+        directories named like a stage are removed; nothing is followed through a link."""
+        self.require_lock()
+        for entry in self.releases.iterdir():
+            if not re.fullmatch(r"\.prepare-[A-Za-z0-9_]{8}", entry.name):
+                continue
+            info = entry.lstat()
+            if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid():
+                continue
+
+            def writable(function, path, _):
+                os.chmod(path, 0o700)  # a sealed, read-only stage
+                function(path)
+
+            shutil.rmtree(entry, onerror=writable)
 
     def require_lock(self):
         """Mutations through an unlocked store are programming errors."""

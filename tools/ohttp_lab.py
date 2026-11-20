@@ -51,9 +51,10 @@ MEMBER_SCRIPT = r"""
 import json,sys,time,urllib.request
 sys.path.insert(0,sys.argv[1])
 import mesh,timesync
-# The lab's namespaces have no internet, so no time pools: the lab host's clock stands in
-# (the synchronization itself: tools/test_ohttp.py and a live check).
-timesync.now=time.time
+# Sealed requests are stamped with the relay's clock (GET /time); no one else is asked.
+def nobody_else(*_):
+    raise SystemExit("a third party was asked the time")
+timesync.now=nobody_else
 cfg=json.loads(sys.argv[2])
 entry=mesh.beacon_entry(cfg)
 out={}

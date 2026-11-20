@@ -34,6 +34,7 @@
 //!   spoofed or unauthenticated packet earns nothing, so a paced server is never a
 //!   reflector. Because the relay's stream is constant, the reply stream is too.
 use crate::daita::RateClass;
+use crate::link_bounds::{Window, earn, spend};
 use anyhow::{Context, Result, bail, ensure};
 use aws_lc_rs::{
     aead::{AES_256_GCM, Aad, LessSafeKey, NONCE_LEN, Nonce, UnboundKey},
@@ -208,41 +209,6 @@ impl Sealer {
             .map_err(|_| anyhow::anyhow!("seal failed"))?;
         out.extend_from_slice(&body);
         Ok(out)
-    }
-}
-
-/// Sliding 128-cell replay window over one sender session's counters.
-#[derive(Default)]
-struct Window {
-    highest: Option<u64>,
-    seen: u128,
-}
-
-impl Window {
-    /// Whether `n` is new (accepting it marks it seen).
-    fn accept(&mut self, n: u64) -> bool {
-        match self.highest {
-            None => {
-                self.highest = Some(n);
-                self.seen = 1;
-                true
-            }
-            Some(h) if n > h => {
-                let shift = n - h;
-                self.seen = if shift >= 128 { 0 } else { self.seen << shift };
-                self.seen |= 1;
-                self.highest = Some(n);
-                true
-            }
-            Some(h) => {
-                let back = h - n;
-                if back >= 128 || self.seen & (1u128 << back) != 0 {
-                    return false;
-                }
-                self.seen |= 1u128 << back;
-                true
-            }
-        }
     }
 }
 
@@ -655,7 +621,7 @@ async fn clock(
         tick.tick().await;
         for _ in 0..pace.slots {
             if let Some(c) = &credit
-                && c.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+                && c.fetch_update(Ordering::SeqCst, Ordering::SeqCst, spend)
                     .is_err()
             {
                 break;
@@ -920,7 +886,7 @@ pub async fn ingress(
                 }
                 let peer = peers.get_mut(&from).expect("just inserted");
                 peer.last = Instant::now();
-                let _ = peer.credit.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |c| Some((c + 1).min(cap)));
+                let _ = peer.credit.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |c| Some(earn(c, cap)));
                 // The sender has switched to the session we answered: reply under it too.
                 if let Some((next, _, rev)) = &mut peer.answered
                     && *next == o.id

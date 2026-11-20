@@ -155,8 +155,12 @@ These governance items are not complete merely because this roadmap lists them.
   abstraction [its fidelity table](../formal/README.md) states. ProVerif then proved
   OHTTP and credit unlinkability (mutation-checked); the credit work found and closed an
   issuer tagging attack (`unblind` now verifies). Hardware-bound sessions added a sixteenth
-  Tamarin model: 57 lemmas and 26 mutants in all (`docs/evidence/TAMARIN.json`). Kani
-  harnesses and parser fuzzing remain.
+  Tamarin model: 57 lemmas and 26 mutants in all (`docs/evidence/TAMARIN.json`). On 20
+  November Kani proved the link's replay window and reply credit on the code itself, and
+  every parser of outside bytes is fuzzed in CI (five Rust targets, coverage-guided, 40
+  million runs clean before landing; Python by mutation, which found three exception
+  types escaping the enrollment and session-leaf parsers, now refused as `ValueError`).
+  Secret-handling review and independent review remain.
 - [x] Let the operator add a hardware post-quantum signature (19 November): an optional
   third signature half from an ML-DSA-44 FIDO2 credential on a separate key, required by
   every verifier once the operator's public file names it. Only Solo 2's Hacker build
@@ -174,8 +178,13 @@ These governance items are not complete merely because this roadmap lists them.
   assumptions, adaptive exposure, durable consumption, complete-book compromise,
   erasure limits and integration. Treat post-compromise recovery as separate new
   work; existing symbolic proofs do not qualify that stronger claim.
-- [ ] Remove the central public DNS dependency through a self-run resolver at the exit,
+- [x] Remove the central public DNS dependency through a self-run resolver at the exit,
   preserving the documented post-quantum transport policy and explaining resolver limits.
+  `avpn init --dns-recursive` (20 November): the exit's Unbound validates DNSSEC and
+  minimises query names; checked live (20 of 20 names, a DNSSEC failure refused) with the
+  exit's forwarder in front, which only ever speaks plain DNS to loopback. Its queries to
+  authoritative servers are plain DNS, a named exception (PQ_INVENTORY exception 5), so it
+  is opt-in; the hybrid post-quantum DoT forwarder stays the default.
 - [ ] Measure operator/provider independence, correlation exposure and actual anonymity
   sets. Evaluate integration with an existing compatible anonymity network.
 - [ ] Review mesh membership and credit verification; keep unreviewed mechanisms

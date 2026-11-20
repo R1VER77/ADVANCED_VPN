@@ -13,6 +13,7 @@ pub mod daita;
 pub mod dcnet;
 /// Constant-rate, encrypted links between consecutive servers (per-hop shaping).
 pub mod link;
+mod link_bounds;
 /// AVPN/Mesh: community node identity, signed descriptors, the node directory
 /// and unlinkable contribution credits. See docs/MESH_DESIGN.md.
 pub mod mesh;
@@ -26,3 +27,14 @@ pub mod session_auth;
 pub mod tls;
 /// TUN devices and packet admission checks.
 pub mod tun;
+
+/// Entry points for coverage-guided fuzzing (`fuzz/`, built with `cfg(fuzzing)` only):
+/// parsers of attacker-controlled bytes that are private to their modules.
+#[cfg(fuzzing)]
+#[doc(hidden)]
+pub mod fuzzing {
+    /// The cloak's parse of an HTTP request carrying a client's proof.
+    pub fn cloak_http_proof(request: &[u8]) {
+        let _ = crate::cloak::parse_http_proof(request);
+    }
+}

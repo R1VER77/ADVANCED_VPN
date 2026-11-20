@@ -12,8 +12,10 @@ oblivious control plane, blind-RSA credits, signed enrollment), the DC-net round
 the abstraction its model states: `formal/README.md` lists what each model leaves out and
 which lemmas rest on an assumption. The ProVerif equivalences (ohttp and credit
 unlinkability) are proved in the same CI job (`tools/proverif_check.py`, results in
-`docs/evidence/PROVERIF.json`). Still planned: the Kani harnesses and the live Rust vectors
-for items 1–2. Nothing in the
+`docs/evidence/PROVERIF.json`). Kani proves the link's replay window and reply credit on the
+code itself (`src/link_bounds.rs` via `crates/avpn-kani`, CI job `kani`), and every parser of
+outside bytes is fuzzed (`fuzz/`, coverage-guided, CI job `fuzz`; `tools/test_parser_fuzz.py`
+for the Python ones). Still planned: the live Rust vectors for items 1–2. Nothing in the
 documentation may claim a property from this list until its model and its gates are in CI.
 Proofs run with Tamarin 1.12.0 and Maude 3.5.1 (official release binaries, pinned by
 SHA-256 in `.github/workflows/verify.yml`, job `formal-models`); `tools/tamarin_check.py`
@@ -57,8 +59,8 @@ packets earn nothing.
 - **Handshake authentication**: without the PSK no one can complete or steer a key exchange, and an answer is bound to its offer (Tamarin; transcript hash in the KDF).
 - Secrecy and integrity of every cell (Tamarin).
 - **No reflection**: a cell sent in one direction is never accepted in the other (Tamarin; the mutation drops the direction from `info`).
-- **No replay**: each counter is accepted at most once per session, and nothing older than the window is accepted, for every interleaving (Kani on the window code, exhaustive to a bound; Tamarin for cross-session replay through the session id).
-- **No amplification**: a sender without the PSK causes no packet in reply (Tamarin, plus a proptest on the credit counter).
+- **No replay**: each counter is accepted at most once per session, and nothing older than the window is accepted, for every interleaving (Kani on the window code, exhaustive to a bound; Tamarin for cross-session replay through the session id). **Proved (Kani, in CI):** over any five counters, none is accepted twice, none 128 or more below the highest accepted, and any above it is accepted; four mutants of the window and credit code are each caught.
+- **No amplification**: a sender without the PSK causes no packet in reply (Tamarin, plus Kani on the credit counter: from zero, under any eight receipts and reply attempts and any cap, the replies sent never exceed the cells received, and the credit never exceeds its cap).
 
 ### 2. The cloak's proof (`src/cloak.rs`)
 
@@ -88,7 +90,7 @@ That deviation is exactly what needs proving.
 - Request and response secrecy against the relay (Tamarin).
 - **Response binding**: a response cannot be swapped onto another request (Tamarin).
 - **Freshness**: the 60 s window and the nonce cache accept each request at most once (Tamarin, stateful), across restarts too: the cache lives in memory, so a gateway refuses anything sent before it started (`test_a_restarted_gateway_refuses_replays_of_earlier_requests`).
-- **Unlinkability**: the gateway cannot tell whether two requests came from the same client, and the relay learns nothing but sizes and times (ProVerif, observational equivalence). **Proved** (`formal/ohttp/ohttp_unlinkability.pv`), given that every member uses the same gateway key; mutants that reuse a reply key or give each member its own gateway key fail. That condition is enforced by `mesh.check_gateway_key` (two independent beacons must show the gateway operator's signed key; equivocation refused). The request's clock reading is a 30-second bucket of a synchronized clock (`tools/timesync.py`, Tails' htpdate method), so a skewed member clock no longer links; the gateway refuses other values.
+- **Unlinkability**: the gateway cannot tell whether two requests came from the same client, and the relay learns nothing but sizes and times (ProVerif, observational equivalence). **Proved** (`formal/ohttp/ohttp_unlinkability.pv`), given that every member uses the same gateway key; mutants that reuse a reply key or give each member its own gateway key fail. That condition is enforced by `mesh.check_gateway_key` (two independent beacons must show the gateway operator's signed key; equivocation refused). The request's clock reading is a 30-second bucket of the relay's clock (`mesh.relay_clock`), so a skewed member clock no longer links, and no third party is asked the time (a relay tagging it would need the gateway's collusion, which the proof already excludes); the gateway refuses other values.
 - Operator separation (relay and gateway run by different operators) is an assumption of the property, and the code already enforces it (`mesh.beacon_entry`).
 
 ### 5. Blind-RSA credits (`tools/mesh_tokens.py`)

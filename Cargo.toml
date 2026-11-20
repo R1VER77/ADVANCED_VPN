@@ -43,6 +43,8 @@ panic = "abort"
 
 [lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
+# fuzz/ builds this crate with cfg(fuzzing), which exposes src/lib.rs `fuzzing`.
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(fuzzing)'] }
 
 [lints.clippy]
 undocumented_unsafe_blocks = "deny"

@@ -68,9 +68,13 @@ private vulnerability reporting (see [SECURITY.md](../SECURITY.md)).
   replaced `verify_descriptor` with a stub, so no test had ever run it.
 - **Fix:** the right module (`MLDSA65PublicKey`, a 32-byte seed or PKCS#8 for signing), and
   `tools/test_gateway_consistency.py`, which signs and verifies real descriptors with no
-  stub and fails on the old import. Still open: `operator.pub` for the mesh is documented as
-  written by `avpn init`, whose `operator.pub` is the operator's JSON public file, not a raw
-  ML-DSA key; the mesh's own node key is a placeholder until enrollment returns it.
+  stub and fails on the old import. The same audit found the mesh reading its identity from a
+  file nothing wrote (`~/.config/advanced-vpn/operator.pub` as a raw key) and asking for a
+  plaintext key to seal: it now uses the operator key `avpn init --vault` already keeps (the
+  vault's `operator-mldsa65.pub`, or the bundles' JSON `operator.pub`) and its sealed
+  envelope (`keyguard mesh-sign --role operator-mldsa65`); a test signs and verifies a
+  descriptor through that whole path. The node key in a descriptor stays the operator's until
+  enrollment returns the server's own.
 
 ### Pad tools could reuse a one-time pad; the information-theoretic claim overstated its proof (16 Nov 2026)
 - **What:** an independent audit (16 Nov 2026) found four state bugs in the pad and identity

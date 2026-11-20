@@ -57,6 +57,17 @@ class UserInstallTests(unittest.TestCase):
         r = self.avpn("--json", "--state", str(self.home / "no-state"), "hops")
         self.assertEqual(json.loads(r.stdout)["chain"], [], r.stderr)
         self.assertIn("• Chain  not enrolled", self.avpn("--state", str(self.home / "no-state"), "hops").stdout)
+        # docs/NAME_MIGRATION.md: the new name drives the same controller, with the same JSON.
+        env = dict(os.environ, HOME=str(self.home))
+        env.pop("AVPN_CONTROLLER", None)
+        for args in (
+            ["--json", "--state", str(self.home / "no-state"), "hops"],
+            ["--state", str(self.home / "no-state"), "hops"],
+        ):
+            new = subprocess.run(
+                [str(self.bin / "cypherpunk"), *args], capture_output=True, text=True, env=env, timeout=60
+            )
+            self.assertEqual((new.returncode, new.stdout), (0, self.avpn(*args).stdout), new.stderr)
 
     def assert_no_preparation_leftovers(self):
         self.assertFalse(list((self.data / "releases").glob(".prepare-*")))
@@ -100,6 +111,35 @@ class UserInstallTests(unittest.TestCase):
                 install.install_user(self.data, self.bin)
         self.assertEqual((venv / "preserve").read_text(), "previous working runtime")
         self.assert_no_preparation_leftovers()
+
+    def test_an_upgrade_killed_at_any_point_leaves_a_working_command_and_reruns_cleanly(self):
+        # Interrupted upgrades (docs/ROADMAP.md): SIGKILL, as a power cut would, at points
+        # spread over a whole upgrade. After each, the command still works (old release or
+        # new, never a broken one), and a plain re-run completes and leaves nothing behind.
+        import signal
+        import time
+
+        self.install()
+        here = str(Path(install.__file__).resolve().parent)
+        run = [
+            sys.executable,
+            "-c",
+            "import sys; from pathlib import Path; sys.path.insert(0, %r); import install; "
+            "install.install_user(Path(%r), Path(%r), python=sys.executable)" % (here, str(self.data), str(self.bin)),
+        ]
+        start = time.monotonic()
+        subprocess.run(run, check=True, capture_output=True, timeout=300)
+        duration = time.monotonic() - start
+        for k in range(1, 13):
+            p = subprocess.Popen(run, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            time.sleep(duration * k / 13)
+            p.send_signal(signal.SIGKILL)
+            p.wait()
+            with self.subTest(killed_at="%d/13" % k):
+                self.assertEqual(self.avpn("--version").returncode, 0)
+        self.install()
+        self.assert_no_preparation_leftovers()
+        self.assertEqual(self.avpn("--version").returncode, 0)
 
     def test_failed_install_leaves_the_old_one_and_no_leftovers(self):
         self.install()

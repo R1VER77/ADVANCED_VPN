@@ -98,7 +98,10 @@ def verify_leaf(device: dict, leaf_der: bytes, now: float) -> dict:
     from cryptography.hazmat.primitives import hashes, serialization
     from cryptography.hazmat.primitives.asymmetric import ec, ed25519
 
-    leaf = x509.load_der_x509_certificate(leaf_der)
+    try:
+        leaf = x509.load_der_x509_certificate(leaf_der)
+    except x509.InvalidVersion as e:  # found by tools/test_parser_fuzz.py
+        raise ValueError("invalid certificate") from e
     try:
         raw = leaf.extensions.get_extension_for_oid(x509.ObjectIdentifier(OID)).value.value
     except x509.ExtensionNotFound as e:
@@ -140,7 +143,14 @@ def verify_leaf(device: dict, leaf_der: bytes, now: float) -> dict:
             raise ValueError("unknown device key algorithm")
     except InvalidSignature as e:
         raise ValueError("not signed by the enrolled key") from e
-    spki = leaf.public_key().public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)
+    from cryptography.exceptions import UnsupportedAlgorithm
+
+    try:
+        spki = leaf.public_key().public_bytes(
+            serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
+        )
+    except UnsupportedAlgorithm as e:  # found by tools/test_parser_fuzz.py
+        raise ValueError("the authorization does not name this key") from e
     if spki_sha256(spki) not in s["layers"].values():
         raise ValueError("the authorization does not name this key")
     if not 0 < not_after - not_before <= MAX_SECONDS:

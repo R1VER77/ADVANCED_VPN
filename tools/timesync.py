@@ -1,5 +1,10 @@
 """A synchronized clock for timestamps other people see (htpdate-style, as Tails does it).
 
+Oblivious requests no longer use it: they take the relay's clock (tools/mesh.py
+relay_clock), which costs no extra traffic and asks no third party. This stays for a
+caller without a relay; note that, unlike Tails, it does not run over Tor, so its regular
+visits to a fixed set of sites are visible to whoever watches this host's connection.
+
 An oblivious request (tools/ohttp.py) carries a timestamp, and the gateway sees it beside
 its own clock: a member whose clock is off by a steady offset would be recognizable by
 that offset from request to request. So the timestamp comes from this clock, not the

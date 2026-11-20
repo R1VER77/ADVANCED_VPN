@@ -99,8 +99,19 @@ plaintext only inside a short-lived signer.
    pinned identity only if the pinned identity signed it, and only where a device key is
    pinned, so the session authorization is mandatory for it.
 4. **Still long-term:** the WireGuard carrier key, its PSK and the cloak token, which the
-   signer returns as before. They reach only the entry's carrier; making them per-session
-   needs the entry to accept a new carrier key each session, and is the next step.
+   signer returns as before. They reach only the entry's carrier, and both TLS layers inside
+   it refuse once the hardware session ends.
+
+   **Assessed, 20 November 2026, not built (owner's decision):** making them per-session
+   needs the entry to learn a new carrier key each session, before the carrier exists: the
+   cloak would have to carry the session's authorization. The cloak's proof today is 32
+   bytes on one QUIC stream (or an `If-None-Match` header on the TCP fallback, whose header
+   the server bounds to 4 KB); a session leaf is about 7 KB (an ML-DSA-65 key and signature
+   plus the statement), so every connection would open with a visible upload, changing the
+   very shape the cloak exists to hide. What it would buy is small: copied carrier keys reach
+   the entry's carrier, never past it. Recommended: leave the carrier as it is. (A short hash
+   of the statement would keep the shape but cannot be checked: the entry never sees the
+   statement it would stand for.)
 
 **Evidence.** Six Rust QUIC handshake tests, among them: a session key certified by the
 identity and named by the device connects; without a pinned device key, or certified by

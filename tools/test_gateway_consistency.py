@@ -70,6 +70,78 @@ class Signatures(unittest.TestCase):
         self.assertFalse(mesh.verify_descriptor(forged))
 
 
+class OperatorIdentity(unittest.TestCase):
+    """The mesh identity is the operator key `avpn init --vault` made: no separate plaintext
+    key, and a descriptor signed by `keyguard mesh-sign` with it verifies (no stubs)."""
+
+    def test_avpn_init_operator_key_signs_a_verifiable_descriptor(self):
+        import contextlib
+        import io
+
+        import keyguard
+        import managed_profile as mp
+        from session_auth_vectors import SoftKey
+
+        from fido2.cose import ES256
+        from fido2.webauthn import Aaguid, AttestedCredentialData
+
+        soft = SoftKey("es256")
+        secret = bytes(range(32))
+        record = AttestedCredentialData.create(
+            Aaguid(bytes(16)), b"\x01" * 32, ES256.from_cryptography_key(soft.key.public_key())
+        )
+        meta = dict(
+            schema=1, rp=keyguard.RP, salt=keyguard.b64(bytes(32)), credential=keyguard.b64(bytes(record)), counter=0
+        )
+        with (
+            tempfile.TemporaryDirectory() as d,
+            mock.patch.object(
+                keyguard,
+                "hardware_assertion",
+                lambda v, message=None, salt2=None: (secret, meta, soft.assert_(message or b"")),
+            ),
+        ):
+            vault = Path(d) / "vault"
+            vault.mkdir(mode=0o700)
+            (vault / "credential.json").write_text(json.dumps(meta))
+            mp.HardwareOperator(vault).sign(b"first signature creates and seals the ML-DSA-65 key")
+            pub = vault / "operator-mldsa65.pub"
+            raw = mesh.load_operator_key(pub)
+            self.assertEqual(len(raw), mesh.MLDSA65_PUBLIC)
+            # The bundles' operator.pub (JSON) names the same identity.
+            with mock.patch.object(keyguard, "credential_public", lambda v: "cHVi"):
+                public = mp.HardwareOperator(vault).public()
+            op_file = Path(d) / "operator.pub"
+            op_file.write_text(json.dumps(public))
+            op_file.chmod(0o600)
+            self.assertEqual(mesh.load_operator_key(op_file), raw)
+            now = int(time.time())
+            unsigned = dict(
+                schema=mesh.SCHEMA, node_id=mesh.member_id(raw), node_public_key=base64.b64encode(raw).decode(),
+                roles=["relay"], country="DE", group="public", operator=mesh.member_id(raw),
+                published=now, expires=now + 3600, signature="",
+            )  # fmt: skip
+            path = Path(d) / "descriptor.json"
+            path.write_text(json.dumps(unsigned))
+            path.chmod(0o600)
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                keyguard.mesh_sign(vault, vault / "operator-mldsa65.sealed.json", pub, path, "operator-mldsa65")
+            signed = json.loads(out.getvalue().strip().splitlines()[-1])["descriptor"]
+            self.assertTrue(mesh.verify_descriptor(signed))
+            with self.assertRaisesRegex(ValueError, "role"):
+                keyguard.mesh_sign(vault, vault / "operator-mldsa65.sealed.json", pub, path, "something-else")
+
+    def test_a_file_that_is_not_an_operator_key_is_refused(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "x.pub"
+            for content in (b"x" * 10, json.dumps(dict(schema=1)).encode()):
+                p.write_bytes(content)
+                p.chmod(0o600)
+                with self.assertRaises(SystemExit):
+                    mesh.load_operator_key(p)
+
+
 class Publishing(unittest.TestCase):
     def test_a_beacon_signs_its_gateway_key_into_its_descriptor(self):
         from cryptography.hazmat.primitives.asymmetric import mlkem, x25519

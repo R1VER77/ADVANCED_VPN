@@ -17,15 +17,22 @@ measured figure in the docs names the version it was measured on.
   signer process that alone unseals the identities after the key's touch and PIN; hops
   accept such a leaf only if the pinned identity signed it and the device named its key.
 - Oblivious requests no longer reveal a member's clock skew: the timestamp is a 30-second
-  bucket of a clock synchronized Tails-style (median of three independent server pools,
-  `tools/timesync.py`); the gateway refuses other values, and refuses requests for up to
-  30 s after it restarts. A member that cannot synchronize sends nothing.
+  bucket of the relay's clock (`GET /time`, refreshed by every answer), so members of a relay
+  send the same value and no third party is asked the time; the gateway refuses other
+  values, and refuses requests for up to 30 s after it restarts. A Tails-style multi-pool
+  clock (`tools/timesync.py`) remains for callers without a relay.
 - Oblivious routes check gateway key consistency (RFC 9458 section 7), the condition the
   OHTTP unlinkability proof rests on: a beacon signs its gateway key into its descriptor
   (`avpn mesh publish --gateway-key`), and a member uses a route beyond directory fetches
   only once two other beacons show that same signed key; equivocation is refused.
 - Fixed: mesh descriptor signatures could never be verified (wrong ML-DSA module name,
   hidden by stubbed tests); see docs/INCIDENTS.md.
+- `avpn init --dns-recursive`: the exit resolves names with its own Unbound (DNSSEC,
+  QNAME minimisation) instead of one public DoT resolver. Opt-in: its queries to
+  authoritative servers are plain DNS (docs/PQ_INVENTORY.md exception 5).
+- Assurance: Kani proves the link's replay window and reply credit; every parser of
+  outside bytes is fuzzed in CI; the Python mutation fuzzer found three exception types
+  escaping the enrollment and session-leaf parsers, now refused as `ValueError`.
 - Formal: ProVerif proves OHTTP and credit unlinkability; Tamarin proves hardware-bound
   sessions. Credits now refuse an issuer's tagged blind signature (RFC 9474 Finalize).
 - Security keys are ranked (open firmware and on-device PIN entry preferred) and the P-256

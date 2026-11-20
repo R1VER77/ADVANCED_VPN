@@ -803,7 +803,7 @@ def mesh_seal(vault, key_path, cert_path, envelope_path, remove_plaintext=False)
         key_path.unlink()
 
 
-def mesh_sign(vault, envelope_path, cert_path, descriptor_path):
+def mesh_sign(vault, envelope_path, cert_path, descriptor_path, role=None):
     """One PIN + touch: unseal the mesh operator key in memory, sign the
     canonical descriptor, and print the signed descriptor as the last stdout
     line (the avpn helper JSON contract).
@@ -822,7 +822,11 @@ def mesh_sign(vault, envelope_path, cert_path, descriptor_path):
     descriptor = json.loads(read_private(descriptor_path))
     message = canonical(descriptor)
     secret, meta, assertion = hardware_assertion(vault, message)
-    key = open_bytes(secret, meta, MESH_ROLE, cert, envelope)
+    # The operator's own key (`avpn init --vault`, role operator-mldsa65) or a separately
+    # sealed mesh key (mesh-seal, role mesh-operator).
+    if role not in (None, MESH_ROLE, "operator-mldsa65"):
+        raise ValueError("unknown mesh signing role")
+    key = open_bytes(secret, meta, role or MESH_ROLE, cert, envelope)
     try:
         # The sealed key is the 32-byte ML-DSA-65 seed, or a PKCS#8 key.
         if len(key) == 32:
@@ -868,6 +872,9 @@ def main():
     p.add_argument("--cert", type=Path, help="with mesh-seal/mesh-sign: the operator public key")
     p.add_argument("--envelope", type=Path, help="with mesh-seal/mesh-sign: the sealed-key envelope")
     p.add_argument("--descriptor", type=Path, help="with mesh-sign: the descriptor JSON to sign")
+    p.add_argument(
+        "--role", help="with mesh-sign: the envelope's role, operator-mldsa65 (avpn init) or mesh-operator (mesh-seal)"
+    )
     a = p.parse_args()
     if a.action == "enroll":
         enroll(a.vault)
@@ -888,7 +895,7 @@ def main():
     if a.action == "mesh-sign":
         if not (a.envelope and a.cert and a.descriptor):
             raise ValueError("mesh-sign needs --envelope, --cert and --descriptor")
-        mesh_sign(a.vault, a.envelope, a.cert, a.descriptor)
+        mesh_sign(a.vault, a.envelope, a.cert, a.descriptor, a.role)
         return
     if not a.config:
         raise ValueError("configuration required")

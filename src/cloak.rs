@@ -704,7 +704,7 @@ async fn prove(c: &Connection, keys: &[[u8; TOKEN_LEN]]) -> Result<usize> {
 }
 
 /// Extract a 32-byte proof from an HTTP/1.1 request's `If-None-Match: "<64-hex>"` header.
-fn parse_http_proof(req: &[u8]) -> Option<[u8; TOKEN_LEN]> {
+pub(crate) fn parse_http_proof(req: &[u8]) -> Option<[u8; TOKEN_LEN]> {
     let text = std::str::from_utf8(req).ok()?;
     for line in text.lines() {
         if let Some((name, value)) = line.split_once(':')

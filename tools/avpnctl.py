@@ -523,7 +523,9 @@ def ensure_network(profile, state, whole=False, service_uid=0, upstream=None, up
         tun(TUN, "10.77.0.1/32", profile["core"]["mtu"], owner=service_uid)
         cmd("ip", "route", "replace", "10.77.0.2/32", "dev", TUN)
         endpoint = profile["dns"]["upstream"].rsplit(":", 1)[0]
-        wan = route_to(endpoint)["dev"]
+        # A recursive exit's upstream is its own loopback resolver: find the internet
+        # interface by the default route instead (TEST-NET-1, a routing lookup only).
+        wan = route_to("192.0.2.1" if profile["dns"].get("recursive") else endpoint)["dev"]
         cmd("/usr/sbin/sysctl", "-qw", "net.ipv4.ip_forward=1")
         # Never forward inner packets into an unrequested management/metadata/LAN destination.
         private = "ip daddr {0.0.0.0/8,10.0.0.0/8,100.64.0.0/10,127.0.0.0/8,169.254.0.0/16,172.16.0.0/12,192.168.0.0/16,224.0.0.0/4} drop"
@@ -924,6 +926,12 @@ def publish_runtime(cfg, directory, uid, gid):
         target = directory / source.name
         owned_public(target, read_private(source), uid, gid)
         published["dns"]["blocklist"] = str(target)
+    if "resolver" in published:
+        import exit_resolver
+
+        owned_public(
+            directory / "unbound.conf", exit_resolver.config(published["resolver"]["listen"]).encode(), uid, gid
+        )
     for name, value in published.items():
         owned_public(directory / (name + ".runtime.json"), canonical(value), uid, gid)
 
@@ -1338,6 +1346,17 @@ def supervise(state, bin_dir, lab=False, whole=False):
                 fds = {r: v for r, v in key_handles.items() if r in CHILD_KEYS.get(name, [])}
                 if name == "front":
                     children[name] = launch_front(front_exe, front_dir, front_uid, front_gid, log, lab)
+                elif name == "resolver":
+                    import exit_resolver
+
+                    # Unbound, unmodified, as the service user, in the foreground, tied to
+                    # the supervisor like every other child.
+                    children[name] = subprocess.Popen(
+                        [exit_resolver.unbound_path(), "-d", "-c", str(device_dir / "unbound.conf")],
+                        preexec_fn=functools.partial(child_guard, os.getpid(), uid, gid),
+                        stdout=log or subprocess.DEVNULL,
+                        stderr=log or subprocess.DEVNULL,
+                    )
                 elif name == "core" and profile["role"] == "client" and not whole:
                     children[name] = launch_client(binary, path, APP, log, fds, uid, gid)
                 else:
@@ -2059,6 +2078,11 @@ def build_parser():
         default=None,
         help="optional allowlist file (same formats) signed into the exit bundle: never blocked, even by a CNAME check",
     )
+    init.add_argument(
+        "--dns-recursive",
+        action="store_true",
+        help="the exit resolves with its own Unbound (DNSSEC, QNAME minimisation) instead of a public DoT resolver",
+    )
     imp = s.add_parser("enroll", help="verify and install this device's signed bundle")
     imp.add_argument("bundle", type=Path, help="the .avpn bundle the operator produced for this device")
     imp.add_argument("--operator-key", type=Path, required=True, help="operator public key, obtained out of band")
@@ -2277,8 +2301,9 @@ def dispatch(a):
                 server_name="one.one.one.one",
                 blocklist=a.dns_blocklist.read_bytes() if a.dns_blocklist else None,
                 allowlist=a.dns_allowlist.read_bytes() if a.dns_allowlist else None,
+                recursive=a.dns_recursive or None,
             )
-            if a.dns_blocklist or a.dns_allowlist
+            if a.dns_blocklist or a.dns_allowlist or a.dns_recursive
             else None
         )
         operator = create(

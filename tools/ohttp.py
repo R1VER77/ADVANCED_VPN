@@ -18,9 +18,11 @@ the response to it. Requests carry a timestamp and a nonce; the gateway refuses 
 or replayed ones.
 
 The timestamp would otherwise link a member's requests: a clock off by a steady offset is
-recognizable beside the gateway's own. It is therefore read from a synchronized clock
-(tools/timesync.py, Tails' htpdate method) and rounded down to a 30-second bucket, so
-members send the same value; the gateway refuses any other.
+recognizable beside the gateway's own. So it is read from the relay's clock (the Date of
+its answers, tools/mesh.py relay_clock), which knows the member already and sees only
+ciphertext, and rounded down to a 30-second bucket: a relay's members send the same value,
+the gateway learns nothing the relay's address does not tell it, and nobody else is asked
+the time. The gateway refuses any value that is not a whole bucket.
 """
 
 import base64
@@ -93,7 +95,8 @@ def header(key_id):
 
 def encapsulate(gateway_public, key_id, method, path, body=b"", now=None):
     """Client: seal one request to the gateway. Returns (wire bytes, reply private key).
-    `now` defaults to the synchronized clock (timesync.now), which refuses to guess."""
+    `now`: the relay's clock (mesh.relay_clock); without one, the multi-source clock
+    (timesync.now), which refuses to guess."""
     if len(body) > MAX_BODY:
         raise ValueError("request too large")
     if now is None:

@@ -362,8 +362,13 @@ def profile_validate(p):
             "blocklist",
             "allowlist",
             "blocked_domains",
+            "recursive",
         }:
             raise ValueError("unknown DNS field")
+        if d.get("recursive") not in (None, True) or (
+            d.get("recursive") and (d["upstream"] != "127.0.0.1:5335" or d["test_ca"] is not None)
+        ):
+            raise ValueError("a recursive exit asks only its own resolver, on 127.0.0.1:5335")
         if (
             d["listen"] != "10.77.0.1:1053"
             or d["client_ip"] != "10.77.0.2"
@@ -618,8 +623,25 @@ def _request_into(role, state, protect, vault, secret, meta):
     return req
 
 
+# What parsing an outside request or certificate can raise besides ValueError; each becomes
+# a ValueError, the one refusal callers handle (found by tools/test_parser_fuzz.py).
+PARSE_ERRORS = (KeyError, TypeError, IndexError, AttributeError, OverflowError)
+
+
 def load_request(raw, role):
-    """Parse and check one device's public enrollment request for `role`."""
+    """Parse and check one device's public enrollment request for `role`; every malformed
+    request is refused with ValueError."""
+    from cryptography.exceptions import InvalidSignature, UnsupportedAlgorithm
+
+    try:
+        return _load_request(raw, role)
+    except ValueError:
+        raise
+    except (*PARSE_ERRORS, InvalidSignature, UnsupportedAlgorithm, x509.InvalidVersion) as e:
+        raise ValueError("malformed enrollment request (%s)" % type(e).__name__) from e
+
+
+def _load_request(raw, role):
     r = json.loads(raw)
     if r.get("schema") != 1 or r.get("role") != role:
         raise ValueError("wrong enrollment request for " + role)
@@ -632,7 +654,12 @@ def load_request(raw, role):
             cert.public_key(), mldsa.MLDSA65PublicKey
         ):
             raise ValueError("ML-DSA-65 identity required")
-        cert.public_key().verify(cert.signature, cert.tbs_certificate_bytes)  # proof of possession
+        from cryptography.exceptions import InvalidSignature
+
+        try:
+            cert.public_key().verify(cert.signature, cert.tbs_certificate_bytes)  # proof of possession
+        except InvalidSignature as e:  # a ValueError like every other refusal (tools/test_parser_fuzz.py)
+            raise ValueError("identity certificate not signed by its own key") from e
     if role in CARRIER_ROLES and not re.fullmatch("[0-9a-f]{64}", r["wireguard_public_hex"]):
         raise ValueError("bad WireGuard key")
     if role in CARRIER_ROLES or "kem_public" in r:
@@ -1032,7 +1059,10 @@ def create(
             cloak = None
         if role == "exit":
             d = dict(upstream="1.1.1.1:853", server_name="one.one.one.one", test_ca=None)
-            if dns:
+            if dns and dns.get("recursive"):
+                # The exit's own Unbound (tools/exit_resolver.py) instead of a public forwarder.
+                d.update(upstream="127.0.0.1:5335", server_name="localhost", recursive=True)
+            elif dns:
                 d.update(upstream=dns["upstream"], server_name=dns["server_name"])
                 if dns.get("test_ca"):
                     files["dns-ca.der"] = dns["test_ca"]
@@ -1460,7 +1490,10 @@ def mesh_bundles(root, mesh, signer, defense="strong", daily_mib=None, dns=None,
         dns_cfg = None
         if role == "exit":
             d = dict(upstream="1.1.1.1:853", server_name="one.one.one.one", test_ca=None)
-            if dns:
+            if dns and dns.get("recursive"):
+                # The exit's own Unbound (tools/exit_resolver.py) instead of a public forwarder.
+                d.update(upstream="127.0.0.1:5335", server_name="localhost", recursive=True)
+            elif dns:
                 d.update(upstream=dns["upstream"], server_name=dns["server_name"])
                 if dns.get("test_ca"):
                     files["dns-ca.der"] = dns["test_ca"]
@@ -1844,6 +1877,8 @@ def runtime(profile, root):
         out["front"] = dict(profile["front"])
     if profile["dns"]:
         out["dns"] = dict(profile["dns"])
+        if profile["dns"].get("recursive"):
+            out["resolver"] = {"listen": "127.0.0.1:5335"}
         if out["dns"].get("test_ca"):
             out["dns"]["test_ca"] = str(root / Path(out["dns"]["test_ca"]).name)
         if out["dns"].get("blocklist"):

@@ -31,21 +31,37 @@ class Relay(BaseHTTPRequestHandler):
         """Log nothing: the relay is the one party that sees members' addresses."""
 
     def _reply(self, code, body=b"", kind="text/plain"):
-        self.send_response(code)
-        self.send_header("Content-Type", kind)
-        self.send_header("Content-Length", str(len(body)))
+        self.send_response(code)  # also sends Date: the relay's clock, which members read
+        if code != 204:
+            self.send_header("Content-Type", kind)
+            self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def _within_budget(self):
+        now, ip = time.time(), self.client_address[0]
+        stamps = [t for t in Relay.budget.get(ip, []) if now - t < 60]
+        if len(stamps) >= PER_MINUTE:
+            return False
+        Relay.budget[ip] = stamps + [now]
+        return True
+
+    def do_GET(self):
+        """GET /time: an empty answer whose Date header is the relay's clock. Members stamp
+        their sealed requests with it (tools/mesh.py, relay_clock), so a member's own
+        clock never reaches the gateway, and no third party is asked the time."""
+        if self.path != "/time":
+            return self._reply(404)
+        if not self._within_budget():
+            return self._reply(429)
+        self._reply(204)
 
     def do_POST(self):
         """Forward one sealed request; answer with the sealed response."""
         if self.path != "/relay":
             return self._reply(404)
-        now, ip = time.time(), self.client_address[0]
-        stamps = [t for t in Relay.budget.get(ip, []) if now - t < 60]
-        if len(stamps) >= PER_MINUTE:
+        if not self._within_budget():
             return self._reply(429)
-        Relay.budget[ip] = stamps + [now]
         try:
             length = int(self.headers.get("Content-Length") or 0)
         except ValueError:

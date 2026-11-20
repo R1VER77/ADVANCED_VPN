@@ -248,6 +248,107 @@ jobs:
         run: |
           mkdir -p "$HOME/bin" && ln -sf "$HOME/opt/proverif2.05/proverif" "$HOME/bin/proverif"
           PATH="$HOME/bin:$PATH" python3 tools/proverif_check.py --timeout 600
+  kani:
+    # Bounded model checking of the link's replay window and reply credit, over the very
+    # file the data plane compiles (src/link_bounds.rs via crates/avpn-kani): no replay,
+    # nothing older than the window, no amplification. Kani pinned by version.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Kani 0.67.0
+        run: |
+          cargo install --locked kani-verifier --version 0.67.0
+          cargo kani setup
+      - name: Prove the link's arithmetic state
+        working-directory: crates/avpn-kani
+        run: cargo kani
+  fuzz:
+    # Coverage-guided fuzzing (libFuzzer via cargo-fuzz) of every parser that takes bytes
+    # from the network or disk: the link's cells, a client's session leaf, the cloak's HTTP
+    # proof, DC-net slots and frames, the data-plane config. 60 s each per run; a crash
+    # fails the job and leaves its input in fuzz/artifacts. cargo-fuzz needs unstable
+    # flags: the pinned stable toolchain with RUSTC_BOOTSTRAP, not a moving nightly.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      RUSTC_BOOTSTRAP: 1
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: cargo-fuzz 0.13.2
+        run: |
+          rustup toolchain install 1.95.0 --profile minimal
+          cargo install --locked cargo-fuzz --version 0.13.2
+      - name: Fuzz each parser for 60 s
+        working-directory: fuzz
+        run: |
+          cargo fuzz build -O
+          for target in $(cargo fuzz list); do
+            mkdir -p "corpus/$target"
+            seeds=""; [ -d "seeds/$target" ] && seeds="seeds/$target"
+            cargo fuzz run -O "$target" "corpus/$target" $seeds -- -max_total_time=60 -rss_limit_mb=2048
+          done
+  aarch64:
+    # The same code on 64-bit ARM (GitHub's ubuntu-24.04-arm, real Arm hardware): the Rust
+    # and Python suites, the static bootstrap, and the protection labs that decide whether a
+    # platform is supported (guard, routed VPN, managed WireGuard + DAITA, failover, oblivious
+    # control plane, the TLS/TCP fallback). The I2P lab is x86-only: its pinned i2pd packages are.
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+    env:
+      CARGO_BUILD_JOBS: 4
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Python 3.13 with OpenSSL 3.5 (aarch64, pinned like the x86-64 runtime)
+        run: |
+          curl -fsSLo /tmp/cpython.tgz "https://github.com/astral-sh/python-build-standalone/releases/download/20261110/cpython-3.13.18%2B20261110-aarch64-unknown-linux-gnu-install_only_stripped.tar.gz"
+          printf '%s  %s\n' 55c00325f7c1fddf325dfc621aabdfbbac4dc54adda224af88ec411dc12db239 /tmp/cpython.tgz | sha256sum -c -
+          tar -xzf /tmp/cpython.tgz -C "$RUNNER_TEMP"
+          [ -e "$RUNNER_TEMP/python/bin/python" ] || ln -s python3 "$RUNNER_TEMP/python/bin/python"
+          echo "$RUNNER_TEMP/python/bin" >> "$GITHUB_PATH"
+      - name: Namespace test dependencies and toolchains
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends iproute2 iputils-ping nftables cmake build-essential uidmap libpcap0.8t64 musl-tools
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          python - <<'PY'
+          import os,pwd,subprocess
+          from pathlib import Path
+          user=pwd.getpwuid(os.getuid()).pw_name
+          for file,option in [('/etc/subuid','--add-subuids'),('/etc/subgid','--add-subgids')]:
+              rows=[r.split(':') for r in Path(file).read_text().splitlines() if r]
+              if not any(r[0]==user for r in rows):
+                  start=max([1000000]+[int(r[1])+int(r[2]) for r in rows])
+                  subprocess.run(['sudo','usermod',option,f'{start}-{start+65535}',user],check=True)
+          PY
+          python -c "import platform, ssl; assert platform.machine() == 'aarch64'; print(platform.machine(), ssl.OPENSSL_VERSION)"
+          python -m pip install --require-hashes -r tools/hardware-requirements.txt
+          # The Arm image may lack rustup: install it from rustup.rs (HTTPS) if so.
+          if ! command -v rustup; then
+            curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none
+          fi
+          export PATH="$HOME/.cargo/bin:$PATH"
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          rustup toolchain install 1.95.0 --profile minimal --component clippy --component rustfmt
+      - name: Rust and Python suites, static bootstrap
+        run: |
+          cargo test --locked --lib --bin advanced-vpn --bin advanced-vpn-dns
+          cargo build --release --locked
+          sh tools/build-bootstrap.sh
+          cargo test --locked -p cypherpunk-preflight -p cypherpunk-bootguard -p cypherpunk-controller
+          python -m unittest discover -s tools -p 'test_*.py'
+      - name: IPv4 and IPv6 output and forwarding guard boundaries
+        run: unshare --user --map-root-user --net --mount python tools/guard_network_test.py --out /tmp/cypherpunk-guard-network
+      - name: Isolated routed VPN, managed WireGuard + DAITA, budget
+        run: |
+          unshare -Urnm python tools/namespace_test.py --state /tmp/advanced-vpn-ci
+          unshare --user --map-root-user --map-auto --net --mount python tools/managed_test.py --state /tmp/advanced-vpn-managed-ci
+          unshare --user --map-root-user --map-auto --net --mount python tools/budget_test.py --state /tmp/advanced-vpn-budget-ci
+      - name: Failover, oblivious control plane, TLS/TCP fallback
+        run: |
+          unshare --user --map-root-user --map-auto --net --mount python tools/failover_lab.py --state /tmp/avpn-failover --rate standard
+          unshare --user --map-root-user --map-auto --net --mount python tools/ohttp_lab.py --state /tmp/avpn-ohttp
+          unshare --user --map-root-user --map-auto --net --mount python tools/throughput_bench.py --state /tmp/avpn-lowmtu --rate standard --mib 8 --underlay-mtu 1400
   linux-desktop:
     runs-on: ubuntu-24.04
     timeout-minutes: 45

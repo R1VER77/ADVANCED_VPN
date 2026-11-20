@@ -1,4 +1,9 @@
 /target/
+/crates/avpn-kani/target/
+/fuzz/target/
+/fuzz/corpus/
+/fuzz/artifacts/
+/fuzz/coverage/
 /state/
 /evidence/
 *.key

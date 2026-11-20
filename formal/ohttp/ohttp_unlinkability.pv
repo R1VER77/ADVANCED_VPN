@@ -26,11 +26,12 @@
    NOT MODELED (outside a symbolic model): sizes and timing. Each request carries a clock
    reading (`t`), which the gateway sees beside its own clock: read from the member's own
    clock it would link a member skewed by a steady offset. It is therefore a 30-second
-   bucket of a synchronized clock (tools/timesync.py, Tails' htpdate method: the median of
-   three independent server pools), the same for synchronized members; the gateway refuses
-   any other value (tools/test_ohttp.py, TimeSync). What remains is a member caught at a
-   bucket boundary, and a member that cannot synchronize, which sends nothing. Lengths and
-   timing are traffic-analysis questions for the labs.
+   bucket of the relay's clock (tools/mesh.py relay_clock), the same for every member of a
+   relay; the gateway already knows the relay from its address, and a relay that skewed one
+   member's clock to tag it would need the gateway's collusion, which this model excludes.
+   The gateway refuses any other value (tools/test_ohttp.py, RelayClock). What remains is a
+   member caught at a bucket boundary. Lengths and timing are traffic-analysis questions
+   for the labs.
 
    MUTANTS (edits in tools/proverif_check.py; each must fail to prove):
    - a member keeps one reply key for all its requests;

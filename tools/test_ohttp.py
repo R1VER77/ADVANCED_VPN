@@ -166,6 +166,46 @@ class TimeSync(unittest.TestCase):
         )
 
 
+class RelayClock(unittest.TestCase):
+    """A member stamps sealed requests with its relay's clock (tools/mesh.py relay_clock):
+    no third party is asked the time, and the gateway learns nothing the relay's own
+    address does not already tell it."""
+
+    def test_the_relay_tells_its_time_and_skewed_members_send_the_same_timestamp(self):
+        import email.utils
+        from email.message import Message
+
+        import mesh
+        import ohttp_relay
+
+        relay = ohttp_relay.serve("http://127.0.0.1:9", "127.0.0.1", 0)
+        threading.Thread(target=relay.serve_forever, daemon=True).start()
+        url = "http://127.0.0.1:%d" % relay.server_address[1]
+        try:
+            import urllib.request
+
+            with urllib.request.urlopen(url + "/time") as r:  # noqa: S310 (local test server)
+                self.assertEqual(r.status, 204)
+                self.assertTrue(r.headers["Date"])
+            mesh._relay_clock.pop(url, None)
+            self.assertLess(abs(mesh.relay_clock(url) - time.time()), 2)
+        finally:
+            relay.shutdown()
+            relay.server_close()
+        true = 1_800_000_000 - 1_800_000_000 % ohttp.BUCKET + 5
+        date = Message()
+        date["Date"] = email.utils.formatdate(true, usegmt=True)
+        private, public = ohttp.keypair()
+        stamps = []
+        for skew in (+7, -11):
+            local = true + skew
+            offset = mesh._date_offset(date, local - 0.2, local + 0.2)
+            wire, _ = ohttp.encapsulate(public, 1, "GET", "/health", now=local + offset)
+            h = ohttp.header(1)
+            stamps.append(json.loads(ohttp.SUITE.decrypt(wire[len(h) :], private, ohttp.REQUEST_INFO + h))["t"])
+        self.assertEqual(stamps[0], stamps[1])
+
+
 class DateHeaders(unittest.TestCase):
     """What a time server's answer may be used for (found in a live survey: CDNs serve
     cached answers whose Date is stale, or rewritten, so Age cannot be trusted)."""
@@ -256,7 +296,15 @@ class RouteTests(unittest.TestCase):
                 self.assertEqual(doc["descriptors"], [])
                 with self.assertRaises(mesh.GatewayKeyRefused):
                     mesh.beacon_call(entry, "GET", "/health")
-                with mock.patch.object(mesh, "gateway_verified", lambda e: True):
+
+                # The timestamp comes from the relay's clock: no one else is asked the time.
+                def nobody_else(*_):
+                    raise AssertionError("a third party was asked the time")
+
+                with (
+                    mock.patch.object(mesh, "gateway_verified", lambda e: True),
+                    mock.patch.object(timesync, "now", nobody_else),
+                ):
                     status, doc = mesh.beacon_call(entry, "GET", "/health")
                 self.assertEqual((status, doc["ok"]), (200, True))
                 # A forged request through the relay is refused by the gateway.

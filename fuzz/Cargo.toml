@@ -1,0 +1,52 @@
+[package]
+name = "advanced-vpn-fuzz"
+version = "0.0.0"
+edition = "2024"
+license = "AGPL-3.0-or-later"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+# Its own root, like crates/avpn-kani: fuzzing builds never touch the main workspace.
+[workspace]
+
+[dependencies]
+libfuzzer-sys = "=0.4.10"
+advanced-vpn = { path = ".." }
+serde_json = "=1.0.154"
+
+[[bin]]
+name = "link_open"
+path = "fuzz_targets/link_open.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "session_leaf"
+path = "fuzz_targets/session_leaf.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "cloak_http_proof"
+path = "fuzz_targets/cloak_http_proof.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "dcnet_slot"
+path = "fuzz_targets/dcnet_slot.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "config_json"
+path = "fuzz_targets/config_json.rs"
+test = false
+doc = false
+bench = false

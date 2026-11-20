@@ -51,6 +51,11 @@ struct Config {
     /// Optional signed allowlist file (same formats): its entries are never blocked.
     #[serde(default)]
     allowlist: Option<PathBuf>,
+    /// Resolve with this exit's own recursive resolver (Unbound, run beside this process)
+    /// instead of a public DNS-over-TLS forwarder: `upstream` must then be a loopback
+    /// address, reached over plain TCP that never leaves the host.
+    #[serde(default)]
+    recursive: bool,
 }
 #[derive(Parser)]
 struct Args {
@@ -314,8 +319,11 @@ fn upstream_tls(roots: rustls::RootCertStore) -> Result<rustls::ClientConfig> {
     Ok(crypto)
 }
 
-/// One upstream DNS-over-TLS connection.
-type Upstream = tokio_rustls::client::TlsStream<TcpStream>;
+/// One upstream connection: DNS over TLS to a public resolver, or plain TCP to this exit's
+/// own recursive resolver on loopback.
+trait Stream: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {}
+impl<T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send> Stream for T {}
+type Upstream = Box<dyn Stream>;
 /// Idle upstream connections kept for reuse (RFC 7858 §3.4): a lookup then costs one
 /// round trip instead of TCP + a hybrid post-quantum TLS handshake + one.
 const POOL: usize = 4;
@@ -339,7 +347,8 @@ async fn exchange(tls: &mut Upstream, b: &[u8]) -> Result<Vec<u8>> {
 }
 
 struct Resolver {
-    tls: TlsConnector,
+    /// `None`: the upstream is this exit's own recursive resolver on loopback.
+    tls: Option<TlsConnector>,
     addr: SocketAddr,
     name: ServerName<'static>,
     slots: Arc<Semaphore>,
@@ -353,14 +362,21 @@ struct Resolver {
 }
 impl Resolver {
     async fn connect(&self) -> Result<Upstream> {
+        ensure!(
+            self.tls.is_some() || self.addr.ip().is_loopback(),
+            "plain DNS only to loopback"
+        );
         let stream = timeout(Duration::from_secs(3), TcpStream::connect(self.addr)).await??;
+        self.connects.fetch_add(1, Ordering::Relaxed);
+        let Some(tls) = &self.tls else {
+            return Ok(Box::new(stream));
+        };
         let tls = timeout(
             Duration::from_secs(3),
-            self.tls.connect(self.name.clone(), stream),
+            tls.connect(self.name.clone(), stream),
         )
         .await??;
-        self.connects.fetch_add(1, Ordering::Relaxed);
-        Ok(tls)
+        Ok(Box::new(tls))
     }
     fn take_idle(&self) -> Option<Upstream> {
         let mut idle = self.idle.lock().ok()?;
@@ -426,7 +442,8 @@ async fn work() -> Result<()> {
             && c.listen.is_ipv4()
             && c.client_ip.is_ipv4()
             && c.listen.port() >= 1024
-            && c.upstream.port() != 0,
+            && c.upstream.port() != 0
+            && (!c.recursive || (c.upstream.ip().is_loopback() && c.test_ca.is_none())),
         "invalid DNS profile"
     );
     // Single chain: exactly the client's address. Mesh: the member tunnel network.
@@ -456,7 +473,11 @@ async fn work() -> Result<()> {
         roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
     }
     let resolver = Arc::new(Resolver {
-        tls: TlsConnector::from(Arc::new(upstream_tls(roots)?)),
+        tls: if c.recursive {
+            None
+        } else {
+            Some(TlsConnector::from(Arc::new(upstream_tls(roots)?)))
+        },
         addr: c.upstream,
         name: ServerName::try_from(c.server_name)?,
         slots: Arc::new(Semaphore::new(16)),
@@ -467,7 +488,10 @@ async fn work() -> Result<()> {
         blocked: AtomicU64::new(0),
     });
     if a.check {
-        println!("{{\"configuration_valid\":true,\"upstream_tls\":true}}");
+        println!(
+            "{{\"configuration_valid\":true,\"upstream_tls\":{},\"recursive\":{}}}",
+            !c.recursive, c.recursive
+        );
         return Ok(());
     }
     // Every list and certificate is loaded: confine before the sockets open. The
@@ -730,7 +754,7 @@ mod tests {
             .add(CertificateDer::from(hex::decode(TEST_CA).unwrap()))
             .unwrap();
         Resolver {
-            tls: TlsConnector::from(Arc::new(upstream_tls(roots).unwrap())),
+            tls: Some(TlsConnector::from(Arc::new(upstream_tls(roots).unwrap()))),
             addr,
             name: ServerName::try_from("dns.test").unwrap(),
             slots: Arc::new(Semaphore::new(1)),
@@ -740,6 +764,60 @@ mod tests {
             idle: std::sync::Mutex::new(Vec::new()),
             connects: AtomicU64::new(0),
         }
+    }
+
+    /// Recursive mode: this exit's own resolver on loopback, over plain TCP.
+    fn recursive_to(addr: SocketAddr) -> Resolver {
+        Resolver {
+            tls: None,
+            addr,
+            name: ServerName::try_from("localhost").unwrap(),
+            slots: Arc::new(Semaphore::new(1)),
+            blocklist: Blocklist::from_lines("", &[]).unwrap(),
+            count: AtomicU64::new(0),
+            blocked: AtomicU64::new(0),
+            idle: std::sync::Mutex::new(Vec::new()),
+            connects: AtomicU64::new(0),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_recursive_exit_asks_its_own_resolver_over_loopback_tcp() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut s, _) = listener.accept().await.unwrap();
+            loop {
+                let Ok(n) = s.read_u16().await else { return };
+                let mut q = vec![0; n as usize];
+                s.read_exact(&mut q).await.unwrap();
+                let mut a = q.clone();
+                a[2] |= 0x80; // a response, same id
+                s.write_all(&(a.len() as u16).to_be_bytes()).await.unwrap();
+                s.write_all(&a).await.unwrap();
+            }
+        });
+        let r = recursive_to(addr);
+        let q = make_query([0x12, 0x34], "example.com");
+        let a = r.query(&q).await.unwrap();
+        assert_eq!(&a[..2], &q[..2]);
+        assert!(a[2] & 0x80 != 0);
+        // A second query reuses the pooled connection.
+        r.query(&make_query([0x56, 0x78], "example.org"))
+            .await
+            .unwrap();
+        assert_eq!(r.connects.load(Ordering::Relaxed), 1);
+    }
+
+    #[tokio::test]
+    async fn a_recursive_exit_never_sends_plain_dns_off_the_host() {
+        let r = recursive_to("192.0.2.53:53".parse().unwrap());
+        let e = r
+            .query(&make_query([1, 2], "example.com"))
+            .await
+            .unwrap_err();
+        assert!(e.to_string().contains("only to loopback"), "{e}");
+        assert_eq!(r.connects.load(Ordering::Relaxed), 0);
     }
 
     #[tokio::test]
@@ -801,7 +879,7 @@ mod tests {
                 .add(CertificateDer::from(hex::decode(TEST_CA).unwrap()))
                 .unwrap();
             let resolver = Resolver {
-                tls: TlsConnector::from(Arc::new(upstream_tls(roots).unwrap())),
+                tls: Some(TlsConnector::from(Arc::new(upstream_tls(roots).unwrap()))),
                 addr: upstream(group).await,
                 name: ServerName::try_from("dns.test").unwrap(),
                 slots: Arc::new(Semaphore::new(1)),
