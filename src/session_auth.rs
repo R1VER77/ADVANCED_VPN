@@ -157,6 +157,40 @@ mod tests {
         }
     }
 
+    /// Real assertions: each emulated firmware's recorded lab run
+    /// (tools/device_compatibility_lab.py, phase `hardware_session_authorization`) signed
+    /// a session whose leaf this verifier must accept, at the time it was recorded, and
+    /// refuse once the session has ended.
+    #[test]
+    fn real_firmware_sessions_from_the_lab_verify() {
+        for (name, evidence) in [
+            (
+                "Solo 1",
+                include_str!("../docs/evidence/SOLO1_PC_VPN_OPERATIONS_20261118.json"),
+            ),
+            (
+                "Solo 2",
+                include_str!("../docs/evidence/SOLO2_PC_VPN_OPERATIONS_20261119.json"),
+            ),
+            (
+                "CanoKey",
+                include_str!("../docs/evidence/CANOKEY_UDP_VPN_OPERATIONS_20261119.json"),
+            ),
+            (
+                "TKey",
+                include_str!("../docs/evidence/TKEY_QEMU_VPN_OPERATIONS_20261119.json"),
+            ),
+        ] {
+            let doc: serde_json::Value = serde_json::from_str(evidence).unwrap();
+            let v = &doc["phases"]["hardware_session_authorization"]["vector"];
+            let device: PeerDevice = serde_json::from_value(v["device"].clone()).unwrap();
+            let leaf = hex::decode(v["leaf"].as_str().unwrap()).unwrap();
+            let now = v["now"].as_i64().unwrap();
+            verify(&device, &leaf, now).unwrap_or_else(|e| panic!("{name}: {e}"));
+            assert!(verify(&device, &leaf, now + MAX_SECONDS).is_err(), "{name}");
+        }
+    }
+
     #[test]
     fn the_oid_bytes_encode_the_documented_arc() {
         // 2.25.N: first byte 2*40+25, then N in base 128, high bit set on all but the last.
