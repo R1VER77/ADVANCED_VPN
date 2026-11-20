@@ -6,6 +6,16 @@ measured figure in the docs names the version it was measured on.
 
 ## Unreleased
 
+- Fixed (found upgrading the owner's laptop, 20 November): `install.py --adopt-legacy`
+  refused every installation whose venv names the system interpreter (all source and
+  pre-bundled-runtime installs), and so did a source install's own new slot; exactly those
+  interpreter links (`venv/bin/python*` to a root-owned `/usr/bin/python3*`) are now
+  accepted, every other link out of a slot still refused. And the system launchers, called
+  through `/usr/local/bin/avpnctl` (a symlink), looked for `/usr/local/venv`: they now
+  resolve themselves first.
+- Admin SSH without address rules: `avpn cloud aws admin-endpoint` (EC2 Instance Connect
+  Endpoint, IAM-authorised from any network).
+
 - Hardware-bound sessions ([design](docs/HARDWARE_BOUND_SESSIONS.md)): a client protected by
   a hardware key now has its FIDO2 key, touched and PIN-unlocked, sign each session (at most
   12 hours), and every hop pinned to that key refuses leaves it did not authorize, so keys

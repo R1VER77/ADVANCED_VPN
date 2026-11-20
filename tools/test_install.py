@@ -16,6 +16,23 @@ import install
 BUILT = all((install.ROOT / "target/release" / b).is_file() for b in install.BINARIES)
 
 
+class Launchers(unittest.TestCase):
+    def test_a_launcher_called_through_a_symlink_elsewhere_finds_its_own_slot(self):
+        # /usr/local/bin/avpnctl is a symlink to /opt/advanced-vpn/bin/avpnctl: the launcher
+        # must resolve itself, or it looks for /usr/local/venv (found on 20 November 2026).
+        with tempfile.TemporaryDirectory() as d:
+            slot, elsewhere = Path(d) / "releases" / "slot", Path(d) / "usr-local-bin"
+            (slot / "bin").mkdir(parents=True)
+            (slot / "tools").mkdir()
+            elsewhere.mkdir()
+            (slot / "tools/avpnctl.py").write_text("import sys; print('SLOT', sys.argv[1:])\n")
+            install.write_tool_launchers(slot, python=sys.executable)
+            (elsewhere / "avpnctl").symlink_to(slot / "bin/avpnctl")
+            r = subprocess.run([str(elsewhere / "avpnctl"), "status"], capture_output=True, text=True, timeout=30)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertEqual(r.stdout.strip(), "SLOT ['--bin-dir', '%s', 'status']" % (slot.resolve() / "bin"))
+
+
 @unittest.skipUnless(BUILT, "build the release binaries first")
 class UserInstallTests(unittest.TestCase):
     def setUp(self):

@@ -1156,7 +1156,15 @@ if sudo -n iptables -S INPUT 2>/dev/null | grep -q -- '-j REJECT'; then
   if [ "$SHARED" != yes ] && command -v netfilter-persistent >/dev/null; then sudo -n netfilter-persistent save >/dev/null 2>&1 || true; fi
 fi
 sudo -n rm -rf /tmp/avpn-src && mkdir -p /tmp/avpn-src && tar -C /tmp/avpn-src -xzf /tmp/avpn-src.tgz
-sudo -n python3 -B /tmp/avpn-src/tools/install.py --apply >/dev/null
+# A flat installation from before release slots cannot be moved while it runs: stop what
+# runs from it and adopt it, kept as the previous slot for a rollback. `chain` enrolls and
+# restarts the service afterwards, and the guard comes back with it (Requires=).
+ADOPT=
+if [ -d /opt/advanced-vpn/bin ] && [ ! -L /opt/advanced-vpn/bin ]; then
+  for unit in advanced-vpn.service advanced-vpn-guard.service; do sudo -n systemctl stop "$unit" 2>/dev/null || true; done
+  ADOPT=--adopt-legacy
+fi
+sudo -n python3 -B /tmp/avpn-src/tools/install.py --apply $ADOPT >/dev/null
 HAVE=$(sudo -n python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["role"])' $E/request.json 2>/dev/null || true)
 # Same-role keys are kept only if they carry every key this release makes for the role
 # (managed_profile.request): keys from before the HTTP/3 camouflage would be refused
@@ -1673,13 +1681,17 @@ def chain_plan(a):
     if cap:
         rows.append(rate_row(cap, a.hours_per_day, a.accept_cost, 2 if len(hops) > 1 else 1))
     rows.append(dict(label="sign", value="one Nitrokey PIN + touch (vault %s)" % a.vault))
-    rows.append(
-        dict(
-            label="ssh",
-            value="afterwards only while connected: other hops admit the exit's address, the exit answers at %s"
-            % EXIT_TUNNEL_IP,
+    endpoint = [h["name"] for h in hops if eice_admin(h["record"])]
+    if endpoint:
+        value = "%s: through its Instance Connect Endpoint, from any network; " % ", ".join(endpoint)
+        value += "the others only while connected (they admit the exit's address; the exit answers at %s)" % (
+            EXIT_TUNNEL_IP
         )
-    )
+    else:
+        value = "afterwards only while connected: other hops admit the exit's address, the exit answers at %s" % (
+            EXIT_TUNNEL_IP
+        )
+    rows.append(dict(label="ssh", value=value))
     for provider in sorted({h["record"]["provider"] for h in hops} & set(CALLER_LOG)):
         rows.append(caller_note(provider))
     return dict(rows=rows, hops=hops)

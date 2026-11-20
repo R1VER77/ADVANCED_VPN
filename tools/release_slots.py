@@ -62,6 +62,25 @@ def digest(path):
     return value.hexdigest()
 
 
+# A classic venv (installs before the bundled runtime, adopted with --adopt-legacy) names
+# the system interpreter it was made with: exactly these links may leave a slot.
+LEGACY_VENV_LINK = re.compile(r"venv/bin/python(?:3(?:\.\d+)?)?")
+SYSTEM_INTERPRETER = re.compile(r"/usr/bin/python3(?:\.\d+)?")
+
+
+def system_interpreter(path, name):
+    """Whether `name` is a legacy venv's interpreter link that resolves to a root-owned,
+    unwritable system Python."""
+    if not LEGACY_VENV_LINK.fullmatch(name):
+        return False
+    try:
+        final = path.resolve(strict=True)
+        info = final.stat()
+    except (OSError, RuntimeError):
+        return False
+    return bool(SYSTEM_INTERPRETER.fullmatch(str(final))) and info.st_uid == 0 and not info.st_mode & 0o022
+
+
 def inventory(root):
     """Reject special files and links outside the immutable application slot."""
     checked_directory(root)
@@ -80,7 +99,7 @@ def inventory(root):
                 inside = not Path(target).is_absolute() and path.resolve(strict=True).is_relative_to(resolved)
             except (OSError, RuntimeError):
                 inside = False
-            if not inside:
+            if not inside and not system_interpreter(path, name):
                 raise ValueError("slot link escapes application: " + name)
             result[name] = dict(kind="link", target=target)
         elif stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode):

@@ -37,6 +37,31 @@ class ReleaseTransactions(unittest.TestCase):
     def assert_state(self):
         self.assertEqual((self.state / "replay-floor").read_text(), "9001")
 
+    def test_a_legacy_venv_may_name_only_its_system_interpreter(self):
+        # Installs before the bundled runtime made classic venvs: venv/bin/python3 ->
+        # /usr/bin/python3. Adopting one (--adopt-legacy) must keep it runnable; every other
+        # link out of a slot stays refused.
+        system = Path("/usr/bin/python3")
+        if not system.exists() or system.resolve().stat().st_uid != 0:
+            self.skipTest("no root-owned system python3 here")
+
+        def legacy(links):
+            def builder(path):
+                (path / "venv/bin").mkdir(parents=True)
+                (path / "venv").chmod(0o755)
+                (path / "venv/bin").chmod(0o755)
+                for name, target in links.items():
+                    (path / "venv/bin" / name).symlink_to(target)
+
+            return builder
+
+        with self.store.transaction():
+            name = self.store.prepare(legacy({"python3": str(system), "python": "python3", "python3.13": "python3"}))
+        self.assertTrue((self.root / "releases" / name / "venv/bin/python").exists())
+        for links in ({"pip": str(system)}, {"python3": "/etc/passwd"}, {"python3": "/bin/sh"}):
+            with self.subTest(links), self.store.transaction(), self.assertRaisesRegex(ValueError, "escapes"):
+                self.store.prepare(legacy(links))
+
     def test_upgrade_retains_running_slot_and_selects_one_coherent_tree(self):
         old = self.initial()
         old_path = self.store.verify(old)

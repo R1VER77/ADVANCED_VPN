@@ -1471,7 +1471,9 @@ class HostScriptTests(unittest.TestCase):
         ctl.chmod(0o755)
         pkg = self.root / "pkg/tools"
         pkg.mkdir(parents=True)
-        (pkg / "install.py").write_text('import os\nopen(os.environ["ROOT"] + "/log", "a").write("install\\n")\n')
+        (pkg / "install.py").write_text(
+            'import os, sys\nopen(os.environ["ROOT"] + "/log", "a").write(" ".join(["install"] + sys.argv[1:]) + "\\n")\n'
+        )
         (self.root / "root").mkdir()
         (self.root / "etc/systemd").mkdir(parents=True)
         (self.root / "var/log/journal").mkdir(parents=True)
@@ -1531,6 +1533,28 @@ class HostScriptTests(unittest.TestCase):
         self.assertLess(log.index("harden"), log.index("apt-get"))
         self.assertFalse((self.root / "etc/advanced-vpn/shared-host").exists())
         self.assertFalse((self.root / "tmp/avpn-src.tgz").exists())
+
+    def test_a_flat_installation_is_stopped_and_adopted_and_a_slotted_one_is_not(self):
+        # Found rebuilding the live chain (20 Nov 2026): a server installed before release
+        # slots refused the upgrade ("legacy system application detected").
+        r = self.setup("relay")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        log = self.log()
+        self.assertIn("systemctl stop advanced-vpn.service", log)
+        self.assertIn("systemctl stop advanced-vpn-guard.service", log)
+        self.assertIn("install --apply --adopt-legacy", log)
+        self.assertLess(log.index("systemctl stop advanced-vpn.service"), log.index("install --apply"))
+        # A slotted installation (bin is a link into the current slot) is upgraded in place.
+        import shutil
+
+        (self.root / "log").write_text("")
+        app = self.root / "opt/advanced-vpn"
+        shutil.move(app / "bin", app / "current-bin")
+        (app / "bin").symlink_to("current-bin")
+        r = self.setup("relay")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("systemctl stop", self.log())
+        self.assertIn("install --apply\n", self.log())
 
     def systemd_creds_stub(self, body):
         stub = self.root / "bin/systemd-creds"

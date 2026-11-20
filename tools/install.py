@@ -291,7 +291,9 @@ def _build_user(data, python, stage):
 
 def write_tool_launchers(stage, python=None):
     """Pin script, interpreter and binaries to the same resolved release slot."""
-    header = 'slot=$(CDPATH= cd -P "$(dirname -- "$0")/.." && pwd -P) || exit 1\n'
+    # Resolve the launcher itself first: /usr/local/bin/avpnctl is a symlink to it, and
+    # dirname of that link would name /usr/local instead of this slot.
+    header = 'slot=$(CDPATH= cd -P "$(dirname -- "$(readlink -f -- "$0")")/.." && pwd -P) || exit 1\n'
     interpreter = shlex.quote(str(python)) if python is not None else '"$slot/venv/bin/python3"'
     for name, script in (("avpnctl", "avpnctl.py"), ("avpn-cloud", "cloud.py"), ("avpn-mesh", "mesh.py")):
         arguments = ' --bin-dir "$slot/bin"' if name == "avpnctl" else ""
