@@ -274,7 +274,13 @@ There are two ways to install from there:
   - generates the device's keys (PIN + touch again);
   - leaves the public request in your home directory as `advanced-vpn-client.req`.
 
-  The operator signs that request (`avpn init`); then run `sudo avpn enroll BUNDLE --operator-key operator.pub` and `sudo avpn connect`. On servers, use `--protect systemd-creds`. Running the same command again upgrades in place and never replaces existing keys.
+  The operator signs that request (`avpn init`); then run `sudo avpn enroll BUNDLE --operator-key operator.pub` and `sudo avpn connect`. Running the same command again upgrades in place and never replaces existing keys.
+
+  On a server, the keys are sealed to its TPM2 or locked to the operator's Nitrokey, never the host key alone (whose secret sits on the same disk):
+  - **with a usable TPM2** (systemd 250+, a TPM, the TSS2 libraries): `--protect systemd-creds`. The installer tests this first, by sealing and opening a throwaway credential, and refuses before installing if it does not work;
+  - **without one** (Ubuntu 22.04's systemd 249, OCI's Always Free shapes): `--protect operator --unlock-key FILE`, where FILE is the operator's unlock key (`avpn unlock-key` on the operator's computer). The server then stays locked after every reboot until the operator unlocks it (`avpn cloud unlock NAME`; [design](docs/HARDWARE_BOUND_SESSIONS.md)).
+
+  `avpn cloud host setup` and `avpn cloud chain` make this choice for you.
 
 Both need Python 3.10+ with `venv` (`sudo apt install python3-venv`). The binaries are
 built on Ubuntu 22.04, so they run on Ubuntu 22.04+ and Debian 12/13 (x86-64).

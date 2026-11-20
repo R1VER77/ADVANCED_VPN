@@ -105,8 +105,12 @@ dropped and then removed. See `avpn help privacy`.
 
 ## Installed layout
 
-`sudo python3 tools/install.py --apply [--role ROLE --protect MODE]` installs or upgrades
-everything below. With `--role`, it also generates this device's keys. It links `avpn`
+`sudo python3 tools/install.py --apply [--role ROLE --protect MODE [--unlock-key FILE]]` installs or
+upgrades everything below. With `--role`, it also generates this device's keys. A server's
+keys are TPM2-sealed (`--protect systemd-creds`, refused before installing when the host
+cannot seal and open a test credential with its TPM2) or locked to the operator's Nitrokey
+(`--protect operator --unlock-key FILE`, unlocked by the operator after every reboot); never
+the host key alone (`tools/sealing.py`, docs/HARDWARE_BOUND_SESSIONS.md). It links `avpn`
 and `avpnctl` into `/usr/local/bin`, because `sudo` searches only system directories.
 
 There is no automatic updater, by design: a program that fetches and runs new code on its

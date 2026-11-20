@@ -12,7 +12,7 @@ operator. Private keys never leave the device.
 - `--role`: `client`, `relay`, `middle` or `exit`. What this device will be in the chain.
 - `--protect`: how the private keys are sealed at rest.
   - `nitrokey`: FIDO2 hmac-secret envelope. Needs the key present (PIN + touch) to start.
-  - `systemd-creds`: sealed with the host key, and with the TPM2 when one is usable (`host+tpm2`). Use it on servers.
+  - `systemd-creds`: sealed with the host key, and with the TPM2 when one is usable (`host+tpm2`). On a server it is accepted only when the host can seal and open a test credential with its TPM2; otherwise it is refused (the host key alone would leave the keys' secret on the same disk) and the message says to use `operator`.
   - `operator`: servers without a usable TPM2. The keys are encrypted under a random data key, which is wrapped to the operator's unlock key and travels in the request; the server never stores it. After every reboot the server stays locked until the operator unwraps it with the Nitrokey (`avpn cloud unlock`). Needs `--unlock-key`.
   - `none`: plaintext, root-only. Lab use only.
 - `--insecure-plaintext-keys`: required for `--protect none`, which stores the private keys as plain root-only files that anyone with root or the disk can read. Without it, `none` is refused before any key is made. Tests and throwaway devices only.

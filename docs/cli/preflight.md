@@ -21,8 +21,8 @@ explain that the installer needs Python 3.10 and venv even on an older host.
 - `--operator-only`: check the command-line-only operator install. It needs a compatible
   OS/architecture, glibc, Python/venv and space; it does not require VPN networking or
   systemd features. The user installer selects this mode automatically.
-- `--protect MODE`: intended protection: `nitrokey`, `systemd-creds` or `none`. An older
-  systemd gets a warning for systemd-creds. This never changes protection or enables plaintext.
+- `--protect MODE`: intended protection: `nitrokey`, `systemd-creds`, `operator` or `none`. An
+  older systemd gets a warning for systemd-creds; on a server without a usable TPM2, use `operator`. This never changes protection or enables plaintext.
 - `--hardware`: also inspect attached keys using the installed hardware environment.
   Omit it for the Python 3.8 bootstrap script. No PIN or touch is requested.
 - `--provider KEY`: explicitly check an existing catalog provider with its installed CLI.

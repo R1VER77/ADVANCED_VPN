@@ -6,6 +6,11 @@ measured figure in the docs names the version it was measured on.
 
 ## Unreleased
 
+- The installer knows the server key rule: `install.py --apply --role relay|middle|exit
+  --protect systemd-creds` first seals and opens a test credential with the TPM2 and refuses,
+  before installing anything, when that fails; `--protect operator --unlock-key FILE` locks
+  the keys to the operator's Nitrokey instead. `avpnctl request` applies the same rule
+  (`tools/sealing.py`), and both preflights accept `--protect operator`.
 - Fixed (owner's first physical connect, 20 November): `sudo avpnctl connect` in a terminal
   failed for a hardware-protected client, because the session signer had no terminal for the
   PIN ([incident](docs/INCIDENTS.md)). A locked server's refusal now says how to unlock it.

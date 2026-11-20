@@ -320,7 +320,7 @@ fn main() {
             }
             "--protect" => match args.next().as_deref() {
                 Some("systemd-creds") => options.systemd_creds = true,
-                Some("nitrokey" | "none") => (),
+                Some("nitrokey" | "operator" | "none") => (),
                 _ => {
                     eprintln!("invalid key protection");
                     std::process::exit(2);

@@ -2312,8 +2312,13 @@ def dispatch(a):
                 "read. Use --protect nitrokey or systemd-creds; for a test device add --insecure-plaintext-keys."
             )
         vault = device_vault(a.vault) if a.protect == "nitrokey" else a.vault
-        if (a.protect == "operator") != (a.unlock_key is not None):
-            raise SystemExit("--unlock-key goes with --protect operator, and only with it")
+        if not a.lab:
+            import sealing
+
+            try:
+                sealing.check_server_protection(a.role, a.protect, a.unlock_key)
+            except ValueError as e:
+                raise SystemExit("refusing: " + str(e)) from None
         unlock_public = a.unlock_key.read_bytes() if a.unlock_key else None
         req = request(a.role, a.state.resolve(), a.protect, vault, unlock_public=unlock_public)
         a.out.write_bytes(canonical(req))

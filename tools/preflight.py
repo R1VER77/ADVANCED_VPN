@@ -393,7 +393,9 @@ def add_arguments(parser):
         action="store_true",
         help="check the command-line-only operator installation, not VPN networking",
     )
-    parser.add_argument("--protect", choices=("nitrokey", "systemd-creds", "none"), help="the intended key protection")
+    parser.add_argument(
+        "--protect", choices=("nitrokey", "systemd-creds", "operator", "none"), help="the intended key protection"
+    )
     parser.add_argument(
         "--provider",
         action="append",

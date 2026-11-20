@@ -733,7 +733,7 @@ def uninstall_system(
     print("Removed inactive application and owned units; private state, keys, users and network settings are kept.")
 
 
-def prepare_device(target, role, protect, vault=None, insecure=False):
+def prepare_device(target, role, protect, vault=None, insecure=False, unlock_key=None):
     """Generate this device's keys with the installed controller (the vault is created on
     first use) and leave the public request in the sudo user's home directory."""
     state = Path("/etc/advanced-vpn/enrolled")
@@ -750,8 +750,15 @@ def prepare_device(target, role, protect, vault=None, insecure=False):
         argv.append("--insecure-plaintext-keys")
     if vault:
         argv += ["--vault", str(vault)]
+    if unlock_key:
+        argv += ["--unlock-key", str(unlock_key.resolve())]
     subprocess.run(argv, check=True)
     print("Next: give %s to the operator (avpn init), then: sudo avpn enroll BUNDLE --operator-key operator.pub" % out)
+    if protect == "operator":
+        print(
+            "This server's keys are locked to the operator's Nitrokey: it cannot open them after a reboot "
+            "until the operator unlocks it (avpn cloud unlock NAME, or avpn unwrap + avpn server-unlock)."
+        )
     if role == "client":
         print(next_servers_step())
 
@@ -801,7 +808,12 @@ def main():
         "--role", choices=["client", "relay", "middle", "exit"], help="with --apply: also generate this device's keys"
     )
     p.add_argument(
-        "--protect", choices=["nitrokey", "systemd-creds", "none"], help="with --role: how the keys are sealed"
+        "--protect",
+        choices=["nitrokey", "systemd-creds", "operator", "none"],
+        help="with --role: how the keys are sealed (a server: systemd-creds needs a usable TPM2, else operator)",
+    )
+    p.add_argument(
+        "--unlock-key", type=Path, help="with --protect operator: the operator's unlock public key (avpn unlock-key)"
     )
     p.add_argument("--vault", type=Path, help="with --protect nitrokey: vault (default /etc/advanced-vpn/vault)")
     p.add_argument(
@@ -831,7 +843,15 @@ def main():
                 uninstall_system(bin_dir=Path("/usr/bin") if a.package_managed else Path("/usr/local/bin"))
             return
         if a.role and not a.protect:
-            raise ValueError("--role needs --protect (nitrokey, systemd-creds or none)")
+            raise ValueError("--role needs --protect (nitrokey, systemd-creds, operator or none)")
+        if a.role:
+            # A server's keys: TPM2-sealed, or locked to the operator's Nitrokey; never the
+            # host key alone. Refused here, before anything is staged (tools/sealing.py).
+            import sealing
+
+            sealing.check_server_protection(a.role, a.protect, a.unlock_key)
+            if a.unlock_key is not None and not a.unlock_key.is_file():
+                raise ValueError("no unlock key at %s" % a.unlock_key)
         if a.protect == "none" and not a.insecure_plaintext_keys:
             raise ValueError("--protect none stores private keys as plain files; it needs --insecure-plaintext-keys")
         installation_preflight(a.protect)
@@ -1015,7 +1035,7 @@ def apply_system(a, package, units, apparmor, stable):
         flush=True,
     )
     if a.role:
-        prepare_device(target, a.role, a.protect, a.vault, a.insecure_plaintext_keys)
+        prepare_device(target, a.role, a.protect, a.vault, a.insecure_plaintext_keys, a.unlock_key)
         return
     print("Next: sudo avpn request --role ROLE --protect MODE --out ROLE.req, or rerun with --role.")
 
