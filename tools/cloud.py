@@ -23,6 +23,7 @@ import ipaddress
 import json
 import os
 from pathlib import Path
+import shlex
 import shutil
 import socket
 import subprocess
@@ -502,11 +503,16 @@ def aws_teardown_plan(a, aws):
         rows.append(dict(label="image", value=img["ImageId"] + " " + img.get("Name", "")))
     for s in owned["snapshots"]:
         rows.append(dict(label="snapshot", value=s["SnapshotId"]))
+    admin = dict(endpoints=admin_endpoints(aws, a.name), groups=aws.owned(a.name + ADMIN_SUFFIX)["security_groups"])
+    for e in admin["endpoints"]:
+        rows.append(dict(label="admin endpoint", value=e["InstanceConnectEndpointId"]))
+    for g in admin["groups"]:
+        rows.append(dict(label="firewall", value=g["GroupId"] + " " + g["GroupName"]))
     if not rows:
         rows.append(dict(label="nothing", value="no resources tagged %s=%s in %s" % (NAME, a.name, aws.region)))
     else:
         rows.append(caller_note("aws"))
-    return dict(rows=rows, owned=owned)
+    return dict(rows=rows, owned=owned, admin=admin)
 
 
 def aws_teardown_apply(a, aws, plan):
@@ -522,7 +528,19 @@ def aws_teardown_apply(a, aws, plan):
             return states <= {"terminated"}
 
         wait("the instances to terminate", gone, timeout=900, every=10)
-    for g in owned["security_groups"]:
+    admin = plan.get("admin", dict(endpoints=[], groups=[]))
+    for e in admin["endpoints"]:
+        aws.ec2("delete-instance-connect-endpoint", "--instance-connect-endpoint-id", e["InstanceConnectEndpointId"])
+    for g in admin["groups"]:
+        # Its outbound rule names the server's group, which could not be deleted while named.
+        for p in g.get("IpPermissionsEgress", []):
+            aws.ec2("revoke-security-group-egress", "--group-id", g["GroupId"], "--ip-permissions", json.dumps([p]))
+    if admin["endpoints"]:
+        ids = [e["InstanceConnectEndpointId"] for e in admin["endpoints"]]
+        wait("the Instance Connect Endpoint to go", lambda: not [
+            e for e in aws.ec2("describe-instance-connect-endpoints", "--instance-connect-endpoint-ids", *ids)
+            .get("InstanceConnectEndpoints", []) if e.get("State") != "delete-complete"], timeout=900, every=15)  # fmt: skip
+    for g in owned["security_groups"] + admin["groups"]:
         aws.ec2("delete-security-group", "--group-id", g["GroupId"])
     for k in owned["key_pairs"]:
         aws.ec2("delete-key-pair", "--key-pair-id", k["KeyPairId"])
@@ -554,6 +572,11 @@ def aws_allow_plan(a, aws):
     groups = owned["security_groups"]
     roles = {t["Value"] for i in owned["instances"] for t in i.get("Tags", []) if t["Key"] == "avpn:role"}
     record = load_inventory()["resources"].get(a.name, {})
+    if a.admin_ip and eice_admin(record):
+        raise CloudError(
+            "%s is administered through its Instance Connect Endpoint (`aws admin-endpoint`): "
+            "SSH admits no address, so there is no --admin-ip to change" % a.name
+        )
     a.allow_from = tunnel_sources(a.allow_from, first_hop=record.get("first_hop", roles == {"relay"}))
     if len(groups) != 1:
         raise CloudError("expected one security group tagged %s=%s, found %d" % (NAME, a.name, len(groups)))
@@ -619,6 +642,107 @@ def aws_allow_apply(a, aws, plan):
             record["admin_ip"] = a.admin_ip
         save_inventory(inv)
     return plan["rows"]
+
+
+ADMIN_SUFFIX = "-admin"
+
+
+def admin_endpoints(aws, name):
+    """The Instance Connect Endpoints this tool made for `name`'s administration."""
+    f = ["Name=tag:%s,Values=true" % MANAGED, "Name=tag:%s,Values=%s" % (NAME, name + ADMIN_SUFFIX)]
+    found = aws.ec2("describe-instance-connect-endpoints", "--filters", *f).get("InstanceConnectEndpoints", [])
+    return [e for e in found if e.get("State") not in ("delete-complete", "delete-in-progress")]
+
+
+def aws_admin_endpoint_plan(a, aws):
+    """What `aws admin-endpoint` creates: an EC2 Instance Connect Endpoint in the server's
+    subnet, its own security group (no inbound; outbound SSH to the server only), and the
+    server's SSH rule replaced by that group, so admin SSH depends on an AWS login, never
+    on the address it comes from."""
+    owned = aws.owned(a.name)
+    if len(owned["instances"]) != 1 or len(owned["security_groups"]) != 1:
+        raise CloudError("expected one instance and one security group tagged %s=%s" % (NAME, a.name))
+    instance, group = owned["instances"][0], owned["security_groups"][0]
+    ssh = [p for p in group.get("IpPermissions", []) if p.get("IpProtocol") == "tcp" and p.get("FromPort") == 22]
+    endpoints = admin_endpoints(aws, a.name)
+    admin_groups = aws.owned(a.name + ADMIN_SUFFIX)["security_groups"]
+    rows = [
+        dict(label="server", value="%s %s" % (instance["InstanceId"], instance.get("PublicIpAddress", ""))),
+        dict(
+            label="endpoint",
+            value=endpoints[0]["InstanceConnectEndpointId"]
+            if endpoints
+            else "new, in %s (free; reached through AWS, authorised by your AWS login)" % instance["SubnetId"],
+        ),  # fmt: skip
+        dict(
+            label="group",
+            value=admin_groups[0]["GroupId"]
+            if admin_groups
+            else "new %s: no inbound, outbound SSH to %s only" % (a.name + ADMIN_SUFFIX, group["GroupId"]),
+        ),  # fmt: skip
+        dict(
+            label="ssh",
+            value="tcp 22 from that group only (was %s)"
+            % (", ".join(sorted(ranges_of(ssh[0]))) if ssh and ranges_of(ssh[0]) else "no address"),
+        ),  # fmt: skip
+    ]
+    return dict(instance=instance, group=group, endpoints=endpoints, admin_groups=admin_groups, rows=rows)
+
+
+def aws_admin_endpoint_apply(a, aws, plan):
+    """Create (or reuse) the endpoint and its group, admit SSH from that group only, then
+    close every address on the server's SSH rule, and record it."""
+    instance, group = plan["instance"], plan["group"]
+    gid = group["GroupId"]
+    if plan["admin_groups"]:
+        admin_gid = plan["admin_groups"][0]["GroupId"]
+    else:
+        admin_gid = aws.ec2(
+            "create-security-group", "--group-name", a.name + ADMIN_SUFFIX, "--vpc-id", instance["VpcId"],
+            "--description", "Instance Connect Endpoint for %s admin SSH (no inbound)" % a.name,
+            "--tag-specifications", aws.tags("security-group", a.name + ADMIN_SUFFIX),
+        )["GroupId"]  # fmt: skip
+        aws.ec2("revoke-security-group-egress", "--group-id", admin_gid, "--ip-permissions",
+                json.dumps([dict(IpProtocol="-1", IpRanges=[dict(CidrIp="0.0.0.0/0")])]))  # fmt: skip
+        aws.ec2("authorize-security-group-egress", "--group-id", admin_gid, "--ip-permissions", json.dumps(
+            [dict(IpProtocol="tcp", FromPort=22, ToPort=22, UserIdGroupPairs=[dict(GroupId=gid)])]))  # fmt: skip
+    if plan["endpoints"]:
+        endpoint = plan["endpoints"][0]["InstanceConnectEndpointId"]
+    else:
+        endpoint = aws.ec2(
+            "create-instance-connect-endpoint", "--subnet-id", instance["SubnetId"],
+            "--security-group-ids", admin_gid, "--no-preserve-client-ip",
+            "--tag-specifications", aws.tags("instance-connect-endpoint", a.name + ADMIN_SUFFIX),
+        )["InstanceConnectEndpoint"]["InstanceConnectEndpointId"]  # fmt: skip
+
+    def ready():
+        got = aws.ec2("describe-instance-connect-endpoints", "--instance-connect-endpoint-ids", endpoint)
+        state = got["InstanceConnectEndpoints"][0]["State"]
+        if state == "create-failed":
+            raise CloudError("the Instance Connect Endpoint could not be created")
+        return state == "create-complete"
+
+    wait("the Instance Connect Endpoint", ready, timeout=900, every=15)
+    ssh = [p for p in group.get("IpPermissions", []) if p.get("IpProtocol") == "tcp" and p.get("FromPort") == 22]
+    if not any(pair.get("GroupId") == admin_gid for p in ssh for pair in p.get("UserIdGroupPairs", [])):
+        aws.ec2("authorize-security-group-ingress", "--group-id", gid, "--ip-permissions", json.dumps([dict(
+            IpProtocol="tcp", FromPort=22, ToPort=22, UserIdGroupPairs=[dict(
+                GroupId=admin_gid, Description="admin SSH via its Instance Connect Endpoint")])]))  # fmt: skip
+    for p in ssh:  # the endpoint is open first; only then is any address closed
+        drop = {k: p[k] for k in ("IpRanges", "Ipv6Ranges", "PrefixListIds") if p.get(k)}
+        others = [q for q in p.get("UserIdGroupPairs", []) if q.get("GroupId") != admin_gid]
+        if others:
+            drop["UserIdGroupPairs"] = others
+        if drop:
+            aws.ec2("revoke-security-group-ingress", "--group-id", gid, "--ip-permissions",
+                    json.dumps([dict(IpProtocol="tcp", FromPort=22, ToPort=22, **drop)]))  # fmt: skip
+    inv = load_inventory()
+    record = inv["resources"].get(a.name)
+    if record is not None:
+        record["admin"] = dict(via="eice", endpoint=endpoint, group=admin_gid, instance=instance["InstanceId"])
+        record.pop("admin_ip", None)
+        save_inventory(inv)
+    return plan["rows"] + [dict(label="admin", value="ssh now goes through %s; no address is admitted" % endpoint)]
 
 
 def oci(*args):
@@ -1093,11 +1217,29 @@ systemctl is-active advanced-vpn.service
 """
 
 
+def eice_admin(record):
+    """The Instance Connect Endpoint a server is administered through, or None."""
+    admin = record.get("admin")
+    return admin if isinstance(admin, dict) and admin.get("via") == "eice" else None
+
+
 def ssh_base(name, record):
-    """ssh/scp options for a recorded host: its key (or SSH config), its own known_hosts."""
+    """ssh/scp options for a recorded host: its key (or SSH config), its own known_hosts.
+    A server administered through an EC2 Instance Connect Endpoint is reached through it
+    (IAM-authorised, from any address); its host key stays filed under its public address."""
     known = INVENTORY.parent / "ssh" / (name + ".known_hosts")
     known.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     opts = ["-F", record["ssh_config"]] if record.get("ssh_config") else []
+    admin = eice_admin(record)
+    if admin:
+        tunnel = [tool("aws"), "ec2-instance-connect", "open-tunnel", "--instance-id", admin["instance"],
+                  "--profile", record["profile"], "--region", record["region"]]  # fmt: skip
+        opts += [
+            "-o",
+            "ProxyCommand=" + " ".join(shlex.quote(x) for x in tunnel),
+            "-o",
+            "HostKeyAlias=" + record["public_ip"],
+        ]
     if record.get("ssh_key"):
         opts += ["-i", record["ssh_key"], "-o", "IdentitiesOnly=yes", "-o", "IdentityAgent=none"]
     return opts + [
@@ -1110,6 +1252,8 @@ def ssh_target(record):
     """`user@host` (or an SSH config alias) for a recorded server."""
     if record.get("ssh"):
         return record["ssh"]
+    if eice_admin(record):
+        return "%s@%s" % (record.get("ssh_user", "admin"), eice_admin(record)["instance"])
     return "%s@%s" % (record.get("ssh_user", "admin"), record["public_ip"])
 
 
@@ -1353,7 +1497,7 @@ def chain_layout(names, inv):
     return hops
 
 
-def sg_diff(perms, wanted):
+def sg_diff(perms, wanted, unmanaged=()):
     """Authorize/revoke lists that make a group's managed rules exactly `wanted`.
 
     Managed rules are every single-port UDP permission, TCP 22, and TCP on the
@@ -1367,6 +1511,7 @@ def sg_diff(perms, wanted):
         managed = (key[0] == "udp" and q.get("FromPort") == q.get("ToPort")) or (
             key[0] == "tcp" and q.get("FromPort") == q.get("ToPort") in (22, FIRST_HOP_PORT)
         )
+        managed = managed and key not in unmanaged
         if managed:
             have[key] = ranges_of(q)
             extra[key] = {k: q[k] for k in ("Ipv6Ranges", "PrefixListIds", "UserIdGroupPairs") if q.get(k)}
@@ -1397,7 +1542,12 @@ def set_firewall(name, record, port, sources, ssh):
         wanted = {("udp", port): set(sources), ("tcp", 22): set(ssh)}
         # The first hop also takes the camouflage's TLS/TCP fallback on the same port.
         wanted[("tcp", FIRST_HOP_PORT)] = set(sources) if port == FIRST_HOP_PORT else set()
-        add, remove = sg_diff(groups[0].get("IpPermissions", []), wanted)
+        # Administered through its Instance Connect Endpoint: SSH admits only that
+        # endpoint's group, never an address, and is not this function's to change.
+        unmanaged = {("tcp", 22)} if eice_admin(record) else set()
+        for key in unmanaged:
+            wanted.pop(key)
+        add, remove = sg_diff(groups[0].get("IpPermissions", []), wanted, unmanaged)
         gid = groups[0]["GroupId"]
         if add:
             aws.ec2("authorize-security-group-ingress", "--group-id", gid, "--ip-permissions", json.dumps(add))
@@ -1408,7 +1558,7 @@ def set_firewall(name, record, port, sources, ssh):
             transports(port),
             port,
             ", ".join(sources),
-            ", ".join(ssh) or "nobody",
+            "its Instance Connect Endpoint only" if unmanaged else (", ".join(ssh) or "nobody"),
         )
     if record["provider"] == "oci" and record.get("managed_list"):
         oc = Oci(record.get("profile", "DEFAULT"), record.get("compartment"))
@@ -1980,6 +2130,17 @@ def build_parser():
     allow.add_argument("--admin-ip", help="new address allowed to SSH in, or auto")
     allow.add_argument("--dry-run", action="store_true", help="show the plan and stop")
     allow.add_argument("--yes", action="store_true", help="do not ask for confirmation")
+    endpoint = aws_s.add_parser(
+        "admin-endpoint", help="administer a server through an EC2 Instance Connect Endpoint, with no SSH address rule"
+    )
+    endpoint.add_argument(
+        "--apply", action="store_true", required=True, help="create the endpoint and switch SSH to it"
+    )
+    endpoint.add_argument("--name", default="avpn-relay", help="the server's name and tag (avpn-*)")
+    endpoint.add_argument("--profile", default=os.environ.get("AWS_PROFILE", "default"), help="AWS CLI profile")
+    endpoint.add_argument("--region", help="must equal the profile's Region (the project has one Region)")
+    endpoint.add_argument("--dry-run", action="store_true", help="show the plan and stop")
+    endpoint.add_argument("--yes", action="store_true", help="do not ask for confirmation")
     h = s.add_parser("host", help="servers this tool created")
     h_s = h.add_subparsers(dest="kind", required=True)
     setup = h_s.add_parser("setup", help="install the package over SSH and fetch the public request")
@@ -2129,6 +2290,14 @@ def run(a):
     if a.provider == "aws":
         valid_name(a.name)
         aws = Aws(a.profile, a.region)
+        if a.kind == "admin-endpoint":
+            plan = aws_admin_endpoint_plan(a, aws)
+            title = "Administer AWS %s through an Instance Connect Endpoint" % a.name
+            if a.dry_run:
+                return dict(title=title, summary="plan", rows=plan["rows"], dry_run=True)
+            if not confirm(a, title):
+                return dict(title=title, summary="cancelled", rows=plan["rows"])
+            return dict(title=title, summary="applied", rows=aws_admin_endpoint_apply(a, aws, plan))
         if a.kind == "allow":
             if not a.allow_from and not a.admin_ip:
                 raise CloudError("nothing to change: give --allow-from and/or --admin-ip (auto = this machine)")

@@ -19,11 +19,32 @@ import tarfile
 import tempfile
 
 VERSION = "3.13.18"
-ARCHIVE_URL = (
-    "https://github.com/astral-sh/python-build-standalone/releases/download/20261110/"
-    "cpython-3.13.18%2B20261110-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz"
-)
-ARCHIVE_SHA256 = "f2d2199eb25880e07863b391cf7124e7ffa1338b0d65600dfcec117c4223a7fb"
+_RELEASE = "https://github.com/astral-sh/python-build-standalone/releases/download/20261110/"
+# One reviewed pin per processor, each the SHA-256 the release's SHA256SUMS publishes.
+PINS = {
+    "x86_64": (
+        "x86_64-linux-gnu",
+        _RELEASE + "cpython-3.13.18%2B20261110-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
+        "f2d2199eb25880e07863b391cf7124e7ffa1338b0d65600dfcec117c4223a7fb",
+    ),
+    "aarch64": (
+        "aarch64-linux-gnu",
+        _RELEASE + "cpython-3.13.18%2B20261110-aarch64-unknown-linux-gnu-install_only_stripped.tar.gz",
+        "55c00325f7c1fddf325dfc621aabdfbbac4dc54adda224af88ec411dc12db239",
+    ),
+}
+# The x86-64 pin under its historical names (release and CI jobs download it).
+_, ARCHIVE_URL, ARCHIVE_SHA256 = PINS["x86_64"]
+
+
+def pin(machine=None):
+    """(platform, archive URL, archive SHA-256) reviewed for this host's processor."""
+    machine = machine or platform.machine()
+    if platform.system() != "Linux" or machine not in PINS:
+        raise RuntimeError("no reviewed runtime pin for %s %s" % (platform.system(), machine))
+    return PINS[machine]
+
+
 MANIFEST = "CYPHERPUNK_RUNTIME.json"
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -80,7 +101,8 @@ def verify(root, requirements):
     ):
         raise ValueError("missing or unsafe bundled runtime manifest")
     m = json.loads(marker.read_text())
-    expected = dict(schema=1, python=VERSION, platform="x86_64-linux-gnu", archive_sha256=ARCHIVE_SHA256)
+    platform_name, _, archive_sha256 = pin()
+    expected = dict(schema=1, python=VERSION, platform=platform_name, archive_sha256=archive_sha256)
     if any(m.get(k) != value for k, value in expected.items()):
         raise ValueError("bundled runtime provenance does not match the reviewed pin")
     if m.get("requirements_sha256") != sha256(requirements):
@@ -95,11 +117,10 @@ def build(archive, output, requirements):
     archive, output, requirements = Path(archive), Path(output), Path(requirements)
     if os.geteuid() == 0:
         raise RuntimeError("build runtime as an ordinary user, never root")
-    if platform.system() != "Linux" or platform.machine() != "x86_64":
-        raise RuntimeError("only x86_64 Linux has a reviewed runtime pin today")
+    platform_name, archive_url, archive_sha256 = pin()
     if output.exists() or output.is_symlink():
         raise FileExistsError("runtime output must not exist")
-    if sha256(archive) != ARCHIVE_SHA256:
+    if sha256(archive) != archive_sha256:
         raise ValueError("Python archive SHA256 does not match the reviewed pin")
     if not hasattr(tarfile, "data_filter"):
         raise RuntimeError("runtime build requires Python with tarfile.data_filter")
@@ -138,8 +159,8 @@ def build(archive, output, requirements):
         for path in [runtime, *runtime.rglob("*")]:
             if not path.is_symlink():
                 path.chmod(stat.S_IMODE(path.stat().st_mode) & ~(0o022 | 0o7000))
-        m = dict(schema=1, python=VERSION, platform="x86_64-linux-gnu", archive_url=ARCHIVE_URL,
-                 archive_sha256=ARCHIVE_SHA256, requirements_sha256=sha256(requirements),
+        m = dict(schema=1, python=VERSION, platform=platform_name, archive_url=archive_url,
+                 archive_sha256=archive_sha256, requirements_sha256=sha256(requirements),
                  entries=inventory(runtime))  # fmt: skip
         (runtime / MANIFEST).write_text(json.dumps(m, sort_keys=True, indent=2) + "\n")
         (runtime / MANIFEST).chmod(0o644)

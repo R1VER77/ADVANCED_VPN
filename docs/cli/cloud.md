@@ -12,6 +12,7 @@ and `oci` command-line tools, and plain SSH for everything else.
     avpn cloud aws relay --apply [--name avpn-NAME] [--role relay|middle|exit] [--allow-from IP|any] [--profile P] ...
     avpn cloud aws relay --teardown [--name avpn-NAME] [--profile P]
     avpn cloud aws allow --apply [--name avpn-NAME] [--allow-from IP|any ...] [--admin-ip IP] [--profile P]
+    avpn cloud aws admin-endpoint --apply [--name avpn-NAME] [--profile P]
     avpn cloud oci server --apply [--name avpn-NAME] [--role relay|middle|exit] [--shape micro|arm] ...
     avpn cloud oci server --teardown [--name avpn-NAME]
     avpn cloud oci allow --apply --name avpn-NAME --security-list OCID --allow-from IP [--port N] [--protocol udp|tcp]
@@ -184,6 +185,31 @@ for OCI servers this tool did not create.
 - `--dry-run`, `--yes`: as above.
 
 Every other ingress rule, and every egress rule, is kept exactly as it was.
+
+## avpn cloud aws admin-endpoint
+
+Administer an AWS server with no SSH address rule at all, so changing networks (a
+commercial VPN, travel) never locks you out and never needs a firewall update.
+
+    avpn cloud aws admin-endpoint --apply --name avpn-relay
+
+- `--apply`: create the endpoint and switch SSH to it (required; the plan is shown first).
+- `--name avpn-NAME`: the server (default `avpn-relay`).
+- `--profile P`, `--region R`: as for `aws relay`.
+- `--dry-run`, `--yes`: as above.
+
+What it does:
+1. Creates an EC2 Instance Connect Endpoint in the server's subnet (free), with its own
+   security group `avpn-NAME-admin`: no inbound rule, outbound SSH to the server only.
+2. Admits SSH to the server from that group, then removes every address from the
+   server's SSH rule. Port 22 is no longer reachable from the internet, so the server
+   also stops answering as an SSH server, which its HTTPS camouflage prefers.
+3. Records it in the inventory. From then on `host setup`, `chain` and every other SSH
+   from this tool go through the endpoint (`aws ec2-instance-connect open-tunnel`),
+   authorised by your AWS login from any address; `chain` leaves the SSH rule alone,
+   and `aws allow --admin-ip` refuses, because no address is admitted.
+
+`aws relay --teardown` removes the endpoint and its group with the server.
 
 ## avpn cloud host add
 

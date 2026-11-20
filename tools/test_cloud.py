@@ -132,7 +132,8 @@ if op == "describe-instances":
         out({"Reservations": [{"Instances": [{"InstanceId": "i-1", "State": {"Name": st}, "PublicIpAddress": "16.0.0.9"}]}]})
     out({"Reservations": [{"Instances": state.get("instances", [])}] if tagged else []})
 if op == "describe-security-groups":
-    out({"SecurityGroups": state.get("groups", []) if tagged else []})
+    admin = any(a.endswith("-admin") for a in argv if a.startswith("Name=tag:avpn:name"))
+    out({"SecurityGroups": (state.get("admin_groups", []) if admin else state.get("groups", [])) if tagged else []})
 if op == "describe-snapshots":
     out({"Snapshots": state.get("snapshots", []) if tagged else []})
 if op == "describe-key-pairs":
@@ -144,7 +145,35 @@ if op == "copy-image":
 if op == "register-image":
     out({"ImageId": "ami-tpm"})
 if op == "create-security-group":
+    if flag("--group-name", ) and flag("--group-name").endswith("-admin"):
+        g = {"GroupId": "sg-admin", "GroupName": flag("--group-name"), "IpPermissions": [],
+             "IpPermissionsEgress": [{"IpProtocol": "-1", "IpRanges": [{"CidrIp": "0.0.0.0/0"}]}]}
+        state.setdefault("admin_groups", []).append(g)
+        json.dump(state, open(os.environ["STUB_STATE"], "w"))
+        out({"GroupId": "sg-admin"})
     out({"GroupId": "sg-1"})
+if op in ("authorize-security-group-egress", "revoke-security-group-egress"):
+    for g in state.get("admin_groups", []):
+        if g["GroupId"] == flag("--group-id"):
+            perms = json.loads(flag("--ip-permissions"))
+            if op.startswith("authorize"):
+                g["IpPermissionsEgress"] += perms
+            else:
+                g["IpPermissionsEgress"] = [q for q in g["IpPermissionsEgress"] if q not in perms]
+    json.dump(state, open(os.environ["STUB_STATE"], "w"))
+    out({"Return": True})
+if op == "create-instance-connect-endpoint":
+    state["endpoint"] = {"InstanceConnectEndpointId": "eice-1", "State": "create-complete",
+                         "SubnetId": flag("--subnet-id"), "SecurityGroupIds": [flag("--security-group-ids")]}
+    json.dump(state, open(os.environ["STUB_STATE"], "w"))
+    out({"InstanceConnectEndpoint": state["endpoint"]})
+if op == "describe-instance-connect-endpoints":
+    e = state.get("endpoint")
+    out({"InstanceConnectEndpoints": [e] if e else []})
+if op == "delete-instance-connect-endpoint":
+    state["endpoint"]["State"] = "delete-complete"
+    json.dump(state, open(os.environ["STUB_STATE"], "w"))
+    out({})
 if op == "run-instances":
     if flag("--user-data"):
         state["user_data"] = open(flag("--user-data")[len("file://"):]).read()
@@ -166,9 +195,11 @@ if op in ("authorize-security-group-ingress", "revoke-security-group-ingress"):
                     mine = [dict(IpProtocol=key[0], FromPort=key[1], ToPort=key[2], IpRanges=[])]
                     g["IpPermissions"].append(mine[0])
                 have = {r["CidrIp"] for r in mine[0]["IpRanges"]}
-                if have & {r["CidrIp"] for r in p["IpRanges"]}:
+                if have & {r["CidrIp"] for r in p.get("IpRanges", [])}:
                     fail("An error occurred (InvalidPermission.Duplicate)")
-                mine[0]["IpRanges"] += p["IpRanges"]
+                mine[0]["IpRanges"] += p.get("IpRanges", [])
+                if p.get("UserIdGroupPairs"):
+                    mine[0].setdefault("UserIdGroupPairs", []).extend(p["UserIdGroupPairs"])
             else:
                 if not mine:
                     fail("An error occurred (InvalidPermission.NotFound)")
@@ -396,7 +427,10 @@ class CloudTests(Stubbed):
                 and "--instance-ids" not in c
             ):
                 self.assertIn("Name=tag:avpn:managed,Values=true", c, c)
-                self.assertIn("Name=tag:avpn:name,Values=avpn-relay", c, c)
+                # The server's own resources, or its admin endpoint's (avpn-relay-admin).
+                self.assertTrue(
+                    {"Name=tag:avpn:name,Values=avpn-relay", "Name=tag:avpn:name,Values=avpn-relay-admin"} & set(c), c
+                )
         deleted = [
             c[1:4]
             for c in self.calls()
@@ -500,6 +534,70 @@ class CloudTests(Stubbed):
         again = self.run_cli("aws", "allow", "--apply", "--yes", "--profile", "p", "--allow-from", "31.13.0.5")
         self.assertEqual(again["rows"][0]["label"], "nothing")
         self.assertEqual([o for o in self.ops()[before:] if "security-group-ingress" in o], [])
+
+    def relay_with_instance(self):
+        self.set_state(dict(
+            groups=[self.relay_group(tunnel=("0.0.0.0/0",), ssh=("31.13.0.5/32",))],
+            instances=[dict(InstanceId="i-1", SubnetId="subnet-1", VpcId="vpc-1", PublicIpAddress="16.0.0.9",
+                            Tags=[dict(Key="Name", Value="avpn-relay")])],
+        ))  # fmt: skip
+        cloud.save_inventory(dict(schema=1, resources={"avpn-relay": dict(
+            provider="aws", instance="i-1", profile="p", region="eu-north-1", public_ip="16.0.0.9",
+            admin_ip="31.13.0.5/32", role="relay", first_hop=True)}))  # fmt: skip
+
+    def test_admin_endpoint_replaces_every_ssh_address_with_the_endpoint_group(self):
+        self.relay_with_instance()
+        r = self.run_cli("aws", "admin-endpoint", "--apply", "--yes", "--profile", "p")
+        self.assertEqual(r["summary"], "applied")
+        state = json.loads(self.state.read_text())
+        ssh = [q for q in state["groups"][0]["IpPermissions"] if q["FromPort"] == 22]
+        self.assertEqual(len(ssh), 1)
+        self.assertEqual(ssh[0]["IpRanges"], [])  # no address at all
+        self.assertEqual([p["GroupId"] for p in ssh[0]["UserIdGroupPairs"]], ["sg-admin"])
+        # The endpoint's group: no inbound, outbound SSH to the server's group only.
+        admin = state["admin_groups"][0]
+        self.assertEqual(admin["IpPermissions"], [])
+        self.assertEqual(admin["IpPermissionsEgress"],
+                         [dict(IpProtocol="tcp", FromPort=22, ToPort=22, UserIdGroupPairs=[dict(GroupId="sg-r")])])  # fmt: skip
+        self.assertEqual(state["endpoint"]["SubnetId"], "subnet-1")
+        # The endpoint is admitted before the address is closed: no window without SSH.
+        ops = [o for o in self.ops() if "security-group-ingress" in o]
+        self.assertEqual(ops, ["authorize-security-group-ingress", "revoke-security-group-ingress"])
+        rec = json.loads(cloud.INVENTORY.read_text())["resources"]["avpn-relay"]
+        self.assertEqual(rec["admin"], dict(via="eice", endpoint="eice-1", group="sg-admin", instance="i-1"))
+        self.assertNotIn("admin_ip", rec)
+        # SSH from this tool now goes through the endpoint, keyed to the instance.
+        base = cloud.ssh_base("avpn-relay", rec)
+        self.assertIn("HostKeyAlias=16.0.0.9", base)
+        proxy = next(o for o in base if o.startswith("ProxyCommand="))
+        self.assertIn("ec2-instance-connect open-tunnel --instance-id i-1 --profile p --region eu-north-1", proxy)
+        self.assertEqual(cloud.ssh_target(rec), "admin@i-1")
+        # chain's firewall step leaves the endpoint's SSH rule alone ...
+        cloud.set_firewall("avpn-relay", rec, 41194, ["0.0.0.0/0"], ["9.9.9.9/32"])
+        ssh = [q for q in json.loads(self.state.read_text())["groups"][0]["IpPermissions"] if q["FromPort"] == 22]
+        self.assertEqual((ssh[0]["IpRanges"], [p["GroupId"] for p in ssh[0]["UserIdGroupPairs"]]), ([], ["sg-admin"]))
+        # ... and aws allow refuses to pin an address again.
+        with self.assertRaisesRegex(cloud.CloudError, "Instance Connect Endpoint"):
+            self.run_cli("aws", "allow", "--apply", "--yes", "--profile", "p", "--admin-ip", "31.13.0.6")
+        # A second run reuses the endpoint and changes nothing.
+        before = [o for o in self.ops() if o.startswith("create-")]
+        self.run_cli("aws", "admin-endpoint", "--apply", "--yes", "--profile", "p")
+        self.assertEqual([o for o in self.ops() if o.startswith("create-")], before)
+
+    def test_teardown_removes_the_endpoint_and_its_group_in_an_order_aws_accepts(self):
+        self.relay_with_instance()
+        self.run_cli("aws", "admin-endpoint", "--apply", "--yes", "--profile", "p")
+        self.run_cli("aws", "relay", "--teardown", "--yes", "--profile", "p")
+        ops = self.ops()
+        tail = ops[ops.index("terminate-instances") :]
+        order = [
+            o
+            for o in tail
+            if o in ("delete-instance-connect-endpoint", "revoke-security-group-egress", "delete-security-group")
+        ]
+        self.assertEqual(order[0], "delete-instance-connect-endpoint")
+        self.assertLess(order.index("revoke-security-group-egress"), order.index("delete-security-group"))
+        self.assertEqual(order.count("delete-security-group"), 2)  # the server's group, then the endpoint's
 
     def test_aws_allow_changes_only_what_is_asked(self):
         self.set_state(dict(groups=[self.relay_group()]))

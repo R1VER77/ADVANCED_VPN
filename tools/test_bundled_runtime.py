@@ -31,8 +31,9 @@ class RuntimeManifest(unittest.TestCase):
         self.manifest()
 
     def manifest(self, **overrides):
-        m = dict(schema=1, python=runtime.VERSION, platform="x86_64-linux-gnu",
-                 archive_sha256=runtime.ARCHIVE_SHA256, requirements_sha256=runtime.sha256(self.lock),
+        platform_name, _, archive_sha256 = runtime.pin()
+        m = dict(schema=1, python=runtime.VERSION, platform=platform_name,
+                 archive_sha256=archive_sha256, requirements_sha256=runtime.sha256(self.lock),
                  entries=runtime.inventory(self.bundle))  # fmt: skip
         m.update(overrides)
         (self.bundle / runtime.MANIFEST).write_text(json.dumps(m))
@@ -85,6 +86,17 @@ class RuntimeManifest(unittest.TestCase):
         os.mkfifo(self.bundle / "fifo")
         with self.assertRaisesRegex(ValueError, "special file"):
             runtime.inventory(self.bundle)
+
+    def test_each_processor_has_its_own_pin_and_a_bundle_is_not_another_processors(self):
+        self.assertEqual(set(runtime.PINS), {"x86_64", "aarch64"})
+        self.assertEqual(runtime.PINS["x86_64"][1:], (runtime.ARCHIVE_URL, runtime.ARCHIVE_SHA256))
+        with self.assertRaisesRegex(RuntimeError, "no reviewed runtime pin"):
+            runtime.pin("riscv64")
+        other = next(m for m in runtime.PINS if m != runtime.platform.machine())
+        name, _, sha = runtime.PINS[other]
+        self.manifest(platform=name, archive_sha256=sha)
+        with self.assertRaisesRegex(ValueError, "reviewed pin"):
+            runtime.verify(self.bundle, self.lock)
 
     def test_bad_archive_is_rejected_before_extraction_or_execution(self):
         archive = self.root / "bad.tar.gz"
