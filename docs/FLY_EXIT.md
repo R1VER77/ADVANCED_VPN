@@ -25,7 +25,9 @@ day (about 47 GB). [The fee guard](FEE_GUARD.md) holds every server to such a ca
   proxy carries no QUIC, so the exit listens on `[::]:4444` and the app's free anycast
   IPv6 forwards raw TCP to it. The relay reaches it over a TCP paced link
   (`--link-transport tcp`): the same fixed-size cells on a constant clock. The relay
-  needs IPv6 itself.
+  needs IPv6 itself, and `chain --apply` refuses a relay without it. On AWS it lets the
+  relay send over IPv6 only to the exit's address and port, and keeps that rule current
+  when the exit's address changes.
 - **Administered through the Machines API**, not SSH. Its exec call runs a command in the
   Machine. `tools/fly-ssh` and `tools/fly-scp` give it the shape of ssh and scp, so
   `host setup`, `unlock`, `health` and `chain` run unchanged. That path is out of band:

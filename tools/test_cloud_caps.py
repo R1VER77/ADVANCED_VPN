@@ -81,6 +81,86 @@ class FlyInTheChain(unittest.TestCase):
         self.assertEqual(cloud.remote("avpn-fly", inv["resources"]["avpn-fly"])[2:], (["--app", "a"], "m"))
 
 
+class RelayIpv6Egress(unittest.TestCase):
+    """The relay may send over IPv6 only to its IPv6 next hop (a Fly.io exit), and chain
+    --apply keeps it so: added by hand once, it went stale whenever the exit's address
+    changed (side review, 21 Nov 2026)."""
+
+    FLY = ("tcp", 4444, "2001:db8::4/128")
+    AUTO = {"IpProtocol": "-1", "IpRanges": [{"CidrIp": "0.0.0.0/0"}], "Ipv6Ranges": [{"CidrIpv6": "::/0"}]}
+
+    def test_the_allow_all_aws_adds_is_revoked_alone_and_the_next_hop_added(self):
+        add, remove = cloud.egress6_diff([self.AUTO], {self.FLY})
+        self.assertEqual(remove, [{"IpProtocol": "-1", "Ipv6Ranges": [{"CidrIpv6": "::/0"}]}])
+        self.assertEqual(add[0]["Ipv6Ranges"][0]["CidrIpv6"], "2001:db8::4/128")
+        self.assertEqual((add[0]["FromPort"], add[0]["ToPort"], add[0]["IpProtocol"]), (4444, 4444, "tcp"))
+
+    def test_an_exact_rule_changes_nothing_and_a_moved_exit_is_followed(self):
+        current = [{"IpProtocol": "tcp", "FromPort": 4444, "ToPort": 4444,
+                    "Ipv6Ranges": [{"CidrIpv6": "2001:db8::4/128"}]}]  # fmt: skip
+        self.assertEqual(cloud.egress6_diff(current, {self.FLY}), ([], []))
+        add, remove = cloud.egress6_diff(current, {("tcp", 4444, "2001:db8::9/128")})
+        self.assertEqual([r["Ipv6Ranges"][0]["CidrIpv6"] for r in add], ["2001:db8::9/128"])
+        self.assertEqual([r["Ipv6Ranges"][0]["CidrIpv6"] for r in remove], ["2001:db8::4/128"])
+        # An IPv4 next hop: no IPv6 out at all.
+        self.assertEqual(cloud.egress6_diff(current, set())[1][0]["Ipv6Ranges"][0]["CidrIpv6"], "2001:db8::4/128")
+
+    def fake(self, six):
+        calls = []
+
+        class FakeAws:
+            def __init__(self, *a):
+                pass
+
+            def owned(self, name):
+                return {"security_groups": [{"GroupId": "sg-r", "IpPermissions": [],
+                                             "IpPermissionsEgress": [RelayIpv6Egress.AUTO]}]}  # fmt: skip
+
+            def ec2(self, *args):
+                calls.append(args)
+                if args[0] == "describe-instances":
+                    return {"Reservations": [{"Instances": [{"NetworkInterfaces": [{"Ipv6Addresses": six}]}]}]}
+                return {}
+
+        return FakeAws, calls
+
+    def test_set_firewall_writes_the_rule_and_refuses_a_relay_without_ipv6(self):
+        rec = dict(provider="aws", profile="p", region="eu-north-1", instance="i-1")
+        fake, calls = self.fake([{"Ipv6Address": "2001:db8:1::1"}])
+        with mock.patch.object(cloud, "Aws", fake), mock.patch.object(cloud, "sg_diff", lambda *a, **k: ([], [])):
+            cloud.set_firewall("avpn-relay", rec, 443, ["0.0.0.0/0"], [], "[2001:db8::4]:4444")
+        ops = {c[0]: json.loads(c[-1]) for c in calls if "security-group-egress" in c[0]}
+        self.assertEqual(ops["authorize-security-group-egress"][0]["Ipv6Ranges"][0]["CidrIpv6"], "2001:db8::4/128")
+        self.assertEqual(ops["revoke-security-group-egress"][0]["Ipv6Ranges"][0]["CidrIpv6"], "::/0")
+        fake, calls = self.fake([])
+        with mock.patch.object(cloud, "Aws", fake), self.assertRaisesRegex(cloud.CloudError, "no IPv6 address"):
+            cloud.set_firewall("avpn-relay", rec, 443, ["0.0.0.0/0"], [], "[2001:db8::4]:4444")
+
+    def test_each_hop_knows_its_next_hop_and_both_firewall_passes_use_it(self):
+        inv = {"r": dict(provider="aws", public_ip="198.51.100.1"), "f": dict(provider="fly", public_ip="2001:db8::4")}
+        hops = cloud.chain_layout(["r", "f"], inv)
+        self.assertEqual([h["next"] for h in hops], ["[2001:db8::4]:4444", None])
+        import inspect
+
+        src = inspect.getsource(cloud.chain_steps)
+        self.assertEqual(src.count('h.get("next"))'), 2)
+
+
+class AddressAgnostic(unittest.TestCase):
+    """Owner, 21 Nov: the tooling should not depend on the caller's (VPN-switched) address."""
+
+    def test_instance_connect_bastion_and_fly_hops_never_look_up_the_callers_address(self):
+        hops = [dict(record=dict(provider="aws", admin=dict(via="eice", instance="i-1"))),
+                dict(record=dict(provider="fly")), dict(record=dict(provider="ssh", bastion={}))]  # fmt: skip
+        with mock.patch.object(cloud, "egress", side_effect=AssertionError("looked up the caller's address")):
+            self.assertIsNone(cloud.setup_ssh_source(hops))
+
+    def test_a_hop_reached_by_address_still_gets_it(self):
+        for rec in (dict(provider="aws"), dict(provider="oci", managed_list=True)):
+            with self.subTest(rec=rec), mock.patch.object(cloud, "egress", lambda: "9.9.9.9"):
+                self.assertEqual(cloud.setup_ssh_source([dict(record=rec)]), "9.9.9.9/32")
+
+
 class Command(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

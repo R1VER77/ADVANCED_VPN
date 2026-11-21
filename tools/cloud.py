@@ -1797,7 +1797,11 @@ def chain_layout(names, inv):
         # address, and the exit itself at its tunnel address (EXIT_TUNNEL_IP), which
         # needs no firewall rule at all; so no rule names you.
         ssh = [] if name == names[-1] else [exit_ip]
-        hops.append(dict(name=name, role=role, port=port, sources=sources, ssh=ssh, record=inv[name]))
+        nxt = None
+        if k + 1 < len(names):
+            later = names[k + 1]
+            nxt = hostport(inv[later]["public_ip"], ROLES[roles[k + 1]])
+        hops.append(dict(name=name, role=role, port=port, sources=sources, ssh=ssh, record=inv[name], next=nxt))
     return hops
 
 
@@ -1834,15 +1838,59 @@ def sg_diff(perms, wanted, unmanaged=()):
     return add, remove
 
 
-def set_firewall(name, record, port, sources, ssh):
+def egress6_diff(perms, wanted):
+    """(authorize, revoke) permission lists that leave a group's IPv6 egress exactly
+    `wanted`, a set of (protocol, port or None, CIDR). AWS revokes single ranges out of a
+    rule, so an IPv6 range riding on an IPv4 rule (the `::/0` AWS adds when a VPC gets
+    IPv6) is revoked alone and the IPv4 range stays."""
+    have = set()
+    for q in perms:
+        for r in q.get("Ipv6Ranges", []):
+            have.add((q.get("IpProtocol"), q.get("FromPort"), r["CidrIpv6"]))
+
+    def perm(proto, port, cidr, describe):
+        out = dict(IpProtocol=proto, Ipv6Ranges=[dict(CidrIpv6=cidr)])
+        if port is not None:
+            out.update(FromPort=port, ToPort=port)
+        if describe:
+            out["Ipv6Ranges"][0]["Description"] = "avpn: the next hop (paced TCP link)"
+        return out
+
+    add = [perm(*w, True) for w in sorted(wanted - have, key=str)]
+    remove = [perm(*h, False) for h in sorted(have - wanted, key=str)]
+    return add, remove
+
+
+def set_firewall(name, record, port, sources, ssh, next_hop=None):
     """Make a managed server's firewall admit exactly the tunnel `sources` on `port`
-    and SSH from `ssh`. Returns a description, or None for a firewall this tool does
-    not manage."""
+    and SSH from `ssh`, and (AWS) let it send over IPv6 only to an IPv6 `next_hop`
+    ("[addr]:port"), and nowhere at all over IPv6 otherwise. Returns a description, or
+    None for a firewall this tool does not manage."""
     if record["provider"] == "aws":
         aws = Aws(record["profile"], record["region"])
         groups = aws.owned(name)["security_groups"]
         if len(groups) != 1:
             raise CloudError("expected one security group tagged %s=%s" % (NAME, name))
+        # Outbound IPv6: exactly the next hop, when it is reached over IPv6 (a Fly.io exit),
+        # which needs this server to have an IPv6 address of its own.
+        wanted6 = set()
+        if next_hop and next_hop.startswith("["):
+            addr, link_port = next_hop[1:].split("]:", 1)
+            if record.get("instance"):
+                found = aws.ec2("describe-instances", "--instance-ids", record["instance"])
+                six = [a for r in found.get("Reservations", []) for i in r["Instances"]
+                       for n in i.get("NetworkInterfaces", []) for a in n.get("Ipv6Addresses", [])]  # fmt: skip
+                if not six:
+                    raise CloudError("%s has no IPv6 address, and its next hop is reachable only over IPv6: give it "
+                                     "one first (docs/FLY_EXIT.md)" % name)  # fmt: skip
+            wanted6 = {("tcp", int(link_port), addr + "/128")}
+        add6, remove6 = egress6_diff(groups[0].get("IpPermissionsEgress", []), wanted6)
+        if add6:
+            aws.ec2("authorize-security-group-egress", "--group-id", groups[0]["GroupId"], "--ip-permissions",
+                    json.dumps(add6))  # fmt: skip
+        if remove6:
+            aws.ec2("revoke-security-group-egress", "--group-id", groups[0]["GroupId"], "--ip-permissions",
+                    json.dumps(remove6))  # fmt: skip
         wanted = {("udp", port): set(sources), ("tcp", 22): set(ssh)}
         # The first hop also takes the camouflage's TLS/TCP fallback on the same port.
         wanted[("tcp", FIRST_HOP_PORT)] = set(sources) if port == FIRST_HOP_PORT else set()
@@ -2078,12 +2126,28 @@ def chain_apply(a, plan):
     return rows
 
 
+def ssh_by_address(rec):
+    """Whether this tool opens SSH to a server by the caller's address (an AWS server
+    without an Instance Connect Endpoint, or an OCI server on a managed security list).
+    Instance Connect (IAM), OCI bastions and Fly.io's API do not depend on it."""
+    if rec.get("provider") == "aws":
+        return not eice_admin(rec)
+    return rec.get("provider") == "oci" and bool(rec.get("managed_list"))
+
+
+def setup_ssh_source(hops):
+    """This machine's public address for the setup SSH rules, looked up only when a hop is
+    reached by address: a chain of Instance Connect, bastion and Fly.io hops builds the
+    same from any address, and a VPN changing it mid-build does not matter."""
+    return single_ip("auto") if any(ssh_by_address(h["record"]) for h in hops) else None
+
+
 def chain_steps(a, hops, progress, n):
     """The work of chain_apply, step by step (see its Progress list)."""
     # Every server's monthly cap, decided before anything changes: a hop whose account has
     # no free allowance on record stops the build here (no fees from a free account).
     caps = require_caps(load_inventory(), [h["name"] for h in hops])
-    me = single_ip("auto")
+    me = setup_ssh_source(hops)
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     work = INVENTORY.parent / "chains" / stamp
     work.mkdir(mode=0o700, parents=True)
@@ -2091,7 +2155,8 @@ def chain_steps(a, hops, progress, n):
     # 1. Open each managed firewall in its final form, plus SSH from here for setup.
     progress.run(0)
     for h in hops:
-        set_firewall(h["name"], h["record"], h["port"], h["sources"], sorted(set(h["ssh"]) | {me}))
+        set_firewall(h["name"], h["record"], h["port"], h["sources"], sorted(set(h["ssh"]) | ({me} if me else set())),
+                     h.get("next"))  # fmt: skip
     # 1b. The operator's unlock key, made once (PIN + touch the first time only): a server
     # without a usable TPM2 locks its keys to it (docs/HARDWARE_BOUND_SESSIONS.md).
     unlock_pub = ensure_unlock_key(a.vault, progress, 1)
@@ -2165,7 +2230,7 @@ def chain_steps(a, hops, progress, n):
     # 5. SSH only through the chain from now on.
     progress.run(2 * n + 3, "from now on: while connected")
     for h in hops:
-        set_firewall(h["name"], h["record"], h["port"], h["sources"], h["ssh"])
+        set_firewall(h["name"], h["record"], h["port"], h["sources"], h["ssh"], h.get("next"))
     inv = load_inventory()
     for h in hops:
         inv["resources"][h["name"]].update(role=h["role"], port=h["port"], first_hop=h is hops[0])
