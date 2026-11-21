@@ -200,6 +200,21 @@ class Adapter:
                 "Disconnect and retain protection",
                 ["Stop the current supervisor and its owned transports.", "Keep existing traffic guards in place."],
             )
+        elif name in ("create_operator_keys", "request_exit", "sign_route"):
+            # The setup wizard's create-branch writes (tools/controller_create_join.py):
+            # exact hardcoded argv, validated fields, previews that re-verify the world.
+            import controller_create_join
+
+            prepared = controller_create_join.prepare(
+                request.get("branch"),
+                name,
+                {k: v for k, v in request.items() if k not in ("action", "branch")},
+                controller_create_join.paths(),
+            )
+            if prepared is None:
+                raise Refused("unknown_action")
+            public_inputs.update(wizard=prepared)
+            summary, effects = prepared["summary"], prepared["effects"]
         else:
             raise Refused("unknown_action")
         return dict(
@@ -257,6 +272,27 @@ class Adapter:
                 elif name == "disconnect":
                     avpnctl.cmd("systemctl", "stop", "advanced-vpn.service")
                     self.dispatch(["disconnect"])
+                elif name in ("create_operator_keys", "request_exit", "sign_route"):
+                    import controller_create_join
+
+                    fields = {k: v for k, v in request.items() if k not in ("action", "branch")}
+                    spec = controller_create_join.apply(
+                        request.get("branch"), name, fields, controller_create_join.paths()
+                    )
+                    progress(
+                        "waiting_for_hardware",
+                        "Approve the trusted hardware prompt for this setup-wizard operation.",
+                    )
+                    if spec.get("state"):
+                        parsed = avpnctl.build_parser().parse_args(
+                            ["--state", spec["state"], "--bin-dir", str(ROOT / "bin"), "--json", *spec["argv"]]
+                        )
+                        avpnctl.dispatch(parsed)
+                    else:
+                        self.dispatch(spec["argv"])
+                    controller_create_join.journal_append(
+                        controller_create_join.paths()["journal"], request.get("branch"), name, fields, caller.uid
+                    )
                 if cancel.is_set():
                     raise InterruptedError
         except Exception:
@@ -268,7 +304,9 @@ class Adapter:
         """Client checks are root-authoritative; provider credentials stay ordinary-user scoped."""
         if branch not in ("create", "join"):
             raise Refused("invalid_setup_branch")
-        steps = setup_flow.client_steps()
+        import controller_create_join
+
+        steps = controller_create_join.steps_for(branch)
         if busy:
             rows = [
                 dict(
@@ -284,29 +322,18 @@ class Adapter:
                 schema=1, branch=branch, complete=0, total=len(rows), current=rows[0]["id"], finished=False, steps=rows
             )
         findings = self.diagnostics(caller)
+        import controller_create_join
+
+        wizard = controller_create_join.paths()
         out = setup_flow.run(
             steps,
-            dict(state=STATE, vault=avpnctl.DEVICE_VAULT, diagnose=lambda: findings),
+            dict(state=STATE, vault=avpnctl.DEVICE_VAULT, exit=wizard["exit"], diagnose=lambda: findings),
             avpnctl.runtime_dir(STATE) / ("desktop-setup-" + str(caller.uid)),
         )
         report = setup_flow.report(out)
         report["branch"] = branch
         report["device_request"] = controller_request.public_request(STATE)
-        for step in report["steps"]:
-            step["actions"] = []
-            if step["id"] == "key" and step["state"] != "complete":
-                for finding in findings:
-                    if finding.repair:
-                        selector = (
-                            finding.detail.get("serial") if finding.repair == "yubikey_enable_fido2" else finding.device
-                        )
-                        step["actions"].append(dict(action="repair", repair=finding.repair, selector=selector))
-            elif step["id"] == "vault" and step["state"] == "waiting_for_user":
-                step["actions"].append(dict(action="request_device"))
-            elif step["id"] == "profile" and report["current"] == "profile" and not STATE.exists():
-                step["actions"].append(dict(action="request_device"))
-            elif step["id"] in ("guard", "protected") and report["current"] == step["id"]:
-                step["actions"].append(dict(action="connect", scope="applications"))
+        controller_create_join.decorate_report(branch, report, STATE, findings)
         return report
 
 

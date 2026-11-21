@@ -136,6 +136,12 @@ export type ActionRequest =
   | { action: 'disconnect' | 'retry' | 'unlock' | 'request_device' }
   | { action: 'repair'; repair: 'install_udev_rule' | 'yubikey_enable_fido2'; selector: string | null }
   | { action: 'import_bundle'; bundle_base64: string; operator_key_base64: string; replace: boolean }
+  // The setup wizard's create-branch writes (tools/controller_create_join.py):
+  // branch-bound, previewed through the same Preview/Apply contract, and the
+  // backend always states the cover-traffic allowance (--accept-cost is CLI-only).
+  | { action: 'create_operator_keys' | 'request_exit'; branch: 'create' }
+  | { action: 'sign_route'; branch: 'create'; hops: 1 | 2 | 3; exit: string; relay?: string; middle?: string;
+      cover_name?: string; allowance_gib: number; extra_requests: { role: 'relay' | 'middle'; name: string }[] }
 export interface ActionPlan {
   schema: 1
   id: string

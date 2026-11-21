@@ -6,6 +6,17 @@ measured figure in the docs names the version it was measured on.
 
 ## Unreleased
 
+- **The GUI's create/join write side** (GLM5.3, merged and re-verified):
+  - three wizard actions through the controller's existing preview/apply path behind the
+    hardware prompt: operator keys, the operator-protected exit request, and signing the
+    route with a stated allowance;
+  - accepting a cost above the allowance is not offered;
+  - all 45 tests run here, including the 4 its sandbox had to skip.
+
+  Hardened while merging: a GUI endpoint shaped like a flag (`--accept-cost`) was accepted
+  by validation and only stopped by the command's own parser. Endpoints are now parsed as
+  `avpn init` parses them (IPv4 on the first hop), and request and cover names may not
+  start with `-` or `.`.
 - **The GLM5.3 batch, merged and re-verified in this tree** (built in a separate sandbox
   on 21 November):
   - streaming eligibility as dated measurement (`avpn stream-check`, the eligibility table,

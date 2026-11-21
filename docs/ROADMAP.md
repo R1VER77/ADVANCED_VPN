@@ -306,5 +306,8 @@ Landed, each with its tests (`python -m unittest tools.test_<name>`):
   shipped separately: TCP links and the egress lock ([fee guard](FEE_GUARD.md)).
 - [ ] Router deployment on GL-MT6000/GL-MT3000 ([design](ROUTER_DEPLOYMENT.md), D010); signed
   deployment-side auto-update (D011); [Tor over the tunnel](TOR_RECIPE.md) (D012).
-- [ ] The GUI's write side (in progress).
+- [x] The GUI's write side: the create/join setup branches over three branch-bound actions
+  (operator keys, the exit request, signing the route with a stated allowance; accepting a
+  cost above the allowance is not offered), exact argv, previews that re-verify, an
+  append-only journal ([tools/controller_create_join.py](../tools/controller_create_join.py)).
 - [ ] The first live eligibility row from a real exit (D016), and a real `avpn cloud rotate`.
