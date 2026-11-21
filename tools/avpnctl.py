@@ -20,6 +20,7 @@ import random
 from pathlib import Path
 import re
 import resource
+import shlex
 import shutil
 import signal
 import socket
@@ -114,7 +115,9 @@ def read_status(state, default=None):
 def runtime_dir(state, create=True):
     """RAM-only (tmpfs) home for everything written while running: status, PIDs,
     locks, rotated leaves, resolver file and namespace marker. Servers persist nothing
-    at runtime, so a powered-off or seized server holds no record of its sessions.
+    at runtime, so a powered-off or seized server holds no record of its sessions: the one
+    exception is the month's outbound total, rounded up to 16 MiB, that keeps a free
+    account free across reboots (tools/fee_guard.py; no sessions, users or times).
 
     Read-only queries pass ``create=False``: they get the path without creating it,
     and an existing directory is still checked before anything inside it is trusted."""
@@ -1004,6 +1007,156 @@ def carrier_meter(profile, grant):
     nft(text)
 
 
+class ServerFees:
+    """A server's monthly cap (tools/fee_guard.py) and egress lock (tools/server_egress.py):
+    only VPN traffic leaves, a kernel quota stops it at what is left of the month, and the
+    meter keeps the month's total across restarts and reboots. A production server without
+    a cap refuses to start: a free account must never be billed."""
+
+    CHECK_SECONDS = 5
+    # Security updates, daily: the egress lock admits no update timer, so the supervisor
+    # runs unattended-upgrade itself (Debian/Ubuntu default: the security origins only) in
+    # a counted window. Skipped on a capped server, a shared host (its own business) and an
+    # image host (a Fly.io Machine's root resets: its image is rebuilt instead).
+    UPDATE_EVERY = 86400
+    UPDATE_TIMEOUT = 1800
+
+    def __init__(self, profile, cfg, state, service_uid, lab=False):
+        import fee_guard
+        import server_egress
+
+        self.fg, self.se = fee_guard, server_egress
+        self.profile, self.cfg, self.uid, self.lab = profile, cfg, service_uid, lab
+        self.cap_path, usage = fee_guard.paths(state)
+        self.maintenance_path = self.cap_path.with_name("maintenance-until")
+        self.last_update_path = self.cap_path.with_name("last-update")
+        self.update_proc = None
+        self.update_started = 0.0
+        self.image = Path("/opt/advanced-vpn/IMAGE").exists()
+        self.shared = not lab and retention.SHARED_MARKER.exists()
+        self.kind, self.cap = fee_guard.read_cap(self.cap_path)
+        if self.kind == "missing" and not lab:
+            raise RuntimeError(
+                "no monthly cap on this server, so its account could be billed: set one with "
+                "avpn cloud cap NAME (or --unlimited for a host whose traffic you pay nothing for)"
+            )
+        self.meter = fee_guard.Meter(usage, source=self.vpn_counter if self.shared else None)
+        self.installed = None  # (month, cap) the kernel quota was set for
+        self.maintenance = False
+        self.next_check = 0.0
+        self.row = None
+
+    def vpn_counter(self):
+        """The VPN's own bytes (a shared host's meter source), from the quota table's counter."""
+        r = cmd("/usr/sbin/nft", "-j", "list", "counter", "inet", self.se.QUOTA_TABLE, "vpn", check=False)
+        if r.returncode:
+            return {}
+        raw = json.loads(r.stdout)
+        return {"vpn": next(x["counter"]["bytes"] for x in raw["nftables"] if "counter" in x)}
+
+    def in_maintenance(self, now):
+        """Whether an update window is open: our own security update, or avpn cloud host update."""
+        if self.update_proc is not None:
+            return True
+        try:
+            return now < float(self.maintenance_path.read_text().strip())
+        except (OSError, ValueError):
+            return False
+
+    def egress_text(self):
+        """The egress table as nft input, replacing any earlier one."""
+        return reset_table(self.se.EGRESS_TABLE) + self.se.egress_rules(
+            self.profile, self.cfg, self.uid, maintenance=self.maintenance, lab_transit=self.lab
+        )
+
+    def install(self, now=None):
+        """Lock egress (dedicated hosts) and set the quota; before any child starts."""
+        now = time.time() if now is None else now
+        self.maintenance = self.in_maintenance(now)
+        if not self.shared:
+            nft(self.egress_text())
+        self.tick(now, force=True)
+
+    def last_update(self):
+        """When security updates last finished (epoch seconds; 0 if never)."""
+        try:
+            return self.last_update_path.stat().st_mtime
+        except OSError:
+            return 0.0
+
+    def security_update(self, now, used):
+        """Start the daily security update when due; collect it when done."""
+        if self.update_proc is not None:
+            done = self.update_proc.poll() is not None
+            if not done and now - self.update_started > self.UPDATE_TIMEOUT:
+                self.update_proc.kill()
+                self.update_proc.wait()
+                done = True
+            if done:
+                if self.update_proc.returncode == 0:
+                    self.last_update_path.write_text(dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"))
+                self.update_proc = None
+            return
+        exe = shutil.which("unattended-upgrade")
+        capped = self.cap is not None and used >= self.cap
+        if self.lab or self.shared or self.image or capped or not exe or now - self.last_update() < self.UPDATE_EVERY:
+            return
+        # tick() opens the window (and tells the table watch) as soon as this process
+        # exists; the download waits two seconds for it.
+        self.update_started = now
+        env = dict(os.environ, DEBIAN_FRONTEND="noninteractive")
+        apt_update = "sleep 2 && apt-get update -qq && " + shlex.quote(exe)
+        self.update_proc = subprocess.Popen(["/bin/sh", "-c", apt_update], stdout=subprocess.DEVNULL,
+                                            stderr=subprocess.DEVNULL, env=env, start_new_session=True)  # fmt: skip
+
+    def quota_present(self):
+        """Whether the kernel quota table still exists."""
+        return cmd("/usr/sbin/nft", "list", "table", "inet", self.se.QUOTA_TABLE, check=False).returncode == 0
+
+    def tick(self, now=None, force=False, tables=None):
+        """Every few seconds: count, follow the cap file and the month, keep the quota and
+        the maintenance window current. Returns the status row's `monthly` field."""
+        now = time.time() if now is None else now
+        if not force and now < self.next_check and self.row is not None:
+            return self.row
+        self.next_check = now + self.CHECK_SECONDS
+        try:
+            kind, cap = self.fg.read_cap(self.cap_path)
+            # A cap file removed while running never lifts the cap (only a lab runs uncapped).
+            if kind != "missing" or self.lab:
+                self.kind, self.cap = kind, cap
+        except self.fg.FeeGuardError:
+            pass  # a malformed edit keeps the cap last read, never none
+        used = self.meter.sample()
+        key = (self.meter.month, self.cap)
+        if force or key != self.installed or not self.quota_present():
+            remaining = (1 << 62) if self.cap is None else self.cap - used
+            nft(reset_table(self.se.QUOTA_TABLE) + self.se.quota_rules(remaining, self.uid, self.shared))
+            self.installed = key
+        self.security_update(now, used)
+        maintenance = self.in_maintenance(now)
+        if maintenance != self.maintenance and not self.shared:
+            self.maintenance = maintenance
+            nft(self.egress_text())
+            if tables is not None:
+                tables.expected[(self.se.EGRESS_TABLE, None)] = tables.listing(self.se.EGRESS_TABLE)
+        self.row = self.fg.verdict(used, self.cap, now)
+        # The kernel quota counts IP packets, the meter interface frames: whichever reaches
+        # the cap first, the server is capped (traffic is already being dropped).
+        if self.cap is not None and self.quota_spent():
+            self.row["capped"] = True
+        self.row.update(egress_lock="off (shared host)" if self.shared else "on", maintenance=self.maintenance)
+        return self.row
+
+    def quota_spent(self):
+        """Whether the kernel quota has dropped traffic for this month already."""
+        r = cmd("/usr/sbin/nft", "-j", "list", "quota", "inet", self.se.QUOTA_TABLE, "month", check=False)
+        if r.returncode:
+            return False
+        q = next(x["quota"] for x in json.loads(r.stdout)["nftables"] if "quota" in x)
+        return q.get("used", 0) >= q.get("bytes", 1 << 62)
+
+
 def meter_used():
     """Bytes counted by the kernel carrier quota, or None when it cannot be read."""
     r = cmd("/usr/sbin/nft", "-j", "list", "quota", "inet", "advanced_vpn_meter", "carrier", check=False)
@@ -1111,10 +1264,23 @@ def supervise(state, bin_dir, lab=False, whole=False):
         front_uid=front_uid,
     )
     cfg = runtime(profile, state)
+    # A server sends only VPN traffic and never past its monthly cap (no fees from a
+    # free account), from before its data plane first starts.
+    fees = None
+    if profile["role"] != "client":
+        fees = ServerFees(profile, cfg, state, uid, lab)
+        fees.install()
     # Watch every table this role just built: whole device or the app namespace for a
-    # client (plus its front and upstream guards), the host table on a server.
+    # client (plus its front and upstream guards), the host and egress tables on a server.
     table_ns = APP if profile["role"] == "client" and not whole else None
-    tables = TableWatch([("advanced_vpn", table_ns), ("advanced_vpn_front", None), (UPSTREAM_TABLE, None)])
+    tables = TableWatch(
+        [
+            ("advanced_vpn", table_ns),
+            ("advanced_vpn_front", None),
+            (UPSTREAM_TABLE, None),
+            ("advanced_vpn_egress", None),
+        ]
+    )
     last_table_check = 0.0
     firewall_tampered = False
     preferences = json.loads(read_private(state / "preferences.json")) if (state / "preferences.json").exists() else {}
@@ -1260,6 +1426,18 @@ def supervise(state, bin_dir, lab=False, whole=False):
                 save(rt / "status.json", dict(schema=1, state="blocked", kill_switch=True, reason="firewall_tampering"))
                 time.sleep(1)
                 continue
+            monthly = fees.tick(tables=tables) if fees is not None else None
+            if monthly is not None and monthly["capped"]:
+                # The kernel quota already drops; stopping the data plane makes the state
+                # plain to every hop and to status. It resumes on the 1st (UTC) or when
+                # the cap is raised.
+                for proc in children.values():
+                    stop(proc)
+                children.clear()
+                save(rt / "status.json", dict(schema=1, state="capped", kill_switch=True, role=profile["role"],
+                                              scope="server", reason="monthly_cap", monthly=monthly))  # fmt: skip
+                time.sleep(1)
+                continue
             if (
                 profile["role"] == "client"
                 and "carrier" in children
@@ -1398,6 +1576,8 @@ def supervise(state, bin_dir, lab=False, whole=False):
                 )
                 if budget_blocked:
                     row["reason"] = "privacy_budget"
+                if monthly is not None:
+                    row["monthly"] = monthly
                 if evidence is not None:
                     row.update(verdict_fields(evidence, probe, rt, supervising=not budget_blocked))
                     if not budget_blocked:

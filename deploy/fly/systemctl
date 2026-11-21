@@ -1,0 +1,23 @@
+#!/bin/sh
+# A systemctl for the cloud scripts on a Fly.io Machine (deploy/fly/init.sh is the service
+# manager). Only advanced-vpn.service exists; every other unit is inactive.
+quiet=; verb=
+for a in "$@"; do
+  case "$a" in
+    -q|--quiet) quiet=1 ;;
+    -*) ;;
+    *) if [ -z "$verb" ]; then verb=$a; else unit=$a; fi ;;
+  esac
+done
+running() { [ -f /run/avpn-supervisor.pid ] && kill -0 "$(cat /run/avpn-supervisor.pid)" 2>/dev/null; }
+case "$unit" in advanced-vpn|advanced-vpn.service) ;; *) [ "$verb" = is-active ] && { [ -n "$quiet" ] || echo inactive; exit 3; }; exit 0 ;; esac
+case "$verb" in
+  is-active) if running; then [ -n "$quiet" ] || echo active; exit 0; fi
+             if [ -e /run/avpn-stopped ]; then s=inactive; else s=activating; fi; [ -n "$quiet" ] || echo $s; exit 3 ;;
+  stop) touch /run/avpn-stopped; running && kill "$(cat /run/avpn-supervisor.pid)"; i=0
+        while running && [ $i -lt 20 ]; do sleep 0.5; i=$((i+1)); done; exit 0 ;;
+  start) rm -f /run/avpn-stopped; exit 0 ;;
+  restart) rm -f /run/avpn-stopped; running && kill "$(cat /run/avpn-supervisor.pid)"; i=0
+           while ! running && [ $i -lt 30 ]; do sleep 0.5; i=$((i+1)); done; exit 0 ;;
+  *) exit 0 ;;  # enable, disable, reset-failed, daemon-reload: nothing to do here
+esac

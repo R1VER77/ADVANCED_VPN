@@ -113,8 +113,8 @@ print(json.dumps(dict(sent=len(probes) * 5, received=got)))
 def probe_first_hop(state, run):
     """Prove WireGuard on the first hop is unreachable from outside: garbage and forged
     handshakes (even with a valid MAC1) sent to its port get nothing back, because only
-    the local cloak may reach it. A closed port on the same host must answer (ICMP),
-    which proves the counter would have seen a reply. (The cloak's public port answers
+    the local cloak may reach it. A TCP connection to the public port must answer, which
+    proves the counter would have seen a reply; a closed port stays silent too. (The cloak's public port answers
     like an HTTP/3 server instead; src/cloak.rs tests that.)"""
     public = json.loads((state / "relay" / "request.json").read_text())["wireguard_public_hex"]
     nft = ("ip", "netns", "exec", "av-relay", "/usr/sbin/nft")
@@ -129,10 +129,18 @@ def probe_first_hop(state, run):
     probe = json.loads(out.stdout)
     silent = answered()
     assert probe["received"] == 0 and silent == 0, ("the first hop answered a stranger", probe, silent)
-    # Control: the same stranger, a closed port. The kernel must reply (port unreachable).
+    # Control: the same stranger opens TCP to the public port, which must answer (a
+    # handshake or a reset), so the counter would have seen a reply. (Closed ports get
+    # nothing at all: the egress lock drops what is not addressed to the chain.)
+    run("ip", "netns", "exec", "av-upstream", sys.executable, "-c",
+        "import socket\ns=socket.socket();s.bind(('192.0.2.4',0));s.settimeout(3)\n"
+        "try:\n s.connect(('192.0.2.1',443))\nexcept OSError:\n pass", timeout=30)  # fmt: skip
+    assert answered() > 0, "control failed: the public port produced no reply, so the counter proves nothing"
+    run(*nft, "reset", "counters", "table", "inet", "seen")
     run("ip", "netns", "exec", "av-upstream", sys.executable, "-c", PROBE, public, "41195", timeout=60)
-    assert answered() > 0, "control failed: a closed port produced no reply, so the counter proves nothing"
-    return dict(probes=probe["sent"], replies=silent, control_replies=answered())
+    closed_silent = answered() == 0
+    assert closed_silent, "a closed port answered a stranger (the egress lock should drop it)"
+    return dict(probes=probe["sent"], replies=silent, closed_port_silent=closed_silent)
 
 
 # Set by main(): where every process's log is written, for the failure report below.
@@ -471,6 +479,44 @@ def main():
         client = manager("client")
         wait_online(client, 240 if a.hardware_vault else 25)
         silence = probe_first_hop(state, run)
+        # The monthly cap, end to end: a relay whose cap is set just above what it has
+        # sent stops serving and says why, the client's traffic stops, and lifting the cap
+        # brings the chain back (a lab runs uncapped without a cap file; a real server
+        # refuses to start without one, and removing it while running keeps the last cap).
+        import fee_guard
+        from avpnctl import runtime_dir as rdir
+
+        cap_path = fee_guard.paths(state / "relay")[0]
+        relay_status = rdir(state / "relay", create=False) / "status.json"
+
+        def relay_row():
+            try:
+                return json.loads(relay_status.read_text())
+            except (OSError, ValueError):
+                return {}
+
+        def captured():
+            path = state / "interhop.json"
+            time.sleep(0.5)  # the capture publishes every 0.2 s of quiet, or on its own schedule
+            return len(json.loads(path.read_text())) if path.exists() else 0
+
+        cap_window = [captured()]
+        sent = relay_row()["monthly"]["used_bytes"]
+        fee_guard.write_cap(cap_path, sent + (1 << 20), "lab: 1 MiB above what the relay has sent")
+        deadline = time.monotonic() + 90
+        while time.monotonic() < deadline and relay_row().get("state") != "capped":
+            time.sleep(0.5)
+        capped = relay_row()
+        assert capped.get("state") == "capped" and capped.get("reason") == "monthly_cap", ("relay never capped", capped)
+        assert capped["monthly"]["used_bytes"] <= sent + (1 << 20) + 2 * fee_guard.STEP, capped["monthly"]
+        time.sleep(3)  # the client's in-flight packets drain
+        app(ping_code, ok=False)
+        cap_path.unlink()
+        wait_online(client, 90)
+        time.sleep(3)  # retransmissions after the outage settle
+        cap_window.append(captured())
+        monthly_cap = dict(capped=True, client_blocked=True, resumed_when_lifted=True,
+                           resumes=capped["monthly"]["resumes"], egress_lock=capped["monthly"]["egress_lock"])  # fmt: skip
         if a.hardware_vault:
             marker = "PRIVATE-HARDWARE-" + os.urandom(16).hex()
             app(
@@ -817,8 +863,14 @@ def main():
             import math
 
             assert inter_sizes, "no TCP traffic seen on the relay-exit link"
-            cell = math.gcd(*inter_sizes)
-            assert cell == 1242, ("TCP link payloads are not whole cells", cell, inter_hop[:10])
+            # Outside the cap phase every TCP payload is whole cells. Inside it the relay's
+            # kernel quota drops segments, and TCP may repack a retransmission up to its
+            # MSS: that reflects loss on the path, never the traffic (the cells are constant).
+            lo, hi = cap_window
+            steady = inter_sizes[:lo] + inter_sizes[hi:]
+            cell = math.gcd(*steady)
+            assert cell == 1242, ("TCP link payloads are not whole cells", cell, sorted(set(steady))[:10])
+            repacked = sorted(set(inter_sizes[lo:hi]) - {1242})
             inter_hop = [cell]
         # Every hop that sent data must have padded every datagram to one size.
         # cellaudit.<layer>.<pid>: every process, every layer, exactly one datagram size,
@@ -870,6 +922,8 @@ def main():
             upstream_entry_fails_closed_when_upstream_drops=True,
             upstream_entry_missing_interface_refused=True,
             first_hop_silent_to_unauthenticated=silence,
+            monthly_cap=monthly_cap,
+            tcp_repacked_during_cap_phase=repacked if a.link_transport == "tcp" else None,
             inter_hop_cell_sizes=inter_hop,
             datagram_sizes_per_role=cell_audit,
             host_network_changed=False,

@@ -6,6 +6,26 @@ measured figure in the docs names the version it was measured on.
 
 ## Unreleased
 
+- **No fees from a free account** ([the fee guard](docs/FEE_GUARD.md)). Every server
+  enforces a monthly outbound cap:
+  - The cap is its account's free allowance, shared by the servers in that account, less
+    10%: Oracle 10 TB, AWS 100 GB, Azure 100 GB; on Fly.io, the $5 waiver after the
+    machine and volume.
+  - A kernel quota stops traffic at the cap, and the server says `capped` until the 1st.
+  - Only VPN traffic may leave a server: an IPv4 and IPv6 egress lock (no pings, no
+    unlisted ports, no transit) replaces the update timers with a daily security-only
+    `unattended-upgrade` in a counted window.
+  - `avpn cloud cap` plans and writes the caps (`chain --apply` does it first and refuses
+    an account with no allowance on record), and `avpn cloud health` shows every server's
+    month and pace, overdue updates, and paid or upgraded accounts.
+  - A server without a cap refuses to start.
+  - Proved in namespaces (`tools/server_egress_test.py`, six mutants) and end to end in
+    the managed lab (a capped relay stops the chain; lifting the cap restores it).
+- **An exit on a Fly.io Machine** ([docs](docs/FLY_EXIT.md)):
+  - `avpn cloud fly server` builds the image from this tree and creates a 256 MB machine,
+    an encrypted volume and the free IPv6.
+  - It is administered through the Machines API (`tools/fly-ssh`, `tools/fly-scp`).
+  - It keeps no logs and no swap; its keys are locked to the operator's Nitrokey.
 - Fixed: every client `connect` crashed at start on `main` from `c22fbf5` (a name clash in
   the supervisor; [incident](docs/INCIDENTS.md)).
 - The paced links between servers can run over TCP (`avpn init --link-transport tcp`), for a
@@ -15,7 +35,9 @@ measured figure in the docs names the version it was measured on.
   IPv4. A dropped connection reconnects and re-keys at once; a restarted exit falls silent,
   so the relay opens a fresh link. The managed lab runs the whole chain with the relay
   reaching the exit only over IPv6 TCP, and every one of 9,809 captured payloads on that
-  hop was exactly one 1,242-byte cell; CI runs it.
+  hop was exactly one 1,242-byte cell; CI runs it. (After loss, TCP may repack a
+  retransmission up to its MSS. That reflects the path, not the traffic: the lab saw one
+  such segment, during its cap phase, when the relay's quota was dropping.)
 - `avpn cloud azure server`: an Azure chain server made by OpenTofu (the `azure-server`
   module, `hashicorp/azurerm` 5.13.0 locked): a Trusted Launch VM (secure boot, virtual
   TPM, so its keys are TPM-sealed and it restarts unattended), the tunnel port from the

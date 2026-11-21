@@ -1,0 +1,4 @@
+#!/bin/sh
+# The cloud scripts run their commands with `sudo -n`; on a Fly.io Machine they already run as root.
+[ "$1" = -n ] && shift
+exec "$@"

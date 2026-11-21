@@ -1171,7 +1171,10 @@ class HealthTests(unittest.TestCase):
         def fake_call(argv, parse=True, stdin=None):
             if ssh_error:
                 raise cloud.CloudError(ssh_error)
-            return ("active=active mode=systemd-creds unlocked=0" if "relay" in " ".join(argv) else ssh_line) + "\n"
+            # Every server of this release reports its month: a small use of a 90 GB cap.
+            metering = 'metering={"usage":null,"cap":{"cap_bytes":90000000000,"unlimited":null}}'
+            first = "active=active mode=systemd-creds unlocked=0" if "relay" in " ".join(argv) else ssh_line
+            return first + "\n" + metering + "\n"
 
         notes = []
         with tempfile.TemporaryDirectory() as d, \
@@ -1198,6 +1201,12 @@ class HealthTests(unittest.TestCase):
         self.assertEqual(notes, [])
         self.assertIn("106.3 USD credits left", rows["aws p"])
         self.assertIn("FREE_TIER", rows["oci DEFAULT"])
+        self.assertIn("0.0 of 90 GB this month", rows["avpn-relay usage"])
+
+    def test_a_paid_aws_plan_is_a_problem_because_the_cap_covers_traffic_only(self):
+        paid = {"accountPlanType": "PAID", "accountPlanStatus": "ACTIVE"}
+        r, rows, _, saved, _ = self.run_health(plan=paid)
+        self.assertTrue(any("paid plan" in x and "traffic only" in x for x in saved["problems"]), saved["problems"])
 
     def test_a_locked_exit_says_how_to_unlock_it(self):
         r, rows, values, saved, notes = self.run_health(ssh_line="active=activating mode=operator unlocked=0")

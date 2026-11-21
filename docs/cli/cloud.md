@@ -25,6 +25,9 @@ and `oci` command-line tools, and plain SSH for everything else.
     avpn cloud host bastion --name avpn-NAME --bastion-id OCID --instance-id OCID --host ALIAS \
         --public-key FILE [--user U] [--oci-profile NAME]
     avpn cloud host forget --name avpn-NAME
+    avpn cloud host update --name avpn-NAME
+    avpn cloud cap [avpn-NAME] [--gb N | --unlimited | --auto] [--apply]
+    avpn cloud fly server --apply|--teardown [--name avpn-NAME] [--app APP] [--region R] [--image REF]
     avpn cloud chain --apply --client-request FILE --vault DIR [--order A,B,C] [--allow-same-provider] \
         [--hours-per-day H] [--accept-cost]
     avpn cloud unlock avpn-NAME [--vault DIR]
@@ -305,6 +308,64 @@ connected client's chain stops answering for a minute (or never answers after a 
 the client shows a desktop notification and `avpn status` shows the notice and this
 command. Checking on a timer from your own address would tie it to the servers in the
 providers' logs.
+
+It also shows every server's month: what it has sent against its cap, and the day it
+would stop at this month's pace. A server at 80% of its cap, on pace to reach it, capped,
+or with no cap at all is a problem.
+
+## avpn cloud fly server
+
+An exit on a Fly.io Machine, within the personal organization's $5 waiver (see
+[the Fly.io exit](../FLY_EXIT.md)). The fee guard is asked first. Then the image is built
+from this tree and pushed to the app's registry, and the tool creates a 1 GB encrypted
+volume with snapshots off, the app's free IPv6 (never a paid IPv4), and a 256 MB Machine
+serving raw TCP on port 4444. It is administered through the Machines API, not SSH.
+
+    avpn cloud fly server --apply --name avpn-flyexit --region fra
+    avpn cloud fly server --teardown --name avpn-flyexit
+
+- `--name avpn-NAME`: the server (default avpn-flyexit).
+- `--app APP`: the Fly.io app the deploy token is for (default advanced-vpn).
+- `--region R`: a Fly.io region (default fra; iad and ewr are the cheapest).
+- `--role exit|middle`: default exit.
+- `--image REF`: an image already pushed (default: build and push this tree's).
+
+The deploy token is read from `~/.config/advanced-vpn/fly-deploy-token` (mode 600).
+
+## avpn cloud cap
+
+Each server's monthly outbound cap, so contributing a free-tier account never produces a
+bill. A server counts what it sends in the UTC month and stops serving at its cap until
+the 1st; nothing but VPN traffic may leave it (an egress lock), and a kernel quota stops it
+exactly at what is left of the month. See [the fee guard](../FEE_GUARD.md).
+
+    avpn cloud cap                       # plan every hop's cap
+    avpn cloud cap --apply               # and write them to the servers
+    avpn cloud cap avpn-home --unlimited --apply
+
+- `avpn-NAME`: one server (default: every hop of the chain).
+- `--gb N`: set this server's cap, in decimal GB as providers bill.
+- `--unlimited`: no cap, for a host whose traffic costs you nothing (your own machine).
+- `--auto`: back to the cap from its account's free allowance.
+- `--apply`: write the caps to the servers; they follow a change within seconds.
+
+The cap is the provider's free allowance per account (Oracle 10 TB, AWS 100 GB, Azure
+100 GB), less 10%, shared by every server in that account. On Fly.io, the whole bill must
+stay under the $5 waiver: the machine and volume come off first, and only one server per
+organization fits. `avpn cloud chain --apply` plans the caps before it changes anything,
+stops if a hop's account has no allowance on record, and writes them before each server
+starts. A server without a cap refuses to start.
+
+## avpn cloud host update
+
+Apply updates on a server now. Each server already applies security updates daily by
+itself (`unattended-upgrade`, security origins only), in a window counted against its cap.
+This command runs a full upgrade on demand, in a maintenance window that lets the server
+reach its package mirrors for up to 30 minutes. A capped server cannot fetch updates until
+the month turns. `avpn cloud health` warns when security updates are more than 3 days old
+(a Fly.io exit: when its image is more than 14 days old).
+
+    avpn cloud host update --name avpn-exit
 
 ## avpn cloud unlock
 

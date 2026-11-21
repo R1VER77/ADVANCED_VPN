@@ -34,6 +34,7 @@ import time
 import urllib.request
 
 from install import pack  # the installer's own package format
+import fee_guard
 import providers
 import retention
 
@@ -1196,22 +1197,47 @@ def oci_teardown_apply(a, oc, plan):
 HOST_SETUP = r"""set -e
 ROLE=$1 PORT=$2 REPLACE=$3 SHARED=$4 UNLOCK=${5:-no}
 E=/etc/advanced-vpn/enrolled
+# Updates and installs need the network the egress lock closes (tools/server_egress.py):
+# open a counted maintenance window first. A running supervisor reopens its egress table
+# with root allowed; with none running, the retained lock is removed and the next start
+# rebuilds it. Traffic still counts against the monthly cap; a capped server stays shut.
+M=/etc/advanced-vpn/metering/enrolled
+sudo -n install -d -m 0700 /etc/advanced-vpn/metering $M
+echo $(( $(date +%s) + 1800 )) | sudo -n tee $M/maintenance-until >/dev/null
+trap 'sudo -n rm -f /etc/advanced-vpn/metering/enrolled/maintenance-until' EXIT
+if systemctl is-active -q advanced-vpn.service 2>/dev/null; then sleep 7
+else sudo -n nft delete table inet advanced_vpn_egress 2>/dev/null || true; fi
+# An image host (a Fly.io Machine) was built with the package, its logs in RAM and no
+# timers: only its keys are made here.
+IMAGE=no; [ -f /opt/advanced-vpn/IMAGE ] && IMAGE=yes
 # No retained data, first: a dedicated server keeps every log in RAM before anything
 # else runs (tools/retention.py). A shared host's logging belongs to its other
 # workloads, so it is only marked, and doctor reports it.
-if [ "$SHARED" != yes ]; then
+if [ "$IMAGE" = yes ]; then
+  :
+elif [ "$SHARED" != yes ]; then
   sudo -n sh -s <<'AVPN_HARDEN'
 @@HARDEN@@
 AVPN_HARDEN
   sudo -n rm -f /etc/advanced-vpn/shared-host
+  # Nothing sends on its own (the egress lock would drop it anyway, and every byte counts
+  # against the cap): no update timers, snaps, news or telemetry. Updates run in a counted
+  # window instead: avpn cloud host update NAME.
+  # Their own timers are off; security updates still come daily, from the supervisor.
+  for u in apt-daily.timer apt-daily-upgrade.timer snapd.service snapd.socket \
+           motd-news.timer ua-timer.timer esm-cache.service update-notifier-download.timer fwupd-refresh.timer; do
+    sudo -n systemctl disable --now "$u" >/dev/null 2>&1 || true
+  done
 else
   sudo -n mkdir -p /etc/advanced-vpn
   sudo -n touch /etc/advanced-vpn/shared-host
 fi
+if [ "$IMAGE" = no ]; then
 export DEBIAN_FRONTEND=noninteractive
 sudo -n apt-get update -qq
 TSS=$(apt-cache search --names-only '^libtss2-(esys|mu|rc|tcti-device)' | awk '{print $1}' | grep -v -- -dev | tr '\n' ' ')
-sudo -n apt-get install -y -qq nftables python3-venv $TSS >/dev/null
+# unattended-upgrades: the supervisor runs it daily (security only) in a counted window.
+sudo -n apt-get install -y -qq nftables python3-venv unattended-upgrades $TSS >/dev/null
 # Images that reject by default (OCI's Ubuntu) need the tunnel port accepted on the host.
 if sudo -n iptables -S INPUT 2>/dev/null | grep -q -- '-j REJECT'; then
   sudo -n iptables -C INPUT -p udp --dport "$PORT" -j ACCEPT 2>/dev/null || sudo -n iptables -I INPUT 1 -p udp --dport "$PORT" -j ACCEPT
@@ -1234,6 +1260,7 @@ if [ -d /opt/advanced-vpn/bin ] && [ ! -L /opt/advanced-vpn/bin ]; then
   ADOPT=--adopt-legacy
 fi
 sudo -n python3 -B /tmp/avpn-src/tools/install.py --apply $ADOPT >/dev/null
+fi
 HAVE=$(sudo -n python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["role"])' $E/request.json 2>/dev/null || true)
 # Same-role keys are kept only if they carry every key this release makes for the role
 # (managed_profile.request): keys from before the HTTP/3 camouflage would be refused
@@ -1296,6 +1323,25 @@ sudo -n rm -f /tmp/avpn-unlock.pub
 echo "protection=$(sudo -n python3 -c 'import json;print(json.load(open("/etc/advanced-vpn/enrolled/protection.json")).get("mode"))' 2>/dev/null || echo unknown) tpm2=$(systemd-analyze has-tpm2 >/dev/null 2>&1 && echo yes || echo no) creds_key=$(sudo -n python3 -c 'import json;print(json.load(open("/etc/advanced-vpn/enrolled/protection.json")).get("creds_key"))')"
 sudo -n rm -rf /tmp/avpn-src /tmp/avpn-src.tgz
 """.replace("@@HARDEN@@", retention.HARDEN.rstrip("\n"))
+
+# Security updates in a counted maintenance window: bash -s.
+HOST_UPDATE = r"""set -e
+# Updates and installs need the network the egress lock closes (tools/server_egress.py):
+# open a counted maintenance window first. A running supervisor reopens its egress table
+# with root allowed; with none running, the retained lock is removed and the next start
+# rebuilds it. Traffic still counts against the monthly cap; a capped server stays shut.
+M=/etc/advanced-vpn/metering/enrolled
+sudo -n install -d -m 0700 /etc/advanced-vpn/metering $M
+echo $(( $(date +%s) + 1800 )) | sudo -n tee $M/maintenance-until >/dev/null
+trap 'sudo -n rm -f /etc/advanced-vpn/metering/enrolled/maintenance-until' EXIT
+if systemctl is-active -q advanced-vpn.service 2>/dev/null; then sleep 7
+else sudo -n nft delete table inet advanced_vpn_egress 2>/dev/null || true; fi
+export DEBIAN_FRONTEND=noninteractive
+sudo -n apt-get update -qq
+sudo -n apt-get -y -qq -o Dpkg::Options::=--force-confold upgrade >/dev/null
+date -u +%Y-%m-%dT%H:%M:%SZ | sudo -n tee $M/last-update >/dev/null
+echo "updated $(cat /var/run/reboot-required 2>/dev/null && echo '(reboot required)')"
+"""
 
 # Restart an unlocked server's service and report whether it runs.
 HOST_RESTART = r"""set -e
@@ -1395,7 +1441,12 @@ def check_glibc(name, have, need):
 
 
 def remote(name, record):
-    """(ssh, scp, base options, target) for one recorded server."""
+    """(ssh, scp, base options, target) for one recorded server. A Fly.io Machine has no
+    sshd: it is reached through the Machines API's exec call, shaped like ssh and scp
+    (tools/fly-ssh, tools/fly-scp)."""
+    if record.get("provider") == "fly":
+        here = Path(__file__).resolve().parent
+        return str(here / "fly-ssh"), str(here / "fly-scp"), ["--app", record["app"]], record["machine"]
     ensure_bastion(name, record)
     return tool("ssh"), tool("scp"), ssh_base(name, record), ssh_target(record)
 
@@ -1528,12 +1579,17 @@ def setup_server(name, record, role, port, out, source, replace=False, source_ar
     """Install or upgrade the package on a recorded server and fetch its public request
     for `role`, with the tunnel `port` accepted by the host firewall. Returns
     (kept|new, TPM report)."""
-    ssh, scp, base, host = tool("ssh"), tool("scp"), ssh_base(name, record), ssh_target(record)
+    image = record.get("provider") == "fly"  # the package is in the image already
+    if image:
+        ssh, scp, base, host = remote(name, record)
+    else:
+        ssh, scp, base, host = tool("ssh"), tool("scp"), ssh_base(name, record), ssh_target(record)
 
     def reachable():
         try:
             # A new server's bastion plugin takes minutes to start: retry the session too.
-            ensure_bastion(name, record)
+            if not image:
+                ensure_bastion(name, record)
             call([ssh, *base, host, "true"], parse=False)
             return True
         except CloudError:
@@ -1552,9 +1608,10 @@ def setup_server(name, record, role, port, out, source, replace=False, source_ar
     except FileNotFoundError as e:
         raise CloudError("%s is missing: build first (cargo build --release)" % e.filename) from None
     check_glibc(name, call([ssh, *base, host, "getconf GNU_LIBC_VERSION"], parse=False), need)
-    with tempfile.TemporaryDirectory() as d:
-        tgz = source_tarball(Path(source).resolve(), Path(d) / "avpn-src.tgz")
-        call([scp, "-q", *base, str(tgz), host + ":/tmp/avpn-src.tgz"], parse=False)
+    if not image:
+        with tempfile.TemporaryDirectory() as d:
+            tgz = source_tarball(Path(source).resolve(), Path(d) / "avpn-src.tgz")
+            call([scp, "-q", *base, str(tgz), host + ":/tmp/avpn-src.tgz"], parse=False)
     args = [role, str(port), "yes" if replace else "no"]
     args.append("yes" if record.get("shared") else "no")
     # The operator's unlock key: a host without a usable TPM2 locks its keys to it.
@@ -1574,11 +1631,24 @@ def setup_server(name, record, role, port, out, source, replace=False, source_ar
     return keys, protection, (lines[-1] if lines else "")
 
 
+def host_update(a):
+    """`host update NAME`: apply security updates in a counted maintenance window (a
+    server's egress lock admits nothing else, and its update timers are off)."""
+    inv = load_inventory()
+    rec = inv["resources"].get(a.name)
+    if not rec:
+        raise CloudError("%s is not recorded" % a.name)
+    ssh, _scp, base, host = remote(a.name, rec)
+    out = call([ssh, *base, host, "bash", "-s"], parse=False, stdin=HOST_UPDATE).strip().splitlines()
+    return [dict(label=a.name, value=out[-1] if out else "no answer")]
+
+
 def host_setup(a):
     """`host setup`: install on a recorded server and fetch its public request."""
     inv = load_inventory()
     record = inv["resources"].get(a.name)
-    if not record or not record.get("public_ip") or not (record.get("ssh_key") or record.get("ssh_config")):
+    reachable = record and (record.get("ssh_key") or record.get("ssh_config") or record.get("provider") == "fly")
+    if not record or not record.get("public_ip") or not reachable:
         raise CloudError("%s is not a recorded host with an address and SSH access" % a.name)
     role = a.role or record.get("role")
     if role not in ROLES:
@@ -1999,6 +2069,9 @@ def chain_apply(a, plan):
 
 def chain_steps(a, hops, progress, n):
     """The work of chain_apply, step by step (see its Progress list)."""
+    # Every server's monthly cap, decided before anything changes: a hop whose account has
+    # no free allowance on record stops the build here (no fees from a free account).
+    caps = require_caps(load_inventory(), [h["name"] for h in hops])
     me = single_ip("auto")
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     work = INVENTORY.parent / "chains" / stamp
@@ -2039,14 +2112,19 @@ def chain_steps(a, hops, progress, n):
             )
         )
     # 3. One signature over the whole chain.
-    endpoint = {h["role"]: "%s:%d" % (h["record"]["public_ip"], h["port"]) for h in hops}
+    endpoint = {h["role"]: hostport(h["record"]["public_ip"], h["port"]) for h in hops}
     argv = [*controller(), "--json", "init", "--out", str(work / "bundles"), "--hops", str(len(hops))]
     argv += ["--exit", endpoint["exit"], "--vault", str(a.vault)]
-    # The rate class: auto picks the fastest the smallest hop allowance fits.
-    cap = providers.capacity_gib(h["record"].get("catalog", h["record"]["provider"]) for h in hops)
-    if cap:
-        argv += ["--allowance-gib", str(cap)]
+    # The rate class: auto picks the fastest the smallest hop's monthly cap fits (the cap
+    # each server enforces: its account's free allowance, shared, less a margin).
+    capped = [c for c, _ in caps.values() if c is not None]
+    if capped:
+        argv += ["--allowance-gib", str(max(1, min(capped) >> 30))]
     argv += ["--hours-per-day", "%g" % a.hours_per_day] + (["--accept-cost"] if a.accept_cost else [])
+    # A later hop reachable only over IPv6 TCP (a Fly.io exit: no UDP there without a paid
+    # IPv4) needs the paced links between servers over TCP.
+    if any(":" in h["record"]["public_ip"] for h in hops[1:]):
+        argv += ["--link-transport", "tcp"]
     if hops[0]["record"].get("public_dns"):
         argv += ["--cover-name", hops[0]["record"]["public_dns"]]
     for role in ("relay", "middle"):
@@ -2069,6 +2147,7 @@ def chain_steps(a, hops, progress, n):
             send_data_key(h["name"], h["record"], data_keys[h["role"]])
         call([scp, "-q", *base, str(bundles / (h["role"] + ".avpn")), host + ":/tmp/avpn-bundle.avpn"], parse=False)
         call([scp, "-q", *base, str(bundles / "operator.pub"), host + ":/tmp/avpn-operator.pub"], parse=False)
+        push_cap(h["name"], h["record"], *caps[h["name"]])
         state = call([ssh, *base, host, "bash", "-s"], parse=False, stdin=HOST_ENROLL).strip().splitlines()
         if not state or state[-1] != "active":
             raise CloudError("%s did not start after enrolling" % h["name"])
@@ -2164,6 +2243,18 @@ HOST_HEALTH = r"""A=$(systemctl is-active advanced-vpn.service 2>/dev/null || tr
 M=$(sudo -n python3 -c 'import json;print(json.load(open("/etc/advanced-vpn/enrolled/protection.json"))["mode"])' 2>/dev/null || echo unknown)
 K=$(sudo -n sh -c 'ls /run/advanced-vpn-unlock 2>/dev/null | wc -l')
 echo "active=$A mode=$M unlocked=$K"
+echo "updates=$(sudo -n stat -c %Y /etc/advanced-vpn/metering/enrolled/last-update 2>/dev/null || echo 0) image=$([ -f /opt/advanced-vpn/IMAGE ] && echo yes || echo no) shared=$([ -f /etc/advanced-vpn/shared-host ] && echo yes || echo no)"
+echo "status=$(sudo -n /opt/advanced-vpn/bin/avpnctl --state /etc/advanced-vpn/enrolled status 2>/dev/null | tail -1)"
+echo "metering=$(sudo -n python3 -c '
+import json, pathlib
+b = pathlib.Path("/etc/advanced-vpn/metering/enrolled")
+def load(n):
+    try:
+        return json.loads((b / n).read_text())
+    except Exception:
+        return None
+u, c = load("usage.json"), load("cap.json")
+print(json.dumps(dict(usage=u and dict(month=u["month"], bytes=u["bytes"]), cap=c and dict(cap_bytes=c.get("cap_bytes"), unlimited=c.get("unlimited"))), separators=(",", ":")))' 2>/dev/null)"
 """
 CREDIT_FLOOR = 20  # USD: warn below this
 EXPIRY_WARN_DAYS = 30
@@ -2203,10 +2294,17 @@ def server_health(name, rec, now=None):
         return state, "no longer exists", "create a new server and run avpn cloud chain --apply"
     try:
         ssh, scp, base, host = remote(name, rec)
-        line = call([ssh, *base, host, "bash", "-s"], parse=False, stdin=HOST_HEALTH).strip().splitlines()[-1]
-    except (CloudError, IndexError) as e:
+        lines = call([ssh, *base, host, "bash", "-s"], parse=False, stdin=HOST_HEALTH).strip().splitlines()
+        line = next(x for x in lines if x.startswith("active="))
+    except (CloudError, StopIteration) as e:
         return state, "not reachable over SSH (%s)" % str(e)[-80:], "check its firewall and admin path"
     seen = dict(x.split("=", 1) for x in line.split() if "=" in x)
+    monthly_row(name, lines)
+    updates_row(name, rec, lines)
+    if seen.get("active") == "active" and LAST_MONTHLY.get(name, {}).get("capped"):
+        return "running, CAPPED for the month", "reached its monthly cap: stopped so its account is never billed", (
+            "wait for %s, or raise its cap (avpn cloud cap %s --gb N --apply)" % (
+                LAST_MONTHLY[name].get("resumes", "the 1st")[:10], name))  # fmt: skip
     if seen.get("active") == "active":
         return "running, VPN service active", None, None
     if seen.get("mode") == "operator" and seen.get("unlocked") == "0":
@@ -2216,6 +2314,103 @@ def server_health(name, rec, now=None):
         "the VPN service is not running",
         ("avpn cloud chain --apply (or check the server)"),
     )
+
+
+LAST_MONTHLY = {}  # name -> the monthly row health last read from each server
+CAP_WARN = 0.8  # warn at 80% of a cap, or when this month's pace reaches it
+
+
+def monthly_row(name, lines, now=None):
+    """Read a server's month (from its running status, else its metering files) into LAST_MONTHLY."""
+    now = now or time.time()
+    LAST_MONTHLY.pop(name, None)
+    got = {}
+    for x in lines:
+        key, _, value = x.partition("=")
+        if key in ("status", "metering") and value.startswith("{"):
+            try:
+                got[key] = json.loads(value)
+            except ValueError:
+                pass
+    live = (got.get("status") or {}).get("monthly")
+    if live:
+        LAST_MONTHLY[name] = dict(live, capped=live.get("capped") or got["status"].get("state") == "capped")
+        return LAST_MONTHLY[name]
+    files = got.get("metering") or {}
+    usage, cap = files.get("usage") or {}, files.get("cap")
+    used = usage.get("bytes", 0) if usage.get("month") == fee_guard.month_of(now) else 0
+    if cap is None:
+        LAST_MONTHLY[name] = dict(month=fee_guard.month_of(now), used_bytes=used, cap_bytes=None, capped=False,
+                                  missing_cap=True)  # fmt: skip
+    else:
+        LAST_MONTHLY[name] = fee_guard.verdict(used, None if cap.get("unlimited") else cap.get("cap_bytes"), now)
+    return LAST_MONTHLY[name]
+
+
+LAST_UPDATES = {}  # name -> (row text, problem or None)
+UPDATES_OVERDUE_DAYS = 3  # the supervisor updates daily: three missed days is a problem
+IMAGE_OVERDUE_DAYS = 14  # an image host is patched by rebuilding its image
+
+
+def updates_row(name, rec, lines, now=None):
+    """Whether a server's security updates are current (LAST_UPDATES)."""
+    now = now or time.time()
+    LAST_UPDATES.pop(name, None)
+    line = next((x for x in lines if x.startswith("updates=")), None)
+    if line is None:
+        return
+    seen = dict(x.split("=", 1) for x in line.split() if "=" in x)
+    if seen.get("shared") == "yes":
+        LAST_UPDATES[name] = ("security updates: the shared host's own business", None)
+        return
+    if seen.get("image") == "yes":
+        tag = (rec.get("image") or "").rsplit(":", 1)[-1]
+        try:
+            built = datetime.datetime.strptime(tag, "%Y%m%dT%H%M%SZ").replace(tzinfo=datetime.timezone.utc).timestamp()
+        except ValueError:
+            built = 0
+        days = (now - built) / 86400
+        text = "image built %s" % (tag if built else "at an unknown time")
+        LAST_UPDATES[name] = (text, None if days <= IMAGE_OVERDUE_DAYS else (
+            "%s: its image is %d days old; rebuild it for security updates" % (name, days)))  # fmt: skip
+        return
+    try:
+        last = float(seen.get("updates") or 0)
+    except ValueError:
+        last = 0
+    days = (now - last) / 86400
+    text = "security updates %s" % ("never applied" if not last else "%.1f days ago" % days)
+    LAST_UPDATES[name] = (text, None if last and days <= UPDATES_OVERDUE_DAYS else (
+        "%s: security updates overdue (%s; capped servers wait for the month to turn): "
+        "avpn cloud host update --name %s" % (name, text, name)))  # fmt: skip
+
+
+def usage_rows(names):
+    """Rows and problems for every server's month: used against its cap, and the pace."""
+    rows, problems = [], []
+    for name in names:
+        m = LAST_MONTHLY.get(name)
+        if not m:
+            continue
+        if m.get("missing_cap"):
+            rows.append(
+                dict(
+                    label=name + " usage",
+                    value="%.1f GB sent this month, NO CAP SET" % (m["used_bytes"] / fee_guard.GB),
+                )
+            )
+            problems.append("%s has no monthly cap: its account could be billed (avpn cloud cap --apply)" % name)
+            continue
+        rows.append(dict(label=name + " usage", value=fee_guard.describe(m)))
+        if name in LAST_UPDATES:
+            text, problem = LAST_UPDATES[name]
+            rows.append(dict(label="", value=text))
+            if problem:
+                problems.append(problem)
+        cap = m.get("cap_bytes")
+        if cap and not m.get("capped") and (m["used_bytes"] >= CAP_WARN * cap or m.get("runs_out")):
+            problems.append("%s: %s" % (name, fee_guard.describe(m)))
+    return rows, problems
 
 
 def account_health(inv, now=None):
@@ -2237,6 +2432,11 @@ def account_health(inv, now=None):
         if expires:
             value += ", plan ends %s" % expires[:10]
         rows.append(dict(label="aws " + profile, value=value))
+        if plan.get("accountPlanType") == "PAID":
+            # The monthly cap bounds traffic only: on a paid plan the instance hours, its
+            # public IPv4 and its disk are billed too, with no credits to absorb them.
+            problems.append("AWS %s is on the paid plan: its servers' hours, public IPv4 and disks are billed "
+                            "(the monthly cap covers traffic only)" % profile)  # fmt: skip
         if plan.get("accountPlanStatus") not in (None, "ACTIVE"):
             problems.append("AWS %s plan is %s: its servers may stop" % (profile, plan.get("accountPlanStatus")))
         if credits is not None and credits < CREDIT_FLOOR:
@@ -2258,6 +2458,9 @@ def account_health(inv, now=None):
             continue
         for it in items:
             rows.append(dict(label="oci " + profile, value="%s (%s)" % (it.get("plan-type"), it.get("upgrade-state"))))
+            if it.get("plan-type") != "FREE_TIER":
+                problems.append("Oracle %s is upgraded (%s): anything beyond Always Free is billed; keep only "
+                                "Always Free shapes" % (profile, it.get("plan-type")))  # fmt: skip
             if it.get("plan-type") == "FREE_TIER":
                 rows.append(dict(label="", value="free tier: Oracle stops Always Free servers idle for 7 days "
                                  "(CPU, network and memory under 20%); a VPN-only server can look idle"))  # fmt: skip
@@ -2284,6 +2487,9 @@ def health(a):
             rows.append(dict(label="", value="fix: " + fix))
         if problem:
             problems.append("%s: %s" % (name, problem))
+    more, usage_problems = usage_rows(names)
+    rows += more
+    problems += usage_problems
     more, account_problems = account_health(inv)
     rows += more
     problems += account_problems
@@ -2295,6 +2501,183 @@ def health(a):
     if getattr(a, "notify", False) and problems:
         notify_user("VPN: %d problem%s" % (len(problems), "" if len(problems) == 1 else "s"), "\n".join(problems))
     rows.append(dict(label="result", value="; ".join(problems) if problems else "no problem found"))
+    return rows
+
+
+def hostport(ip, port):
+    """IP:PORT, with an IPv6 address in brackets."""
+    return ("[%s]:%d" if ":" in ip else "%s:%d") % (ip, port)
+
+
+FLY_PORT = 4444
+FLY_MEMORY_MB = 256  # the smallest machine: what the $5 waiver leaves room for
+FLY_VOLUME_GB = 1
+
+
+def fly_server(a):
+    """`fly server --apply|--teardown`: one exit on a Fly.io Machine (docs/FLY_EXIT.md). The
+    fee guard is asked first, so a second Fly server in the organization, or a machine too
+    large for the $5 waiver, is refused before anything is created. Then: the image built
+    from this tree and pushed to the app's registry, a 1 GB encrypted volume with snapshots
+    off, the app's free IPv6 (never a paid IPv4), and a 256 MB machine serving raw TCP on
+    one port."""
+    import fly_api
+
+    inv = load_inventory()
+    if a.teardown:
+        rec = inv["resources"].get(a.name)
+        if not rec or rec.get("provider") != "fly":
+            raise CloudError("%s is not a recorded Fly.io server" % a.name)
+        rows = [dict(label="delete", value="machine %s and volume %s" % (rec["machine"], rec["volume"]))]
+        if a.dry_run or not confirm(a, "Delete Fly.io %s" % a.name):
+            return rows
+        fly_api.api("DELETE", "/apps/%s/machines/%s?force=true" % (rec["app"], rec["machine"]))
+        wait("the machine to go", lambda: fly_gone(fly_api, rec), timeout=120, every=3)
+        fly_api.api("DELETE", "/apps/%s/volumes/%s" % (rec["app"], rec["volume"]))
+        inv["resources"].pop(a.name)
+        save_inventory(inv)
+        return rows + [dict(label="deleted", value=a.name)]
+    if a.name in inv["resources"]:
+        raise CloudError("%s is already recorded" % a.name)
+    app = fly_api.api("GET", "/apps/%s" % a.app)
+    record = dict(provider="fly", catalog="fly", app=a.app, account=app["organization"]["slug"], region=a.region,
+                  role=a.role, port=FLY_PORT, memory_mb=FLY_MEMORY_MB, volume_gb=FLY_VOLUME_GB)  # fmt: skip
+    trial = dict(inv, resources=dict(inv["resources"], **{a.name: record}))
+    ((cap, why),) = plan_caps(trial, [a.name]).values()  # raises when the waiver cannot hold it
+    rows = [dict(label="server", value="%s: %s in %s (%s), %d MB" % (a.name, a.role, a.region, a.app, FLY_MEMORY_MB)),
+            dict(label="monthly cap", value=why)]  # fmt: skip
+    if a.dry_run or not confirm(a, "Create Fly.io %s" % a.name):
+        return rows
+    image = a.image or fly_push_image(a.app)
+    vol = fly_api.api("POST", "/apps/%s/volumes" % a.app, dict(
+        name="avpn_" + a.name.removeprefix("avpn-").replace("-", "_"), region=a.region, size_gb=FLY_VOLUME_GB,
+        encrypted=True, auto_backup_enabled=False, snapshot_retention=1))  # fmt: skip
+    record["volume"] = vol["id"]
+    save_inventory(dict(inv, resources=dict(inv["resources"], **{a.name: record})))
+    ips = fly_api.api("GET", "/apps/%s/ip_assignments" % a.app).get("ips") or []
+    v6 = next((x["ip"] for x in ips if ":" in x["ip"] and not x.get("shared") and not x["ip"].startswith("fdaa")), None)
+    if not v6:
+        v6 = fly_api.api("POST", "/apps/%s/ip_assignments" % a.app, dict(type="v6"))["ip"]
+    machine = fly_api.api("POST", "/apps/%s/machines" % a.app, dict(name=a.name, region=a.region, config=dict(
+        image=image, guest=dict(cpu_kind="shared", cpus=1, memory_mb=FLY_MEMORY_MB),
+        mounts=[dict(volume=vol["id"], path="/data")],
+        services=[dict(protocol="tcp", internal_port=FLY_PORT, ports=[dict(port=FLY_PORT)],
+                       autostop="off", autostart=False, min_machines_running=1)],
+        restart=dict(policy="always"))))  # fmt: skip
+    record.update(machine=machine["id"], public_ip=v6, image=image, added=datetime.datetime.now(
+        datetime.timezone.utc).isoformat(timespec="seconds"))  # fmt: skip
+    inv = load_inventory()
+    inv["resources"][a.name] = record
+    save_inventory(inv)
+    fly_api.api("GET", "/apps/%s/machines/%s/wait?state=started&timeout=60" % (a.app, machine["id"]), timeout=90)
+    return rows + [dict(label="machine", value="%s, %s port %d (TCP, IPv6 only)" % (machine["id"], v6, FLY_PORT)),
+                   dict(label="next", value="avpn cloud host setup --name %s --role %s --out FILE --vault DIR" % (
+                       a.name, a.role))]  # fmt: skip
+
+
+def fly_gone(fly_api, rec):
+    """Whether a Fly machine is destroyed (its volume can then be deleted)."""
+    try:
+        return fly_api.api("GET", "/apps/%s/machines/%s" % (rec["app"], rec["machine"])).get("state") == "destroyed"
+    except fly_api.FlyError:
+        return True
+
+
+def fly_push_image(app):
+    """Build the exit image from this tree and push it to the app's registry; its reference."""
+    import fly_api
+
+    root = Path(__file__).resolve().parents[1]
+    tag = "registry.fly.io/%s:%s" % (app, datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ"))
+    call([str(root / "deploy/fly/build.sh"), tag], parse=False)
+    docker = tool("docker")
+    # The token goes on stdin, never in an argument list; and only to Fly's registry.
+    call([docker, "login", "registry.fly.io", "-u", "x", "--password-stdin"], parse=False, stdin=fly_api.token())
+    try:
+        call([docker, "push", "-q", tag], parse=False)
+    finally:
+        call([docker, "logout", "registry.fly.io"], parse=False)
+    return tag
+
+
+def fee_server(rec):
+    """What the fee guard needs to know about a recorded server."""
+    provider = rec.get("catalog") or rec.get("provider")
+    account = rec.get("profile") or (rec.get("bastion") or {}).get("oci_profile") or rec.get("account") or ""
+    d = dict(provider=provider, account=account, region=rec.get("region", ""))
+    for k in ("cap_gb", "unlimited", "memory_mb", "volume_gb"):
+        if k in rec:
+            d[k] = rec[k]
+    return d
+
+
+def plan_caps(inv, names):
+    """{name: (cap bytes or None, why)} for `names`. An account's allowance is shared by
+    every server recorded in it that carries traffic (the chain's hops and standbys)."""
+    chain = set((inv.get("chain") or {}).get("hops") or []) | set(names)
+    active = {n: r for n, r in inv["resources"].items() if n in chain or r.get("standby")}
+    try:
+        planned = fee_guard.plan_caps({n: fee_server(r) for n, r in active.items()})
+    except fee_guard.FeeGuardError as e:
+        raise CloudError(str(e)) from None
+    return {n: planned[n] for n in names}
+
+
+def require_caps(inv, names):
+    """plan_caps, refusing any server whose cap would be unknown (no fees from a free account)."""
+    caps = plan_caps(inv, names)
+    unknown = [n for n, (c, _) in caps.items() if c is None and not inv["resources"][n].get("unlimited")]
+    if unknown:
+        raise CloudError("no monthly cap for %s: %s" % (", ".join(unknown), caps[unknown[0]][1]))
+    return caps
+
+
+def push_cap(name, rec, cap_bytes, why):
+    """Write a server's cap where its supervisor reads it (beside the enrolled state)."""
+    ssh, _scp, base, host = remote(name, rec)
+    body = dict(schema=1, why=why, checked=fee_guard.CHECKED)
+    body.update(unlimited=True) if cap_bytes is None else body.update(cap_bytes=int(cap_bytes))
+    d = "/etc/advanced-vpn/metering/enrolled"
+    script = (
+        "set -e; sudo -n install -d -m 0700 /etc/advanced-vpn/metering %s; "
+        "sudo -n sh -c 'umask 077; cat > %s/cap.json.tmp && mv %s/cap.json.tmp %s/cap.json'" % (d, d, d, d)
+    )
+    call([ssh, *base, host, script], parse=False, stdin=json.dumps(body))
+
+
+def cap(a):
+    """`cap [NAME] [--gb N | --unlimited | --auto] [--apply]`: each server's monthly cap,
+    from its account's free allowance (shared by the servers in that account), or one you
+    set; --apply writes them to the servers, which enforce them within seconds."""
+    inv = load_inventory()
+    names = (inv.get("chain") or {}).get("hops") or []
+    if a.name:
+        valid_name(a.name)
+        if a.name not in inv["resources"]:
+            raise CloudError("%s is not recorded" % a.name)
+        rec = inv["resources"][a.name]
+        if a.gb is not None or a.unlimited or a.auto:
+            for k in ("cap_gb", "unlimited"):
+                rec.pop(k, None)
+            if a.gb is not None:
+                if a.gb <= 0:
+                    raise CloudError("--gb must be positive")
+                rec["cap_gb"] = a.gb
+            elif a.unlimited:
+                rec["unlimited"] = True
+            save_inventory(inv)
+        names = [a.name]
+    if not names:
+        raise CloudError("no chain recorded yet: avpn cloud chain --apply")
+    caps = plan_caps(inv, names)
+    rows = []
+    for n in names:
+        c, why = caps[n]
+        unknown = c is None and not inv["resources"][n].get("unlimited")
+        rows.append(dict(label=n, value=("NOT SET: " if unknown else "") + why))
+        if a.apply and not unknown:
+            push_cap(n, inv["resources"][n], c, why)
+            rows.append(dict(label="", value="written to the server"))
     return rows
 
 
@@ -2735,6 +3118,8 @@ def build_parser():
         help="where it runs: a free tier (oci, aws, azure, gcp), own, or a paid host key from avpn cloud suggest",
     )
     add.add_argument("--shared", action="store_true", help="it also runs other things: leave its journal alone")
+    hu = h_s.add_parser("update", help="apply security updates in a counted maintenance window")
+    hu.add_argument("--name", required=True)
     hb = h_s.add_parser("bastion", help="record that a server is reached through an OCI bastion (sessions renewed)")
     hb.add_argument("--name", required=True, help="the recorded server")
     hb.add_argument("--bastion-id", required=True, help="the OCI bastion's OCID")
@@ -2747,6 +3132,26 @@ def build_parser():
     forget.add_argument("--name", required=True, help="the recorded server")
     hl = s.add_parser("health", help="are the chain's servers running, locked or stopped, and the accounts healthy?")
     hl.add_argument("--notify", action="store_true", help="also show a desktop notification when something is wrong")
+    fl = s.add_parser("fly", help="an exit on a Fly.io Machine (IPv6 TCP; within the $5 waiver)")
+    fl_s = fl.add_subparsers(dest="kind", required=True)
+    fls = fl_s.add_parser("server", help="one 256 MB Machine with an encrypted volume and the app's free IPv6")
+    fmode = fls.add_mutually_exclusive_group(required=True)
+    fmode.add_argument("--apply", action="store_true", help="create the server")
+    fmode.add_argument("--teardown", action="store_true", help="delete its machine and volume")
+    fls.add_argument("--name", default="avpn-flyexit")
+    fls.add_argument("--app", default="advanced-vpn", help="the Fly.io app the deploy token is for")
+    fls.add_argument("--region", default="fra", help="a Fly.io region (default fra; iad/ewr are cheapest)")
+    fls.add_argument("--role", choices=["exit", "middle"], default="exit")
+    fls.add_argument("--image", help="an image already pushed (default: build and push this tree's)")
+    fls.add_argument("--dry-run", action="store_true")
+    fls.add_argument("--yes", action="store_true")
+    cp = s.add_parser("cap", help="each server's monthly outbound cap, so a free account is never billed")
+    cp.add_argument("name", nargs="?", help="one server (default: every hop of the chain)")
+    how = cp.add_mutually_exclusive_group()
+    how.add_argument("--gb", type=float, help="set this server's cap, in GB (decimal, as providers bill)")
+    how.add_argument("--unlimited", action="store_true", help="no cap: a host whose traffic costs you nothing")
+    how.add_argument("--auto", action="store_true", help="back to the cap from its account's free allowance")
+    cp.add_argument("--apply", action="store_true", help="write the caps to the servers")
     az = s.add_parser("azure", help="Azure servers, through OpenTofu")
     az_s = az.add_subparsers(dest="kind", required=True)
     azs = az_s.add_parser("server", help="one Trusted Launch VM (vTPM), administered through the relay")
@@ -2869,6 +3274,8 @@ def run(a):
             return dict(title="Forget server %s" % a.name, summary="forgotten", rows=host_forget(a))
         if a.kind == "bastion":
             return dict(title="Bastion for %s" % a.name, summary="recorded", rows=host_bastion(a))
+        if a.kind == "update":
+            return dict(title="Update %s" % a.name, summary="updated", rows=host_update(a))
         return dict(title="Set up %s" % a.name, summary="installed", rows=host_setup(a))
     if a.provider == "azure" and a.kind == "server":
         valid_name(a.name)
@@ -2883,6 +3290,12 @@ def run(a):
         rows = health(a)
         bad = rows[-1]["value"] != "no problem found"
         return dict(title="Health", summary="problems found" if bad else "healthy", rows=rows)
+    if a.provider == "fly" and a.kind == "server":
+        valid_name(a.name)
+        title = ("Remove" if a.teardown else "Create") + " Fly.io %s" % a.name
+        return dict(title=title, summary="plan" if a.dry_run else "done", rows=fly_server(a), dry_run=a.dry_run)
+    if a.provider == "cap":
+        return dict(title="Monthly caps", summary="written" if a.apply else "planned", rows=cap(a))
     if a.provider == "unlock":
         valid_name(a.name)
         return dict(title="Unlock %s" % a.name, summary="unlocked", rows=unlock(a))
