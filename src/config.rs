@@ -118,6 +118,11 @@ pub struct Config {
     /// Servers behind a relay (middle relays and multi-hop exits): how many inbound
     /// link keys follow the outbound ones in the `link` key descriptor.
     pub link_in: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// How the paced links between servers travel: `udp` (absent: the default) or `tcp`,
+    /// for a next hop reachable only over TCP (an IPv6-only exit whose provider carries
+    /// no UDP there). Signed like every other field; the same cells either way.
+    pub link_transport: Option<String>,
     #[serde(default)]
     /// The server before the exit: standby exits to fail over to, in order after `exit`.
     pub alternates: Vec<SocketAddr>,
@@ -214,7 +219,13 @@ impl Config {
             self.mtu == crate::tls::MANAGED_IP_MTU || (self.mtu == 1280 && layers == 2),
             "supported inner MTUs are 1100 (managed) and 1280 (legacy two-layer)"
         );
-        ensure!(self.listen.is_ipv4(), "IPv4 underlay required in v0.1");
+        // IPv4 underlay, except a server whose paced ingress is TCP: it listens on `[::]`
+        // (both families), as a provider's proxy may reach it over IPv6.
+        ensure!(
+            self.listen.is_ipv4()
+                || (self.link_tcp() && self.paced_ingress() && self.listen.ip().is_unspecified()),
+            "IPv4 underlay required (IPv6 only for a TCP-linked server)"
+        );
         ensure!(self.destinations.len() <= 32, "destination list too large");
         for route in &self.destinations {
             crate::tun::network(route)?;
@@ -234,10 +245,7 @@ impl Config {
                     "a middle relay exists only in three-hop chains"
                 );
                 ensure!(
-                    self.exit.is_some_and(|a| a.is_ipv4()
-                        && !a.ip().is_unspecified()
-                        && !a.ip().is_multicast()
-                        && a.port() != 0),
+                    self.exit.is_some_and(|a| self.next_hop_ok(&a)),
                     "fixed exit required"
                 );
             }
@@ -409,6 +417,21 @@ impl Config {
             .as_deref()
             .and_then(crate::daita::RateClass::parse)
     }
+    /// A concrete next hop: IPv4, or IPv6 only over a TCP link (an IPv6-only exit); never
+    /// unspecified, multicast, link-local or port 0.
+    pub fn next_hop_ok(&self, a: &SocketAddr) -> bool {
+        let concrete = !a.ip().is_unspecified() && !a.ip().is_multicast() && a.port() != 0;
+        match a.ip() {
+            std::net::IpAddr::V4(_) => concrete,
+            std::net::IpAddr::V6(v6) => {
+                concrete && self.link_tcp() && !v6.is_unicast_link_local() && !v6.is_loopback()
+            }
+        }
+    }
+    /// Whether the paced links between servers travel over TCP (`link_transport`).
+    pub fn link_tcp(&self) -> bool {
+        self.link_transport.as_deref() == Some("tcp")
+    }
     /// Whether this server receives its layer over a paced link (it sits behind a relay).
     pub fn paced_ingress(&self) -> bool {
         self.link_in > 0
@@ -423,6 +446,17 @@ impl Config {
         const RESIGN: &str = "every link between servers is paced (per-hop shaping); re-sign this chain with a current avpn init";
         // The legacy standalone QUIC interface (docs/LEGACY_QUIC.md, MTU 1280) has no
         // carrier and no shaping at all; per-hop pacing is part of every managed chain.
+        ensure!(
+            matches!(
+                self.link_transport.as_deref(),
+                None | Some("udp") | Some("tcp")
+            ),
+            "link_transport must be udp or tcp"
+        );
+        ensure!(
+            self.link_transport.is_none() || self.link_rate.is_some(),
+            "link_transport applies only to paced links between servers"
+        );
         if self.mtu != crate::tls::MANAGED_IP_MTU {
             ensure!(
                 self.link_rate.is_none()
@@ -442,9 +476,7 @@ impl Config {
             self.link_out.len() <= 256 && self.link_in <= 256,
             "too many links"
         );
-        let concrete = |a: &SocketAddr| {
-            a.is_ipv4() && !a.ip().is_unspecified() && !a.ip().is_multicast() && a.port() != 0
-        };
+        let concrete = |a: &SocketAddr| self.next_hop_ok(a);
         match self.role.as_str() {
             "client" => ensure!(
                 self.link_rate.is_none()
@@ -635,6 +667,7 @@ mod tests {
             link_rate: Some("metered".into()),
             link_out: vec!["203.0.113.80:4444".parse().unwrap()],
             link_in: 0,
+            link_transport: None,
             alternates: vec![],
             rotate_seconds: None,
         }
@@ -776,6 +809,52 @@ mod tests {
         c.local_ip = Some("10.77.0.2".into());
         c.peer_ip = Some("10.77.0.1".into());
         assert!(c.validate().is_err());
+    }
+
+    #[test]
+    fn the_link_transport_is_udp_or_tcp_and_only_on_paced_links() {
+        let mut c = relay(vec![], vec![pin(1)]);
+        c.outer.as_mut().unwrap().peer_members = vec![];
+        c.outer.as_mut().unwrap().peer_sha256 = pin(1);
+        c.validate().unwrap();
+        assert!(!c.link_tcp());
+        // Absent, the field is not written: profiles signed before it are unchanged.
+        assert!(
+            !serde_json::to_string(&c)
+                .unwrap()
+                .contains("link_transport")
+        );
+        for (t, ok) in [
+            ("udp", true),
+            ("tcp", true),
+            ("sctp", false),
+            ("TCP", false),
+        ] {
+            let mut x = c.clone();
+            x.link_transport = Some(t.into());
+            assert_eq!(x.validate().is_ok(), ok, "{t}");
+        }
+        let mut tcp = c.clone();
+        tcp.link_transport = Some("tcp".into());
+        assert!(tcp.link_tcp());
+        // An IPv6 next hop validates over TCP only, and never link-local.
+        let v6: SocketAddr = "[2001:db8:1::4]:4444".parse().unwrap();
+        tcp.exit = Some(v6);
+        tcp.link_out = vec![v6];
+        tcp.validate().unwrap();
+        let mut udp6 = tcp.clone();
+        udp6.link_transport = None;
+        assert!(udp6.validate().is_err(), "IPv6 next hop over UDP");
+        let mut local = tcp.clone();
+        local.exit = Some("[fe80::1]:4444".parse().unwrap());
+        local.link_out = vec![local.exit.unwrap()];
+        assert!(local.validate().is_err(), "link-local next hop");
+        // Not on a configuration without paced links (a client or a one-hop exit).
+        let mut bare = c.clone();
+        bare.link_rate = None;
+        bare.link_out = vec![];
+        bare.link_transport = Some("tcp".into());
+        assert!(bare.validate().is_err());
     }
 
     #[test]

@@ -94,15 +94,41 @@ def quic_sizes(iface, out):
         sizes.append(len(b[14 + ihl + 8 :]))
 
 
+def tcp6_sizes(iface, out):
+    """Record TCP-over-IPv6 payload sizes on `iface` to `out`: the relay-exit link when it
+    runs over TCP. Receive offload may merge segments, so a cell-aligned stream shows
+    payloads that are whole multiples of one cell size, never a fraction of one."""
+    s = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.htons(3))
+    s.bind((iface, 0))
+    s.settimeout(0.2)
+    sizes = []
+    while True:
+        try:
+            b = s.recv(262144)
+        except socket.timeout:
+            publish(out, sizes)
+            continue
+        # Ethernet (14) + IPv6 fixed header (40, next header at byte 6): TCP only.
+        if len(b) < 14 + 40 + 20 or b[12:14] != b"\x86\xdd" or b[14 + 6] != 6:
+            continue
+        tcp = 14 + 40
+        payload = len(b) - tcp - (b[tcp + 12] >> 4) * 4
+        if payload > 0:  # pure ACKs carry nothing
+            sizes.append(payload)
+
+
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("role", choices=["dot", "observer", "echo", "stun", "quicsizes"])
+    p.add_argument("role", choices=["dot", "observer", "echo", "stun", "quicsizes", "tcp6sizes"])
     p.add_argument("--state", type=Path, required=True)
     p.add_argument("--iface")
     p.add_argument("--out", type=Path)
     a = p.parse_args()
     if a.role == "quicsizes":
         quic_sizes(a.iface, a.out)
+        return
+    if a.role == "tcp6sizes":
+        tcp6_sizes(a.iface, a.out)
         return
     if a.role == "dot":
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)

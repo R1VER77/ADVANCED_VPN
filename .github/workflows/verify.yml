@@ -104,6 +104,8 @@ jobs:
           unshare -Urnm python tools/namespace_test.py --state /tmp/advanced-vpn-ci
       - name: Managed WireGuard DAITA, constant cells and unprivileged service proof
         run: unshare --user --map-root-user --map-auto --net --mount python tools/managed_test.py --state /tmp/advanced-vpn-managed-ci
+      - name: The relay-exit link over TCP on IPv6 only (an IPv6-only exit), whole cells on the wire
+        run: unshare --user --map-root-user --map-auto --net --mount python tools/managed_test.py --state /tmp/advanced-vpn-managed-tcp-ci --link-transport tcp
       - name: Privacy budget lifecycle (opt-in cap, refunds, blocked-not-exited)
         run: unshare --user --map-root-user --map-auto --net --mount python tools/budget_test.py --state /tmp/advanced-vpn-budget-ci
       - name: Tunnel throughput floor (default per-session limits)
@@ -349,6 +351,7 @@ jobs:
         run: |
           unshare -Urnm python tools/namespace_test.py --state /tmp/advanced-vpn-ci
           unshare --user --map-root-user --map-auto --net --mount python tools/managed_test.py --state /tmp/advanced-vpn-managed-ci
+          unshare --user --map-root-user --map-auto --net --mount python tools/managed_test.py --state /tmp/advanced-vpn-managed-tcp-ci --link-transport tcp
           unshare --user --map-root-user --map-auto --net --mount python tools/budget_test.py --state /tmp/advanced-vpn-budget-ci
       - name: Failover, oblivious control plane, TLS/TCP fallback
         run: |

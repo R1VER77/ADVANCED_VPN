@@ -293,7 +293,11 @@ async fn open_link(
 ) -> Result<crate::link::Egress> {
     let next = tls::layer_payload(c.mtu, c.layers, layer + 1) as usize;
     let pace = crate::link::Pace::of(c.link_class().context("link rate required")?);
-    crate::link::egress(next_hop, psk, pace, link_cell(next)).await
+    if c.link_tcp() {
+        crate::link::egress_tcp(next_hop, psk, pace, link_cell(next)).await
+    } else {
+        crate::link::egress(next_hop, psk, pace, link_cell(next)).await
+    }
 }
 
 async fn relay_session(
@@ -543,14 +547,16 @@ pub async fn serve(c: &Config, fds: &BTreeMap<String, i32>, tun_fd: Option<i32>)
         let pace = crate::link::Pace::of(c.link_class().context("link rate required")?);
         let cell = link_cell(tls::layer_payload(c.mtu, c.layers, layer) as usize);
         let quic = endpoint.local_addr()?;
-        let task = tokio::spawn(crate::link::ingress(
-            c.listen,
-            quic,
-            link_in,
-            pace,
-            cell,
-            2 * c.members.len().max(1) + 8,
-        ));
+        let peers = 2 * c.members.len().max(1) + 8;
+        let task = if c.link_tcp() {
+            tokio::spawn(crate::link::ingress_tcp(
+                c.listen, quic, link_in, pace, cell, peers,
+            ))
+        } else {
+            tokio::spawn(crate::link::ingress(
+                c.listen, quic, link_in, pace, cell, peers,
+            ))
+        };
         Some(crate::link::Guard::new(task))
     } else {
         None

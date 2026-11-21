@@ -64,9 +64,34 @@ LINK_AAD = b"advanced-vpn/link-psk/"
 ROTATE_SECONDS = (900, 3600)
 
 
-def link_fields(rate, outs, ins):
-    """Core fields of a server's paced links: next-hop endpoints out, inbound key count."""
-    return dict(link_rate=rate, link_out=list(outs), link_in=ins)
+LINK_TRANSPORTS = ("udp", "tcp")
+
+
+def link_fields(rate, outs, ins, transport="udp"):
+    """Core fields of a server's paced links: next-hop endpoints out, inbound key count,
+    and, for TCP only, the transport (absent means UDP, as profiles signed before it)."""
+    fields = dict(link_rate=rate, link_out=list(outs), link_in=ins)
+    if transport == "tcp":
+        fields["link_transport"] = "tcp"
+    return fields
+
+
+def endpoint_parts(endpoint, ipv6=False):
+    """(address, port) of `A.B.C.D:PORT`, or with `ipv6` also `[v6]:PORT` (a next hop
+    reached over a TCP link, such as an IPv6-only exit). Refuses unspecified, multicast
+    and link-local addresses and ports outside 1..65535."""
+    if type(endpoint) is not str or ":" not in endpoint:
+        raise ValueError("bad endpoint")
+    host, port = endpoint.rsplit(":", 1)
+    if host.startswith("[") and host.endswith("]"):
+        if not ipv6:
+            raise ValueError("an IPv6 endpoint needs a TCP link (--link-transport tcp)")
+        ip = ipaddress.IPv6Address(host[1:-1])
+    else:
+        ip = ipaddress.IPv4Address(host)
+    if ip.is_multicast or ip.is_unspecified or ip.is_link_local or not port.isdigit() or not 1 <= int(port) <= 65535:
+        raise ValueError("bad endpoint")
+    return ip, int(port)
 
 
 CLOAK_REQUIRED = "this chain was signed before the HTTP/3 camouflage, which is now required; re-sign it (avpn cloud chain --apply, or avpn init) and enroll the new bundles with --replace"
@@ -156,8 +181,11 @@ def profile_validate(p):
     outs, ins = p["core"].get("link_out", []), p["core"].get("link_in", 0)
     if type(outs) is not list or type(ins) is not int or not 0 <= ins <= 256 or len(outs) > 256:
         raise ValueError("malformed link table")
+    transport = p["core"].get("link_transport", "udp")
+    if transport not in LINK_TRANSPORTS or ("link_transport" in p["core"] and not link_rate):
+        raise ValueError("link transport must be udp or tcp, on paced links only")
     for endpoint in outs:
-        ipaddress.IPv4Address(endpoint.rsplit(":", 1)[0])
+        endpoint_parts(endpoint, ipv6=transport == "tcp")
     if p["role"] == "client" and (link_rate or outs or ins):
         raise ValueError("a client's only link is the carrier")
     lanes = {l for l in ALL_LANES if p["core"].get(l)}
@@ -182,7 +210,7 @@ def profile_validate(p):
         if p["role"] not in ("relay", "middle") or type(alts) is not list or not 1 <= len(alts) <= 7:
             raise ValueError("standby exits belong to the server before the exit")
         for endpoint in alts:
-            ipaddress.IPv4Address(endpoint.rsplit(":", 1)[0])
+            endpoint_parts(endpoint, ipv6=transport == "tcp")
         if (
             type(rotate) is not list
             or len(rotate) != 2
@@ -240,11 +268,12 @@ def profile_validate(p):
     if set(n) not in (network, network | {"cover_name"}) or ("cover_name" in n) != ("cloak" in p):
         raise ValueError("network schema mismatch")
     valid_cover_name(n.get("cover_name"))
-    for endpoint in [n["relay_endpoint"], n["exit_endpoint"]] + ([n["middle_endpoint"]] if h == 3 else []):
-        host, port = endpoint.rsplit(":", 1)
-        ip = ipaddress.IPv4Address(host)
-        if ip.is_multicast or ip.is_unspecified or not 1 <= int(port) <= 65535:
-            raise ValueError("bad endpoint")
+    # The first hop is what the client dials: always IPv4. The client never dials a later
+    # hop (its packets reach it through the chain), so those may be IPv6; the relay's own
+    # signed core is what requires a TCP link for an IPv6 next hop (link_out above).
+    endpoint_parts(n["relay_endpoint"])
+    for endpoint in [n["exit_endpoint"]] + ([n["middle_endpoint"]] if h == 3 else []):
+        endpoint_parts(endpoint, ipv6=True)
     if (n["middle_endpoint"] is None) != (h != 3):
         raise ValueError("middle endpoint only in three-hop chains")
     if n["dns_ip"] != "10.77.0.1" or n["dns_port"] != 53:
@@ -1092,6 +1121,7 @@ def create(
     front=None,
     front_hops=i2p.DEFAULT_HOPS,
     front_port=None,
+    link_transport="udp",
 ):
     """Operator: build signed bundles for a 1-, 2- or 3-hop chain from public device
     requests. Bundles carry no private key; the WireGuard PSK is hybrid-KEM encrypted
@@ -1128,8 +1158,14 @@ def create(
         raise ValueError("rotation window must be 60..86400 seconds, min <= max")
     if (relay is None) != (hops == 1) or (middle is None) != (hops != 3):
         raise ValueError("endpoints do not match the chain")
-    for a in [x for x in [relay, middle, exit_address] if x]:
-        ipaddress.IPv4Address(a.rsplit(":", 1)[0])
+    if link_transport not in LINK_TRANSPORTS or (link_transport == "tcp" and hops == 1):
+        raise ValueError("link transport must be udp or tcp, and tcp needs a server link (2-3 hops)")
+    # The first hop is dialled by the client: IPv4. Later hops are reached over the paced
+    # server links, so they may be IPv6 only when those run over TCP.
+    dialled = relay if hops > 1 else exit_address
+    endpoint_parts(dialled)
+    for a in [x for x in [middle, exit_address] if x and x != dialled]:
+        endpoint_parts(a, ipv6=link_transport == "tcp")
     carrier_endpoint = relay if hops > 1 else exit_address
     root.mkdir(mode=0o700, parents=False, exist_ok=False)
     roles = ["client"] + servers
@@ -1168,7 +1204,10 @@ def create(
     # listeners bind every local address on the enrolled port; peers still send to
     # the public endpoint, and QUIC authentication pins who may connect.
     def any_address(endpoint):
-        return "0.0.0.0:" + endpoint.rsplit(":", 1)[1] if endpoint else None
+        # Over a TCP link, both families: a provider's proxy may reach the host over
+        # either (Fly's does over IPv6). The link authenticates every connection.
+        wildcard = "[::]:" if link_transport == "tcp" else "0.0.0.0:"
+        return wildcard + endpoint.rsplit(":", 1)[1] if endpoint else None
 
     listen = {
         "relay": "10.78.0.1:4433",
@@ -1228,7 +1267,7 @@ def create(
             outs = [pair_psk[(role, x)] for x in nexts]
             ins = [pair_psk[(servers[k - 1], name)]] if k > 0 else []
             out_eps = [nxt[role]] + [alt_endpoint[x] for x in nexts[1:]] if nexts else []
-            core.update(link_fields(rate, out_eps, len(ins)))
+            core.update(link_fields(rate, out_eps, len(ins), link_transport))
             if role == forwarder and alternates:
                 core["alternates"] = out_eps[1:]
                 core["rotate_seconds"] = list(rotate)
@@ -2328,6 +2367,7 @@ def lab_setup(
     rotate=ROTATE_SECONDS,
     front=None,
     front_hops=i2p.DEFAULT_HOPS,
+    link_transport="udp",
 ):
     """TEST/LAB: run the real request -> init -> enroll flow for every role in the
     chain (and every standby exit, `standby` = [(name, endpoint)]). `protect` maps
@@ -2371,6 +2411,7 @@ def lab_setup(
         rotate=rotate,
         front=front,
         front_hops=front_hops,
+        link_transport=link_transport,
     )
     for name, data_key in (signer.unwrapped or {}).items():
         server_unlock(root / name, data_key)

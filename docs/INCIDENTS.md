@@ -55,6 +55,20 @@ private vulnerability reporting (see [SECURITY.md](../SECURITY.md)).
 
 ## Fixed
 
+### Every client connect crashed on main (c22fbf5 to 7650a7d, 20–21 Nov 2026)
+- **What:** the chain-notice watcher added in `c22fbf5` was bound to the name `watch` in
+  `supervise()`, which a `CarrierWatch` reused a few lines later; the first status update
+  then called a method the carrier watch does not have, and the supervisor stopped
+  (`AttributeError`). Every client `connect` from that commit on failed at start.
+- **Not affected:** servers (the watcher runs on clients only), and installed clients
+  older than `c22fbf5` (the owner's laptop runs `0bbf432`).
+- **How found:** CI's managed lab (`aarch64` and `local-protocol-proof` failed on
+  `7650a7d`), noticed late, and the same lab run locally for the TCP link work. The unit
+  tests exercised the watcher alone.
+- **Fix:** the watcher is `chain_notice`. The managed lab, which runs the real
+  supervisor, already guards this; CI results are now read before further work builds on
+  a commit.
+
 ### The OCI exit kept its private keys as plain files (14–20 Nov 2026)
 - **What:** a server whose systemd could not seal with systemd-creds fell back, by design and
   with a loud warning (Bug 9a), to plain root-only key files. The owner's exit (OCI Always

@@ -52,8 +52,12 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::{
-    net::UdpSocket,
-    sync::mpsc::{self, error::TryRecvError},
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::{TcpListener, TcpStream, UdpSocket},
+    sync::{
+        Notify,
+        mpsc::{self, error::TryRecvError},
+    },
     task::{AbortHandle, JoinHandle},
     time::{MissedTickBehavior, interval},
 };
@@ -602,12 +606,48 @@ impl Drop for Guard {
     }
 }
 
-/// Send `slots` cells to `peer` every tick of `pace` on a drift-free grid: queued
+/// Where a link's cells go: a UDP socket (the default), or a TCP stream, for a next hop
+/// reachable only over TCP (an IPv6-only host whose provider carries no UDP there). On a
+/// stream every cell is written whole and cells are all one size, so the receiver reads
+/// exactly one cell at a time: no framing that a cell's contents could influence.
+#[derive(Clone)]
+enum Wire {
+    Udp {
+        socket: Arc<UdpSocket>,
+        peer: Option<SocketAddr>,
+    },
+    /// Cells for the stream's writer task. A full buffer (a stalled connection) drops
+    /// the cell, as a lost datagram would: the clock never waits and never bursts.
+    Stream(mpsc::Sender<Vec<u8>>),
+}
+
+impl Wire {
+    async fn put(&self, cell: Vec<u8>) {
+        // A refused or unreachable next hop is not fatal: keep the clock.
+        match self {
+            Wire::Udp { socket, peer } => {
+                let _ = match peer {
+                    Some(p) => socket.send_to(&cell, *p).await,
+                    None => socket.send(&cell).await,
+                };
+            }
+            Wire::Stream(tx) => {
+                let _ = tx.try_send(cell);
+            }
+        }
+    }
+}
+
+/// How many sealed cells may wait for a stream's writer: a second of the clock at most.
+fn stream_buffer(pace: Pace) -> usize {
+    (pace.per_second().ceil() as usize).max(8)
+}
+
+/// Send `slots` cells to the wire every tick of `pace` on a drift-free grid: queued
 /// packets first, dummies for the rest. With `credit`, each cell spends one credit and
 /// a tick without credit sends nothing more (never a burst later).
 async fn clock(
-    socket: Arc<UdpSocket>,
-    peer: Option<SocketAddr>,
+    wire: Wire,
     mut queue: mpsc::Receiver<Bytes>,
     lane: Arc<Lane>,
     pace: Pace,
@@ -648,14 +688,10 @@ async fn clock(
                     sealer.seal(&payload, cell)
                 }
             };
-            let Ok(wire) = sealed else {
+            let Ok(sealed) = sealed else {
                 return;
             };
-            // A refused or unreachable next hop is not fatal: keep the clock.
-            let _ = match peer {
-                Some(p) => socket.send_to(&wire, p).await,
-                None => socket.send(&wire).await,
-            };
+            wire.put(sealed).await;
         }
     }
 }
@@ -708,64 +744,75 @@ pub async fn egress(next: SocketAddr, psk: [u8; 32], pace: Pace, cell: usize) ->
     egress_rekeying(next, psk, pace, cell, REKEY).await
 }
 
-/// [`egress`] with its own rekey interval (tests).
-async fn egress_rekeying(
+/// [`egress`] over TCP: the same cells, clock, keys and handshake on one stream to
+/// `next`, reconnected (with a fresh key exchange at once) whenever it drops.
+pub async fn egress_tcp(
     next: SocketAddr,
     psk: [u8; 32],
     pace: Pace,
     cell: usize,
-    every: Duration,
 ) -> Result<Egress> {
-    let socket = Arc::new(UdpSocket::bind("0.0.0.0:0").await?);
-    socket.connect(next).await?;
+    egress_tcp_rekeying(next, psk, pace, cell, REKEY).await
+}
+
+/// The parts of a relay's link that do not depend on the transport.
+struct EgressCore {
+    opener: Arc<std::sync::Mutex<Opener>>,
+    answers: mpsc::Sender<Vec<u8>>,
+    deliver: mpsc::Sender<Bytes>,
+    born: Instant,
+    heard: Arc<AtomicU64>,
+}
+
+impl EgressCore {
+    /// One cell from the next hop: note that it is alive, collect handshake answers and
+    /// deliver packets (never one under a PSK-only key).
+    fn take(&self, wire: &[u8], cell: usize, assembler: &mut Assembler) {
+        let Some(o) = self
+            .opener
+            .lock()
+            .ok()
+            .and_then(|mut op| op.open_cell(wire, cell))
+        else {
+            return;
+        };
+        self.heard
+            .store(self.born.elapsed().as_millis() as u64, Ordering::SeqCst);
+        if o.control {
+            if let Some((ANSWER, msg)) = assembler.feed(&o.payload) {
+                let _ = self.answers.try_send(msg);
+            }
+        } else if !o.payload.is_empty() && o.rekeyed {
+            let _ = self.deliver.try_send(Bytes::from(o.payload));
+        }
+    }
+}
+
+/// Build the transport-independent state, its clock on `wire` and the key exchange
+/// (offer until answered, switch, wait `every` or a `kick`, again).
+fn egress_parts(
+    wire: Wire,
+    psk: [u8; 32],
+    pace: Pace,
+    cell: usize,
+    every: Duration,
+    kick: Arc<Notify>,
+) -> Result<(Arc<EgressCore>, Egress, Vec<JoinHandle<()>>)> {
     let (tx, queue) = mpsc::channel(pace.queue());
     let (deliver, rx) = mpsc::channel(pace.queue());
     let born = Instant::now();
     let heard = Arc::new(AtomicU64::new(u64::MAX));
-    let mark = heard.clone();
     let lane = Lane::new(Sealer::new(&psk, Dir::Forward)?);
     let opener = Arc::new(std::sync::Mutex::new(Opener::new(vec![psk], Dir::Reverse)));
     let (answers, mut answered) = mpsc::channel::<Vec<u8>>(4);
-    let sender = tokio::spawn(clock(
-        socket.clone(),
-        None,
-        queue,
-        lane.clone(),
-        pace,
-        cell,
-        None,
-    ));
-    let receiver = {
-        let opener = opener.clone();
-        tokio::spawn(async move {
-            let mut buf = vec![0u8; 65536];
-            let mut assembler = Assembler::default();
-            loop {
-                let Ok(n) = socket.recv(&mut buf).await else {
-                    // ICMP-refused while the next hop is down: keep listening.
-                    tokio::time::sleep(Duration::from_millis(100)).await;
-                    continue;
-                };
-                let Some(o) = opener
-                    .lock()
-                    .ok()
-                    .and_then(|mut op| op.open_cell(&buf[..n], cell))
-                else {
-                    continue;
-                };
-                mark.store(born.elapsed().as_millis() as u64, Ordering::SeqCst);
-                if o.control {
-                    if let Some((ANSWER, msg)) = assembler.feed(&o.payload) {
-                        let _ = answers.try_send(msg);
-                    }
-                } else if !o.payload.is_empty() && o.rekeyed {
-                    // A packet under a PSK-only key is never accepted.
-                    let _ = deliver.try_send(Bytes::from(o.payload));
-                }
-            }
-        })
-    };
-    // The key exchange: offer until answered, switch, wait, again.
+    let sender = tokio::spawn(clock(wire, queue, lane.clone(), pace, cell, None));
+    let core = Arc::new(EgressCore {
+        opener: opener.clone(),
+        answers,
+        deliver,
+        born,
+        heard: heard.clone(),
+    });
     let handshake = tokio::spawn(async move {
         loop {
             let Ok(me) = Initiator::new() else { return };
@@ -792,16 +839,114 @@ async fn egress_rekeying(
             if lane.rekey(next, &fwd).is_err() {
                 return;
             }
-            tokio::time::sleep(every).await;
+            // A new stream starts a new exchange at once: the next hop's state for the
+            // old one is gone, and its replies would otherwise wait for the next rekey.
+            tokio::select! {
+                _ = tokio::time::sleep(every) => {}
+                _ = kick.notified() => {}
+            }
         }
     });
-    Ok(Egress {
+    let link = Egress {
         tx,
         rx,
         born,
         heard,
-        _guard: Guard::all(vec![sender, receiver, handshake]),
-    })
+        _guard: Guard(Vec::new()),
+    };
+    Ok((core, link, vec![sender, handshake]))
+}
+
+/// [`egress`] with its own rekey interval (tests).
+async fn egress_rekeying(
+    next: SocketAddr,
+    psk: [u8; 32],
+    pace: Pace,
+    cell: usize,
+    every: Duration,
+) -> Result<Egress> {
+    let any = if next.is_ipv6() {
+        "[::]:0"
+    } else {
+        "0.0.0.0:0"
+    };
+    let socket = Arc::new(UdpSocket::bind(any).await?);
+    socket.connect(next).await?;
+    let wire = Wire::Udp {
+        socket: socket.clone(),
+        peer: None,
+    };
+    let (core, mut link, mut tasks) =
+        egress_parts(wire, psk, pace, cell, every, Arc::new(Notify::new()))?;
+    tasks.push(tokio::spawn(async move {
+        let mut buf = vec![0u8; 65536];
+        let mut assembler = Assembler::default();
+        loop {
+            let Ok(n) = socket.recv(&mut buf).await else {
+                // ICMP-refused while the next hop is down: keep listening.
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                continue;
+            };
+            core.take(&buf[..n], cell, &mut assembler);
+        }
+    }));
+    link._guard = Guard::all(tasks);
+    Ok(link)
+}
+
+/// [`egress_tcp`] with its own rekey interval (tests).
+async fn egress_tcp_rekeying(
+    next: SocketAddr,
+    psk: [u8; 32],
+    pace: Pace,
+    cell: usize,
+    every: Duration,
+) -> Result<Egress> {
+    let (cells, mut pending) = mpsc::channel::<Vec<u8>>(stream_buffer(pace));
+    let kick = Arc::new(Notify::new());
+    let (core, mut link, mut tasks) =
+        egress_parts(Wire::Stream(cells), psk, pace, cell, every, kick.clone())?;
+    let size = OVERHEAD + cell;
+    tasks.push(tokio::spawn(async move {
+        let mut first = true;
+        loop {
+            let Ok(Ok(stream)) =
+                tokio::time::timeout(Duration::from_secs(10), TcpStream::connect(next)).await
+            else {
+                // Down or unreachable: cells meanwhile are dropped, as lost datagrams.
+                while pending.try_recv().is_ok() {}
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                continue;
+            };
+            let _ = stream.set_nodelay(true); // one segment per cell, as the clock sends them
+            let (mut rd, mut wr) = stream.into_split();
+            while pending.try_recv().is_ok() {} // stale cells from while it was down
+            if !first {
+                kick.notify_one();
+            }
+            first = false;
+            let core = core.clone();
+            let reader = tokio::spawn(async move {
+                let mut buf = vec![0u8; size];
+                let mut assembler = Assembler::default();
+                while rd.read_exact(&mut buf).await.is_ok() {
+                    core.take(&buf, cell, &mut assembler);
+                }
+            });
+            let _reader = Guard::new(reader);
+            while let Some(c) = pending.recv().await {
+                if wr.write_all(&c).await.is_err() {
+                    break;
+                }
+                if _reader.0[0].is_finished() {
+                    break;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+    }));
+    link._guard = Guard::all(tasks);
+    Ok(link)
 }
 
 struct Peer {
@@ -814,6 +959,97 @@ struct Peer {
     /// again: the answer was lost) and our reply key, held until the sender switches.
     answered: Option<Answered>,
     _guard: Guard,
+}
+
+/// A new peer's state, its paced replies on `wire` and its packets from the local QUIC
+/// endpoint at `quic`. Called only after its first cell authenticated.
+async fn new_peer(
+    wire: Wire,
+    quic: SocketAddr,
+    psk: &[u8; 32],
+    pace: Pace,
+    cell: usize,
+) -> Result<Peer> {
+    let local = Arc::new(UdpSocket::bind("127.0.0.1:0").await?);
+    local.connect(quic).await?;
+    let (tx, queue) = mpsc::channel::<Bytes>(pace.queue());
+    let credit = Arc::new(AtomicU64::new(0));
+    let lane = Lane::new(Sealer::new(psk, Dir::Reverse)?);
+    let pacer = tokio::spawn(clock(
+        wire,
+        queue,
+        lane.clone(),
+        pace,
+        cell,
+        Some(credit.clone()),
+    ));
+    let reader = {
+        let local = local.clone();
+        tokio::spawn(async move {
+            let mut b = vec![0u8; 65536];
+            while let Ok(n) = local.recv(&mut b).await {
+                // Full queue: drop, as a bottleneck would.
+                let _ = tx.try_send(Bytes::copy_from_slice(&b[..n]));
+            }
+        })
+    };
+    Ok(Peer {
+        last: Instant::now(),
+        credit,
+        local,
+        lane,
+        assembler: Assembler::default(),
+        answered: None,
+        _guard: Guard::all(vec![pacer, reader]),
+    })
+}
+
+/// One authenticated cell from `peer`: earn reply credit, follow its key exchange, and
+/// return the packet to forward to the local QUIC endpoint, if it carries one under a
+/// handshake key (never one under a PSK-only key). The same on UDP and TCP.
+fn admit(
+    peer: &mut Peer,
+    opener: &mut Opener,
+    psks: &[[u8; 32]],
+    o: Opened,
+    cell: usize,
+    cap: u64,
+) -> Option<Vec<u8>> {
+    peer.last = Instant::now();
+    let _ = peer
+        .credit
+        .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |c| Some(earn(c, cap)));
+    // The sender has switched to the session we answered: reply under it too.
+    if let Some((next, _, rev)) = &mut peer.answered
+        && *next == o.id
+        && let Some(key) = rev.take()
+    {
+        let _ = peer.lane.rekey(*next, &key);
+    }
+    if o.control {
+        if let Some((OFFER, offer)) = peer.assembler.feed(&o.payload) {
+            match &peer.answered {
+                // The same offer again: our answer was lost; resend it unchanged.
+                Some((next, answer, _)) if offer.get(..SESSION_ID) == Some(&next[..]) => {
+                    peer.lane.push_control(fragments(ANSWER, answer, cell));
+                }
+                _ => {
+                    if let Ok((answer, (fwd, rev))) = respond(&psks[o.index], &offer) {
+                        let fwd = zeroize::Zeroizing::new(fwd);
+                        let next: [u8; SESSION_ID] = answer[..SESSION_ID].try_into().expect("id");
+                        opener.add_session(next, o.index, &fwd, Some(o.id));
+                        peer.lane.push_control(fragments(ANSWER, &answer, cell));
+                        peer.answered = Some((next, answer, Some(zeroize::Zeroizing::new(rev))));
+                    }
+                }
+            }
+        }
+        None
+    } else if !o.payload.is_empty() && o.rekeyed {
+        Some(o.payload)
+    } else {
+        None
+    }
 }
 
 /// The receiving end of paced links: listen on `public`, admit only authenticated
@@ -845,78 +1081,116 @@ pub async fn ingress(
                 let Ok((n, from)) = r else { continue };
                 // Authenticate first: an unauthenticated packet creates no state.
                 let Some(o) = opener.open_cell(&buf[..n], cell) else { continue };
-                let index = o.index;
                 if !peers.contains_key(&from) {
                     if peers.len() >= max_peers {
                         continue;
                     }
-                    let local = Arc::new(UdpSocket::bind("127.0.0.1:0").await?);
-                    local.connect(quic).await?;
-                    let (tx, queue) = mpsc::channel::<Bytes>(pace.queue());
-                    let credit = Arc::new(AtomicU64::new(0));
-                    let lane = Lane::new(Sealer::new(&psks[index], Dir::Reverse)?);
-                    let pacer = tokio::spawn(clock(
-                        socket.clone(),
-                        Some(from),
-                        queue,
-                        lane.clone(),
-                        pace,
-                        cell,
-                        Some(credit.clone()),
-                    ));
-                    let reader = {
-                        let local = local.clone();
-                        tokio::spawn(async move {
-                            let mut b = vec![0u8; 65536];
-                            while let Ok(n) = local.recv(&mut b).await {
-                                // Full queue: drop, as a bottleneck would.
-                                let _ = tx.try_send(Bytes::copy_from_slice(&b[..n]));
-                            }
-                        })
-                    };
-                    peers.insert(from, Peer {
-                        last: Instant::now(),
-                        credit,
-                        local,
-                        lane,
-                        assembler: Assembler::default(),
-                        answered: None,
-                        _guard: Guard::all(vec![pacer, reader]),
-                    });
+                    let wire = Wire::Udp { socket: socket.clone(), peer: Some(from) };
+                    let peer = new_peer(wire, quic, &psks[o.index], pace, cell).await?;
+                    peers.insert(from, peer);
                 }
                 let peer = peers.get_mut(&from).expect("just inserted");
-                peer.last = Instant::now();
-                let _ = peer.credit.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |c| Some(earn(c, cap)));
-                // The sender has switched to the session we answered: reply under it too.
-                if let Some((next, _, rev)) = &mut peer.answered
-                    && *next == o.id
-                    && let Some(key) = rev.take()
-                {
-                    let _ = peer.lane.rekey(*next, &key);
-                }
-                if o.control {
-                    if let Some((OFFER, offer)) = peer.assembler.feed(&o.payload) {
-                        match &peer.answered {
-                            // The same offer again: our answer was lost; resend it unchanged.
-                            Some((next, answer, _)) if offer.get(..SESSION_ID) == Some(&next[..]) => {
-                                peer.lane.push_control(fragments(ANSWER, answer, cell));
-                            }
-                            _ => {
-                                if let Ok((answer, (fwd, rev))) = respond(&psks[o.index], &offer) {
-                                    let fwd = zeroize::Zeroizing::new(fwd);
-                                    let next: [u8; SESSION_ID] = answer[..SESSION_ID].try_into().expect("id");
-                                    opener.add_session(next, o.index, &fwd, Some(o.id));
-                                    peer.lane.push_control(fragments(ANSWER, &answer, cell));
-                                    peer.answered = Some((next, answer, Some(zeroize::Zeroizing::new(rev))));
-                                }
-                            }
-                        }
-                    }
-                } else if !o.payload.is_empty() && o.rekeyed {
-                    // A packet under a PSK-only key is never forwarded.
-                    let _ = peer.local.send(&o.payload).await;
+                if let Some(packet) = admit(peer, &mut opener, &psks, o, cell, cap) {
+                    let _ = peer.local.send(&packet).await;
                 }
             }
+        }
+    }
+}
+
+/// How long a new TCP connection may take to send its first authenticated cell before
+/// it is closed: an unauthenticated connection holds no peer state, only this wait.
+const FIRST_CELL: Duration = Duration::from_secs(10);
+
+/// [`ingress`] over TCP: each connection is one peer, admitted only once its first cell
+/// authenticates (nothing is ever sent to a connection that has not), with the same
+/// credit, key exchange and peer limit. Its replies go back on the same connection.
+pub async fn ingress_tcp(
+    public: SocketAddr,
+    quic: SocketAddr,
+    psks: Vec<[u8; 32]>,
+    pace: Pace,
+    cell: usize,
+    max_peers: usize,
+) -> Result<()> {
+    if psks.is_empty() {
+        bail!("paced ingress needs at least one link key");
+    }
+    let listener = TcpListener::bind(public).await.context("link listen")?;
+    let opener = Arc::new(std::sync::Mutex::new(Opener::new(
+        psks.clone(),
+        Dir::Forward,
+    )));
+    let psks = Arc::new(psks);
+    // Every connection's task lives in this set: when the ingress stops (its guard is
+    // dropped, the server restarts), they all stop with it, and their state is gone.
+    let mut peers = tokio::task::JoinSet::new();
+    loop {
+        tokio::select! {
+            accepted = listener.accept() => {
+                let Ok((stream, _)) = accepted else {
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    continue;
+                };
+                if peers.len() >= max_peers {
+                    continue; // dropped: closed without a byte
+                }
+                let (opener, psks) = (opener.clone(), psks.clone());
+                peers.spawn(async move {
+                    let _ = serve_tcp_peer(stream, quic, &psks, &opener, pace, cell).await;
+                });
+            }
+            Some(_) = peers.join_next(), if !peers.is_empty() => {}
+        }
+    }
+}
+
+async fn serve_tcp_peer(
+    stream: TcpStream,
+    quic: SocketAddr,
+    psks: &[[u8; 32]],
+    opener: &std::sync::Mutex<Opener>,
+    pace: Pace,
+    cell: usize,
+) -> Result<()> {
+    let _ = stream.set_nodelay(true);
+    let (mut rd, mut wr) = stream.into_split();
+    let mut buf = vec![0u8; OVERHEAD + cell];
+    tokio::time::timeout(FIRST_CELL, rd.read_exact(&mut buf))
+        .await
+        .context("no first cell")??;
+    let open = |b: &[u8]| opener.lock().ok().and_then(|mut op| op.open_cell(b, cell));
+    let Some(first) = open(&buf) else {
+        bail!("first cell did not authenticate");
+    };
+    let (cells, mut pending) = mpsc::channel::<Vec<u8>>(stream_buffer(pace));
+    let writer = tokio::spawn(async move {
+        while let Some(c) = pending.recv().await {
+            if wr.write_all(&c).await.is_err() {
+                return;
+            }
+        }
+    });
+    let _writer = Guard::new(writer);
+    let mut peer = new_peer(Wire::Stream(cells), quic, &psks[first.index], pace, cell).await?;
+    let cap = CREDIT_TICKS * pace.slots as u64;
+    let mut next = Some(first);
+    loop {
+        if let Some(o) = next.take() {
+            let packet = {
+                let Ok(mut op) = opener.lock() else {
+                    bail!("opener poisoned")
+                };
+                admit(&mut peer, &mut op, psks, o, cell, cap)
+            };
+            if let Some(packet) = packet {
+                let _ = peer.local.send(&packet).await;
+            }
+        }
+        // A live sender sends a cell every tick: silence means it is gone.
+        match tokio::time::timeout(PEER_IDLE, rd.read_exact(&mut buf)).await {
+            Ok(Ok(_)) => next = open(&buf),
+            _ => return Ok(()),
         }
     }
 }
@@ -1151,6 +1425,298 @@ mod tests {
             replies += 1;
         }
         assert_eq!(replies, 5, "one reply cell per authenticated cell, no more");
+    }
+}
+
+#[cfg(test)]
+mod tcp_tests {
+    //! The paced link over TCP (an IPv6-only next hop whose provider carries no UDP):
+    //! the same cells, clock, keys and refusals as over UDP.
+    use super::*;
+
+    const CELL: usize = 1214;
+
+    fn psk(b: u8) -> [u8; 32] {
+        [b; 32]
+    }
+
+    async fn echo() -> SocketAddr {
+        let echo = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let quic = echo.local_addr().unwrap();
+        tokio::spawn(async move {
+            let mut b = vec![0u8; 2048];
+            while let Ok((n, from)) = echo.recv_from(&mut b).await {
+                let _ = echo.send_to(&b[..n], from).await;
+            }
+        });
+        quic
+    }
+
+    fn free_port() -> SocketAddr {
+        let probe = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        probe.local_addr().unwrap()
+    }
+
+    async fn round_trips(link: &mut Egress, n: u8) -> usize {
+        for i in 0..n {
+            assert!(link.send(&[i; 100]));
+        }
+        let mut got = 0;
+        let deadline = Instant::now() + Duration::from_secs(4);
+        while got < n as usize && Instant::now() < deadline {
+            if let Ok(Some(p)) =
+                tokio::time::timeout(Duration::from_millis(500), link.rx.recv()).await
+            {
+                assert_eq!(p.len(), 100);
+                got += 1;
+            }
+        }
+        got
+    }
+
+    #[tokio::test]
+    async fn a_tcp_link_carries_packets_both_ways() {
+        let quic = echo().await;
+        let public = free_port();
+        let pace = Pace::of(RateClass::Standard);
+        tokio::spawn(ingress_tcp(public, quic, vec![psk(9)], pace, CELL, 4));
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let mut link = egress_tcp(public, psk(9), pace, CELL).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        assert_eq!(
+            round_trips(&mut link, 50).await,
+            50,
+            "every packet crossed the link and back"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_tcp_wire_carries_the_clock_idle_or_busy_in_whole_cells() {
+        // A raw observer at the next hop reads the stream: one cell size, the clock's rate.
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let pace = Pace::of(RateClass::Standard);
+        let link = egress_tcp(listener.local_addr().unwrap(), psk(9), pace, CELL)
+            .await
+            .unwrap();
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let size = OVERHEAD + CELL;
+        let mut count = async |secs: f64| {
+            let mut b = vec![0u8; size];
+            let end = Instant::now() + Duration::from_secs_f64(secs);
+            let mut n = 0u32;
+            while let Ok(Ok(_)) =
+                tokio::time::timeout_at(end.into(), stream.read_exact(&mut b)).await
+            {
+                n += 1;
+            }
+            n as f64 / secs
+        };
+        count(0.3).await; // settle
+        let idle = count(1.0).await;
+        let feeder = {
+            let tx = link.tx.clone();
+            tokio::spawn(async move {
+                loop {
+                    let _ = tx.try_send(Bytes::from_static(&[1u8; 500]));
+                    tokio::task::yield_now().await;
+                }
+            })
+        };
+        let busy = count(1.0).await;
+        feeder.abort();
+        let want = pace.per_second();
+        assert!((idle - want).abs() / want < 0.05, "idle {idle}/s");
+        assert!((busy - want).abs() / want < 0.05, "busy {busy}/s");
+    }
+
+    #[tokio::test]
+    async fn an_unauthenticated_connection_gets_no_byte_and_no_state() {
+        let quic = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let public = free_port();
+        let pace = Pace::of(RateClass::Fast);
+        tokio::spawn(ingress_tcp(
+            public,
+            quic.local_addr().unwrap(),
+            vec![psk(9)],
+            pace,
+            CELL,
+            4,
+        ));
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let mut wrong = Sealer::new(&psk(8), Dir::Forward).unwrap();
+        for first in [vec![0u8; OVERHEAD + CELL], wrong.seal(b"x", CELL).unwrap()] {
+            let mut attacker = TcpStream::connect(public).await.unwrap();
+            attacker.write_all(&first).await.unwrap();
+            for _ in 0..50 {
+                let _ = attacker.write_all(&wrong.seal(b"x", CELL).unwrap()).await;
+            }
+            let mut b = [0u8; 64];
+            // Closed without a byte (EOF), or nothing at all: never an answer.
+            if let Ok(Ok(n)) =
+                tokio::time::timeout(Duration::from_millis(500), attacker.read(&mut b)).await
+            {
+                assert_eq!(n, 0, "a reflector would have answered");
+            }
+        }
+        // Nothing reached the local QUIC endpoint.
+        let mut b = [0u8; 64];
+        assert!(
+            tokio::time::timeout(Duration::from_millis(200), quic.recv(&mut b))
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn the_tcp_reply_stream_never_exceeds_what_the_peer_sent() {
+        let quic = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let public = free_port();
+        let pace = Pace::of(RateClass::Fast);
+        tokio::spawn(ingress_tcp(
+            public,
+            quic.local_addr().unwrap(),
+            vec![psk(9)],
+            pace,
+            CELL,
+            4,
+        ));
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let mut peer = TcpStream::connect(public).await.unwrap();
+        let mut s = Sealer::new(&psk(9), Dir::Forward).unwrap();
+        for _ in 0..5 {
+            peer.write_all(&s.seal(&[], CELL).unwrap()).await.unwrap();
+        }
+        let mut replies = 0;
+        let mut b = vec![0u8; OVERHEAD + CELL];
+        while let Ok(Ok(_)) =
+            tokio::time::timeout(Duration::from_millis(300), peer.read_exact(&mut b)).await
+        {
+            replies += 1;
+        }
+        assert_eq!(replies, 5, "one reply cell per authenticated cell, no more");
+    }
+
+    #[tokio::test]
+    async fn the_peer_limit_holds_on_tcp() {
+        let quic = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let public = free_port();
+        let pace = Pace::of(RateClass::Standard);
+        tokio::spawn(ingress_tcp(
+            public,
+            quic.local_addr().unwrap(),
+            vec![psk(9)],
+            pace,
+            CELL,
+            1,
+        ));
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let mut first = TcpStream::connect(public).await.unwrap();
+        let mut s = Sealer::new(&psk(9), Dir::Forward).unwrap();
+        first.write_all(&s.seal(&[], CELL).unwrap()).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let mut second = TcpStream::connect(public).await.unwrap();
+        let mut s2 = Sealer::new(&psk(9), Dir::Forward).unwrap();
+        let _ = second.write_all(&s2.seal(&[], CELL).unwrap()).await;
+        let mut b = [0u8; 64];
+        if let Ok(Ok(n)) =
+            tokio::time::timeout(Duration::from_millis(500), second.read(&mut b)).await
+        {
+            assert_eq!(n, 0, "over the limit: closed, never answered");
+        }
+    }
+
+    /// A TCP relay between the two ends whose connections the test can cut, as a
+    /// provider's proxy resetting a stream while the exit itself keeps running.
+    async fn cuttable(to: SocketAddr) -> (SocketAddr, Arc<Notify>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let at = listener.local_addr().unwrap();
+        let cut = Arc::new(Notify::new());
+        let c = cut.clone();
+        tokio::spawn(async move {
+            while let Ok((mut a, _)) = listener.accept().await {
+                let Ok(mut b) = TcpStream::connect(to).await else {
+                    continue;
+                };
+                let c = c.clone();
+                tokio::spawn(async move {
+                    tokio::select! {
+                        _ = tokio::io::copy_bidirectional(&mut a, &mut b) => {}
+                        _ = c.notified() => {} // both halves dropped: the connection is cut
+                    }
+                });
+            }
+        });
+        (at, cut)
+    }
+
+    #[tokio::test]
+    async fn a_dropped_connection_reconnects_and_rekeys_at_once() {
+        let quic = echo().await;
+        let public = free_port();
+        let pace = Pace::of(RateClass::Standard);
+        let _exit = Guard::new(tokio::spawn(ingress_tcp(
+            public,
+            quic,
+            vec![psk(9)],
+            pace,
+            CELL,
+            4,
+        )));
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let (via, cut) = cuttable(public).await;
+        // A rekey interval far longer than the test: recovery must not wait for it.
+        let mut link = egress_tcp_rekeying(via, psk(9), pace, CELL, Duration::from_secs(600))
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        assert_eq!(round_trips(&mut link, 10).await, 10);
+        cut.notify_waiters();
+        let start = Instant::now();
+        let mut back = 0;
+        while back < 10 && start.elapsed() < Duration::from_secs(8) {
+            back += round_trips(&mut link, 10).await;
+        }
+        assert!(back >= 10, "packets flow again after the reconnect");
+        assert!(
+            start.elapsed() < Duration::from_secs(8),
+            "within seconds, not the next rekey"
+        );
+    }
+
+    #[tokio::test]
+    async fn after_the_exit_restarts_the_relay_hears_silence_and_a_fresh_link_works() {
+        // A restarted exit has none of the old session keys: the link falls silent, which
+        // is what makes the relay end the session and open a new link (run.rs LINK_DEAD).
+        let quic = echo().await;
+        let public = free_port();
+        let pace = Pace::of(RateClass::Standard);
+        let first = tokio::spawn(ingress_tcp(public, quic, vec![psk(9)], pace, CELL, 4));
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let mut link = egress_tcp(public, psk(9), pace, CELL).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        assert_eq!(round_trips(&mut link, 10).await, 10);
+        first.abort();
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let _second = Guard::new(tokio::spawn(ingress_tcp(
+            public,
+            quic,
+            vec![psk(9)],
+            pace,
+            CELL,
+            4,
+        )));
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        assert!(
+            link.silent_for().unwrap() > Duration::from_millis(1500),
+            "the old link is silent"
+        );
+        let mut fresh = egress_tcp(public, psk(9), pace, CELL).await.unwrap();
+        assert!(fresh.alive_within(Duration::from_secs(2)).await);
+        assert_eq!(
+            round_trips(&mut fresh, 10).await,
+            10,
+            "a new link to the restarted exit works"
+        );
     }
 }
 

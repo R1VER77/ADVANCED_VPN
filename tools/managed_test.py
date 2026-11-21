@@ -169,8 +169,15 @@ def main():
     p.add_argument(
         "--hardware-vault", type=Path, help="client keys and operator signature on this FIDO2 vault (PIN+touch 4 times)"
     )
+    p.add_argument(
+        "--link-transport",
+        choices=["udp", "tcp"],
+        default="udp",
+        help="tcp: the relay reaches the exit over TCP on IPv6 only (an IPv6-only exit, as on Fly)",
+    )
     a = p.parse_args()
     os.umask(0o077)
+    exit_endpoint = "[2001:db8:1::2]:4444" if a.link_transport == "tcp" else "198.51.100.2:4444"
     # Constant-cell padding is always on. The data plane runs as an unprivileged
     # service UID, so its datagram-size audit must land somewhere that UID can write
     # (the state dir is root-owned 0700).
@@ -213,7 +220,8 @@ def main():
     ops = lab_setup(
         state,
         "192.0.2.1:443",
-        "198.51.100.2:4444",
+        exit_endpoint,
+        link_transport=a.link_transport,
         dns=dns,
         daily_mib=1024,
         destinations=["203.0.113.0/30"],
@@ -375,6 +383,11 @@ def main():
                 run("ip", "link", "set", dev, "netns", ns)
                 run("ip", "-n", ns, "address", "add", addr, "dev", dev)
                 run("ip", "-n", ns, "link", "set", dev, "up")
+        if a.link_transport == "tcp":
+            # The relay-exit segment also carries IPv6, and the chain names the exit only by
+            # its IPv6 address: the link must run over TCP on IPv6 to work at all.
+            for ns, dev, addr in [("av-relay", "r1", "2001:db8:1::1/64"), ("av-exit", "e0", "2001:db8:1::2/64")]:
+                run("ip", "-n", ns, "address", "add", addr, "dev", dev, "nodad")
         # av-upstream stands in for an existing VPN provider: the client reaches it on u0
         # and it NATs to the relay, so the relay sees only the provider's address.
         for n1, d1, ip1, n2, d2, ip2 in [("av-client", "u0", "100.64.0.2/30", "av-upstream", "ua", "100.64.0.1/30")]:
@@ -435,7 +448,7 @@ def main():
             [
                 sys.executable,
                 ROOT / "tools/managed_lab_peer.py",
-                "quicsizes",
+                "tcp6sizes" if a.link_transport == "tcp" else "quicsizes",
                 "--state",
                 state,
                 "--iface",
@@ -798,6 +811,15 @@ def main():
         # the exact proof).
         inter_sizes = json.loads((state / "interhop.json").read_text()) if (state / "interhop.json").exists() else []
         inter_hop = sorted(set(inter_sizes))
+        if a.link_transport == "tcp":
+            # Over TCP the link must be whole cells: every payload a multiple of the one cell
+            # size the UDP link uses (1242 bytes in this chain), never a fraction of one.
+            import math
+
+            assert inter_sizes, "no TCP traffic seen on the relay-exit link"
+            cell = math.gcd(*inter_sizes)
+            assert cell == 1242, ("TCP link payloads are not whole cells", cell, inter_hop[:10])
+            inter_hop = [cell]
         # Every hop that sent data must have padded every datagram to one size.
         # cellaudit.<layer>.<pid>: every process, every layer, exactly one datagram size,
         # and one size per layer across all the processes the lab started.

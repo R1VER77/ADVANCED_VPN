@@ -1216,7 +1216,7 @@ def supervise(state, bin_dir, lab=False, whole=False):
         # out of credits) is made obvious: a desktop notice and a line in `avpn status`.
         import chain_watch
 
-        watch = chain_watch.ChainWatch(chain_watch.desktop_notify)
+        chain_notice = chain_watch.ChainWatch(chain_watch.desktop_notify)
     last_meter = 0
     # The optional daily cap is client-only: a server never stores byte counts.
     allowance = Allowance(
@@ -1401,7 +1401,7 @@ def supervise(state, bin_dir, lab=False, whole=False):
                 if evidence is not None:
                     row.update(verdict_fields(evidence, probe, rt, supervising=not budget_blocked))
                     if not budget_blocked:
-                        row.update(watch.observe(time.time(), row))
+                        row.update(chain_notice.observe(time.time(), row))
                 save(rt / "status.json", row)
             time.sleep(0.25)
     finally:
@@ -2091,6 +2091,13 @@ def build_parser():
         "--request", action="append", required=True, help="ROLE=PATH for the client and every server in the chain"
     )
     init.add_argument(
+        "--link-transport",
+        choices=["udp", "tcp"],
+        default="udp",
+        help="how the paced links between servers travel (tcp: for a next hop reachable only over TCP, "
+        "such as an IPv6-only exit)",
+    )
+    init.add_argument(
         "--emit-unlock", action="store_true",
         help="also unwrap the data keys of operator-unlocked servers with the same touch, printed to a pipe only",
     )  # fmt: skip
@@ -2407,6 +2414,7 @@ def dispatch(a):
             rotate=rotate,
             front=a.front,
             front_hops=a.front_hops,
+            link_transport=a.link_transport,
         )
         emit(
             a,

@@ -6,6 +6,16 @@ measured figure in the docs names the version it was measured on.
 
 ## Unreleased
 
+- Fixed: every client `connect` crashed at start on `main` from `c22fbf5` (a name clash in
+  the supervisor; [incident](docs/INCIDENTS.md)).
+- The paced links between servers can run over TCP (`avpn init --link-transport tcp`), for a
+  later hop reachable only over TCP, such as an IPv6-only exit whose provider carries no UDP
+  there: the same fixed-size cells, clock, keys, forward secrecy, credit and peer limit, one
+  whole cell per TCP write. Such hops may be given as `[IPv6]:PORT`; the first hop stays
+  IPv4. A dropped connection reconnects and re-keys at once; a restarted exit falls silent,
+  so the relay opens a fresh link. The managed lab runs the whole chain with the relay
+  reaching the exit only over IPv6 TCP, and every one of 9,809 captured payloads on that
+  hop was exactly one 1,242-byte cell; CI runs it.
 - `avpn cloud azure server`: an Azure chain server made by OpenTofu (the `azure-server`
   module, `hashicorp/azurerm` 5.13.0 locked): a Trusted Launch VM (secure boot, virtual
   TPM, so its keys are TPM-sealed and it restarts unattended), the tunnel port from the
