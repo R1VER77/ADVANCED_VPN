@@ -1,4 +1,4 @@
 [[permission]]
 identifier = "controller-bridge"
 description = "Bounded controller observations and reviewed operations"
-commands.allow = ["get_snapshot", "get_setup", "preview_action", "apply_action", "get_operation", "cancel_operation", "provider_search"]
+commands.allow = ["get_snapshot", "get_setup", "preview_action", "apply_action", "get_operation", "cancel_operation", "provider_search", "streaming_eligibility", "multihop_presets", "autoconnect_policy"]

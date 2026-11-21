@@ -1,0 +1,82 @@
+{
+ "schema": 1,
+ "version": "2026-11-21.1",
+ "generated": "2026-11-21T11:04:11+00:00",
+ "stale_after_days": 30,
+ "claim": "Streaming eligibility is measured per exit, per service, dated in the exit's descriptor; run `avpn stream-check` to test yours. No blanket 'works with service X' claim is made or implied by this table.",
+ "services": {
+  "netflix": "Netflix",
+  "bbc-iplayer": "BBC iPlayer",
+  "disney-plus": "Disney+",
+  "max": "Max (HBO)",
+  "youtube-tv": "YouTube TV",
+  "dazn": "DAZN"
+ },
+ "rows": [
+  {
+   "kind": "class-knowledge",
+   "exit": null,
+   "provider": "AWS",
+   "service": "netflix",
+   "region": "any",
+   "result": "blocked (class, unmeasured)",
+   "transport_profile": null,
+   "checked": null,
+   "stale": false,
+   "unmeasured": true,
+   "note": ""
+  },
+  {
+   "kind": "class-knowledge",
+   "exit": null,
+   "provider": "Google Cloud",
+   "service": "netflix",
+   "region": "any",
+   "result": "blocked (class, unmeasured)",
+   "transport_profile": null,
+   "checked": null,
+   "stale": false,
+   "unmeasured": true,
+   "note": ""
+  },
+  {
+   "kind": "class-knowledge",
+   "exit": null,
+   "provider": "Hetzner",
+   "service": "bbc-iplayer",
+   "region": "any",
+   "result": "blocked (class, unmeasured)",
+   "transport_profile": null,
+   "checked": null,
+   "stale": false,
+   "unmeasured": true,
+   "note": ""
+  },
+  {
+   "kind": "class-knowledge",
+   "exit": null,
+   "provider": "Hetzner",
+   "service": "netflix",
+   "region": "any",
+   "result": "blocked (class, unmeasured)",
+   "transport_profile": null,
+   "checked": null,
+   "stale": false,
+   "unmeasured": true,
+   "note": "r/selfhosted and devrunners.com report Hetzner ranges blocked by Netflix"
+  },
+  {
+   "kind": "class-knowledge",
+   "exit": null,
+   "provider": "Oracle Cloud",
+   "service": "netflix",
+   "region": "any",
+   "result": "blocked (class, unmeasured)",
+   "transport_profile": null,
+   "checked": null,
+   "stale": false,
+   "unmeasured": true,
+   "note": "the owner's current OCI exit is believed blocked; measure it with `avpn run -- stream-check netflix` to replace this row"
+  }
+ ]
+}

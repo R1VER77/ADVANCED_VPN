@@ -71,6 +71,8 @@ organizational and nonprofit provisions are not automatically this project's str
 - [ ] Document hardware, server, accessibility and connectivity costs; test the setup
   with people who do not already administer servers. Report cover-traffic bandwidth,
   energy/battery costs and trade-offs without silently weakening protection.
+  Documented on 21 November: [hardware costs](HARDWARE_COSTS.md), and every server's monthly cap and
+  usage ([fee guard](FEE_GUARD.md)). Open: the sessions with people who do not administer servers.
 - [x] Keep security limitations prominent, distinguish implemented/tested/planned claims,
   and publish reproducible evidence and incidents. An [independent review package](INDEPENDENT_REVIEW.md)
   is prepared and supports unpaid review; it is not a completed audit.
@@ -180,6 +182,8 @@ throughout.
   million runs clean before landing; Python by mutation, which found three exception
   types escaping the enrollment and session-leaf parsers, now refused as `ValueError`).
   Secret-handling review and independent review remain.
+  On 21 November a secret-handling review ([tools/test_secret_review.py](../tools/test_secret_review.py)) and
+  per-session carrier keys ([tools/test_session_carrier.py](../tools/test_session_carrier.py)) landed; independent review remains.
 - [x] Let the operator add a hardware post-quantum signature (19 November): an optional
   third signature half from an ML-DSA-44 FIDO2 credential on a separate key, required by
   every verifier once the operator's public file names it. Only Solo 2's Hacker build
@@ -218,8 +222,10 @@ and the [post-quantum inventory](PQ_INVENTORY.md).
 - [x] Use `cypherpunk_vpn` as the project name in the README.
 - [x] [Plan](NAME_MIGRATION.md) the repository, binary, package, service, state and signed-chain migration;
   preserve recovery and avoid breaking existing installations through a cosmetic rename.
-- [ ] Implement and validate the compatibility migration before changing canonical
+- [x] Implement and validate the compatibility migration before changing canonical
   services, state paths or signed protocol domains.
+  On 21 November the compatibility shim landed ([tools/name_migration.py](../tools/name_migration.py),
+  13 tests): old names keep working while the canonical ones change.
 - [ ] Expand to aarch64 Linux, then additional desktop/mobile platforms, with
   platform-specific protection tests before marking each supported.
 - [x] Publish a [device/platform matrix](SUPPORT_MATRIX.md) distinguishing protocol compatibility,
@@ -239,9 +245,13 @@ The owner's full-stack hybrid-PQ and SafeCurves requirements remain target polic
 - [ ] Specify and prove voucher issuance, redemption, quantum unlinkability,
   nullifier binding and spent-state recovery. A classical VOPRF plus KEM/hash inputs
   is not by itself a proof of those properties. Keep public admission fail-closed.
+  Implemented on 21 November ([tools/voucher.py](../tools/voucher.py), [tools/voprf.py](../tools/voprf.py), RFC 9497 vectors);
+  the proofs remain.
 - [ ] Implement/authenticate a consistent PIR directory with secure randomness and
   explicit independent-operator assumptions. Distinguish XOR reference timings from
   deployed DPF results and from network reservations.
+  Implemented on 21 November ([tools/pir_directory.py](../tools/pir_directory.py): two-server XOR and DPF, 13 tests);
+  deployed DPF timings remain.
 - [ ] Account for all handshake flights and parameter generations. Retain the
   established hybrid/ML-DSA baseline while evaluating MAYO; category-1 MAYO-1 does
   not supply category-3 authentication. Preserve PMTU/fallback and downgrade protection.
@@ -253,9 +263,15 @@ The owner's full-stack hybrid-PQ and SafeCurves requirements remain target polic
   dependencies. Preserve no-tracing policy without claiming that all disruption
   accountability identifies honest senders; include the whitepaper draft corrections
   in the research review before publication.
+  On 21 November [tools/dcnet_validation.py](../tools/dcnet_validation.py) (20 tests) validated complete DLEQ
+  batches over the real ristretto255 VOPRF, authenticated event effects (a substitution
+  attack shown, then closed) and jamming/fallback dependencies (detection, never
+  attribution). Open: the whitepaper draft corrections in the research review.
 - [ ] Complete the interface/curve inventory and versioned migration. Preserve current
   device keys, document compatibility dependencies and test the PQ property of each
   interface; do not silently reset hardware to satisfy a design mandate.
+  The inventory landed on 21 November ([tools/test_curve_inventory.py](../tools/test_curve_inventory.py), which scans this
+  tree); the versioned migration remains.
 - [ ] Publish scientific claims/whitepaper figures only after the corresponding formal,
   live empirical and independent-review gates. Synthetic chance-level classification
   and primitive timings remain labelled research results.
@@ -270,3 +286,25 @@ CI checks; hardware and VM validation for affected paths; and explicit live-depl
 review. Do not ship a positive privacy claim based only on simulated tests. Documentation
 and accessible setup can progress while CPU-sensitive experiments run; compilation and
 load tests wait until those measurements finish.
+
+## Commercial-gap and streaming items (21 November)
+
+Landed, each with its tests (`python -m unittest tools.test_<name>`):
+
+- [x] Streaming eligibility as dated measurement, never a promise: `avpn stream-check`
+  ([tools/stream_check.py](../tools/stream_check.py), with the transport profile), the generated
+  [eligibility table](STREAMING_ELIGIBILITY.md) and `avpn cloud rotate` for a fresh exit address
+  ([streaming parity](STREAMING_GEO_PARITY_20261120.md) §4).
+- [x] `exit_policy` and `streaming` in the signed node descriptor, validated alike by the
+  Python control plane and every Rust node (one shared fixture, `tests/fixtures/descriptor_fields.json`;
+  [path selection](PATH_SELECTION_DESIGN.md) §2). Rust nodes refused both as unknown fields before.
+- [x] Auto-connect on untrusted networks ([tools/autoconnect.py](../tools/autoconnect.py)), multi-hop presets with the
+  3-hop ceiling ([tools/multihop_presets.py](../tools/multihop_presets.py)), and the GUI's read side for both plus the
+  eligibility table ([tools/controller_extension.py](../tools/controller_extension.py); SSIDs never cross).
+- [x] The IPv6 leak suite ([tools/ipv6_leak_suite.py](../tools/ipv6_leak_suite.py)).
+- [ ] IPv6 inside the user's tunnel ([design](IPV6_TUNNELING_DESIGN.md), D009). IPv6 between servers
+  shipped separately: TCP links and the egress lock ([fee guard](FEE_GUARD.md)).
+- [ ] Router deployment on GL-MT6000/GL-MT3000 ([design](ROUTER_DEPLOYMENT.md), D010); signed
+  deployment-side auto-update (D011); [Tor over the tunnel](TOR_RECIPE.md) (D012).
+- [ ] The GUI's write side (in progress).
+- [ ] The first live eligibility row from a real exit (D016), and a real `avpn cloud rotate`.

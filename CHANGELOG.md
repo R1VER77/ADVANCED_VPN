@@ -6,6 +6,35 @@ measured figure in the docs names the version it was measured on.
 
 ## Unreleased
 
+- **The GLM5.3 batch, merged and re-verified in this tree** (built in a separate sandbox
+  on 21 November):
+  - streaming eligibility as dated measurement (`avpn stream-check`, the eligibility table,
+    `avpn cloud rotate`);
+  - auto-connect on untrusted networks;
+  - multi-hop presets;
+  - the IPv6 leak suite;
+  - vouchers and the RFC 9497 VOPRF;
+  - mesh private-group credits;
+  - the two-server PIR directory;
+  - DC-net DLEQ batch, event-effect and jamming validation;
+  - the name-migration shim;
+  - `exit_policy`;
+  - the interface/curve inventory, secret-handling review and per-session carrier key
+    tests;
+  - the GUI controller's read side;
+  - design documents for IPv6 tunneling, router deployment, Tor and costs;
+  - decisions D008–D017, renumbered after the owner's D007.
+
+  Fixed while merging:
+  - **Rust nodes refused every descriptor carrying `exit_policy` or `streaming`**
+    (unknown fields). Both are now typed, validated and round-tripped unchanged, and the
+    Python and Rust validators run one shared fixture.
+  - The policy validator is a closed schema on both sides.
+  - Policy validation no longer passes silently when its module is missing.
+  - A security check no longer disappears under `python -O`.
+  - Equal-length `zip`s in the cryptographic code are strict.
+  - `stream-check` fetches https only.
+  - The embedded and evidence-only tests now run in the suite.
 - **No fees from a free account** ([the fee guard](docs/FEE_GUARD.md)). Every server
   enforces a monthly outbound cap:
   - The cap is its account's free allowance, shared by the servers in that account, less

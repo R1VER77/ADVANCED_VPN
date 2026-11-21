@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { ActionPlan, ActionRequest, Operation, ProviderSearchPage, SetupBranch, SetupSnapshot, Status } from './types'
+import type { ActionPlan, ActionRequest, AutoconnectPolicy, MultihopPresets, Operation, ProviderSearchPage, SetupBranch, SetupSnapshot, Status, StreamingEligibility } from './types'
 
 const MAX_RESPONSE = 256 * 1024
 
@@ -34,4 +34,25 @@ export const controller = {
   apply: (id: string) => read<Operation>('apply_action', { id }),
   operation: (id: string) => read<Operation>('get_operation', { id }),
   cancel: (id: string) => read<Operation>('cancel_operation', { id }),
+  async streamingEligibility(): Promise<StreamingEligibility> {
+    const table = await read<StreamingEligibility>('streaming_eligibility')
+    if (!Array.isArray(table.rows) || table.rows.length > 200
+      || table.rows.some(row => !row || !['measured', 'class-knowledge'].includes(row.kind)
+        || typeof row.service !== 'string' || row.service.length > 64)) throw new Error('invalid_eligibility_table')
+    return table
+  },
+  async multihopPresets(): Promise<MultihopPresets> {
+    const presets = await read<MultihopPresets>('multihop_presets')
+    if (!Array.isArray(presets.presets) || presets.presets.length === 0 || presets.presets.length > 8
+      || !Number.isSafeInteger(presets.ceiling) || presets.ceiling !== 3
+      || presets.presets.some(p => !p || ![1, 2, 3].includes(p.hops))) throw new Error('invalid_presets')
+    return presets
+  },
+  async autoconnectPolicy(): Promise<AutoconnectPolicy> {
+    const policy = await read<AutoconnectPolicy>('autoconnect_policy')
+    if (typeof policy.enabled !== 'boolean' || typeof policy.wired_trusted !== 'boolean'
+      || !Number.isSafeInteger(policy.trusted_ssids_count) || policy.trusted_ssids_count < 0
+      || policy.trusted_ssids_count > 1000) throw new Error('invalid_autoconnect_policy')
+    return policy
+  },
 }

@@ -80,6 +80,23 @@ async fn get_snapshot(bridge: State<'_, Bridge>) -> Result<String, String> {
     bridge.call("GetSnapshot", &()).await
 }
 
+// The GUI's observation commands (tools/controller_extension.py): reads
+// only - no plan, no operation, no user input crosses this boundary.
+#[tauri::command]
+async fn streaming_eligibility(bridge: State<'_, Bridge>) -> Result<String, String> {
+    bridge.call("GetStreamingEligibility", &()).await
+}
+
+#[tauri::command]
+async fn multihop_presets(bridge: State<'_, Bridge>) -> Result<String, String> {
+    bridge.call("GetMultihopPresets", &()).await
+}
+
+#[tauri::command]
+async fn autoconnect_policy(bridge: State<'_, Bridge>) -> Result<String, String> {
+    bridge.call("GetAutoconnectPolicy", &()).await
+}
+
 #[tauri::command]
 async fn get_setup(branch: String, bridge: State<'_, Bridge>) -> Result<String, String> {
     if !matches!(branch.as_str(), "create" | "join") {
@@ -159,7 +176,10 @@ pub fn run() {
             apply_action,
             get_operation,
             cancel_operation,
-            provider_search
+            provider_search,
+            streaming_eligibility,
+            multihop_presets,
+            autoconnect_policy
         ])
         .run(tauri::generate_context!())
         .expect("cypherpunk_vpn desktop application");

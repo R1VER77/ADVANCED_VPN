@@ -167,6 +167,9 @@ def verify_descriptor(descriptor: dict) -> bool:
         return False
 
 
+STREAMING_KEYS = {"service", "region", "result", "checked", "transport_profile"}
+
+
 def validate(descriptor: dict, now: float | None = None) -> list[str]:
     """Structural checks mirroring Descriptor::validate in src/mesh/descriptor.rs."""
     now = time.time() if now is None else now
@@ -184,6 +187,43 @@ def validate(descriptor: dict, now: float | None = None) -> list[str]:
     c = descriptor.get("country", "")
     if len(c) != 2 or not c.isupper():
         errors.append("country must be ISO alpha-2 uppercase")
+    # The exit_policy field (PATH_SELECTION_DESIGN.md section 2): absent is
+    # the default refuse-everything posture; present, its structure is
+    # checked here so an invalid policy cannot be signed into a descriptor.
+    if "exit_policy" in descriptor:
+        # Fail closed: a policy that cannot be checked is never signed (the installed
+        # layout ships all of tools/, so the import is always there).
+        try:
+            import exit_policy
+        except ImportError:
+            errors.append("exit_policy: present but the validator is not installed")
+        else:
+            for e in exit_policy.validate_policy(descriptor.get("exit_policy")):
+                errors.append(f"exit_policy: {e}")
+    # Dated streaming measurements (tools/stream_check.py), the same rules as
+    # Descriptor::validate: one row per service, a known result, a date.
+    if "streaming" in descriptor:
+        rows = descriptor["streaming"]
+        if not isinstance(rows, list) or len(rows) > 64:
+            errors.append("streaming must be a list of at most 64 rows")
+            rows = []
+        seen = set()
+        for i, row in enumerate(rows):
+            if not isinstance(row, dict) or set(row) != STREAMING_KEYS:
+                errors.append(f"streaming row {i}: exactly the keys {sorted(STREAMING_KEYS)}")
+                continue
+            service = row["service"]
+            if not isinstance(service, str) or not 0 < len(service) <= 64 or service in seen:
+                errors.append(f"streaming row {i}: one row per named service")
+            seen.add(service)
+            if row["result"] not in ("eligible", "blocked", "unknown"):
+                errors.append(f"streaming row {i}: result must be eligible, blocked or unknown")
+            if not isinstance(row["checked"], str) or not 0 < len(row["checked"]) <= 40:
+                errors.append(f"streaming row {i}: must be dated")
+            if not isinstance(row["transport_profile"], str) or len(row["transport_profile"]) > 64:
+                errors.append(f"streaming row {i}: transport profile too long")
+            if row["region"] is not None and (not isinstance(row["region"], str) or len(row["region"]) > 64):
+                errors.append(f"streaming row {i}: region too long")
     return errors
 
 

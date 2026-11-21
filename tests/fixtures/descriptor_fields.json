@@ -1,0 +1,319 @@
+{
+ "about": "Descriptor exit_policy and streaming fields: every case must be accepted or refused alike by tools/mesh.py validate (Python) and Descriptor::validate (src/mesh/descriptor.rs).",
+ "accept": [
+  {
+   "exit_policy": {
+    "schema": 1,
+    "default": "refuse",
+    "rules": [
+     {
+      "proto": "tcp",
+      "ports": "1-65535",
+      "direction": "outbound",
+      "effect": "accept"
+     },
+     {
+      "proto": "tcp",
+      "ports": "25",
+      "direction": "outbound",
+      "effect": "reject"
+     },
+     {
+      "proto": "tcp",
+      "ports": "6881-6889",
+      "direction": "inbound",
+      "effect": "accept",
+      "plan": "bulk",
+      "abuse_contact": "operator@mesh"
+     }
+    ],
+    "egress_ceiling_gib_month": 4096,
+    "inbound_admission": "static-manual",
+    "notes": "opt-in"
+   },
+   "streaming": [
+    {
+     "service": "netflix",
+     "region": null,
+     "result": "blocked",
+     "checked": "2026-11-21T00:00:00Z",
+     "transport_profile": "cli"
+    },
+    {
+     "service": "bbc-iplayer",
+     "region": "GB",
+     "result": "eligible",
+     "checked": "2026-11-21T00:00:00Z",
+     "transport_profile": "browser"
+    }
+   ]
+  },
+  {
+   "exit_policy": {
+    "schema": 1,
+    "default": "refuse",
+    "rules": []
+   }
+  },
+  {
+   "streaming": []
+  }
+ ],
+ "refuse": [
+  {
+   "exit_policy": {
+    "schema": 2,
+    "default": "refuse",
+    "rules": []
+   }
+  },
+  {
+   "exit_policy": {
+    "schema": 1,
+    "default": "accept",
+    "rules": []
+   }
+  },
+  {
+   "exit_policy": {
+    "schema": 1,
+    "default": "refuse",
+    "rules": [
+     {
+      "proto": "icmp",
+      "ports": "1",
+      "direction": "outbound",
+      "effect": "accept"
+     }
+    ],
+    "inbound_admission": "static-manual"
+   }
+  },
+  {
+   "exit_policy": {
+    "schema": 1,
+    "default": "refuse",
+    "rules": [
+     {
+      "proto": "tcp",
+      "ports": "1",
+      "direction": "sideways",
+      "effect": "accept"
+     }
+    ],
+    "inbound_admission": "static-manual"
+   }
+  },
+  {
+   "exit_policy": {
+    "schema": 1,
+    "default": "refuse",
+    "rules": [
+     {
+      "proto": "tcp",
+      "ports": "1",
+      "direction": "outbound",
+      "effect": "maybe"
+     }
+    ],
+    "inbound_admission": "static-manual"
+   }
+  },
+  {
+   "exit_policy": {
+    "schema": 1,
+    "default": "refuse",
+    "rules": [
+     {
+      "proto": "tcp",
+      "ports": "0-10",
+      "direction": "outbound",
+      "effect": "accept"
+     }
+    ],
+    "inbound_admission": "static-manual"
+   }
+  },
+  {
+   "exit_policy": {
+    "schema": 1,
+    "default": "refuse",
+    "rules": [
+     {
+      "proto": "tcp",
+      "ports": "9-8",
+      "direction": "outbound",
+      "effect": "accept"
+     }
+    ],
+    "inbound_admission": "static-manual"
+   }
+  },
+  {
+   "exit_policy": {
+    "schema": 1,
+    "default": "refuse",
+    "rules": [
+     {
+      "proto": "tcp",
+      "ports": "65536",
+      "direction": "outbound",
+      "effect": "accept"
+     }
+    ],
+    "inbound_admission": "static-manual"
+   }
+  },
+  {
+   "exit_policy": {
+    "schema": 1,
+    "default": "refuse",
+    "rules": [
+     {
+      "proto": "tcp",
+      "ports": "80",
+      "direction": "inbound",
+      "effect": "accept",
+      "plan": "bulk"
+     }
+    ],
+    "inbound_admission": "static-manual"
+   }
+  },
+  {
+   "exit_policy": {
+    "schema": 1,
+    "default": "refuse",
+    "rules": [
+     {
+      "proto": "tcp",
+      "ports": "80",
+      "direction": "inbound",
+      "effect": "accept",
+      "abuse_contact": "a@b"
+     }
+    ],
+    "inbound_admission": "static-manual"
+   }
+  },
+  {
+   "exit_policy": {
+    "schema": 1,
+    "default": "refuse",
+    "rules": [
+     {
+      "proto": "tcp",
+      "ports": "1",
+      "direction": "outbound",
+      "effect": "accept",
+      "extra": 1
+     }
+    ],
+    "inbound_admission": "static-manual"
+   }
+  },
+  {
+   "exit_policy": {
+    "schema": 1,
+    "default": "refuse",
+    "rules": [
+     {
+      "proto": "tcp",
+      "ports": "80",
+      "direction": "inbound",
+      "effect": "accept",
+      "plan": "p",
+      "abuse_contact": "a"
+     }
+    ]
+   }
+  },
+  {
+   "exit_policy": {
+    "schema": 1,
+    "default": "refuse",
+    "rules": [],
+    "inbound_admission": "upnp"
+   }
+  },
+  {
+   "exit_policy": {
+    "schema": 1,
+    "default": "refuse",
+    "rules": [],
+    "egress_ceiling_gib_month": 0
+   }
+  },
+  {
+   "exit_policy": {
+    "schema": 1,
+    "default": "refuse",
+    "rules": [],
+    "surprise": true
+   }
+  },
+  {
+   "streaming": [
+    {
+     "service": "x",
+     "region": null,
+     "result": "maybe",
+     "checked": "2026-11-21",
+     "transport_profile": "cli"
+    }
+   ]
+  },
+  {
+   "streaming": [
+    {
+     "service": "x",
+     "region": null,
+     "result": "eligible",
+     "checked": "",
+     "transport_profile": "cli"
+    }
+   ]
+  },
+  {
+   "streaming": [
+    {
+     "service": "",
+     "region": null,
+     "result": "eligible",
+     "checked": "2026-11-21",
+     "transport_profile": "cli"
+    }
+   ]
+  },
+  {
+   "streaming": [
+    {
+     "service": "x",
+     "region": null,
+     "result": "eligible",
+     "checked": "2026-11-21",
+     "transport_profile": "cli",
+     "extra": 1
+    }
+   ]
+  },
+  {
+   "streaming": [
+    {
+     "service": "x",
+     "region": null,
+     "result": "eligible",
+     "checked": "d",
+     "transport_profile": "cli"
+    },
+    {
+     "service": "x",
+     "region": null,
+     "result": "blocked",
+     "checked": "d",
+     "transport_profile": "cli"
+    }
+   ]
+  }
+ ]
+}

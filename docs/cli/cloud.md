@@ -27,6 +27,7 @@ and `oci` command-line tools, and plain SSH for everything else.
     avpn cloud host forget --name avpn-NAME
     avpn cloud host update --name avpn-NAME
     avpn cloud cap [avpn-NAME] [--gb N | --unlimited | --auto] [--apply]
+    avpn cloud rotate --name avpn-NAME [--strategy reallocate|reprovision] [--reason R] --tunnel-down [--profile P] [--region R]
     avpn cloud fly server --apply|--teardown [--name avpn-NAME] [--app APP] [--region R] [--image REF]
     avpn cloud chain --apply --client-request FILE --vault DIR [--order A,B,C] [--allow-same-provider] \
         [--hours-per-day H] [--accept-cost]
@@ -312,6 +313,33 @@ providers' logs.
 It also shows every server's month: what it has sent against its cap, and the day it
 would stop at this month's pace. A server at 80% of its cap, on pace to reach it, capped,
 or with no cap at all is a problem.
+
+## avpn cloud rotate
+
+Trade an exit's public address for a fresh one, when `stream-check` shows the address is
+newly blocked ([streaming eligibility](../STREAMING_GEO_PARITY_20261120.md) §4.4). Only
+servers this tool created and tagged are touched.
+
+    avpn cloud rotate --name avpn-exit --reason netflix-blocked --dry-run
+    avpn cloud rotate --name avpn-exit --reason netflix-blocked --tunnel-down
+
+- `--name avpn-NAME`: the server.
+- `--strategy reallocate` (default): the server stays and its address is traded. An
+  Elastic IP is disassociated, a new one allocated and associated, then the old one
+  released, in that order, so a failure part-way puts the old address back. A server on
+  an auto-assigned address is stopped and started.
+- `--strategy reprovision`: teardown and re-apply, possibly in another region. This only
+  prints the plan and the two existing commands.
+- `--reason R`: why, kept in the rotation journal (`rotation.jsonl`, no secrets).
+- `--tunnel-down`: required to apply. It attests that the chain through this exit is
+  stopped (rotating a live hop would break sessions). Nothing overrides it.
+- `--profile P`, `--region R`: the AWS profile; the Region must be the project's own.
+
+The same address handed back counts as a failure, not a pass. Afterwards run `avpn cloud
+chain --apply`. A new address changes what the previous hop's firewall must admit, and on
+an IPv6 next hop, the relay's egress rule. The rebuild rewrites both, and re-signs the
+chain and writes each server's monthly cap again. Then run `stream-check` once more:
+eligibility is a dated measurement, never a promise.
 
 ## avpn cloud fly server
 

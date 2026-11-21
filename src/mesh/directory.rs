@@ -213,6 +213,8 @@ mod tests {
             operator: MemberId::from_public_key(op.as_bytes()),
             published: 1_000,
             expires: 1_000 + DESCRIPTOR_TTL_SECONDS,
+            exit_policy: None,
+            streaming: None,
             signature: "c2ln".into(),
         }
     }

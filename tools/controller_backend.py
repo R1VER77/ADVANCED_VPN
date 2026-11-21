@@ -341,6 +341,12 @@ def main():
                     import search_providers
 
                     result = search_providers.search(search_providers.shipped_index(), value)
+                elif method in ("GetStreamingEligibility", "GetMultihopPresets", "GetAutoconnectPolicy"):
+                    # The GUI's observation commands (tools/controller_extension.py):
+                    # reads only - no plan, no operation, no user input.
+                    import controller_extension
+
+                    result = controller_extension.dispatch_extension(method, value)
                 elif method == "GetSetup":
                     with broker.lock:
                         busy = any(

@@ -3070,6 +3070,24 @@ def build_parser():
     au.add_argument("--oci-profile", help="OCI CLI profile to audit too (default: DEFAULT, if OCI is used)")
     st = s.add_parser("status", help="recorded resources and whether they still exist")
     st.add_argument("--live", action="store_true", help="ask the provider whether each instance still exists")
+    rot = s.add_parser("rotate", help="trade an exit's public IP for a fresh one (STREAMING_GEO_PARITY section 4.4)")
+    rot.add_argument("--name", required=True, help="the server's name and tag (avpn-*)")
+    rot.add_argument(
+        "--strategy",
+        choices=["reallocate", "reprovision"],
+        default="reallocate",
+        help="trade the address (default) or teardown plus re-apply, possibly in a new region",
+    )
+    rot.add_argument("--reason", default="unspecified", help="why (journal; for example: netflix-blocked)")
+    rot.add_argument("--profile", default=os.environ.get("AWS_PROFILE", "default"), help="AWS CLI profile")
+    rot.add_argument("--region", help="must equal the profile's Region (the project has one Region)")
+    rot.add_argument(
+        "--tunnel-down",
+        action="store_true",
+        help="attest the tunnel using this exit is stopped (required to apply; there is no --force)",
+    )
+    rot.add_argument("--dry-run", action="store_true", help="show the plan and stop")
+    rot.add_argument("--yes", action="store_true", help="do not ask for confirmation")
     aws = s.add_parser("aws", help="Amazon Web Services")
     aws_s = aws.add_subparsers(dest="kind", required=True)
     relay = aws_s.add_parser("relay", help="one chain server on EC2 (relay, middle or exit)")
@@ -3285,6 +3303,10 @@ def confirm(a, title):
 
 def run(a):
     """Execute one parsed command; return the result object."""
+    if a.provider == "rotate":
+        import ip_rotation  # lazy: ip_rotation imports this module
+
+        return ip_rotation.run_rotate(a)
     if a.provider == "suggest":
         return dict(title="Where to run your servers", summary="checked %s" % providers.CHECKED, rows=suggest(a))
     if a.provider == "audit":

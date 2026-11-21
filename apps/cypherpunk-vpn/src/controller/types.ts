@@ -151,3 +151,47 @@ export interface Operation {
   state: 'running' | 'waiting_for_user' | 'waiting_for_hardware' | 'complete' | 'failed' | 'cancelled'
   message: string
 }
+
+// The observation commands (controller_extension.py): reads only. The GUI
+// renders these; it never derives protection claims from them.
+export interface StreamingEligibilityRow {
+  kind: 'measured' | 'class-knowledge'
+  exit: string | null
+  provider: string | null
+  service: string
+  region: string | null
+  result: string
+  transport_profile: string | null
+  checked: string | null
+  stale: boolean
+  unmeasured: boolean
+}
+export interface StreamingEligibility {
+  schema: 1
+  rows: StreamingEligibilityRow[]
+  source: string
+  generated: string | null
+  note: string
+}
+export interface MultihopPreset {
+  name: string
+  hops: number
+  label: string
+  description: string
+  rate: string | null
+  requires: string | null
+}
+export interface MultihopPresets {
+  schema: 1
+  presets: MultihopPreset[]
+  default: string
+  ceiling: number
+  note: string
+}
+export interface AutoconnectPolicy {
+  schema: 1
+  enabled: boolean
+  wired_trusted: boolean
+  trusted_ssids_count: number
+  note: string
+}
