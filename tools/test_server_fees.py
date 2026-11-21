@@ -72,5 +72,30 @@ class SecurityUpdate(unittest.TestCase):
         self.assertFalse(self.f.last_update_path.exists())
 
 
+class FrontRouterEgress(unittest.TestCase):
+    """A server's I2P front runs i2pd under its own user: the egress lock must let it out,
+    and only it (and the data plane), or the router never reaches the I2P network."""
+
+    def lock(self, front_uid):
+        import server_egress
+
+        f = avpnctl.ServerFees.__new__(avpnctl.ServerFees)
+        f.se, f.uid, f.front_uid, f.maintenance, f.lab = server_egress, 1001, front_uid, False, False
+        f.profile = dict(role="relay", network=dict(relay_endpoint="198.51.100.1:443"))
+        f.cfg = dict(core=dict(listen="10.78.0.1:4444"), cloak=dict(listen="0.0.0.0:8443"))
+        return f.egress_text()
+
+    def test_the_front_router_may_send_and_no_other_user_may(self):
+        text = self.lock(1002)
+        self.assertIn("meta skuid 1001 accept", text)
+        self.assertIn("meta skuid 1002 accept", text)
+        self.assertNotIn("skuid 0 accept", text)
+
+    def test_without_a_front_only_the_data_plane_may_send(self):
+        text = self.lock(None)
+        self.assertIn("meta skuid 1001 accept", text)
+        self.assertEqual(text.count("meta skuid"), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

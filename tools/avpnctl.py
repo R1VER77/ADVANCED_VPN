@@ -1021,12 +1021,14 @@ class ServerFees:
     UPDATE_EVERY = 86400
     UPDATE_TIMEOUT = 1800
 
-    def __init__(self, profile, cfg, state, service_uid, lab=False):
+    def __init__(self, profile, cfg, state, service_uid, lab=False, front_uid=None):
         import fee_guard
         import server_egress
 
         self.fg, self.se = fee_guard, server_egress
         self.profile, self.cfg, self.uid, self.lab = profile, cfg, service_uid, lab
+        # The I2P router a server's front runs under its own user: it must be let out too.
+        self.front_uid = front_uid
         self.cap_path, usage = fee_guard.paths(state)
         self.maintenance_path = self.cap_path.with_name("maintenance-until")
         self.last_update_path = self.cap_path.with_name("last-update")
@@ -1066,7 +1068,12 @@ class ServerFees:
     def egress_text(self):
         """The egress table as nft input, replacing any earlier one."""
         return reset_table(self.se.EGRESS_TABLE) + self.se.egress_rules(
-            self.profile, self.cfg, self.uid, maintenance=self.maintenance, lab_transit=self.lab
+            self.profile,
+            self.cfg,
+            self.uid,
+            extra_uids=[self.front_uid] if self.front_uid else (),
+            maintenance=self.maintenance,
+            lab_transit=self.lab,
         )
 
     def install(self, now=None):
@@ -1268,7 +1275,7 @@ def supervise(state, bin_dir, lab=False, whole=False):
     # free account), from before its data plane first starts.
     fees = None
     if profile["role"] != "client":
-        fees = ServerFees(profile, cfg, state, uid, lab)
+        fees = ServerFees(profile, cfg, state, uid, lab, front_uid=front_uid)
         fees.install()
     # Watch every table this role just built: whole device or the app namespace for a
     # client (plus its front and upstream guards), the host and egress tables on a server.
