@@ -29,7 +29,7 @@ struct DirectoryFile {
 /// every descriptor already signs. Mirrors `legal_parent` in tools/mesh.py.
 pub fn legal_parent(provider: &str, country: &str) -> String {
     match provider {
-        "oci" | "aws" | "gcp" | "azure" | "racknerd" => "US".into(),
+        "oci" | "aws" | "gcp" | "azure" | "fly" | "racknerd" => "US".into(),
         "hetzner" | "netcup" | "ionos" => "DE".into(),
         "ovh" => "FR".into(),
         "1984" => "IS".into(),

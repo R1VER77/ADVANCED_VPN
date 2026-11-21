@@ -197,7 +197,7 @@ class Store:
             os.close(fd)
 
     def sweep_stale_stages(self):
-        """Remove staging directories that an interrupted install left behind. Under the
+        """Remove staging directories and pending pointer links that an interrupted install left behind. Under the
         exclusive lock no other install is running, so every one belongs to a dead process
         (tools/test_install.py kills upgrades mid-way). Only this user's own real
         directories named like a stage are removed; nothing is followed through a link."""
@@ -214,6 +214,15 @@ class Store:
                 function(path)
 
             shutil.rmtree(entry, onerror=writable)
+        # A pointer switch killed between creating its pending link and renaming it over
+        # `current` (pointer()) leaves that link behind: only this user's own symlinks
+        # named exactly like one are removed, never followed.
+        for entry in self.root.iterdir():
+            if not re.fullmatch(r"\.current-[a-f0-9]{32}", entry.name):
+                continue
+            info = entry.lstat()
+            if stat.S_ISLNK(info.st_mode) and info.st_uid == os.geteuid():
+                entry.unlink()
 
     def require_lock(self):
         """Mutations through an unlocked store are programming errors."""

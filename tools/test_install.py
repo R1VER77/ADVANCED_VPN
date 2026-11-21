@@ -90,6 +90,20 @@ class UserInstallTests(unittest.TestCase):
         self.assertFalse(list((self.data / "releases").glob(".prepare-*")))
         self.assertFalse(list(self.data.glob(".current-*")))
 
+    def test_a_pending_pointer_left_by_a_kill_is_swept_by_the_next_run(self):
+        # Deterministic form of the window the kill test hits only sometimes (aarch64 CI,
+        # 21 Nov 2026): killed between creating `.current-<hex>` and renaming it.
+        self.install()
+        stale = self.data / (".current-" + "ab" * 16)
+        stale.symlink_to("releases/nonexistent")
+        decoy = self.data / ".current-notours"  # another name: left alone
+        decoy.symlink_to("x")
+        self.install()
+        self.assertFalse(stale.is_symlink())
+        self.assertTrue(decoy.is_symlink())
+        decoy.unlink()
+        self.assert_no_preparation_leftovers()
+
     def test_upgrade_retains_the_previous_verified_slot(self):
         self.install()
         previous = (self.data / "app").resolve()
