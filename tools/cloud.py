@@ -1736,7 +1736,7 @@ def servers():
     """Recorded servers that can be chain hops: name -> provider key (catalog)."""
     out = {}
     for name, r in load_inventory()["resources"].items():
-        if r.get("public_ip") and (r.get("ssh_key") or r.get("ssh_config")):
+        if r.get("public_ip") and (r.get("ssh_key") or r.get("ssh_config") or r.get("provider") == "fly"):
             out[name] = r.get("catalog", r["provider"])
     return out
 
@@ -1787,11 +1787,12 @@ def chain_order(recorded, order=None):
 def chain_layout(names, inv):
     """Role, port, tunnel sources and final SSH sources for each hop."""
     roles = {1: ["exit"], 2: ["relay", "exit"], 3: ["relay", "middle", "exit"]}[len(names)]
-    exit_ip = inv[names[-1]]["public_ip"] + "/32"
+    exit_ip = inv[names[-1]]["public_ip"] + ("/128" if ":" in inv[names[-1]]["public_ip"] else "/32")
     hops = []
     for k, (name, role) in enumerate(zip(names, roles, strict=True)):
         port = FIRST_HOP_PORT if k == 0 else ROLES[role]
-        sources = [ANY] if k == 0 else [inv[names[k - 1]]["public_ip"] + "/32"]
+        prev = inv[names[k - 1]]["public_ip"] if k else ""
+        sources = [ANY] if k == 0 else [prev + ("/128" if ":" in prev else "/32")]
         # Connected through the chain, your SSH reaches every other hop from the exit's
         # address, and the exit itself at its tunnel address (EXIT_TUNNEL_IP), which
         # needs no firewall rule at all; so no rule names you.
@@ -1914,6 +1915,8 @@ def chain_plan(a):
         r = h["record"]
         managed = r["provider"] == "aws" or (r["provider"] == "oci" and r.get("managed_list"))
         how = "managed" if managed else "NOT managed: open it yourself"
+        if r["provider"] == "fly":
+            how = "Fly.io's proxy delivers only this port"
         rows.append(
             dict(
                 label="hop %d" % k,
@@ -1923,7 +1926,13 @@ def chain_plan(a):
         rows.append(
             dict(
                 label="",
-                value="%s %d from %s; firewall %s" % (transports(h["port"]), h["port"], ", ".join(h["sources"]), how),
+                value="%s %d from %s; firewall %s"
+                % (
+                    "tcp" if k > 1 and ":" in r["public_ip"] else transports(h["port"]),
+                    h["port"],
+                    ", ".join(h["sources"]),
+                    how,
+                ),  # fmt: skip
             )
         )
         if r.get("role") and r["role"] != h["role"]:
@@ -1931,9 +1940,11 @@ def chain_plan(a):
     extra = sorted(set(servers()) - set(names))
     if extra:
         rows.append(dict(label="unused", value=", ".join(extra) + " (a chain has at most 3 hops)"))
-    cap = providers.capacity_gib(r["record"].get("catalog", r["record"]["provider"]) for r in hops)
-    if cap:
-        rows.append(dict(label="capacity", value="about %d GiB/month, the smallest hop allowance" % cap))
+    caps = plan_caps(load_inventory(), [h["name"] for h in hops])
+    for h in hops:
+        c, why = caps[h["name"]]
+        rows.append(dict(label="cap" if h is hops[0] else "", value="%s: %s" % (h["name"], why)))
+    cap = per_link_allowance_gib(hops, caps)
     # Legal spheres of the two ends: one order should never reach both.
     keys = [r["record"].get("catalog", r["record"]["provider"]) for r in hops]
     ends = [providers.sphere(keys[0]), providers.sphere(keys[-1])] if len(hops) > 1 else []
@@ -2117,9 +2128,9 @@ def chain_steps(a, hops, progress, n):
     argv += ["--exit", endpoint["exit"], "--vault", str(a.vault)]
     # The rate class: auto picks the fastest the smallest hop's monthly cap fits (the cap
     # each server enforces: its account's free allowance, shared, less a margin).
-    capped = [c for c, _ in caps.values() if c is not None]
-    if capped:
-        argv += ["--allowance-gib", str(max(1, min(capped) >> 30))]
+    allowance = per_link_allowance_gib(hops, caps)
+    if allowance:
+        argv += ["--allowance-gib", str(allowance)]
     argv += ["--hours-per-day", "%g" % a.hours_per_day] + (["--accept-cost"] if a.accept_cost else [])
     # A later hop reachable only over IPv6 TCP (a Fly.io exit: no UDP there without a paid
     # IPv4) needs the paced links between servers over TCP.
@@ -2598,6 +2609,22 @@ def fly_push_image(app):
     finally:
         call([docker, "logout", "registry.fly.io"], parse=False)
     return tag
+
+
+def per_link_allowance_gib(hops, caps):
+    """The rate-class allowance for `avpn init --allowance-gib` (which counts two links when
+    the chain has more than one hop): each hop's cap divided by the streams it sends (a
+    relay or middle two, the exit one), the tightest of them, as GiB for two links."""
+    shares = []
+    for h in hops:
+        c = caps[h["name"]][0]
+        if c is not None:
+            links = 1 if h["role"] == "exit" else 2
+            shares.append(c / links)
+    if not shares:
+        return None
+    links = 2 if len(hops) > 1 else 1
+    return max(1, int(min(shares) * links) >> 30)
 
 
 def fee_server(rec):

@@ -186,11 +186,25 @@ UNTESTED = [
 ]
 # The legal sphere each provider's company answers to (tools/mesh.py and
 # src/mesh/directory.rs use the same table). "own" is your own host: its country's law.
-LEGAL_PARENT = {"oci": "US", "aws": "US", "azure": "US", "gcp": "US", **{p["key"]: p["parent"] for p in NON_US}}
+LEGAL_PARENT = {
+    "oci": "US",
+    "aws": "US",
+    "azure": "US",
+    "gcp": "US",
+    "fly": "US",
+    **{p["key"]: p["parent"] for p in NON_US},
+}
 
 LEGAL_PARENT.update({p["key"]: p["parent"] for p in LOW_COST})
 
-ALL_KEYS = {p["key"] for p in PROVIDERS} | {p["key"] for p in NON_US} | {p["key"] for p in LOW_COST}
+# Fly.io: no free tier, a $5 monthly waiver (tools/fee_guard.py), one exit per organization
+# over IPv6 TCP (docs/FLY_EXIT.md). Created with `avpn cloud fly server`, so it is not in
+# the "where to start" table above.
+FLY = dict(key="fly", name="Fly.io (within the $5 waiver)", short="Fly.io", terms="pay as you go; bills under $5 waived",
+           egress_gib=51, servers="one 256 MB Machine per organization", automation="create", cli="docker",
+           caveats="IPv6 TCP only; one server per organization; no spending limit",
+           source="https://docs.fly.io/about/pricing")  # fmt: skip
+ALL_KEYS = {p["key"] for p in PROVIDERS} | {p["key"] for p in NON_US} | {p["key"] for p in LOW_COST} | {"fly"}
 
 
 def sphere(key):
@@ -225,6 +239,8 @@ def by_key(key):
     for p in PROVIDERS:
         if p["key"] == key:
             return p
+    if key == "fly":
+        return FLY
     q = next((p for p in NON_US if p["key"] == key), None) or next(p for p in LOW_COST if p["key"] == key)
     return dict(q, egress_gib=None, terms="paid", servers="a VPS you create", automation="ssh")
 

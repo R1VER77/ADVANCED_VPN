@@ -1648,7 +1648,7 @@ class ChainTests(Stubbed):
         )
         text = json.dumps(r["rows"])
         self.assertIn("NOT managed", text)
-        self.assertIn("about 100 GiB/month", text)
+        self.assertIn("avpn-relay: 90 GB", text)  # each hop's monthly cap, from its account
         self.assertFalse([c for c in self.calls()[before:] if "security-group-ingress" in (c[1:2] or [""])[0]])
         self.assertFalse(Path(os.environ["STUB_LOG"] + ".ctl").exists())
 

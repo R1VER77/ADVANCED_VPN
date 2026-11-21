@@ -59,6 +59,28 @@ class Planning(unittest.TestCase):
         self.assertLess(src.index("push_cap("), src.index("stdin=HOST_ENROLL"))
 
 
+class FlyInTheChain(unittest.TestCase):
+    def test_the_rate_allowance_divides_each_cap_by_the_streams_its_hop_sends(self):
+        hops = [dict(name="r", role="relay"), dict(name="f", role="exit")]
+        caps = {"r": (90 * GB, ""), "f": (55 * GB, "")}
+        # The relay sends two streams: 45 GB each, tighter than the exit's 55 GB.
+        self.assertEqual(cloud.per_link_allowance_gib(hops, caps), int(90 * GB) >> 30)
+        caps["f"] = (30 * GB, "")  # now the exit binds: 30 GB for its one stream
+        self.assertEqual(cloud.per_link_allowance_gib(hops, caps), int(60 * GB) >> 30)
+
+    def test_a_fly_server_is_a_hop_and_ipv6_sources_are_slash_128(self):
+        inv = dict(schema=1, resources={
+            "avpn-relay": dict(provider="aws", public_ip="198.51.100.1", ssh_key="k"),
+            "avpn-fly": dict(provider="fly", catalog="fly", public_ip="2001:db8::4", app="a", machine="m"),
+        })  # fmt: skip
+        with mock.patch.object(cloud, "load_inventory", lambda: inv):
+            self.assertIn("avpn-fly", cloud.servers())
+        hops = cloud.chain_layout(["avpn-fly", "avpn-relay"], inv["resources"])
+        self.assertEqual(hops[1]["sources"], ["2001:db8::4/128"])
+        self.assertEqual(cloud.hostport("2001:db8::4", 4444), "[2001:db8::4]:4444")
+        self.assertEqual(cloud.remote("avpn-fly", inv["resources"]["avpn-fly"])[2:], (["--app", "a"], "m"))
+
+
 class Command(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
