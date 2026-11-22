@@ -12,10 +12,38 @@ A Rust VPN data plane with signed enrollment, hardware-bound sessions, automatic
 
 ```mermaid
 flowchart LR
-    App[Protected applications] --> Client[Client]
-    Client <-->|WireGuard + DAITA; two PQ layers inside| Relay[Cloud relay]
-    Relay <-->|Paced, forward-secret PQ link; inner PQ ciphertext| Exit[Owned exit]
-    Exit --> Internet[Destination]
+    subgraph ClientHost["Client Endpoint (Protected Namespace & Guard)"]
+        App["Protected Applications"] -->|"inner MTU 1100"| CoreC["advanced-vpn<br/>(2 or 3 Nested QUIC Layers:<br/>X25519MLKEM768 + ML-DSA-65<br/>+ FIDO2 Session Auth)"]
+        CoreC -->|"1380 B constant cells"| WGC["advanced-vpn-wireguard<br/>(Vendored GotaTun 0.10.2<br/>+ Maybenot 2.2.2 DAITA)"]
+        WGC -->|"loopback"| CloakC["advanced-vpn-cloak<br/>(1420 B cells: HTTP/3 UDP 443<br/>or TLS 1.3 TCP 443 fallback<br/>+ Cloak v2 Exporter HMAC)"]
+        CloakC -.->|"optional: --front i2p"| I2PC["Local i2pd Router<br/>(Hidden NTCP2-only)"]
+        App -.->|"optional async: avpn mix"| MixC["Katzenpost Mix Client<br/>(X-Wing PQ-Sphinx)"]
+    end
+
+    subgraph Hop1["Hop 1: Entry Relay (Sticky Guard)"]
+        CloakR["Cloak v2 + GotaTun Carrier<br/>(TPM2-sealed keys;<br/>advanced_vpn_egress lock<br/>+ monthly fee-guard quota)"]
+        LinkR["Paced Link Sender (src/link.rs)<br/>(Strips outer QUIC layer;<br/>holds ZERO inner tunnel keys)"]
+        CloakR --> LinkR
+    end
+
+    subgraph Hop2["Optional Hop 2: Middle Relay (--hops 3)"]
+        Mid["Paced Link Relay<br/>(Distinct operator, provider & country;<br/>sees neither client IP nor destination)"]
+    end
+
+    subgraph HopExit["Final Hop: Owned or Mesh Exit (+ Standby Exits)"]
+        ExitNode["advanced-vpn Exit<br/>(TPM2 or Operator-Nitrokey locked;<br/>decrypts inner PQ QUIC layer;<br/>never sees client IP)"]
+        ExitDNS["advanced-vpn-dns<br/>(Signed Blocklist + X25519MLKEM768 DoT<br/>or local Unbound --dns-recursive)"]
+        ExitNode --> ExitDNS
+    end
+
+    CloakC <==>|"Constant-rate DAITA stream (UDP/TCP 443)"| CloakR
+    I2PC -.->|"Garlic-routed I2P tunnel"| CloakR
+    LinkR <==>|"1242 B paced AES-256-GCM cells (UDP or IPv6/IPv4 TCP)<br/>120 s ephemeral X25519 + ML-KEM-768 rekey"| Mid
+    LinkR <==>|"2-hop direct paced PQ link (UDP or TCP)"| ExitNode
+    Mid <==>|"1242 B paced PQ link (4.2 s standby failover)"| ExitNode
+    MixC -.->|"Poisson-delayed PQ-Sphinx cells"| Internet["Destination / Web"]
+    ExitNode -->|"Owned-exit NAT"| Internet
+    ExitDNS -->|"PQ DoT or DNSSEC"| Internet
 ```
 
 WireGuard is the outer carrier, implemented by a vendored **GotaTun 0.10.2** (`vendor/gotatun`), with its actual DAITA integration and public **Maybenot 2.2.2** defense machines. Its ChaCha20-Poly1305 encryption and 256-bit PSK supplement the existing **two TLS 1.3 X25519 + ML-KEM-768 / AES-256-GCM layers**. WireGuard alone is not advertised as native ML-KEM. Authentication is post-quantum too: both QUIC layers accept **only ML-DSA-65** (FIPS 204) certificate chains and TLS 1.3 CertificateVerify signatures, and operator enrollment bundles require **both the classical operator signature and ML-DSA-65** (plus an optional **third operator signature half** from an **ML-DSA-44** FIDO2 credential on a separate hardware key, `avpn init --pq-vault`, schema 3). The hardware path uses the enrolled FIDO2 credential’s COSE algorithm; the software laboratory signer uses Ed25519. A correctly pinned classical (ECDSA) deployment is refused; the Rust tests prove this and fail if the restriction is removed. The listed VPN network layers enforce their hybrid key-exchange policy; compatibility dependencies and exceptions are named in the inventory. Authentication is post-quantum on the inner tunnels (ML-DSA-65, augmented by per-session hardware FIDO2 authorization when a device key is pinned) and on the cloak (protocol v2: both ends prove the enrolled key with a role-separated HMAC over the hybrid exchange; its browser-facing certificate is an ECDSA facade), while exit DNS either authenticates its DoT upstream (`X25519MLKEM768` enforced) with classical WebPKI signatures or resolves names directly on the exit with a local DNSSEC-validating recursive Unbound resolver (`avpn init --dns-recursive`). [docs/PQ_INVENTORY.md](docs/PQ_INVENTORY.md) separates key exchange from authentication for each layer, with enforcing code, tests and the five named exceptions. The local FIDO PIN/secret channel over USB uses P-256 (CTAP PIN/UV protocols 1 and 2) and is flagged on every key; the full-stack PQ/SafeCurves mandate is a migration target, not a qualification of that hardware boundary.
@@ -49,6 +77,43 @@ limitations are tracked in the roadmap, [changelog](CHANGELOG.md), [incident log
 and [security scope](SECURITY.md).
 
 ## What is automatic
+
+```mermaid
+flowchart TB
+    subgraph UserSpace["Unprivileged User Space"]
+        CLI["avpn / cypherpunk (Rust TUI & CLI)<br/>Renders results, live checklists & key hints"]
+        GUI["apps/cypherpunk-vpn (Vue 3 / Tauri 2 GUI)<br/>Read & Create/Join Write Views"]
+        CLOUD["avpn-cloud & tofu_run.py<br/>(AWS / OCI / Azure / Fly.io / SSH;<br/>Pinned OpenTofu 1.13.9, encrypted state)"]
+    end
+
+    subgraph RootSupervisor["Privileged Controller & Hardware Enclave Boundary"]
+        BUS["org.cypherpunk_vpn.Controller1 (D-Bus) / --json"]
+        CTL["avpnctl (Python Root Supervisor)<br/>Atomic nftables TableWatch, netns, fee-guard quota,<br/>5 s .invalid end-to-end protection probe"]
+        SIGNER["session_signer.py (Phase 2 Short-Lived Signer)<br/>PR_SET_DUMPABLE=0, mlockall, no core dumps;<br/>unseals long-term ML-DSA-65 identities ONLY during touch,<br/>certifies fresh <=12 h per-session keys, then exits"]
+        HW["FIDO2 Hardware Token (Nitrokey / Trezor / Solo 2 / TKey)<br/>hmac-secret vault unseal + WebAuthn session assertion"]
+    end
+
+    subgraph SandboxedDataPlane["Sandboxed Data-Plane Daemons (Non-Root UID, 0 Caps, seccomp-BPF + Landlock)"]
+        CLOAK["advanced-vpn-cloak<br/>HTTP/3 UDP 443 + TLS 1.3 TCP 443 fallback<br/>Cloak v2 mutual exporter HMAC"]
+        WG["advanced-vpn-wireguard<br/>Vendored GotaTun + Maybenot strict-blocking DAITA"]
+        CORE["advanced-vpn<br/>Nested X25519MLKEM768 + ML-DSA-65 QUIC<br/>+ Paced UDP/TCP Server Links (src/link.rs)"]
+        DNS["advanced-vpn-dns<br/>Signed Blocklist + PQ DoT / Unbound DNSSEC"]
+    end
+
+    CLI -->|"--json"| BUS
+    GUI -->|"D-Bus"| BUS
+    CLI -->|"as ordinary user"| CLOUD
+    BUS --> CTL
+    CTL -->|"stdin: session pubkeys"| SIGNER
+    SIGNER <-->|"PIN + touch"| HW
+    SIGNER -->|"stdout: signed <=12 h session leaves"| CTL
+    CTL -->|"sealed memfd (per-session keys only)"| CLOAK
+    CTL -->|"sealed memfd"| WG
+    CTL -->|"sealed memfd"| CORE
+    CTL -->|"loopback + namespace"| DNS
+    WG <-->|"loopback"| CLOAK
+    CORE <-->|"TUN / carrier"| WG
+```
 
 - A signed role bundle supplies endpoints, identities, pins and safe defaults. No JSON, firewall, route or DNS editing is needed on an enrolled device.
 - The supervisor creates WireGuard/TUN interfaces, addresses, routes, atomic `nftables` rules, an application namespace, owned-exit NAT, local DNS blocklist filtering (`NXDOMAIN` before upstream resolution, including CNAME-cloaking checks and signed allowlists), and DNS-over-TLS forwarding (or exit-local recursive Unbound DNSSEC resolution with `--dns-recursive`).
@@ -117,9 +182,39 @@ Setup is designed as one ordered flow led conversationally by a local Gemma mode
 narrowed, qualified provider catalog (`tools/providers.py`), calling only the deterministic
 engine's typed tools (no shell access, no secrets or PINs in the model context, and explicit
 human approval for every privileged or billable action):
+
+```mermaid
+flowchart LR
+    subgraph Step1["1. First Launch: Provisioning & Hardware Key"]
+        Gemma["Local Gemma Assistant<br/>(Typed tool calls only;<br/>zero secrets or PINs in context)"]
+        HWKey["Hardware Key Setup<br/>(Rank 1-4 detection, udev/FIDO repair,<br/>vault + client.req generation)"]
+        Tofu["Pinned OpenTofu 1.13.9 Engine<br/>(oci-server / azure-server / AWS / Fly / SSH;<br/>Nitrokey-sealed state & exact plan preview)"]
+        Sign["One-Touch Chain Sign & Unlock<br/>(Classical + ML-DSA-65 + optional ML-DSA-44;<br/>mandatory per-account fee-guard caps)"]
+        Gemma --> HWKey --> Tofu --> Sign
+    end
+
+    subgraph Step2["2. Main Desktop GUI (apps/cypherpunk-vpn)"]
+        DBus["D-Bus Broker (org.cypherpunk_vpn.Controller1)<br/>Read & Create/Join Write Sides"]
+        Window["Vue 3 / Tauri 2 Native Window<br/>(Offline Natural Earth map, live protection probe,<br/>posture-only autoconnect, streaming table)"]
+        DBus --> Window
+    end
+
+    subgraph Step3["3. Later Launches: Viable Profile Check"]
+        Check["Profile & Fleet Health Gate<br/>(require_current, key sealing intact,<br/>avpn cloud health check)"]
+    end
+
+    Sign -->|"Enrollment complete"| DBus
+    Check -->|"Viable profile"| Window
+    Check -->|"None or adding profile"| Gemma
+```
+
 1. **Provisioning and hardware-key setup** through pinned **OpenTofu 1.13.9** modules (`tools/tofu.py`, `tools/tofu_run.py`, SHA256SUMS and signing-key verified, with state and saved plans encrypted under a key sealed in the operator's Nitrokey vault via `avpn state-key`), currently covering `oci-server` (Oracle Cloud) and `azure-server` (Azure Trusted Launch with vTPM) alongside AWS, Fly.io and bring-your-own SSH hosts.
 2. **The Vue/Tauri Linux GUI** ([`apps/cypherpunk-vpn`](apps/cypherpunk-vpn/README.md)) appears when provisioning completes, backed by a native D-Bus adapter, the read-side controller extension (`tools/controller_extension.py`: posture-only auto-connect, multi-hop presets, streaming eligibility table), and the create/join write side (`tools/controller_create_join.py`: branch-bound operator keys, operator-locked exit requests, and signing a route with a stated allowance, with exact hardcoded argv previews and an append-only action journal; `--accept-cost` is unreachable from the GUI).
 3. **Viable-profile checks** on every subsequent launch verify signature validity, current protocol schema, key sealing and server health (`avpn cloud health`). Multi-profile storage and the trained local Gemma model evaluation remain open roadmap gates.
+
+| Native Linux WebKitGTK Desktop View (`1200×900`, fail-closed `status: unknown` smoke) | Narrow Responsive View (`420px`, zero horizontal overflow) |
+|---|---|
+| <img src="docs/evidence/gui/native-unknown-desktop-20261118.png" alt="Native Linux GUI Desktop View" width="560" /> | <img src="docs/evidence/gui/native-unknown-narrow-20261118.png" alt="Native Linux GUI Narrow View" width="240" /> |
 
 Hardware repairs are separate, exact plans: `avpn setup --repair ID` diagnoses and shows
 an available fix. Applying it requires approval of the current plan and fresh verification
@@ -374,6 +469,35 @@ Closed firmware, and still usable (Ranks 3–4):
 
 ## One-time enrollment, then connect
 
+```mermaid
+sequenceDiagram
+    autonumber
+    participant HW as FIDO2 Hardware Key(s)<br/>(Nitrokey / Trezor / Solo 2)
+    participant Signer as Client & session_signer.py<br/>(Short-lived undumpable enclave)
+    participant Relay as Entry Relay<br/>(TPM2-sealed keys)
+    participant Exit as TPM-less Exit Server<br/>(--protect operator)
+
+    Note over HW,Exit: 1. Key Generation & Operator-Locked Server Sealing (No private key ever leaves its device)
+    Signer->>HW: avpn request --role client --protect nitrokey (PIN + touch)
+    HW-->>Signer: hmac-secret seals long-term ML-DSA-65 identities + exports device_public
+    Relay->>Relay: avpn request --role relay --protect systemd-creds (TPM2 seal test)
+    Exit->>Exit: avpn request --role exit --protect operator (encrypts keys under random AES-256-GCM data key,<br/>wraps data key to operator-unlock.pub via X25519 + ML-KEM-768)
+
+    Note over HW,Exit: 2. One-Touch Chain Signing & Server RAM Unlock (avpn init / avpn cloud chain --apply)
+    Signer->>HW: One PIN + touch (unseals operator ML-DSA-65 + unlock key; signs classical FIDO2 half;<br/>optional 2nd-key ML-DSA-44 3rd half via --pq-vault)
+    Signer->>Relay: Enroll relay.avpn (pins client ML-DSA-65 SPKI + peer_device FIDO2 key)
+    Signer->>Exit: Deliver unwrapped data key over SSH stdin into /run (RAM only) + enroll exit.avpn
+
+    Note over HW,Exit: 3. Connect & Phase 2 Hardware-Bound Session (<=12 h window)
+    Signer->>Signer: Generate fresh ephemeral per-session ML-DSA-65 layer keys in memory
+    Signer->>HW: PIN + touch (unseals long-term ML-DSA-65 in session_signer.py + signs WebAuthn session statement)
+    Signer->>Signer: session_signer certifies per-session leaves (with OID session extension) & exits immediately
+    Signer->>Relay: Outer QUIC TLS 1.3 (X25519MLKEM768 + per-session ML-DSA-65 leaf + FIDO2 assertion)
+    Relay->>Relay: Verify identity signature AND FIDO2 peer_device statement (<=12 h)
+    Signer->>Exit: Inner QUIC TLS 1.3 through relay (X25519MLKEM768 + per-session ML-DSA-65 leaf + FIDO2 assertion)
+    Exit->>Exit: Verify identity signature AND FIDO2 peer_device statement (<=12 h)
+```
+
 First stage the native package; staging does not install or activate anything:
 
 ```sh
@@ -502,6 +626,26 @@ avpn mesh chain --hops 3         # every hop a distinct operator, provider and c
 avpn mesh quota                  # credits earned relaying vs spent on chains
 ```
 
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Member as Mesh Member<br/>(Hardware Key !xxxxxxxx)
+    participant Relay as Entry Relay (Non-Colluding)<br/>(Serves GET /time 30 s bucket)
+    participant Beacons as Independent Mesh Beacons<br/>(>=2 Witness Descriptors)
+    participant Gateway as OHTTP Gateway & Directory<br/>(HPKE X25519 + ML-KEM-768)
+    participant Nodes as Contributed Mesh Hop Nodes<br/>(Distinct Operator / Provider / Legal Sphere)
+
+    Member->>Beacons: 1. Fetch signed descriptors (ML-DSA-65 + exit_policy + streaming)
+    Member->>Member: 2. Enforce Gateway Key Consistency (RFC 9458 s.7:<br/>require >=2 independent beacons signing same ohttp_gateway; refuse equivocation)
+    Member->>Relay: 3. Sync 30 s relay-clock bucket (Date header; no third-party time fetch)
+    Member->>Relay: 4. Send HPKE-sealed OHTTP request + blinded credit / VOPRF token (B = Blind(H(T)))
+    Relay->>Gateway: 5. Forward opaque HPKE request (Gateway sees Relay IP, never Member IP)
+    Gateway-->>Relay: 6. Seal response to in-request reply public key + blind signature S_blind
+    Relay-->>Member: 7. Deliver sealed OHTTP response
+    Member->>Member: 8. Verify & unblind token (RFC 9474 Finalize refuses tagged signatures)<br/>or generate v1.0 forward-private STARK nullifier bound to SHA-256(request)
+    Member->>Nodes: 9. Redeem unlinked token / proof & establish 3-hop constant-rate PQ chain
+```
+
 There is **no account anywhere**: a member is their hardware device — an open-source FIDO2 token by preference. The member ID is the hash of the device public key; the private key never leaves the token, and mesh descriptors are signed with the operator's `operator-mldsa65` key (`mesh-sign --role`) and carry typed `exit_policy` and `streaming` fields validated identically by the Python control plane and every Rust node (`tests/fixtures/descriptor_fields.json`). Nodes can also be kept private (`avpn mesh offer --private`, `tools/mesh_voprf.py`), usable only by you or an invited group. Defense is strong-only and per-hop: the client's link runs the constant-rate carrier stream and every server-to-server link a paced, encrypted constant-rate stream; your own node is your entry, and the exit must answer to another legal sphere than the entry.
 
 Control-plane requests travel over **Oblivious HTTP (HPKE `X25519 + ML-KEM-768`)** with two anti-correlation defenses enforced in code and proved in ProVerif 2.05 (`formal/ohttp/ohttp_unlinkability.pv`):
@@ -554,6 +698,35 @@ DNS offers two explicit post-quantum / privacy trade-offs ([docs/PQ_INVENTORY.md
 - **Opt-in exit recursive resolver (`avpn init --dns-recursive`, `tools/exit_resolver.py`):** the exit runs its own local Unbound resolver with DNSSEC validation and QNAME minimisation (verified live on 20/20 domains with `dnssec-failed.org` refused), removing any central public DNS provider. Those queries leave from the exit to authoritative DNS servers as plain DNS authenticated by classical DNSSEC (exception 5).
 
 **Formal verification, bounded model checking and fuzzing ([formal/README.md](formal/README.md), [docs/VERIFICATION_PLAN.md](docs/VERIFICATION_PLAN.md)):**
+
+```mermaid
+flowchart LR
+    subgraph SymbolicTamarin["Tamarin 1.12.0 + Maude 3.5.1 (16 Models, 57 Lemmas, 26 Mutants)"]
+        T1["formal/cloak/cloak.spthy<br/>Cloak v2 mutual exporter HMAC & role binding"]
+        T2["formal/link/link.spthy<br/>120 s hybrid forward secrecy (X25519 + ML-KEM)"]
+        T3["formal/kem_seal/kem_seal.spthy<br/>Hybrid confidentiality & context binding"]
+        T4["formal/enrollment/enrollment.spthy<br/>Dual/triple operator signature binding"]
+        T5["formal/session/session_auth.spthy<br/>Phase 1/2 hardware-bound sessions & expiry"]
+        T6["formal/dcnet/*.spthy (7 models) & formal/zk/<br/>DC-net authenticity, 4-member collusion, OTP/ratchet, forward-private nullifiers"]
+        T7["formal/ohttp/ & formal/credits/<br/>OHTTP response binding & single-ledger no-double-spend"]
+    end
+
+    subgraph EquivalenceProVerif["ProVerif 2.05 Observational Equivalence"]
+        PV1["formal/ohttp/ohttp_unlinkability.pv<br/>Gateway request unlinkability (with 2-witness key check & relay clock)"]
+        PV2["formal/credits/credits_unlinkability.pv<br/>Blind credit issue/spend unlinkability (RFC 9474 Finalize)"]
+    end
+
+    subgraph BoundedAndFuzz["Kani Model Checking, Vectors & CI Fuzzing"]
+        Kani["crates/avpn-kani (src/link_bounds.rs)<br/>Replay window & reply credit proofs (4 mutants)"]
+        Vec["tools/formal_model_vectors.py<br/>15/15 live Rust & Python crypto test vectors"]
+        Fuzz["5 cargo-fuzz targets + Python parser mutation fuzzer<br/>All external byte & leaf/bundle parsers"]
+    end
+
+    SymbolicTamarin --> Vec
+    EquivalenceProVerif --> Vec
+    BoundedAndFuzz --> Vec
+```
+
 - **Tamarin 1.12.0 (16 symbolic models, 57 verified lemmas, 26 falsified mutants in CI, `docs/evidence/TAMARIN.json`):** covers DC-net frame authenticity/decoding/collusion bounds, mix-lane re-blinding, cloak v2 mutual channel/role-bound proofs, hop-link hybrid forward secrecy (safe after a PSK leak unless both X25519 and ML-KEM are broken for that session), hybrid `kem_seal`, OHTTP response binding, credit redemption, dual-signature enrollment, and Phase 1/2 hardware-bound sessions (`stolen_session_key_expires`), each pinned to production crypto vectors by `tools/formal_model_vectors.py`.
 - **ProVerif 2.05 (`tools/proverif_check.py`, `docs/evidence/PROVERIF.json`):** proves observational equivalence (unlinkability) for OHTTP requests against the gateway and for blind-credit issuance/spending against the ledger (after closing an issuer multiplicative-tagging attack via RFC 9474 Finalize verification).
 - **Kani & CI fuzzing:** `crates/avpn-kani` (`src/link_bounds.rs`, 4 mutants caught) proves the hop link's replay window and reply-credit invariants on the Rust code; five `cargo-fuzz` targets and the Python mutation fuzzer test all external byte parsers in CI.
@@ -562,9 +735,56 @@ DNS offers two explicit post-quantum / privacy trade-offs ([docs/PQ_INVENTORY.md
 `src/dcnet.rs` is a tested DC-net round core for anonymous mesh control events (72-bit truncated SHA-256 event integrity, end-to-end cell lab in `tools/dcnet_cell_lab.py`, deniable multi-layer storage in `tools/padstore.py` v2 with copy-on-write dual headers and Elligator 2 envelopes in `tools/elligator.py`, plus DLEQ batch, authenticated event-effect and jamming/fallback validation in `tools/dcnet_validation.py`). No VPN command calls it yet. Its one-time-pad construction supports information-theoretic sender anonymity within an honest group connected by jointly secret, uniform, never-reused pad edges. The current generator (`tools/padbook.py`) combines kernel/Nitrokey output (whose internal RNG was verified in firmware source to be a once-per-boot seeded ChaCha8 stream, hence computational alone) with assessed raw CPU-jitter noise (NIST SP 800-90B `ea_non_iid` + Toeplitz extractor); it has not established the required joint entropy, independent extractor-seed and physical custody assumptions. Its `conditional-information-theoretic` label records declared provenance, not qualification. Network-seeded hash chains remain computational. See the [design](docs/DCNET_CONTROL_DESIGN.md), [paper and implementation review](docs/INFORMATION_THEORETIC_REVIEW_20261117.md), and [pad exposure validation guide](docs/PAD_EXPOSURE_VALIDATION.md) for the precise passive-round claim and remaining gates. This does not qualify the VPN as information-theoretically secure.
 
 The proposed four-plane architecture is documented in the
-[CYPHERPUNKS research specification](docs/CYPHERPUNKS_PROTOCOL_SPECIFICATION.md).
+[CYPHERPUNKS research specification](docs/CYPHERPUNKS_PROTOCOL_SPECIFICATION.md):
+
+```mermaid
+flowchart TD
+    subgraph P1["Plane 1: Conditional Ideal-Pad Control Plane (Research / Library Core)"]
+        NK["Nitrokey 3 + Assessed CPU-Jitter Noise"] -->|"tools/padbook.py & padstore.py v2"| PB["In-Person One-Time Pad Books (conditional-IT)<br/>& Forward-Secure SHA-256 Chains (computational)"]
+        PB --> DC["DC-Net Micro-Cells (src/dcnet.rs, 4-60 members, 30 s rounds)<br/>72-bit SHA-256 event check & accept-DoS jamming policy"]
+        DC -->|"64-Byte Control Events (not yet wired to CLI)"| TOK["CHAIN_SETUP_COMMIT & MIX_LANE_FALLBACK"]
+    end
+
+    subgraph P2["Plane 2: Pathless Egress & Membership Plane (Implemented Modules / Proof Gates Open)"]
+        TOK --> HYBRID["RFC 9497 ristretto255 VOPRF & Blind Vouchers (tools/voprf.py, tools/voucher.py)<br/>+ RISC Zero STARK Forward-Private Nullifiers (tools/zkid.py)"]
+        HYBRID --> PIR["2-Server XOR / DPF Private Information Retrieval Directory<br/>(tools/pir_directory.py)"]
+        PIR -->|"Oblivious Descriptor Lookup"| EXT["Anonymous Exit & Chain Selection"]
+    end
+
+    subgraph P3["Plane 3: High-Throughput Post-Quantum Transport Plane (Deployed)"]
+        EXT --> WG["Vendored GotaTun WireGuard + 2 or 3 Nested QUIC Layers"]
+        WG -->|"Enforced X25519MLKEM768 + ML-DSA-65 + FIDO2 Session Auth<br/>+ 120 s Rekeyed UDP/TCP Server Links"| DAT["Bulk IP Data Stream (~115 Mbit/s line class on 2-3 hops)"]
+    end
+
+    subgraph P4["Plane 4: Statistical Anti-Surveillance Shield (Deployed)"]
+        DAT --> CR["DAITA Strict Constant-Rate Pacing (src/daita.rs & src/link.rs)"]
+        CR -->|"0-3.7% idle/busy wire delta inside HTTP/3 Cloak v2"| WIRE["Physical Ingress / Egress Wire"]
+        MIX["Katzenpost X-Wing PQ-Sphinx Mix-Lane (avpn mix)<br/>& Optional I2P Front (--front i2p)"] -.->|"Async Poisson Mixing / Entry Hiding"| WIRE
+    end
+```
+
 While the RFC 9497 `ristretto255` VOPRF and voucher modules (`tools/voprf.py`, `tools/voucher.py`, `tools/mesh_voprf.py`), the two-server XOR/DPF PIR directory (`tools/pir_directory.py`), the full-tree curve inventory (`tools/curve_inventory.py`) and secret-handling audit (`tools/secret_review.py`) are now implemented and unit-tested in the tree, synthetic/reference benchmarks do not qualify live traffic immunity, post-quantum voucher unlinkability proofs, deployed multi-operator DPF network timings or production throughput. See the [18 November artifact review](docs/RESEARCH_REVIEW_20261118.md) and [roadmap §6](docs/ROADMAP.md#6-cypherpunks-research-qualification) for incorporation decisions and the remaining qualification gates.
 
 Inside the client tunnel, traffic is currently Linux/IPv4 only while **client-side IPv6 is deliberately blocked fail-closed** in every mode so it cannot escape around the tunnel — verified by the 19-gate dual-stack IPv6 leak suite (`tools/ipv6_leak_suite.py`; native inside-tunnel IPv6 is designed and staged in [docs/IPV6_TUNNELING_DESIGN.md](docs/IPV6_TUNNELING_DESIGN.md), decision D009). **Between servers**, IPv6 is supported today: paced server-to-server links run over IPv6 TCP (`avpn init --link-transport tcp`) to IPv6-only exits such as Fly.io, and the server-side egress lock and fee-guard quota enforce `inet` rules across both IPv4 and IPv6 ([docs/FEE_GUARD.md](docs/FEE_GUARD.md)). The managed profile uses inner MTU 1100 and WireGuard MTU 1340; HTTP/3 QUIC cloak requires an IPv4 underlay MTU of at least 1448 bytes, automatically falls back to TLS 1.3 over TCP 443 on paths between 576 and 1447 bytes, and refuses to connect below 576 bytes with the kill switch held. The native Linux GUI, OpenTofu onboarding, router deployment target designs ([GL.iNet GL-MT6000/GL-MT3000](docs/ROUTER_DEPLOYMENT.md), decision D010) and [Tor-over-the-tunnel recipe](docs/TOR_RECIPE.md) (decision D012) still require packaged-release, hardware-in-the-loop and full-onboarding qualification. The standalone v0.1 QUIC interface remains available; see [historical interface](docs/LEGACY_QUIC.md).
+
+```mermaid
+flowchart TD
+    subgraph Ethos["Non-Negotiable Cypherpunk Boundaries (docs/PRINCIPLES.md)"]
+        B1["Zero Accounts & Zero KYC<br/>(Hardware key is identity; no user tables)"]
+        B2["Privacy by Construction<br/>(Unlinked blind tokens & local key custody)"]
+        B3["Software Freedom & Hardware Exception<br/>(AGPL-3.0-or-later + Hardware Linking Exception)"]
+        B4["Zero Custodial Fee-Skimming<br/>(Pure protocol software; mandatory free-tier fee guard)"]
+    end
+
+    subgraph Sustainability["Ethos-Preserving Sustainability & Governance (docs/REVENUE_ARCHITECTURE.md)"]
+        S1["1. Blind Cryptographic Vouchers<br/>(Chaumian / RFC 9497 VOPRF / L402)"]
+        S2["2. OpenWrt Router Targets & Hardware Kits<br/>(GL-MT6000 / GL-MT3000, decision D010)"]
+        S3["3. Zero-Knowledge Sovereign Fleet Automation<br/>(Pinned OpenTofu; host holds zero inner keys)"]
+        S4["4. Private Group Meshes for Collectives<br/>(Newsrooms & NGOs; continuous WF red-teaming)"]
+        S5["5. Non-Dilutive Public Goods Grants & Dual-Licensing<br/>(Disclosed in docs/FUNDING.md)"]
+    end
+
+    Ethos --> Sustainability
+```
 
 Current project terms are in [LICENSE](LICENSE), under **GNU AGPL-3.0-or-later** with the Cypherpunk Hardware Linking Exception and Commercial Dual-Licensing Terms ([docs/REVENUE_ARCHITECTURE.md](docs/REVENUE_ARCHITECTURE.md)). Historical file provenance remains documented separately. Vendored GotaTun (`vendor/gotatun`, modified for strict-blocking stall recovery) is an MPL-2.0 dependency; Maybenot components are MIT/Apache-2.0; Katzenpost mix-lane binaries run as separate unmodified AGPL-3.0 processes; `i2pd` runs as a separate unmodified BSD-3-Clause daemon. See [provenance](docs/PROVENANCE.md) and [upstream source/notice information](third_party/SOURCES.json). No VP.NET implementation was copied or ported; this is not represented as a clean-room project.
