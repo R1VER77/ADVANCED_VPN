@@ -566,7 +566,7 @@ sequenceDiagram
     Exit->>Exit: avpn request --role exit --protect operator (encrypts keys under random AES-256-GCM data key,<br/>wraps data key to operator-unlock.pub via X25519 + ML-KEM-768)
 
     Note over HW,Exit: 2. One-Touch Chain Signing & Server RAM Unlock (avpn init / avpn cloud chain --apply)
-    Signer->>HW: One PIN + touch (unseals operator ML-DSA-65 + unlock key; signs classical FIDO2 half;<br/>optional 2nd-key ML-DSA-44 3rd half via --pq-vault)
+    Signer->>HW: One PIN + touch (unseals operator ML-DSA-65 + unlock key, signs classical FIDO2 half,<br/>and optional 2nd-key ML-DSA-44 3rd half via --pq-vault)
     Signer->>Relay: Enroll relay.avpn (pins client ML-DSA-65 SPKI + peer_device FIDO2 key)
     Signer->>Exit: Deliver unwrapped data key over SSH stdin into /run (RAM only) + enroll exit.avpn
 
@@ -717,15 +717,15 @@ sequenceDiagram
     participant Gateway as OHTTP Gateway & Directory<br/>(HPKE X25519 + ML-KEM-768)
     participant Nodes as Contributed Mesh Hop Nodes<br/>(Distinct Operator / Provider / Legal Sphere)
 
-    Member->>Beacons: 1. Fetch signed descriptors (ML-DSA-65 + exit_policy + streaming)
-    Member->>Member: 2. Enforce Gateway Key Consistency (RFC 9458 s.7:<br/>require >=2 independent beacons signing same ohttp_gateway; refuse equivocation)
-    Member->>Relay: 3. Sync 30 s relay-clock bucket (Date header; no third-party time fetch)
-    Member->>Relay: 4. Send HPKE-sealed OHTTP request + blinded credit / VOPRF token (B = Blind(H(T)))
-    Relay->>Gateway: 5. Forward opaque HPKE request (Gateway sees Relay IP, never Member IP)
-    Gateway-->>Relay: 6. Seal response to in-request reply public key + blind signature S_blind
-    Relay-->>Member: 7. Deliver sealed OHTTP response
-    Member->>Member: 8. Verify & unblind token (RFC 9474 Finalize refuses tagged signatures)<br/>or generate v1.0 forward-private STARK nullifier bound to SHA-256(request)
-    Member->>Nodes: 9. Redeem unlinked token / proof & establish 3-hop constant-rate PQ chain
+    Member->>Beacons: Fetch signed descriptors (ML-DSA-65 + exit_policy + streaming)
+    Member->>Member: Enforce Gateway Key Consistency (RFC 9458 s.7:<br/>require >=2 independent beacons signing same ohttp_gateway, refuse equivocation)
+    Member->>Relay: Sync 30 s relay-clock bucket (Date header, no third-party time fetch)
+    Member->>Relay: Send HPKE-sealed OHTTP request + blinded credit / VOPRF token (B = Blind(H(T)))
+    Relay->>Gateway: Forward opaque HPKE request (Gateway sees Relay IP, never Member IP)
+    Gateway-->>Relay: Seal response to in-request reply public key + blind signature S_blind
+    Relay-->>Member: Deliver sealed OHTTP response
+    Member->>Member: Verify & unblind token (RFC 9474 Finalize refuses tagged signatures)<br/>or generate v1.0 forward-private STARK nullifier bound to SHA-256(request)
+    Member->>Nodes: Redeem unlinked token / proof & establish 3-hop constant-rate PQ chain
 ```
 
 There is **no account anywhere**: a member is their hardware device — an open-source FIDO2 token by preference. The member ID is the hash of the device public key; the private key never leaves the token, and mesh descriptors are signed with the operator's `operator-mldsa65` key (`mesh-sign --role`) and carry typed `exit_policy` and `streaming` fields validated identically by the Python control plane and every Rust node (`tests/fixtures/descriptor_fields.json`). Nodes can also be kept private (`avpn mesh offer --private`, `tools/mesh_voprf.py`), usable only by you or an invited group. Defense is strong-only and per-hop: the client's link runs the constant-rate carrier stream and every server-to-server link a paced, encrypted constant-rate stream; your own node is your entry, and the exit must answer to another legal sphere than the entry.
