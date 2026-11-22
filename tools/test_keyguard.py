@@ -228,6 +228,19 @@ class PinDialogTests(unittest.TestCase):
         self.assertEqual(len(calls), 1)
         self.assertNotIn("user", calls[0][1])  # already you: no user switch
 
+    def test_an_unanswered_dialog_says_so_instead_of_claiming_no_pin_source(self):
+        # Live, 22 Nov 2026: a chain build's dialog timed out unanswered and the error read
+        # "no terminal, desktop session or systemd password agent", hiding what happened.
+        import subprocess
+
+        value, calls = self.prompt(env={"WAYLAND_DISPLAY": "wayland-0"}, tty=False,
+                                   raises=subprocess.TimeoutExpired("pinentry", 180))  # fmt: skip
+        self.assertIsInstance(value, RuntimeError)
+        self.assertIn("not answered within 3 minutes", str(value))
+        # A dialog that could not open at all still falls back to the terminal.
+        value, _ = self.prompt(env={"WAYLAND_DISPLAY": "wayland-0"}, raises=OSError("no display"))
+        self.assertEqual(value, "tty-pin")
+
     def test_under_sudo_the_dialog_runs_as_the_invoking_user_in_their_session(self):
         # Live regression (14 Nov 2026): as root the dialog could not open ("PIN dialog stopped").
         value, calls = self.prompt(euid=0, env={"SUDO_UID": "1000", "SUDO_GID": "1000"})
@@ -264,6 +277,112 @@ class PinDialogTests(unittest.TestCase):
         self.assertEqual(value, "dialog-pin")
         self.assertIsNone(calls[0][1].get("user"))
         self.assertEqual(calls[0][1]["env"]["DISPLAY"], ":0")
+
+
+class OnePinPerCommand(unittest.TestCase):
+    """Owner, 22 Nov 2026: an operation needing the key more than once asks for the PIN once
+    (a chain build's second prompt failed after the first was answered). Held in memory
+    for one command only."""
+
+    def asks(self):
+        from unittest import mock
+        import keyguard
+
+        answers = iter(["1111", "2222", "3333"])
+        asked = []
+
+        def ask():
+            asked.append(1)
+            return next(answers)
+
+        return keyguard, mock.patch.object(keyguard, "_ask_pin", ask), asked
+
+    def test_inside_one_command_the_pin_is_asked_once(self):
+        keyguard, patch, asked = self.asks()
+        with patch, keyguard.one_pin():
+            self.assertEqual([keyguard.pinentry() for _ in range(3)], ["1111"] * 3)
+        self.assertEqual(len(asked), 1)
+
+    def test_outside_a_command_scope_every_prompt_asks(self):
+        keyguard, patch, asked = self.asks()
+        with patch:
+            self.assertEqual([keyguard.pinentry(), keyguard.pinentry()], ["1111", "2222"])
+
+    def test_the_pin_is_dropped_when_the_command_ends_even_on_error(self):
+        keyguard, patch, asked = self.asks()
+        with patch:
+            with keyguard.one_pin():
+                keyguard.pinentry()
+            with self.assertRaises(ValueError), keyguard.one_pin():
+                self.assertEqual(keyguard.pinentry(), "2222")  # a new command asks again
+                raise ValueError("the key refused it")
+            with keyguard.one_pin():
+                self.assertEqual(keyguard.pinentry(), "3333")
+        self.assertIsNone(keyguard._HELD_PIN.get())
+
+    def test_long_running_and_broker_paths_scope_it_to_one_operation(self):
+        import inspect
+
+        import avpnctl
+        import controller_backend
+
+        main = inspect.getsource(avpnctl.main)
+        self.assertIn('("connect", "run")', main)  # the supervisor never holds a PIN
+        broker = inspect.getsource(controller_backend)
+        self.assertEqual(broker.count("with one_pin():"), 2)
+
+
+class PinDialogScript(unittest.TestCase):
+    """The dialog's text reaches pinentry as exactly one command per line (14-22 Nov 2026:
+    a raw line break in SETDESC became an unknown command, whose ERR threw away the PIN)."""
+
+    def test_each_line_is_one_known_command(self):
+        import keyguard
+
+        for line in keyguard.pinentry_script().splitlines():
+            self.assertIn(line.split(" ", 1)[0], {"SETTITLE", "SETDESC", "SETPROMPT", "GETPIN", "BYE"}, line)
+        self.assertIn("%0AThis cannot reset", keyguard.pinentry_script())
+
+    def test_a_strict_pinentry_returns_the_pin(self):
+        # A fake pinentry that, like the real one, refuses any unknown command.
+        import subprocess
+        import sys
+        import tempfile
+
+        import keyguard
+
+        fake = (
+            "import sys\nprint('OK Pleased to meet you', flush=True)\n"
+            "for line in sys.stdin:\n"
+            " c = line.split(' ', 1)[0].strip()\n"
+            " if c == 'GETPIN': print('D 123456', flush=True); print('OK', flush=True)\n"
+            " elif c == 'BYE': print('OK closing connection', flush=True); break\n"
+            " elif c in ('SETTITLE', 'SETDESC', 'SETPROMPT'): print('OK', flush=True)\n"
+            " else: print('ERR 536871187 Unknown IPC command', flush=True)\n"
+        )
+        with tempfile.TemporaryDirectory() as d:
+            exe = Path(d) / "pinentry"
+            exe.write_text("#!%s\n%s" % (sys.executable, fake))
+            exe.chmod(0o755)
+            r = subprocess.run([str(exe)], input=keyguard.pinentry_script().encode(), capture_output=True, timeout=20)
+        self.assertNotIn(b"ERR", r.stdout)
+        from unittest import mock
+
+        with mock.patch.object(keyguard, "PINENTRY", str(exe)), mock.patch.object(keyguard.subprocess, "run",
+                return_value=subprocess.CompletedProcess([], 0, stdout=r.stdout, stderr=b"")):  # fmt: skip
+            self.assertEqual(keyguard.desktop_pinentry((None, None, {})), "123456")
+
+    @unittest.skipUnless(Path("/usr/bin/pinentry-gnome3").exists(), "needs the real pinentry-gnome3")
+    def test_the_real_pinentry_accepts_every_line(self):
+        # No GETPIN: nothing is shown, but every command is parsed by the real program.
+        import subprocess
+
+        import keyguard
+
+        r = subprocess.run(["/usr/bin/pinentry-gnome3"], input=keyguard.pinentry_script(get_pin=False).encode(),
+                           capture_output=True, timeout=20)  # fmt: skip
+        self.assertEqual(r.returncode, 0)
+        self.assertNotIn(b"ERR", r.stdout, r.stdout)
 
 
 if __name__ == "__main__":

@@ -55,6 +55,24 @@ private vulnerability reporting (see [SECURITY.md](../SECURITY.md)).
 
 ## Fixed
 
+### The PIN dialog threw away every PIN typed into it (150dd4c to 22 Nov 2026)
+- **What:** the dialog's description held a raw line break. pinentry reads one command per
+  line, so the second sentence arrived as an unknown command and drew
+  `ERR 536871187 Unknown IPC command`. The dialog then took the PIN, the ERR line made the
+  code treat it as "could not be shown", and the PIN was discarded:
+  - in a terminal, it asked again there (two PIN entries for one operation);
+  - with no terminal (a background chain build), it failed with "no terminal, desktop
+    session or systemd password agent for the PIN".
+- **Not affected:** the key itself. The discarded PIN never reached it, so no attempts were
+  used.
+- **How found:** the owner reported a PIN request without a touch. A trace of the signer
+  showed one prompt, failing five seconds in after a value was typed, and the real
+  pinentry answered ERR to the dialog's text.
+- **Fix:** the dialog text is escaped as the protocol requires (`%0A`), and tests run the
+  script through a strict fake and the real pinentry-gnome3. Separately, a PIN is now asked
+  once per command (owner), and an unanswered dialog says so instead of claiming no PIN
+  source exists.
+
 ### Every client connect crashed on main (c22fbf5 to 7650a7d, 20–21 Nov 2026)
 - **What:** the chain-notice watcher added in `c22fbf5` was bound to the name `watch` in
   `supervise()`, which a `CarrierWatch` reused a few lines later; the first status update

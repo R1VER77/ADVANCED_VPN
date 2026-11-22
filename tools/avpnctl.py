@@ -7,6 +7,7 @@ is opt-in and is never automatically selected over an existing VPN.
 """
 
 import argparse
+import contextlib
 import datetime as dt
 import fcntl
 import functools
@@ -2492,13 +2493,19 @@ def main():
     """Command-line entry point: harden the process, parse arguments, run one action."""
     harden_process()
     a = build_parser().parse_args()
-    if a.action in ("request", "enroll", "preferences", "reset") or (a.action == "setup" and a.apply):
-        from controller_mutation import locked
+    # One PIN per command (keyguard.one_pin), except for the long-running supervisor and app
+    # launcher, whose hardware prompts run in their own short-lived signer processes.
+    from keyguard import one_pin
 
-        with locked(a.state):
+    scope = contextlib.nullcontext() if a.action in ("connect", "run") else one_pin()
+    with scope:
+        if a.action in ("request", "enroll", "preferences", "reset") or (a.action == "setup" and a.apply):
+            from controller_mutation import locked
+
+            with locked(a.state):
+                dispatch(a)
+        else:
             dispatch(a)
-    else:
-        dispatch(a)
 
 
 def dispatch(a):

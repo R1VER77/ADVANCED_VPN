@@ -6,6 +6,18 @@ measured figure in the docs names the version it was measured on.
 
 ## Unreleased
 
+- Fixed: the desktop PIN dialog discarded the PIN typed into it since `150dd4c` (a raw line
+  break in its text), which made every hardware operation ask twice in a terminal and fail
+  in the background ([incident](docs/INCIDENTS.md)).
+- One PIN per command: a command or GUI operation that uses the key more than once asks
+  once. The PIN is held in memory for that command only, and dropped on any error. An
+  unanswered dialog now says so.
+- `avpn cloud`:
+  - SSH and scp are retried when the Instance Connect tunnel drops a session before the
+    remote command runs;
+  - a Fly.io exit's outgoing address is documented: shared and movable
+    ([Fly exit](docs/FLY_EXIT.md)).
+- The relay → Fly.io exit chain is built and live.
 - **The GUI's create/join write side** (GLM5.3, merged and re-verified):
   - three wizard actions through the controller's existing preview/apply path behind the
     hardware prompt: operator keys, the operator-protected exit request, and signing the

@@ -63,9 +63,25 @@ def tool(name):
     return found
 
 
-def call(argv, parse=True, stdin=None):
-    """Run a provider CLI command; return its parsed JSON output (or text)."""
-    r = subprocess.run(argv, capture_output=True, text=True, timeout=900, check=False, input=stdin)
+# ssh/scp failing before the remote side ran anything: exit 255 with one of these. The
+# Instance Connect tunnel drops a session now and then right after authentication (live,
+# 22 Nov 2026: "Connection closed by UNKNOWN port 65535" one second into the setup
+# script); every host script this tool runs is safe to run again.
+SSH_TRANSIENT = ("Connection closed by UNKNOWN port 65535", "kex_exchange_identification", "Connection reset by peer")
+SSH_TRIES = 3
+
+
+def call(argv, parse=True, stdin=None, sleep=time.sleep):
+    """Run a provider CLI command; return its parsed JSON output (or text). An ssh or scp
+    whose connection dropped before the remote command ran is tried again (SSH_TRANSIENT)."""
+    for attempt in range(SSH_TRIES):
+        r = subprocess.run(argv, capture_output=True, text=True, timeout=900, check=False, input=stdin)
+        transient = (
+            r.returncode == 255 and Path(argv[0]).name in ("ssh", "scp") and any(t in r.stderr for t in SSH_TRANSIENT)
+        )
+        if not transient or attempt == SSH_TRIES - 1:
+            break
+        sleep(5 * (attempt + 1))
     if r.returncode != 0:
         detail = (r.stderr.strip().splitlines() or ["exit %d" % r.returncode])[-1]
         if "{" in r.stderr:  # OCI prints a JSON service error; its last line is just "}"

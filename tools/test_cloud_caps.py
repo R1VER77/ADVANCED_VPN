@@ -161,6 +161,36 @@ class AddressAgnostic(unittest.TestCase):
                 self.assertEqual(cloud.setup_ssh_source([dict(record=rec)]), "9.9.9.9/32")
 
 
+class TransientSsh(unittest.TestCase):
+    """A dropped Instance Connect tunnel is retried; real failures are not (22 Nov 2026)."""
+
+    def script(self, d, body):
+        exe = Path(d) / "ssh"
+        exe.write_text("#!/bin/sh\n" + body)
+        exe.chmod(0o755)
+        return str(exe)
+
+    def test_a_dropped_tunnel_is_retried_until_it_works(self):
+        with tempfile.TemporaryDirectory() as d:
+            count = Path(d) / "n"
+            ssh = self.script(d, 'n=$(cat %s 2>/dev/null || echo 0); echo $((n+1)) > %s\n'
+                                 'if [ "$n" -lt 2 ]; then echo "Connection closed by UNKNOWN port 65535" >&2; exit 255; fi\n'
+                                 'echo done\n' % (count, count))  # fmt: skip
+            self.assertEqual(cloud.call([ssh, "host", "true"], parse=False, sleep=lambda s: None), "done")
+            self.assertEqual(count.read_text().strip(), "3")
+
+    def test_a_real_failure_or_a_failing_command_is_not_retried(self):
+        with tempfile.TemporaryDirectory() as d:
+            count = Path(d) / "n"
+            for body in ('echo "Permission denied (publickey)." >&2; exit 255',
+                         'echo "Connection closed by UNKNOWN port 65535" >&2; exit 3'):  # fmt: skip
+                count.write_text("0")
+                ssh = self.script(d, "echo $(($(cat %s)+1)) > %s\n%s\n" % (count, count, body))
+                with self.subTest(body=body), self.assertRaises(cloud.CloudError):
+                    cloud.call([ssh, "host", "true"], parse=False, sleep=lambda s: None)
+                self.assertEqual(count.read_text().strip(), "1")
+
+
 class Command(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

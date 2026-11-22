@@ -134,7 +134,39 @@ def desktop_session():
     return int(uid), int(gid), env
 
 
+# The PIN for one command (owner, 22 Nov 2026: an operation needing the key twice must not
+# ask twice). Held in memory only inside one_pin(); never on disk, never in a keyring,
+# never past the command. A long-running process (the supervisor, the GUI's broker)
+# scopes it to one operation, never to its own lifetime.
+_HELD_PIN = contextvars.ContextVar("advanced_vpn_held_pin", default=None)
+
+
+@contextlib.contextmanager
+def one_pin():
+    """Within this scope (one command or one GUI operation), the PIN is asked for once and
+    reused by every later prompt; it is dropped when the scope ends, also on any error,
+    so a wrong PIN is never offered to the key a second time."""
+    holder = {"pin": None}
+    token = _HELD_PIN.set(holder)
+    try:
+        yield
+    finally:
+        holder["pin"] = None
+        _HELD_PIN.reset(token)
+
+
 def pinentry():
+    """The PIN: the one already given in this one_pin() scope, else asked for (_ask_pin)."""
+    holder = _HELD_PIN.get()
+    if holder is not None and holder["pin"] is not None:
+        return holder["pin"]
+    value = _ask_pin()
+    if holder is not None:
+        holder["pin"] = value
+    return value
+
+
+def _ask_pin():
     """PIN source, in order: a desktop dialog (pinentry-gnome3) on the session of the
     person at this keyboard, also under sudo; a terminal (no-echo prompt with a
     visible label); a systemd service without either, e.g. the whole-device unit at
@@ -182,12 +214,32 @@ def pinentry():
     raise RuntimeError("no terminal, desktop session or systemd password agent for the PIN; run interactively")
 
 
+PIN_DIALOG = (
+    ("SETTITLE", "ADVANCED VPN"),
+    ("SETDESC", "Enter your Nitrokey PIN, then touch the key when it flashes.\nThis cannot reset or change the PIN."),
+    ("SETPROMPT", "PIN:"),
+)
+
+
+def assuan_escape(text):
+    """Percent-escape a pinentry (Assuan) argument: a raw line break ends the command, so
+    a second line would arrive as an unknown command (live, 14-22 Nov 2026: the dialog
+    took the PIN, then its ERR line made the PIN be thrown away)."""
+    return text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+
+def pinentry_script(get_pin=True):
+    """The commands sent to pinentry: the dialog's text, then (normally) GETPIN."""
+    lines = ["%s %s" % (command, assuan_escape(text)) for command, text in PIN_DIALOG]
+    return "\n".join(lines + (["GETPIN"] if get_pin else []) + ["BYE"]) + "\n"
+
+
 def desktop_pinentry(session=None):
     """Ask for the FIDO2 PIN with the desktop pinentry dialog; never caches it.
     `session` is (uid, gid, env) from desktop_session(): under sudo the dialog runs
     as the invoking user, in their session."""
     uid, gid, env = session if session else (None, None, dict(os.environ))
-    message = "SETTITLE ADVANCED VPN\nSETDESC Enter your Nitrokey PIN, then touch the key when it flashes.\nThis cannot reset or change the PIN.\nSETPROMPT PIN:\nGETPIN\nBYE\n"
+    message = pinentry_script()
     kw = dict(user=uid, group=gid, extra_groups=[]) if uid is not None else {}
     try:
         cancel = _PROMPT_CANCEL.get()
@@ -223,7 +275,11 @@ def desktop_pinentry(session=None):
                         except subprocess.TimeoutExpired:
                             process.kill()
                             process.wait(timeout=2)
-    except (OSError, subprocess.TimeoutExpired) as e:
+    except subprocess.TimeoutExpired:
+        # The dialog was shown and nobody answered: say so, rather than fall through to a
+        # terminal or service prompt and report that no PIN source exists at all.
+        raise RuntimeError("the PIN dialog was not answered within 3 minutes; run it again at the key") from None
+    except OSError as e:
         raise DialogUnavailable(str(e)) from e
     errors = [v for v in r.stdout.splitlines() if v.startswith(b"ERR ")]
     # Assuan error 83886179 is "Operation cancelled": the person said no; stop there.

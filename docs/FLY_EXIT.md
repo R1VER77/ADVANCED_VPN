@@ -40,6 +40,20 @@ the relay's address. Fly sees the relay's IPv6 and the volume of constant-rate c
 which is the same as any exit host's provider sees. Fly can read the volume's contents
 only if it also holds the Nitrokey's unlock.
 
+## The address websites see
+
+The Machine has no outgoing address of its own: its traffic to websites leaves through
+Fly.io's NAT for the host it runs on. On 21 November that was `152.233.61.18`, while the
+Machine itself held only private `172.19.x` addresses. That address is shared with other
+Fly.io customers on the same host, and it changes if Fly moves the Machine.
+
+So the "a single-tenant exit you own is rarely flagged" argument
+([streaming parity](STREAMING_GEO_PARITY_20261120.md)) does not hold for a Fly exit. A
+`stream-check` result is good only while that address lasts, and has to be re-run after a
+move. A dedicated outgoing address costs about $3.65 a month, which with the Machine
+exceeds the $5 waiver, so the fee guard does not allow it. An exit that must keep one
+address belongs on a host with its own (Oracle, AWS).
+
 ## Limits
 
 - **The deploy token** is a secret with control over the app. Keep it in

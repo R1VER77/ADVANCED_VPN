@@ -226,7 +226,10 @@ class Adapter:
         parsed = avpnctl.build_parser().parse_args(
             ["--state", str(STATE), "--bin-dir", str(ROOT / "bin"), "--json", *arguments]
         )
-        avpnctl.dispatch(parsed)
+        from keyguard import one_pin
+
+        with one_pin():  # one PIN for this one operation, never for the broker's lifetime
+            avpnctl.dispatch(parsed)
 
     def execute(self, caller, request, cancel, progress):
         """A cancellation never resets devices, discards counters or clears a guard."""
@@ -287,7 +290,10 @@ class Adapter:
                         parsed = avpnctl.build_parser().parse_args(
                             ["--state", spec["state"], "--bin-dir", str(ROOT / "bin"), "--json", *spec["argv"]]
                         )
-                        avpnctl.dispatch(parsed)
+                        from keyguard import one_pin
+
+                        with one_pin():  # one PIN for this one operation
+                            avpnctl.dispatch(parsed)
                     else:
                         self.dispatch(spec["argv"])
                     controller_create_join.journal_append(

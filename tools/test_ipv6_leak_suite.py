@@ -24,12 +24,6 @@ import ipv6_leak_suite as suite  # noqa: E402
 # ---------------------------------------------------------------- helpers
 
 
-def free_port(family):
-    with socket.socket(family, socket.SOCK_DGRAM) as s:
-        s.bind(("127.0.0.1" if family == socket.AF_INET else "::1", 0))
-        return s.getsockname()
-
-
 class StunServer(threading.Thread):
     """A real RFC 5389 binding responder: echoes the transaction id and
     returns the XOR-MAPPED-ADDRESS of the observed source, exactly as
@@ -39,11 +33,11 @@ class StunServer(threading.Thread):
         super().__init__(daemon=True)
         self.family = family
         self.mapped = (mapped_host, mapped_port)
-        self.addr = free_port(family)
-        if host is not None:
-            self.addr = (host, self.addr[1])
+        # Bind the real socket to port 0 and read it back: asking for a free port, closing
+        # it and binding again later raced other processes (CI, 21 Nov 2026: EADDRINUSE).
         self.sock = socket.socket(family, socket.SOCK_DGRAM)
-        self.sock.bind(self.addr)
+        self.sock.bind((host or ("127.0.0.1" if family == socket.AF_INET else "::1"), 0))
+        self.addr = self.sock.getsockname()[:2]
         self.sock.settimeout(0.2)
         self.seen = []
         self._stop = threading.Event()
@@ -98,9 +92,9 @@ class DnsServer(threading.Thread):
         self.family = family
         self.a = a_records
         self.aaaa = aaaa_records
-        self.addr = (host or ("127.0.0.1" if family == socket.AF_INET else "::1"), free_port(family)[1])
         self.sock = socket.socket(family, socket.SOCK_DGRAM)
-        self.sock.bind(self.addr)
+        self.sock.bind((host or ("127.0.0.1" if family == socket.AF_INET else "::1"), 0))
+        self.addr = self.sock.getsockname()[:2]
         self.sock.settimeout(0.2)
         self.queries = []
         self._stop = threading.Event()
