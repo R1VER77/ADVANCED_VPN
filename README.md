@@ -48,6 +48,88 @@ flowchart LR
 
 WireGuard is the outer carrier, implemented by a vendored **GotaTun 0.10.2** (`vendor/gotatun`), with its actual DAITA integration and public **Maybenot 2.2.2** defense machines. Its ChaCha20-Poly1305 encryption and 256-bit PSK supplement the existing **two TLS 1.3 X25519 + ML-KEM-768 / AES-256-GCM layers**. WireGuard alone is not advertised as native ML-KEM. Authentication is post-quantum too: both QUIC layers accept **only ML-DSA-65** (FIPS 204) certificate chains and TLS 1.3 CertificateVerify signatures, and operator enrollment bundles require **both the classical operator signature and ML-DSA-65** (plus an optional **third operator signature half** from an **ML-DSA-44** FIDO2 credential on a separate hardware key, `avpn init --pq-vault`, schema 3). The hardware path uses the enrolled FIDO2 credential’s COSE algorithm; the software laboratory signer uses Ed25519. A correctly pinned classical (ECDSA) deployment is refused; the Rust tests prove this and fail if the restriction is removed. The listed VPN network layers enforce their hybrid key-exchange policy; compatibility dependencies and exceptions are named in the inventory. Authentication is post-quantum on the inner tunnels (ML-DSA-65, augmented by per-session hardware FIDO2 authorization when a device key is pinned) and on the cloak (protocol v2: both ends prove the enrolled key with a role-separated HMAC over the hybrid exchange; its browser-facing certificate is an ECDSA facade), while exit DNS either authenticates its DoT upstream (`X25519MLKEM768` enforced) with classical WebPKI signatures or resolves names directly on the exit with a local DNSSEC-validating recursive Unbound resolver (`avpn init --dns-recursive`). [docs/PQ_INVENTORY.md](docs/PQ_INVENTORY.md) separates key exchange from authentication for each layer, with enforcing code, tests and the five named exceptions. The local FIDO PIN/secret channel over USB uses P-256 (CTAP PIN/UV protocols 1 and 2) and is flagged on every key; the full-stack PQ/SafeCurves mandate is a migration target, not a qualification of that hardware boundary.
 
+## Post-quantum security architecture
+
+Imagine a **series of encrypted tunnels nested inside one another**, like reinforced vaults, each with its own encryption and authentication. Surrounding these tunnels are independent systems for traffic camouflage, timing obfuscation, hardware authorization and DNS security.
+
+```mermaid
+flowchart TB
+    subgraph CloakBoundary["Outer Camouflage — Cloak v2 (UDP 443 HTTP/3 QUIC / TCP 443 TLS 1.3 Fallback)"]
+        direction TB
+        CDesc["Hybrid X25519 + ML-KEM-768 key exchange enforced<br/>Mutual role-separated exporter HMAC proof · ECDSA browser-facing facade"]
+        subgraph Layer01["LAYER 01 — OUTER CARRIER: WIREGUARD (Client <-> First Hop)"]
+            direction TB
+            L1Desc["Vendored GotaTun 0.10.2 · Noise IK (X25519) · ChaCha20-Poly1305<br/>256-bit PSK (sealed via hybrid X25519 + ML-KEM-768)<br/>Traffic obfuscation: DAITA / Maybenot 2.2.2 strict constant-rate stream"]
+            subgraph Layer02["LAYER 02 — OUTER QUIC TUNNEL (Client <-> Entry Relay)"]
+                direction TB
+                L2Desc["TLS 1.3 · X25519 + ML-KEM-768 enforced · AES-256-GCM<br/>ML-DSA-65 certificate & CertificateVerify authentication only (classical ECDSA refused)<br/>+ Pinned FIDO2 hardware session authorization (<=12 h)"]
+                subgraph Layer03["LAYER 03 — INNER QUIC TUNNEL (Client <-> Owned / Mesh Exit; + Middle Layer on 3 Hops)"]
+                    direction TB
+                    L3Desc["TLS 1.3 · X25519 + ML-KEM-768 enforced · AES-256-GCM<br/>ML-DSA-65 certificate & CertificateVerify authentication only (classical ECDSA refused)<br/>+ Pinned FIDO2 hardware session authorization (<=12 h)<br/>Carried between servers inside 1242 B paced cells re-keyed every 120 s (X25519 + ML-KEM-768)"]
+                    subgraph Payload["PROTECTED USER TRAFFIC"]
+                        PDesc["Application IPv4 data (inner MTU 1100) inside three independent encryption boundaries"]
+                    end
+                end
+            end
+        end
+    end
+```
+
+*Conceptual nesting diagram (not a literal byte-offset packet trace): **WireGuard itself remains classical X25519 with a hybrid-sealed 256-bit PSK supplement**; the inner QUIC tunnel layers independently enforce hybrid post-quantum key exchange and pure ML-DSA-65 authentication.*
+
+### Identity, authentication, exit DNS paths and the five named exceptions
+
+```mermaid
+flowchart LR
+    subgraph IdentityAuth["1. Identity, Enrollment & Hardware Session Boundary"]
+        USB["Local USB CTAP PIN/UV 1 & 2 Channel<br/>(Classical P-256 ECDH boundary — flagged on every key)"]
+        OpSig["Operator Enrollment Bundle (avpn init)<br/>Required Branch 1: Classical FIDO2 (Ed25519 / ES256)<br/>Required Branch 2: Operator ML-DSA-65 (FIPS 204)<br/>Optional Branch 3 (--pq-vault): 2nd-key FIDO2 ML-DSA-44"]
+        SessAuth["Per-Session Hardware Authorization (<=12 h)<br/>Short-lived session_signer.py certifies fresh ML-DSA-65 leaves<br/>+ FIDO2 WebAuthn device statement verified by every hop"]
+        USB --> OpSig
+        USB --> SessAuth
+    end
+
+    subgraph ExitPaths["2. Traffic Exits & DNS Resolution Paths"]
+        ExitSrv["VPN Exit Server<br/>(Decrypts inner QUIC layer)"]
+        DoT["Default: DNS over TLS (1.1.1.1:853 / 8.8.8.8:853)<br/>Key Exchange: Hybrid X25519 + ML-KEM-768 enforced<br/>Auth: Classical WebPKI (Exception 4)"]
+        Unbound["Opt-In: Recursive Unbound (--dns-recursive)<br/>Direct authoritative queries + QNAME minimisation<br/>Key Exchange: Plain DNS · Auth: Classical DNSSEC (Exception 5)"]
+        WebEgress["Destination Traffic Past Exit<br/>Browser / application TLS (Exception 3)"]
+        ExitSrv -->|"DNS (default)"| DoT
+        ExitSrv -.->|"DNS (opt-in)"| Unbound
+        ExitSrv -->|"App traffic"| WebEgress
+    end
+
+    subgraph ExceptionsBox["3. Five Named Exceptions to Full-Stack PQ (docs/PQ_INVENTORY.md)"]
+        Ex1["Exception 1 (Loud / Contained): Mesh contribution credits<br/>Chaum blind RSA-FDH (IT blindness, classical unforgeability;<br/>bounded by 2-day epoch keys, inflation alarm & v1.0 STARK replacement)"]
+        Ex2["Exception 2: I2P front internal tunnel routing (--front i2p)<br/>Classical X25519/Ed25519 I2P routers (carries hybrid PQ cloak + QUIC inside)"]
+        Ex3["Exception 3: Fast-lane traffic beyond the exit<br/>Destination TLS depends on the remote website & client application"]
+        Ex4["Exception 4: Exit DoT upstream authentication<br/>Hybrid X25519MLKEM768 KEX enforced, but resolver cert is classical WebPKI"]
+        Ex5["Exception 5: Opt-in exit recursive DNS (--dns-recursive)<br/>Plain authoritative DNS queries validated by classical DNSSEC"]
+    end
+
+    IdentityAuth --> ExitSrv
+```
+
+- **Enrollment and session identity:** Classical and post-quantum (`ML-DSA-65`) signatures are both mandatory for every enrollment bundle; an additional hardware-backed `ML-DSA-44` signature on a second key (`--pq-vault`, schema 3) is optional. The QUIC tunnel layers reject classical ECDSA-only certificate deployments even when correctly pinned. A pinned FIDO2 hardware key additionally signs each `≤ 12 h` session statement, while the local USB CTAP PIN/secret channel retains a classical `P-256` ECDH boundary.
+- **Traffic exits and DNS:** After leaving the protected chain at the exit, application traffic uses its own end-to-end TLS while DNS follows one of two explicit paths: **DNS over TLS** (default, enforcing `X25519 + ML-KEM-768` key exchange with classical WebPKI authentication) or **Recursive Unbound** (`--dns-recursive`, resolving names directly on the exit with classical DNSSEC validation over plain upstream DNS).
+
+### Security boundaries at a glance
+
+| Component | Key exchange | Authentication |
+|---|---|---|
+| **WireGuard carrier** (Layer 01) | Classical `X25519` Noise IK + hybrid-sealed 256-bit PSK supplement (`X25519 + ML-KEM-768`) | WireGuard public keys + PSK |
+| **Two (or three) QUIC tunnels** (Layers 02–03) | Hybrid PQ enforced (`X25519MLKEM768` only; classical peers refused) | `ML-DSA-65` (FIPS 204) only (classical ECDSA refused) |
+| **Cloak v2** (UDP/TCP 443 front) | Hybrid PQ enforced (`X25519MLKEM768` only) | Mutual role-separated symmetric HMAC proof over TLS exporter; ECDSA certificate is a browser-facing facade |
+| **Paced server-to-server links** (`src/link.rs`) | Ephemeral `X25519 + ML-KEM-768` in-cell exchange every 120 s (forward-secret; `AES-256-GCM`) | Link PSK (sealed via hybrid `kem_seal`) |
+| **Operator enrollment** (`avpn init`) | Hybrid KEM sealing (`X25519 + ML-KEM-768`) | Classical FIDO2 (`Ed25519` / `ES256`) + `ML-DSA-65` (+ optional 2nd-key `ML-DSA-44` via `--pq-vault`) |
+| **Hardware-bound sessions** (`<=12 h`) | Separate local USB CTAP PIN/UV 1 & 2 boundary (`P-256` ECDH, flagged) | Per-session `ML-DSA-65` leaf certified by long-term identity + pinned FIDO2 device WebAuthn assertion |
+| **Oblivious control plane** (OHTTP) | Hybrid HPKE (`ML-KEM-768 + X25519`, `0x647A`) | Gateway key confirmed by `>=2` independent beacon witness descriptors (`ML-DSA-65`) |
+| **Mix lane** (`avpn mix`, Katzenpost) | `X-Wing` (`ML-KEM-768 + X25519`) Sphinx packets, PQ Noise links & `X25519MLKEM768`-only exit fetches | Hybrid `Ed25519 + SPHINCS+` directory PKI |
+| **Exit DoT** (default DNS) | Hybrid PQ enforced (`X25519MLKEM768` only; fails closed otherwise) | Classical WebPKI (Exception 4) |
+| **Recursive Unbound** (`--dns-recursive`, opt-in) | Plain DNS to authoritative servers (Exception 5) | Classical DNSSEC (Exception 5) |
+
+**The architectural summary:** `cypherpunk_vpn` is a three-boundary encrypted carrier with independently enforced post-quantum inner tunnels, forward-secret paced inter-server links, hardware-linked session identity controls, and constant-rate traffic-analysis defenses. Because of the five named exceptions in [docs/PQ_INVENTORY.md](docs/PQ_INVENTORY.md) (mesh blind-RSA credit unforgeability, I2P internal routing, traffic past the fast-lane exit, exit DoT WebPKI authentication, and opt-in recursive plain DNS/DNSSEC) and the local USB CTAP `P-256` channel, it is documented accurately as a **hybrid post-quantum network architecture** rather than an unconditionally post-quantum system.
+
 ## Principles and roadmap
 
 `cypherpunk_vpn` aims to make verifiable private communication practical: open source,
