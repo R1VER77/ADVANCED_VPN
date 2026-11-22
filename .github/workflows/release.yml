@@ -39,6 +39,15 @@ jobs:
           rustup toolchain install 1.95.0 --profile minimal
           cargo build --release --locked
           sh tools/build-bootstrap.sh
+      - name: Build the desktop app
+        run: |
+          curl -fsSLo "$RUNNER_TEMP/node.tar.xz" https://nodejs.org/dist/v22.23.5/node-v22.23.5-linux-x64.tar.xz
+          printf '%s  %s\n' cdeb8670a0c81f51b4dc4ac61919f9b1ad917b304bf8221eb939570663d240f8 "$RUNNER_TEMP/node.tar.xz" | sha256sum -c -
+          tar -xJf "$RUNNER_TEMP/node.tar.xz" -C "$RUNNER_TEMP"
+          export PATH="$RUNNER_TEMP/node-v22.23.5-linux-x64/bin:$PATH"
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
+          sh tools/build-desktop-app.sh > desktop-app-path.txt
       - name: Package
         run: |
           python3 - <<'PY'
@@ -51,7 +60,11 @@ jobs:
           mkdir dist
           name=advanced-vpn-$TAG-x86_64-linux-gnu.tar.gz
           python3 tools/install.py --pack "dist/$name" --runtime offline-runtime
-          (cd dist && sha256sum "$name" > SHA256SUMS)
+          # The one app file: controller, services and the desktop app.
+          python3 tools/native_package.py --runtime offline-runtime --out native-package \
+            --format deb --epoch "$(git show -s --format=%ct HEAD)" --gui "$(cat desktop-app-path.txt)"
+          cp native-package/*.deb dist/
+          (cd dist && sha256sum "$name" cypherpunk-vpn_*.deb > SHA256SUMS)
       - name: Smoke-test the package's own user installation
         run: |
           mkdir -p "$RUNNER_TEMP/pkg"
@@ -89,18 +102,29 @@ jobs:
       - name: Attest build provenance
         uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
         with:
-          subject-path: dist/*.tar.gz
+          subject-path: |
+            dist/*.tar.gz
+            dist/*.deb
           # Storage records exist only for organisation-owned repositories and are not
           # needed to verify; skipping them keeps the job off artifact-metadata: write.
           create-storage-record: false
       - name: The attestation verifies before anything is published
         run: |
-          gh attestation verify dist/*.tar.gz -R "$GITHUB_REPOSITORY" \
-            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml"
+          for asset in dist/*.tar.gz dist/*.deb; do
+            gh attestation verify "$asset" -R "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml"
+          done
       - name: Publish
         run: |
           cat > notes.md <<NOTES
           Built by GitHub Actions on Ubuntu 22.04 from commit \`$GITHUB_SHA\` (verify passed: $VERIFY_URL).
+
+          **The app.** \`cypherpunk-vpn_*_amd64.deb\` is the controller, its services and the
+          desktop app in one file (Debian 12/13, Ubuntu 22.04/24.04, x86_64). After checking it
+          (below), install it with \`sudo apt install ./cypherpunk-vpn_*_amd64.deb\` and open
+          **Cypherpunk VPN** from the applications menu. Installation enables and starts nothing.
+          The app makes this device's request, imports the signed bundle your operator sends back,
+          and connects; the Nitrokey PIN is asked for in a system dialog, never in the app.
 
           Download it with \`curl -fsSLO\` from this page's asset links (no GitHub account
           needed), or \`gh release download $TAG -R $GITHUB_REPOSITORY\`.

@@ -94,7 +94,7 @@ function setSite(i: number, id: string) {
 .head svg { transform: rotate(180deg); }
 .head .flipped { transform: rotate(0); }
 .pill { color: var(--warn); font-size: 8px; font-weight: 650; letter-spacing: .05em; }
-.body { position: absolute; right: -2px; bottom: 30px; width: 300px; max-height: calc(100vh - 100px); overflow-y: auto; padding: 17px; border: 1px solid var(--line); background: var(--panel); border-radius: 11px; box-shadow: 0 12px 48px #17102622; }
+.body { position: absolute; right: -2px; bottom: 30px; width: 300px; max-height: calc(100vh - 100px); overflow-y: auto; padding: 17px; border: 1px solid var(--line); background: var(--panel); border-radius: 11px; box-shadow: 0 12px 48px #00000022; }
 .note {
   margin: 0 0 8px;
   color: var(--muted);

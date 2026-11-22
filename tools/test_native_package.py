@@ -148,6 +148,112 @@ class NativePackages(unittest.TestCase):
         self.assertNotIn("dpkg", recipe)
         self.assertIn("rpm.vercmp", recipe)
 
+    def run_configure(self, installer_status, controller_active, argument="configure"):
+        """Run the real postinst against a stand-in installer and systemctl; return the calls."""
+        bin_dir = self.fixture.root / "postinst"
+        bin_dir.mkdir(exist_ok=True)
+        log = bin_dir / "calls"
+        log.write_text("")
+        (bin_dir / "install.sh").write_text('#!/bin/sh\necho "install $*" >> %s\nexit %d\n' % (log, installer_status))
+        (bin_dir / "systemctl").write_text(
+            '#!/bin/sh\necho "systemctl $*" >> %s\n[ "$1" != is-active ] || exit %d\n'
+            % (log, 0 if controller_active else 3)
+        )
+        for name in ("install.sh", "systemctl"):
+            (bin_dir / name).chmod(0o755)
+        script = (
+            package.configure()
+            .replace(package.PAYLOAD, str(bin_dir))
+            .replace(package.SYSTEMCTL, str(bin_dir / "systemctl"))
+        )
+        result = subprocess.run(["/bin/sh", "-c", script, "postinst", argument], capture_output=True, text=True)
+        return result.returncode, log.read_text().splitlines()
+
+    def test_upgrade_stops_a_running_controller_only_after_the_new_install_succeeds(self):
+        code, calls = self.run_configure(0, controller_active=True)
+        self.assertEqual(code, 0)
+        self.assertEqual(calls[0], "install --apply --package-managed")
+        self.assertEqual(calls[-1], "systemctl stop " + package.CONTROLLER_UNIT)
+        self.assertFalse(any(" start " in c or " restart" in c or "enable" in c for c in calls))
+        # Not running: nothing is stopped and nothing is started.
+        self.assertNotIn("systemctl stop " + package.CONTROLLER_UNIT, self.run_configure(0, controller_active=False)[1])
+        # A failed install leaves the running controller (and its old slot) alone.
+        code, calls = self.run_configure(1, controller_active=True)
+        self.assertNotEqual(code, 0)
+        self.assertEqual(calls, ["install --apply --package-managed"])
+        self.assertEqual(self.run_configure(0, True, "abort-upgrade"), (0, []))
+
+    def gui_fixture(self, marker=b"GLIBC_2.35"):
+        icon = self.root / package.GUI_ICON
+        icon.parent.mkdir(parents=True, exist_ok=True)
+        icon.write_bytes(b"\x89PNG fixture icon")
+        gui = self.fixture.root / "cypherpunk-vpn-gui"
+        gui.write_bytes(b"\x7fELF desktop app fixture, never run " + marker + b"\x00")
+        gui.chmod(0o755)
+        return gui
+
+    def test_desktop_app_is_staged_unprivileged_with_its_launcher(self):
+        tree = self.output / "root"
+        package.stage(self.root, self.fixture.bundle, tree, self.gui_fixture())
+        app = tree / package.GUI.lstrip("/")
+        self.assertTrue(app.read_bytes().startswith(b"\x7fELF"))
+        self.assertEqual(app.stat().st_mode & 0o7777, 0o755)
+        self.assertEqual(os.readlink(tree / "usr/bin/cypherpunk-vpn-gui"), package.GUI)
+        entry = (tree / "usr/share/applications/cypherpunk-vpn.desktop").read_text()
+        self.assertIn("Exec=cypherpunk-vpn-gui\n", entry)
+        self.assertIn("Terminal=false\n", entry)
+        self.assertNotIn("pkexec", entry)
+        self.assertNotIn("sudo", entry)
+        self.assertTrue((tree / "usr/share/icons/hicolor/128x128/apps/cypherpunk-vpn.png").is_file())
+        # Nothing setuid, and no privileged file appears outside the reviewed payload.
+        for path in tree.rglob("*"):
+            if not path.is_symlink():
+                self.assertFalse(path.stat().st_mode & 0o6000, path)
+        self.assertFalse((tree / "etc").exists())
+
+    def test_without_the_desktop_app_nothing_of_it_is_staged(self):
+        tree = self.output / "root"
+        package.stage(self.root, self.fixture.bundle, tree)
+        self.assertFalse((tree / "usr/share").exists())
+        self.assertFalse((tree / "usr/bin/cypherpunk-vpn-gui").exists())
+
+    def test_desktop_app_built_on_a_newer_glibc_is_refused(self):
+        tree = self.output / "root"
+        with self.assertRaisesRegex(ValueError, "desktop app ABI 2.38 exceeds the declared release baseline"):
+            package.stage(self.root, self.fixture.bundle, tree, self.gui_fixture(b"GLIBC_2.38"))
+
+    def test_desktop_app_must_be_a_regular_elf_file(self):
+        gui = self.gui_fixture()
+        gui.write_bytes(b"#!/bin/sh\nexec id\n")
+        with self.assertRaisesRegex(ValueError, "not an ELF"):
+            package.stage(self.root, self.fixture.bundle, self.output / "a", gui)
+        link = self.fixture.root / "gui-link"
+        link.symlink_to("/bin/true")
+        with self.assertRaisesRegex(ValueError, "regular file"):
+            package.stage(self.root, self.fixture.bundle, self.output / "b", link)
+
+    def test_rpm_recipe_lists_the_desktop_app_only_when_shipped(self):
+        plain, with_gui = package.rpm_spec("1.2.3"), package.rpm_spec("1.2.3", True)
+        self.assertNotIn("webkit2gtk", plain)
+        self.assertNotIn("cypherpunk-vpn.desktop", plain)
+        self.assertIn(package.GUI_RPM_REQUIRES, with_gui)
+        self.assertIn("/usr/bin/cypherpunk-vpn-gui\n", with_gui)
+        self.assertIn("/usr/share/applications/cypherpunk-vpn.desktop\n", with_gui)
+
+    @unittest.skipUnless(Path("/usr/bin/dpkg-deb").exists(), "dpkg-deb required for archive inspection")
+    def test_deb_with_the_desktop_app_depends_on_webkit_and_owns_its_files(self):
+        built = package.debian(self.root, self.fixture.bundle, self.output, epoch=1_700_000_000, gui=self.gui_fixture())
+        depends = subprocess.run(
+            ["/usr/bin/dpkg-deb", "--field", str(built), "Depends"], capture_output=True, text=True, check=True
+        ).stdout
+        self.assertIn(package.GUI_DEB_DEPENDS, depends)
+        listing = subprocess.run(
+            ["/usr/bin/dpkg-deb", "--contents", str(built)], capture_output=True, text=True, check=True
+        ).stdout
+        self.assertIn("." + package.GUI, listing)
+        self.assertIn("./usr/share/applications/cypherpunk-vpn.desktop", listing)
+        self.assertIn("./usr/bin/cypherpunk-vpn-gui -> " + package.GUI, listing)
+
     @unittest.skipUnless(Path("/usr/bin/dpkg-deb").exists(), "dpkg-deb required for archive inspection")
     def test_deb_archive_can_be_inspected_without_running_its_scripts(self):
         built = package.debian(self.root, self.fixture.bundle, self.output, epoch=1_700_000_000)
@@ -157,6 +263,7 @@ class NativePackages(unittest.TestCase):
         self.assertIn("Package: cypherpunk-vpn", fields)
         self.assertIn("Version: 1.2.3-1", fields)
         self.assertNotIn("python3", fields)
+        self.assertNotIn("webkit", fields)
         controls = self.output / "control"
         subprocess.run(["/usr/bin/dpkg-deb", "--control", str(built), str(controls)], check=True)
         self.assertEqual((controls / "postinst").read_text(), package.configure())

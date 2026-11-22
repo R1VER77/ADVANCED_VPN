@@ -210,6 +210,46 @@ def usb_devices(sysfs=Path("/sys")):
     return out
 
 
+def usb_release(vendor, product, sysfs=Path("/sys")):
+    """The firmware release a key reports in its USB descriptor (bcdDevice), as "MAJOR.MINOR",
+    or None. Nitrokey 3 puts its firmware's major and minor version there and reports none over
+    FIDO2; other keys' values are shown only when FIDO2 gives nothing."""
+    found = []
+    for d in sorted((sysfs / "bus/usb/devices").glob("*")):
+        try:
+            if (d / "idVendor").read_text().strip().upper() == vendor and (
+                d / "idProduct"
+            ).read_text().strip().upper() == product:
+                found.append(int((d / "bcdDevice").read_text().strip(), 16))
+        except (OSError, ValueError):
+            continue
+    if len(found) != 1:  # none, or several keys of one model: do not guess which
+        return None
+    return "%d.%d" % (found[0] >> 8, found[0] & 0xFF)
+
+
+def device_summary(findings, sysfs=Path("/sys")):
+    """What setup shows about the one ready key: model, firmware, firmware openness, PIN."""
+    ready = [f for f in findings if f.code == "key_ready"]
+    if len(ready) != 1:
+        return None
+    f = ready[0]
+    vendor, product = f.detail.get("vendor"), f.detail.get("product")
+    firmware = f.detail.get("firmware")
+    if firmware:
+        version, source = str(firmware), "fido2"
+    else:
+        version, source = usb_release(vendor, product, sysfs), "usb"
+    return dict(
+        name=key_name(vendor, product) or RANKED_ONLY.get((vendor, product)) or "Security key",
+        firmware=version,
+        firmware_source=source if version else None,
+        open_firmware=f.detail.get("tier") == "cypherpunk_preferred",
+        verification=f.detail.get("verification"),
+        pin_retries=f.detail.get("pin_retries"),
+    )
+
+
 def probe_device(node, dev=Path("/dev")):
     """What the key says about itself, without a PIN or a touch: CTAP2 getInfo and, when a PIN
     is set, the retries left. Returns a dict (raises OSError if the device cannot be opened)."""

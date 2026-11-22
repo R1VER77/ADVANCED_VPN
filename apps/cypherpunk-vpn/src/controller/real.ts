@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { ActionPlan, ActionRequest, AutoconnectPolicy, MultihopPresets, Operation, ProviderSearchPage, SetupBranch, SetupSnapshot, Status, StreamingEligibility } from './types'
+import type { ActionPlan, ActionRequest, AutoconnectPolicy, BuildStatus, MultihopPresets, Operation, OperatorState, ProviderSearchPage, SetupBranch, SetupSnapshot, Status, StreamingEligibility } from './types'
 
 const MAX_RESPONSE = 256 * 1024
 
@@ -55,4 +55,23 @@ export const controller = {
       || policy.trusted_ssids_count > 1000) throw new Error('invalid_autoconnect_policy')
     return policy
   },
+}
+
+// The own-servers side of setup: the user helper behind fixed native commands.
+async function helper<T>(command: string, args: Record<string, unknown> = {}): Promise<T> {
+  const value = await read<T & { error?: string }>(command, args)
+  if (value.error) throw new Error(value.error)
+  return value
+}
+
+export const operator = {
+  state: () => helper<OperatorState>('operator_state'),
+  check: (key: string) => helper<{ schema: 1; key: string; ready: boolean; why: string }>('operator_provider', { command: 'check', key }),
+  add: (key: string) => helper<OperatorState>('operator_provider', { command: 'add', key }),
+  remove: (key: string) => helper<OperatorState>('operator_provider', { command: 'remove', key }),
+  build: (order: string[], hours: number, request: string) => invoke<void>('operator_build', { order, hours, request }),
+  buildStatus: () => read<BuildStatus>('operator_build_status'),
+  export: (request: string) => helper<{ schema: 1; path: string }>('operator_export', { request }),
+  // Opens the browser for the cloud sign-in this recorded server uses; resolves when it is done.
+  signin: (server: string) => helper<{ schema: 1; server: string; profile: string; ready: boolean; why: string }>('operator_signin', { server }),
 }

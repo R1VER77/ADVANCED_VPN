@@ -1,0 +1,79 @@
+{
+  "license": "CC0-1.0",
+  "packages": {
+    "simple-icons": {
+      "version": "16.36.0",
+      "tarball_sha256": "2069d8e682dda3aa05fa71de36c0ab17984e62d2bd34d7082c4a85e0691b4235",
+      "source": "https://www.npmjs.com/package/simple-icons/v/16.36.0"
+    },
+    "@iconify-json/logos": {
+      "version": "1.2.19",
+      "tarball_sha256": "1e8907c088bbf02eab8ee1b28f37e68ef22c380f2fb579ff99736b8ce5abf13a",
+      "source": "https://www.npmjs.com/package/@iconify-json/logos/v/1.2.19"
+    }
+  },
+  "icons": {
+    "oci": {
+      "package": "@iconify-json/logos",
+      "icon": "oracle",
+      "crop": "-2 -2 112 71"
+    },
+    "aws": {
+      "package": "@iconify-json/logos",
+      "icon": "aws"
+    },
+    "azure": {
+      "package": "@iconify-json/logos",
+      "icon": "microsoft-azure"
+    },
+    "gcp": {
+      "package": "@iconify-json/logos",
+      "icon": "google-cloud"
+    },
+    "digitalocean": {
+      "package": "@iconify-json/logos",
+      "icon": "digital-ocean-icon"
+    },
+    "vultr": {
+      "package": "@iconify-json/logos",
+      "icon": "vultr-icon"
+    },
+    "fly": {
+      "package": "simple-icons",
+      "icon": "flydotio"
+    },
+    "akamai": {
+      "package": "simple-icons",
+      "icon": "akamai"
+    },
+    "hetzner": {
+      "package": "simple-icons",
+      "icon": "hetzner"
+    },
+    "ovh": {
+      "package": "simple-icons",
+      "icon": "ovh"
+    },
+    "netcup": {
+      "package": "simple-icons",
+      "icon": "netcup"
+    },
+    "ionos": {
+      "package": "simple-icons",
+      "icon": "ionos"
+    },
+    "scaleway": {
+      "package": "simple-icons",
+      "icon": "scaleway"
+    },
+    "infomaniak": {
+      "package": "simple-icons",
+      "icon": "infomaniak"
+    },
+    "exoscale": {
+      "package": "simple-icons",
+      "icon": "exoscale"
+    }
+  },
+  "note": "Trademarks belong to their owners; the marks only identify each provider in the provider list."
+}

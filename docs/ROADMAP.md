@@ -151,7 +151,14 @@ throughout.
   selection, and a viability check (verified, current, protection intact, servers healthy)
   that decides what each launch shows.
 - [ ] The GUI ([`apps/cypherpunk-vpn`](../apps/cypherpunk-vpn)) appears when provisioning
-  completes, and on later launches offers the viable profiles or adding one. It stays driven
+  completes, and on later launches offers the viable profiles or adding one. **v0.11.0**
+  ships it inside the native `.deb` with one *Start setup* checklist: key check and access,
+  the key's distribution software (upgrades only on request), device keys, providers in a
+  randomly named profile, a route of 1-3 recorded servers with their jurisdictions, and
+  connect, with no copy and paste. Still open for v2: creating servers from the app,
+  adding a device to a route without rebuilding the servers (today a build re-keys them
+  and earlier devices must be set up again), and GLM5.3's in-progress items (profile
+  store, mesh membership review, research batch, IPv6 inside the tunnel). It stays driven
   by the same typed controller checks, with honest progress, actionable failure states
   (including a chain that stops answering) and explicit review of privileged or billable
   changes.

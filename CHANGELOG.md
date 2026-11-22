@@ -4,7 +4,74 @@ User-visible changes per release, newest first. Defects that affected security, 
 availability or a published claim are in [docs/INCIDENTS.md](docs/INCIDENTS.md). Every
 measured figure in the docs names the version it was measured on.
 
-## Unreleased
+## v0.11.0 (22 Nov 2026)
+
+- **One app file.** `cypherpunk-vpn_0.11.0-1_amd64.deb` now carries the desktop app with
+  the controller: `sudo apt install ./cypherpunk-vpn_*_amd64.deb`, then open Cypherpunk VPN
+  from the menu. Built on Ubuntu 22.04 (glibc 2.35); the package refuses an app built on a
+  newer system. Installing still enables and starts nothing.
+- **Setup in the app** is one checklist started with *Start setup*:
+  1. the security key: whether it is usable, and if not, which keys are; desktop access
+     (the udev rule) is given by itself;
+  2. the key's software from the system's package sources (`libfido2-1`, plus
+     `yubikey-manager` or `trezor` for those keys). A missing package is installed; a newer
+     version is only offered, as a separate approval, so an older or custom build can stay;
+  3. this device's keys (PIN and touch);
+  4. cloud providers, saved to a profile with a random name that shows how many providers
+     are active (have a server);
+  5. the route: 1 to 3 hops from your recorded servers, each with its jurisdiction, and a
+     warning when one legal system or one provider covers both ends. *Build my route* signs
+     the chain on your servers and the app installs the signed route itself;
+  6. connect, for VPN applications only or the whole device.
+
+  No key, request or file is copied or pasted by hand. Joining someone else's network saves
+  the device request to Documents and opens their signed file. The operator side runs as
+  you (`avpn-desktop`, fixed commands only), so cloud sign-ins never reach the root
+  controller and device keys never leave it. Creating new servers from the app is for a
+  later version.
+
+  Each step, and each stage of *Build my route*, shows a turning gray circle while it works
+  and a green tick when it is done. The key step names the key and its firmware (for a
+  Nitrokey 3, read from its USB descriptor, as FIDO2 reports none); the software step lists
+  each package and its version. The provider list also searches every OpenTofu registry
+  provider (marked as not yet set up by the app), locally in the controller.
+- **Upgrading the package** stops a running controller once the new version is installed,
+  so the app's next request starts the new one; nothing else is stopped or started. Install
+  output is three lines unless a host check fails.
+
+  Known limit: building a route reinstalls the servers with fresh keys and signs the route
+  for the one device doing the setup, as `avpn cloud chain --apply` does. Any device set up
+  earlier must be set up again; the app says so above the button. Adding a device to a
+  route without rebuilding it is for a later version.
+- **Signed-out cloud accounts are caught first.** Before the security key is asked for
+  anything, *Build my route* checks the sign-in of every server in the route, for the AWS
+  profile that server uses (the CLI's default profile says nothing about it). A run-out
+  sign-in gets a **Sign in to AWS** button: `aws login` opens the browser and takes the
+  result on a local callback, nothing pasted, and the route builds by itself afterwards. A
+  failed stage shows a red cross, and the build's full output is kept beside the request
+  (`~/.config/…/desktop/build-*.log`, owner-only), named in the error.
+- **Fixed: servers never installed security updates, and a rebuild could not get apt's lock**
+  ([incident](docs/INCIDENTS.md)). The egress lock's update window let root out, but apt
+  downloads as `_apt` and names resolve through the system resolver's own user, so every
+  update hung. The supervisor retried each failure at once, so apt's lock was nearly always
+  held; and updates ran inside the supervisor's sandbox, which forbids setting a setuid
+  file, so sudo's security fix could never install. The window now lets those two users out
+  too (still counted against the cap). The update runs as its own transient unit, with
+  download timeouts and a runtime limit, and a failed one waits an hour. Setup and
+  `cloud host update` stop a pending daily update, wait for apt's lock rather than fail, and
+  recover a server still running the old supervisor.
+- **The provider list** names cloud services, not companies ("Amazon Web Services (AWS)
+  EC2", "Microsoft Azure Virtual Machines", "Oracle Cloud Infrastructure (OCI) Always
+  Free"), with their logos. Privacy hosts come first, then non-US providers, then US ones,
+  each by included data. Every entry shows roughly what a month of 300 GB costs. Prices and
+  logos ship with the release, dated (22 November 2026); the app fetches neither. Logos are
+  from CC0 icon sets, pinned by digest (`tools/provider_logos.py`).
+- The app is black, white and gray.
+- [Privacy notice](docs/PRIVACY_NOTICE.md) and [terms of service](docs/TERMS_OF_SERVICE.md).
+- Correction: the create-branch wizard actions listed below (operator keys, exit request,
+  route signing) were never admitted by the controller's D-Bus action schema, so the app
+  could not reach them. The app's own-servers setup above replaces them; the controller
+  code and its tests remain.
 
 - Fixed: the desktop PIN dialog discarded the PIN typed into it since `150dd4c` (a raw line
   break in its text), which made every hardware operation ask twice in a terminal and fail

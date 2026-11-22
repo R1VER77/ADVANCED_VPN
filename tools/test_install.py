@@ -61,7 +61,7 @@ class UserInstallTests(unittest.TestCase):
 
     def test_installs_a_working_command_line(self):
         app = self.install()
-        for b in install.BINARIES + ["avpnctl", "avpn-cloud", "avpn-mesh"]:
+        for b in install.BINARIES + ["avpnctl", "avpn-cloud", "avpn-mesh", "avpn-desktop"]:
             self.assertTrue(os.access(app / "bin" / b, os.X_OK), b)
         self.assertTrue((app / "docs/cli/overview.md").exists())
         self.assertFalse(list(app.rglob("__pycache__")))

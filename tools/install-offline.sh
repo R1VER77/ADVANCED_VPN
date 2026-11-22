@@ -6,6 +6,7 @@ package_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 install_mode=0
 operator_only=0
 removal=0
+package_managed=0
 protection=none
 previous=
 for argument do
@@ -16,6 +17,7 @@ for argument do
         --apply) install_mode=1 ;;
         --user) install_mode=1; operator_only=1 ;;
         --uninstall) removal=1 ;;
+        --package-managed) package_managed=1 ;;
     esac
     previous=$argument
 done
@@ -27,6 +29,14 @@ if [ "$install_mode" = 1 ] && [ "$removal" = 0 ]; then
     fi
     if [ "$operator_only" = 1 ]; then
         "$preflight" --package "$package_dir" --target "${XDG_DATA_HOME:-$HOME/.local/share}/advanced-vpn" --operator-only
+    elif [ "$package_managed" = 1 ]; then
+        # Inside apt: one line when the checks pass, the full report only when they do not.
+        if report=$("$preflight" --package "$package_dir" --target /opt --protect "$protection"); then
+            printf '%s\n' 'cypherpunk-vpn: host checks passed.'
+        else
+            printf '%s\n' "$report" >&2
+            exit 1
+        fi
     else
         "$preflight" --package "$package_dir" --target /opt --protect "$protection"
     fi

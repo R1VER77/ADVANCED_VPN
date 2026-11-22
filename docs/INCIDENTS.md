@@ -55,6 +55,30 @@ private vulnerability reporting (see [SECURITY.md](../SECURITY.md)).
 
 ## Fixed
 
+### Servers never installed security updates; a rebuild could not get apt's lock (21–22 Nov 2026)
+- **What:** the egress lock (v0.11.0's fee guard) let only root out during the daily update
+  window. apt downloads as its own user (`_apt`) and names resolve through
+  `systemd-resolved`'s user, so both were dropped and every `apt-get update` hung until
+  killed. The supervisor then retried at once, so a hung update held apt's lock almost all
+  the time. The update also ran inside the supervisor's sandbox (`RestrictSUIDSGID`), where
+  dpkg cannot set a setuid file, so sudo's security fix (`1.9.16p2-3+deb13u5`) failed on
+  every one of 27 attempts on the relay.
+- **Effect:** no security updates on servers built since the fee guard (the relay ran a
+  known-vulnerable sudo). The owner's first route build from the app stopped at
+  "Install avpn-relay as the relay", waiting on apt's lock.
+- **Not affected:** VPN traffic and the egress lock itself (the hung updates sent nothing;
+  the cap and the lock held throughout).
+- **How found:** the failed build. On the relay, the lock holder was the supervisor's
+  `apt-get update`, stuck in name resolution for non-root users, and its journal showed
+  the setuid refusal.
+- **Fix:** the window also lets out apt's user and the resolver's user (counted against the
+  cap like the rest). The update runs as its own transient systemd unit, outside the
+  supervisor's sandbox, with download timeouts and a runtime limit inside the window; a
+  failed one waits an hour. Setup and `cloud host update` stop a pending update, wait for
+  apt's lock, and recover a server still running the old supervisor. Each is tested
+  against stand-ins of the host's tools, with mutants of the retry, the helpers, the
+  unit and the lock wait all failing tests.
+
 ### The PIN dialog threw away every PIN typed into it (150dd4c to 22 Nov 2026)
 - **What:** the dialog's description held a raw line break. pinentry reads one command per
   line, so the second sentence arrived as an unknown command and drew

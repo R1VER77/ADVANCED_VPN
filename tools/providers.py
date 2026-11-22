@@ -206,6 +206,120 @@ FLY = dict(key="fly", name="Fly.io (within the $5 waiver)", short="Fly.io", term
            source="https://docs.fly.io/about/pricing")  # fmt: skip
 ALL_KEYS = {p["key"] for p in PROVIDERS} | {p["key"] for p in NON_US} | {p["key"] for p in LOW_COST} | {"fly"}
 
+# The desktop app's provider list (apps/cypherpunk-vpn/src/controller/providers.json,
+# generated from this table with `--generate`). Prices are what each provider or a pricing
+# survey listed on APP_CHECKED, in US dollars, rounded; the app shows that date and never
+# fetches a price (a recurring fetch from the device would mark it). `egress_gb` is the
+# monthly outbound data included: a number, "unmetered", or None when unconfirmed.
+# `over_usd_gb` is the price per GB beyond it. Privacy tiers: 1 = a privacy host (pays
+# without identity, privacy-minded jurisdiction), 2 = a non-US company under GDPR-style
+# law, 3 = a US company (the CLOUD Act reaches its servers wherever they stand).
+# Considered and left out (2026-11-22): Koyeb. Its Master Services Agreement s.10.2 names
+# "proxy anonymization services" as forbidden use, with suspension at Koyeb's discretion;
+# raw TCP is a public preview; new users need the $29/month Pro plan; Mistral AI is buying it.
+APP_CHECKED = "2026-11-22"
+APP_PLAN_GB = MEMBER_GB
+EUR = 1.16  # USD per EUR on APP_CHECKED, for the euro-priced hosts
+APP_CATALOG = [
+    dict(key="njalla", service="Njalla VPS", company="Njalla", parent="KN", tier=1,
+         server_usd=round(15 * EUR, 2), egress_gb=None, over_usd_gb=None, how="ssh",
+         why="crypto payment, no identity required, registered in Nevis",
+         note="traffic allowance not published", source="https://njal.la/vps/"),
+    dict(key="flokinet", service="FlokiNET VPS", company="FlokiNET", parent="IS", tier=1,
+         server_usd=round(7.99 * EUR, 2), egress_gb=3000, over_usd_gb=None, how="ssh",
+         why="crypto payment, no identity required, Icelandic company",
+         note="servers in Iceland, Romania, Finland and the Netherlands", source="https://flokinet.is/vps.php"),
+    dict(key="1984", service="1984 Hosting VPS", company="1984 ehf.", parent="IS", tier=1,
+         server_usd=round(7.6 * EUR, 2), egress_gb=1000, over_usd_gb=None, how="ssh",
+         why="crypto payment, Icelandic free-speech host", note="reviews disagree on the traffic cap",
+         source="https://1984.hosting/product/vps/"),
+    dict(key="netcup", service="netcup VPS", company="netcup GmbH", parent="DE", tier=2,
+         server_usd=round(4 * EUR, 2), egress_gb="unmetered", over_usd_gb=None, how="ssh",
+         why="German company, GDPR", note="fair-use limit reported as 2 TB a day",
+         source="https://www.netcup.com/en/server/vps"),
+    dict(key="ovh", service="OVHcloud VPS", company="OVHcloud", parent="FR", tier=2,
+         server_usd=4.54, egress_gb="unmetered", over_usd_gb=None, how="ssh",
+         why="French company, GDPR", note="500 Mbit/s; its rules forbid Tor exits",
+         source="https://www.ovhcloud.com/en/vps/"),
+    dict(key="ionos", service="IONOS VPS", company="IONOS SE", parent="DE", tier=2,
+         server_usd=2.0, egress_gb="unmetered", over_usd_gb=None, how="ssh",
+         why="German company, GDPR", note="lowest price needs a 24-month term",
+         source="https://www.ionos.com/servers/vps"),
+    dict(key="scaleway", service="Scaleway Instances", company="Scaleway SAS", parent="FR", tier=2,
+         server_usd=round(7.75 * EUR, 2), egress_gb="unmetered", over_usd_gb=None, how="ssh",
+         why="French company, GDPR", note="DEV1-S with a public IPv4; 200 Mbit/s",
+         source="https://www.scaleway.com/en/pricing/virtual-instances/"),
+    dict(key="hetzner", service="Hetzner Cloud", company="Hetzner Online GmbH", parent="DE", tier=2,
+         server_usd=round(5.99 * EUR, 2), egress_gb=20000, over_usd_gb=None, how="ssh",
+         why="German company, GDPR", note="20 TB in EU locations, 1 TB in the US; new servers sometimes restricted",
+         source="https://www.hetzner.com/cloud"),
+    dict(key="infomaniak", service="Infomaniak Public Cloud", company="Infomaniak", parent="CH", tier=2,
+         server_usd=None, egress_gb=None, over_usd_gb=None, how="ssh",
+         why="Swiss company, Swiss data protection law", note="price not checked",
+         source="https://www.infomaniak.com/en/hosting/public-cloud"),
+    dict(key="exoscale", service="Exoscale Compute", company="Exoscale (A1 Digital)", parent="CH", tier=2,
+         server_usd=None, egress_gb=None, over_usd_gb=None, how="ssh",
+         why="Swiss company, Swiss data protection law", note="price not checked",
+         source="https://www.exoscale.com/pricing/"),
+    dict(key="oci", service="Oracle Cloud Infrastructure (OCI) Always Free", company="Oracle", parent="US", tier=3,
+         server_usd=0.0, egress_gb=10240, over_usd_gb=0.0085, how="create",
+         why="US company", note="free with no expiry; idle servers can be reclaimed",
+         source="https://www.oracle.com/cloud/networking/pricing/"),
+    dict(key="racknerd", service="RackNerd KVM VPS", company="RackNerd", parent="US", tier=3,
+         server_usd=1.83, egress_gb=3000, over_usd_gb=None, how="ssh",
+         why="US company", note="yearly promotions; stock varies", source="https://www.racknerd.com/kvm-vps"),
+    dict(key="akamai", service="Akamai Cloud (Linode)", company="Akamai", parent="US", tier=3,
+         server_usd=5.0, egress_gb=1000, over_usd_gb=0.005, how="ssh",
+         why="US company", note="Nanode 1 GB", source="https://www.linode.com/pricing/"),
+    dict(key="vultr", service="Vultr Cloud Compute", company="Vultr", parent="US", tier=3,
+         server_usd=5.0, egress_gb=1000, over_usd_gb=0.01, how="ssh",
+         why="US company", note="", source="https://www.vultr.com/pricing/"),
+    dict(key="digitalocean", service="DigitalOcean Droplets", company="DigitalOcean", parent="US", tier=3,
+         server_usd=4.0, egress_gb=500, over_usd_gb=0.01, how="ssh",
+         why="US company", note="included transfer is pooled across an account's Droplets",
+         source="https://www.digitalocean.com/pricing/droplets"),
+    dict(key="fly", service="Fly.io Machines", company="Fly.io", parent="US", tier=3,
+         server_usd=2.19, egress_gb=0, over_usd_gb=0.02, how="create",
+         why="US company", note="bills under $5 a month are waived; IPv6 exit only; no spending limit",
+         source="https://fly.io/docs/about/pricing/"),
+    dict(key="azure", service="Microsoft Azure Virtual Machines", company="Microsoft", parent="US", tier=3,
+         server_usd=7.59, egress_gb=100, over_usd_gb=0.087, how="ssh",
+         why="US company", note="B1s; free for 12 months on a new account",
+         source="https://azure.microsoft.com/pricing/details/bandwidth/"),
+    dict(key="aws", service="Amazon Web Services (AWS) EC2", company="Amazon", parent="US", tier=3,
+         server_usd=12.0, egress_gb=100, over_usd_gb=0.09, how="create",
+         why="US company", note="t3.micro with disk and IPv4; new accounts get credits for 6 months",
+         source="https://aws.amazon.com/ec2/pricing/on-demand/"),
+    dict(key="gcp", service="Google Cloud Compute Engine", company="Google", parent="US", tier=3,
+         server_usd=0.0, egress_gb=1, over_usd_gb=0.12, how="ssh",
+         why="US company", note="one free e2-micro in three US regions",
+         source="https://cloud.google.com/vpc/network-pricing"),
+]  # fmt: skip
+
+
+def month_usd(p, gb=APP_PLAN_GB):
+    """About what a month of `gb` out costs on one server, or None when a price is unknown."""
+    if p["server_usd"] is None:
+        return None
+    egress = p["egress_gb"]
+    if egress == "unmetered" or (isinstance(egress, int) and egress >= gb):
+        return round(p["server_usd"], 2)
+    if egress is None or p["over_usd_gb"] is None:
+        return None
+    return round(p["server_usd"] + (gb - egress) * p["over_usd_gb"], 2)
+
+
+def app_catalog():
+    """The app's list: privacy tier first, then the most included data, then the cheapest."""
+
+    def data(p):
+        e = p["egress_gb"]
+        return float("inf") if e == "unmetered" else -1 if e is None else e
+
+    rows = [dict(p, month_usd=month_usd(p), sphere=p["parent"]) for p in APP_CATALOG]
+    rows.sort(key=lambda p: (p["tier"], -data(p), p["month_usd"] if p["month_usd"] is not None else 1e9, p["key"]))
+    return dict(schema=1, checked=APP_CHECKED, plan_gb=APP_PLAN_GB, providers=rows)
+
 
 def sphere(key):
     """A provider's legal sphere, or None for your own host (whose country decides)."""
@@ -385,6 +499,14 @@ def endpoints_page():
     return "".join(out)
 
 
+APP_CATALOG_PATH = "apps/cypherpunk-vpn/src/controller/providers.json"
+
+
+def app_catalog_text():
+    """The generated app list, as written (the test suite compares it)."""
+    return json.dumps(app_catalog(), indent=1) + "\n"
+
+
 if __name__ == "__main__":
     import sys
 
@@ -392,6 +514,7 @@ if __name__ == "__main__":
         root = Path(__file__).resolve().parents[1]
         (root / "src/bin/avpn/get_started.txt").write_text(get_started_text())
         (root / "docs/cli/endpoints.md").write_text(endpoints_page())
-        print("wrote src/bin/avpn/get_started.txt and docs/cli/endpoints.md")
+        (root / APP_CATALOG_PATH).write_text(app_catalog_text())
+        print("wrote src/bin/avpn/get_started.txt, docs/cli/endpoints.md and " + APP_CATALOG_PATH)
     else:
         print(json.dumps(ranked(), indent=2))

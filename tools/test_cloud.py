@@ -1996,7 +1996,9 @@ class HostScriptTests(unittest.TestCase):
         (app / "bin").symlink_to("current-bin")
         r = self.setup("relay")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertNotIn("systemctl stop", self.log())
+        # a slotted installation keeps running (only the daily update gives way to the window)
+        self.assertNotIn("systemctl stop advanced-vpn.service", self.log())
+        self.assertNotIn("systemctl stop advanced-vpn-guard.service", self.log())
         self.assertIn("install --apply\n", self.log())
 
     def systemd_creds_stub(self, body):

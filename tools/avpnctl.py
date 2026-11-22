@@ -1021,6 +1021,12 @@ class ServerFees:
     # image host (a Fly.io Machine's root resets: its image is rebuilt instead).
     UPDATE_EVERY = 86400
     UPDATE_TIMEOUT = 1800
+    # A failed update tries again in an hour, not at once: each attempt holds apt's lock
+    # and opens the window, and an immediate retry kept both near-permanently in use.
+    UPDATE_RETRY = 3600
+    UPDATE_UNIT = "advanced-vpn-security-update"
+    # apt's download sandbox and the system resolver: root's updates go through both.
+    UPDATE_HELPERS = ("_apt", "systemd-resolve", "systemd-resolved")
 
     def __init__(self, profile, cfg, state, service_uid, lab=False, front_uid=None):
         import fee_guard
@@ -1035,6 +1041,7 @@ class ServerFees:
         self.last_update_path = self.cap_path.with_name("last-update")
         self.update_proc = None
         self.update_started = 0.0
+        self.update_retry_at = 0.0
         self.image = Path("/opt/advanced-vpn/IMAGE").exists()
         self.shared = not lab and retention.SHARED_MARKER.exists()
         self.kind, self.cap = fee_guard.read_cap(self.cap_path)
@@ -1075,7 +1082,20 @@ class ServerFees:
             extra_uids=[self.front_uid] if self.front_uid else (),
             maintenance=self.maintenance,
             lab_transit=self.lab,
+            maintenance_uids=self.update_helper_uids() if self.maintenance else (),
         )
+
+    def update_helper_uids(self):
+        """The users root's updates depend on, as present on this host."""
+        import pwd
+
+        found = []
+        for name in self.UPDATE_HELPERS:
+            try:
+                found.append(pwd.getpwnam(name).pw_uid)
+            except KeyError:
+                pass
+        return sorted(set(found))
 
     def install(self, now=None):
         """Lock egress (dedicated hosts) and set the quota; before any child starts."""
@@ -1099,23 +1119,43 @@ class ServerFees:
             if not done and now - self.update_started > self.UPDATE_TIMEOUT:
                 self.update_proc.kill()
                 self.update_proc.wait()
+                # The transient unit runs on its own: stop it, so nothing outlives the window.
+                run_unit = shutil.which("systemctl")
+                if run_unit:
+                    subprocess.run([run_unit, "stop", self.UPDATE_UNIT + ".service"], capture_output=True, timeout=30)
                 done = True
             if done:
                 if self.update_proc.returncode == 0:
                     self.last_update_path.write_text(dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"))
+                else:
+                    self.update_retry_at = now + self.UPDATE_RETRY
                 self.update_proc = None
             return
         exe = shutil.which("unattended-upgrade")
         capped = self.cap is not None and used >= self.cap
         if self.lab or self.shared or self.image or capped or not exe or now - self.last_update() < self.UPDATE_EVERY:
             return
+        if now < self.update_retry_at:
+            return
         # tick() opens the window (and tells the table watch) as soon as this process
-        # exists; the download waits two seconds for it.
+        # exists; the download waits two seconds for it. Downloads give up rather than hang.
         self.update_started = now
+        apt_update = (
+            "sleep 2 && apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 "
+            "-o Acquire::https::Timeout=30 update -qq && " + shlex.quote(exe)
+        )
+        # In its own transient unit: this service's sandbox (RestrictSUIDSGID, its
+        # capability set) stops dpkg setting a setuid file, so a sudo update never installed.
+        # The unit's own limit ends it before the window does.
+        argv = ["/bin/sh", "-c", apt_update]
+        systemd_run = shutil.which("systemd-run")
+        if systemd_run:
+            argv = [systemd_run, "--wait", "--collect", "--quiet", "--unit=" + self.UPDATE_UNIT,
+                    "--property=RuntimeMaxSec=%d" % (self.UPDATE_TIMEOUT - 100),
+                    "--setenv=DEBIAN_FRONTEND=noninteractive", "--", *argv]  # fmt: skip
         env = dict(os.environ, DEBIAN_FRONTEND="noninteractive")
-        apt_update = "sleep 2 && apt-get update -qq && " + shlex.quote(exe)
-        self.update_proc = subprocess.Popen(["/bin/sh", "-c", apt_update], stdout=subprocess.DEVNULL,
-                                            stderr=subprocess.DEVNULL, env=env, start_new_session=True)  # fmt: skip
+        self.update_proc = subprocess.Popen(argv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env,
+                                            start_new_session=True)  # fmt: skip
 
     def quota_present(self):
         """Whether the kernel quota table still exists."""

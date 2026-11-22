@@ -302,7 +302,12 @@ def write_tool_launchers(stage, python=None):
     # dirname of that link would name /usr/local instead of this slot.
     header = 'slot=$(CDPATH= cd -P "$(dirname -- "$(readlink -f -- "$0")")/.." && pwd -P) || exit 1\n'
     interpreter = shlex.quote(str(python)) if python is not None else '"$slot/venv/bin/python3"'
-    for name, script in (("avpnctl", "avpnctl.py"), ("avpn-cloud", "cloud.py"), ("avpn-mesh", "mesh.py")):
+    for name, script in (
+        ("avpnctl", "avpnctl.py"),
+        ("avpn-cloud", "cloud.py"),
+        ("avpn-mesh", "mesh.py"),
+        ("avpn-desktop", "desktop_setup.py"),
+    ):
         arguments = ' --bin-dir "$slot/bin"' if name == "avpnctl" else ""
         launcher(
             stage / "bin" / name, header + 'exec %s -B -E -s "$slot/tools/%s"%s "$@"' % (interpreter, script, arguments)
@@ -1037,12 +1042,22 @@ def apply_system(a, package, units, apparmor, stable):
             atomic(PACKAGE_OWNER, PACKAGE_OWNER_BYTES)
     print(
         ("Upgraded" if upgraded else "Installed")
-        + " /opt/advanced-vpn without activation; "
-        + ("`sudo avpn` now works." if linked else "see the warning above about /usr/local/bin."),
+        + " /opt/advanced-vpn without activation"
+        + (": nothing is enabled or started." if a.package_managed else "; ")
+        + (
+            ""
+            if a.package_managed
+            else "`sudo avpn` now works."
+            if linked
+            else "see the warning above about /usr/local/bin."
+        ),
         flush=True,
     )
     if a.role:
         prepare_device(target, a.role, a.protect, a.vault, a.insecure_plaintext_keys, a.unlock_key)
+        return
+    if a.package_managed:
+        print("Open Cypherpunk VPN from your applications menu and choose Start setup.")
         return
     print("Next: sudo avpn request --role ROLE --protect MODE --out ROLE.req, or rerun with --role.")
 

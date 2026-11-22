@@ -46,8 +46,8 @@ function keydown(event: KeyboardEvent) {
   </div>
 </template>
 <style scoped>
-.backdrop { position: fixed; inset: 0; background: #17102635; backdrop-filter: blur(3px); display: grid; place-items: center; z-index: 20; padding: 18px; }
-.dialog { width: 370px; max-width: 100%; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 24px 90px #20133230; padding: 29px; }
+.backdrop { position: fixed; inset: 0; background: #00000038; backdrop-filter: blur(3px); display: grid; place-items: center; z-index: 20; padding: 18px; }
+.dialog { width: 370px; max-width: 100%; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 24px 90px #00000030; padding: 29px; }
 .key-icon { display: grid; place-items: center; width: 48px; height: 48px; background: var(--primary-soft); color: var(--primary); border-radius: 14px; margin-bottom: 22px; }
 .eyebrow { color: var(--warn); font-size: 9px; }
 h2 { margin: 11px 0 10px; font-weight: 600; font-size: 23px; line-height: 1.3; letter-spacing: -.6px; }

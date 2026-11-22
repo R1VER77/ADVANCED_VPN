@@ -1,6 +1,6 @@
 [package]
 name = "cypherpunk-vpn-gui"
-version = "0.1.0"
+version = "0.11.0"
 description = "Unprivileged cypherpunk_vpn desktop controller"
 authors = ["Anonymous"]
 license = "AGPL-3.0-or-later"

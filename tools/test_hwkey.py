@@ -377,5 +377,36 @@ class RepairOutput(unittest.TestCase):
             self.assertEqual(json.loads(output.getvalue()), dict(ok=True))
 
 
+class DeviceSummary(unittest.TestCase):
+    def sysfs(self, devices):
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(__import__("shutil").rmtree, root)
+        for i, (vendor, product, bcd) in enumerate(devices):
+            d = root / "bus/usb/devices" / ("1-%d" % i)
+            d.mkdir(parents=True)
+            (d / "idVendor").write_text(vendor.lower() + "\n")
+            (d / "idProduct").write_text(product.lower() + "\n")
+            (d / "bcdDevice").write_text(bcd + "\n")
+        return root
+
+    def ready(self, firmware=0):
+        detail = dict(vendor="20A0", product="42B2", firmware=firmware, tier="cypherpunk_preferred",
+                      verification="pin", pin_retries=8)  # fmt: skip
+        return [h.Finding("key_ready", "ok", "ready", "hidraw2", detail)]
+
+    def test_nitrokey_firmware_comes_from_its_usb_release_when_fido2_gives_none(self):
+        sysfs = self.sysfs([("20A0", "42B2", "0109"), ("1D6B", "0002", "0612")])
+        s = h.device_summary(self.ready(), sysfs)
+        self.assertEqual((s["name"], s["firmware"], s["firmware_source"]), ("Nitrokey 3", "1.9", "usb"))
+        self.assertTrue(s["open_firmware"])
+        self.assertEqual(s["pin_retries"], 8)
+
+    def test_a_fido2_firmware_version_wins_and_two_same_keys_are_not_guessed(self):
+        sysfs = self.sysfs([("20A0", "42B2", "0109"), ("20A0", "42B2", "0108")])
+        self.assertEqual(h.device_summary(self.ready(), sysfs)["firmware"], None)
+        self.assertEqual(h.device_summary(self.ready(firmware=7), sysfs)["firmware"], "7")
+        self.assertIsNone(h.device_summary([], sysfs))
+
+
 if __name__ == "__main__":
     unittest.main()

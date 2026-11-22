@@ -24,6 +24,7 @@ import controller_mutation
 import controller_request
 import controller_status
 import hwkey
+import key_software
 import keyguard
 import managed_profile
 import setup_cli
@@ -153,6 +154,26 @@ class Adapter:
                 "Create an isolated VPN credential and protect new client keys under it.",
                 "Keep existing wallet material, applications, PINs and credentials.",
             ]
+        elif name == "key_software":
+            rows = self.key_software(caller, fresh=True)
+            packages = key_software.selection(rows, request["mode"])
+            if not packages:
+                raise Refused("no_software_to_change")
+            public_inputs["packages"] = packages
+            versions = {r["package"]: r for r in rows}
+            if request["mode"] == "install":
+                summary = "Install the software your security key needs"
+                effects = [
+                    "Install from this system's package sources: "
+                    + ", ".join("%s %s" % (p, versions[p]["candidate"]) for p in packages)
+                    + "."
+                ]
+            else:
+                summary = "Upgrade your security key's software"
+                effects = ["Upgrade: " + ", ".join("%s %s -> %s" % (p, versions[p]["installed"], versions[p]["candidate"])
+                                                   for p in packages) + ".",
+                           "Skip this if you keep an older or custom version on purpose."]  # fmt: skip
+            effects.append("Nothing else is installed or removed; your keys and their credentials are not touched.")
         elif name == "import_bundle":
             if avpnctl.service_active():
                 raise Refused("disconnect_before_import")
@@ -249,6 +270,18 @@ class Adapter:
                     result = setup_cli.setup(parsed, diagnose=lambda: self.diagnostics(caller))
                     if not result["repair"].get("commands_succeeded"):
                         raise Refused("hardware_repair_failed")
+                elif name == "key_software":
+                    packages = key_software.selection(self.key_software(caller, fresh=True), request["mode"])
+                    if not packages:
+                        raise Refused("no_software_to_change")
+                    progress("running", "Installing " + ", ".join(packages) + " from the system's package sources.")
+                    subprocess.run(key_software.command(request["mode"], packages), stdin=subprocess.DEVNULL,
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1800,
+                                   env=key_software.ENV, check=False)  # fmt: skip
+                    # The command's exit status is not the proof: the packages' state is.
+                    after = {r["package"]: r["state"] for r in self.key_software(caller, fresh=True)}
+                    if any(after.get(p) not in ("ok",) for p in packages):
+                        raise Refused("software_install_failed")
                 elif name == "request_device":
                     progress(
                         "waiting_for_hardware", "Use the trusted system/device prompt, then touch the selected key."
@@ -306,6 +339,25 @@ class Adapter:
                 raise InterruptedError from None
             raise
 
+    def key_software(self, caller, fresh=False, findings=None):
+        """The detected key families' packages (cached briefly: the setup screen polls)."""
+        if findings is None:
+            findings = self.diagnostics(caller)
+        families = sorted(
+            {
+                hwkey.key_name(f.detail.get("vendor"), f.detail.get("product"))
+                for f in findings
+                if f.detail.get("vendor")
+            }
+            - {None}
+        )
+        cached = getattr(self, "_software", None)
+        if not fresh and cached and cached[1] == families and time.monotonic() - cached[0] < 30:
+            return cached[2]
+        rows = key_software.status(families)
+        self._software = (time.monotonic(), families, rows)
+        return rows
+
     def setup(self, caller, branch, busy=False):
         """Client checks are root-authoritative; provider credentials stay ordinary-user scoped."""
         if branch not in ("create", "join"):
@@ -339,6 +391,8 @@ class Adapter:
         report = setup_flow.report(out)
         report["branch"] = branch
         report["device_request"] = controller_request.public_request(STATE)
+        report["key_software"] = self.key_software(caller, findings=findings)
+        report["key_device"] = hwkey.device_summary(findings)
         controller_create_join.decorate_report(branch, report, STATE, findings)
         return report
 

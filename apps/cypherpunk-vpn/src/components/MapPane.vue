@@ -245,7 +245,7 @@ const route = computed(() => {
 .map-icon { display: grid; place-items: center; width: 31px; height: 31px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; color: var(--primary); }
 .map-heading strong { display: block; font-size: 12px; font-weight: 550; }
 .map-heading div > span { display: block; color: var(--muted); font-size: 10px; margin-top: 4px; }
-.map-controls { position: absolute; top: 24px; right: 20px; padding: 3px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; display: flex; align-items: center; box-shadow: 0 2px 8px #17102604; z-index: 2; }
+.map-controls { position: absolute; top: 24px; right: 20px; padding: 3px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; display: flex; align-items: center; box-shadow: 0 2px 8px #00000008; z-index: 2; }
 .map-controls .icon-button { width: 25px; height: 25px; }
 .map-controls > span { width: 1px; height: 12px; background: var(--line); margin: 0 3px; }
 .land { fill: var(--map-land); stroke: var(--map-border); stroke-width: .8; vector-effect: non-scaling-stroke; transition: fill .6s ease; }

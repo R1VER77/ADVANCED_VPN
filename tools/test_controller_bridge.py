@@ -114,6 +114,9 @@ class CallerPlans(unittest.TestCase):
             dict(action="connect", scope="anything"),
             dict(action="repair", repair="yubikey_enable_fido2", selector="--reset"),
             dict(action="repair", repair="install_udev_rule", selector="/dev/../etc/shadow"),
+            dict(action="key_software", mode="remove"),
+            dict(action="key_software", mode="install", packages=["openssh-server"]),
+            dict(action="key_software"),
         ]
         for request in attacks:
             with self.subTest(request=request), self.assertRaises(bridge.Refused):

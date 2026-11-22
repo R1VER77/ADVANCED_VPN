@@ -114,13 +114,16 @@ export interface ProviderSearchPage {
   results: ProviderListing[]
 }
 export type StepState = 'pending' | 'running' | 'waiting_for_user' | 'waiting_for_hardware' | 'blocked' | 'failed' | 'complete' | 'skipped'
+export interface SetupFinding { code: string; severity: 'ok' | 'info' | 'warning' | 'blocker'; message: string; repair: string | null }
 export interface SetupStep {
   id: string
   title: string
   state: StepState
   say: string
   actions: ActionRequest[]
+  findings?: SetupFinding[]
 }
+export interface KeySoftwareRow { package: string; installed: string | null; candidate: string | null; state: 'ok' | 'missing' | 'upgrade' | 'unavailable' }
 export interface SetupSnapshot {
   schema: 1
   branch: SetupBranch
@@ -130,12 +133,16 @@ export interface SetupSnapshot {
   finished: boolean
   steps: SetupStep[]
   device_request?: { text: string; sha256: string } | null
+  key_software?: KeySoftwareRow[]
+  key_device?: { name: string; firmware: string | null; firmware_source: 'fido2' | 'usb' | null; open_firmware: boolean
+    verification: 'pin' | 'on_device' | null; pin_retries: number | null } | null
 }
 export type ActionRequest =
   | { action: 'connect'; scope: 'applications' | 'whole-device' }
   | { action: 'disconnect' | 'retry' | 'unlock' | 'request_device' }
   | { action: 'repair'; repair: 'install_udev_rule' | 'yubikey_enable_fido2'; selector: string | null }
   | { action: 'import_bundle'; bundle_base64: string; operator_key_base64: string; replace: boolean }
+  | { action: 'key_software'; mode: 'install' | 'upgrade' }
   // The setup wizard's create-branch writes (tools/controller_create_join.py):
   // branch-bound, previewed through the same Preview/Apply contract, and the
   // backend always states the cover-traffic allowance (--accept-cost is CLI-only).
@@ -201,3 +208,29 @@ export interface AutoconnectPolicy {
   trusted_ssids_count: number
   note: string
 }
+
+// The own-servers side of setup (tools/desktop_setup.py, run as this user).
+export interface CatalogProvider {
+  key: string; service: string; company: string; parent: string; tier: 1 | 2 | 3
+  server_usd: number | null; egress_gb: number | 'unmetered' | null; over_usd_gb: number | null
+  month_usd: number | null; how: 'create' | 'ssh'; why: string; note: string; source: string
+}
+export interface ProviderCatalog { schema: 1; checked: string; plan_gb: number; providers: CatalogProvider[] }
+export interface RecordedServer {
+  name: string; provider: string; role: string | null; region: string | null; address: string
+  family: 'ipv4' | 'ipv6'; sphere: string | null; in_chain: boolean; first_hop_ok: boolean
+}
+export interface OperatorState {
+  schema: 1
+  profile: { name: string; created: string; providers: string[]; hours_per_day: number; active_providers: number
+    checked: Record<string, { ready: boolean; why: string; at: string }> }
+  servers: RecordedServer[]
+  chain: { hops: string[]; created: string | null; operator_vault: boolean }
+}
+export interface BuildEvent {
+  event: 'progress' | 'done' | 'error'
+  plan?: string[]; step?: number; state?: 'run' | 'wait' | 'done'; note?: string
+  hops?: string[]; bundle_base64?: string; operator_base64?: string; message?: string; error?: string
+  server?: string; profile?: string
+}
+export interface BuildStatus { schema: 1; running: boolean; events: BuildEvent[] }

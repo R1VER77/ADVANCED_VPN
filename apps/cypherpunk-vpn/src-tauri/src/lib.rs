@@ -1,5 +1,9 @@
 //! Unprivileged, bounded D-Bus adapter. No shell, filesystem API, PIN or cloud token
 //! is exposed to the WebView. Privileged authorization remains in the root broker.
+//! The own-servers side of setup runs the installed user helper (`operator.rs`) with
+//! fixed, checked arguments only.
+
+mod operator;
 
 use tauri::State;
 use tokio::sync::Mutex;
@@ -161,6 +165,56 @@ async fn cancel_operation(id: String, bridge: State<'_, Bridge>) -> Result<Strin
     bridge.call("CancelOperation", &(id,)).await
 }
 
+// The own-servers side of setup (tools/desktop_setup.py, as this user).
+#[tauri::command]
+async fn operator_state() -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(|| operator::call(&["state"]))
+        .await
+        .map_err(|_| "helper_unavailable")?
+}
+
+#[tauri::command]
+async fn operator_provider(command: String, key: String) -> Result<String, String> {
+    if !matches!(command.as_str(), "check" | "add" | "remove") {
+        return Err("invalid_provider_command".into());
+    }
+    operator::provider_key(&key)?;
+    tauri::async_runtime::spawn_blocking(move || operator::call(&[command.as_str(), key.as_str()]))
+        .await
+        .map_err(|_| "helper_unavailable")?
+}
+
+/// Renew the cloud sign-in one recorded server uses (the helper opens the browser).
+#[tauri::command]
+async fn operator_signin(server: String) -> Result<String, String> {
+    operator::server_name(&server)?;
+    tauri::async_runtime::spawn_blocking(move || operator::call(&["signin", server.as_str()]))
+        .await
+        .map_err(|_| "helper_unavailable")?
+}
+
+#[tauri::command]
+fn operator_build(
+    order: Vec<String>,
+    hours: u8,
+    request: String,
+    builds: State<'_, operator::Builds>,
+) -> Result<(), String> {
+    builds.start(order, hours, request)
+}
+
+#[tauri::command]
+async fn operator_export(request: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || operator::export(&request))
+        .await
+        .map_err(|_| "helper_unavailable")?
+}
+
+#[tauri::command]
+fn operator_build_status(builds: State<'_, operator::Builds>) -> Result<String, String> {
+    builds.status()
+}
+
 pub fn run() {
     // SAFETY: geteuid has no arguments or memory preconditions.
     if unsafe { libc::geteuid() } == 0 {
@@ -169,6 +223,7 @@ pub fn run() {
     }
     tauri::Builder::default()
         .manage(Bridge::default())
+        .manage(operator::Builds::default())
         .invoke_handler(tauri::generate_handler![
             get_snapshot,
             get_setup,
@@ -179,7 +234,13 @@ pub fn run() {
             provider_search,
             streaming_eligibility,
             multihop_presets,
-            autoconnect_policy
+            autoconnect_policy,
+            operator_state,
+            operator_provider,
+            operator_build,
+            operator_build_status,
+            operator_export,
+            operator_signin
         ])
         .run(tauri::generate_context!())
         .expect("cypherpunk_vpn desktop application");

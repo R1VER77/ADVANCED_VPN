@@ -95,6 +95,30 @@ class CatalogGate(unittest.TestCase):
         for p in providers.PROVIDERS:
             self.assertIn(p["name"], providers.endpoints_page())
 
+    def test_app_provider_list_is_generated_from_the_catalog(self):
+        root = DOCS.parents[1]
+        self.assertEqual((root / providers.APP_CATALOG_PATH).read_text(), providers.app_catalog_text(),
+                         "run providers.py --generate")  # fmt: skip
+        rows = providers.app_catalog()["providers"]
+        # Privacy first: no US company above a non-US one, no plain host above a privacy host.
+        self.assertEqual([p["tier"] for p in rows], sorted(p["tier"] for p in rows))
+        logos = root / "apps/cypherpunk-vpn/src/assets/providers"
+        for p in rows:
+            self.assertIn(p["how"], ("create", "ssh"))
+            self.assertTrue(p["source"].startswith("https://"), p["key"])
+            # A known logo is shipped; a missing one is drawn as a lettered tile, never fetched.
+            if p["key"] in __import__("provider_logos").CHOSEN:
+                self.assertTrue((logos / (p["key"] + ".svg")).is_file(), p["key"])
+            if p["key"] in {q["key"] for q in providers.PROVIDERS} | {"fly"}:
+                self.assertEqual(p["parent"], providers.sphere(p["key"]) or p["parent"])
+
+    def test_month_cost_counts_data_beyond_the_allowance(self):
+        aws = next(p for p in providers.APP_CATALOG if p["key"] == "aws")
+        self.assertEqual(providers.month_usd(aws, 100), aws["server_usd"])
+        self.assertAlmostEqual(providers.month_usd(aws, 300), aws["server_usd"] + 200 * aws["over_usd_gb"])
+        self.assertIsNone(providers.month_usd(dict(aws, egress_gb=None), 300))
+        self.assertEqual(providers.month_usd(dict(aws, egress_gb="unmetered"), 10**6), aws["server_usd"])
+
 
 if __name__ == "__main__":
     unittest.main()

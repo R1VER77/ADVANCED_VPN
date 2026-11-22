@@ -1210,19 +1210,43 @@ def oci_teardown_apply(a, oc, plan):
 # What a server needs, as a script run over SSH: bash -s -- ROLE PORT REPLACE SHARED.
 # The TSS2 runtime libraries let systemd-creds actually use the TPM; without them it
 # silently falls back to the host key. Keys are kept when the role is unchanged.
-HOST_SETUP = r"""set -e
-ROLE=$1 PORT=$2 REPLACE=$3 SHARED=$4 UNLOCK=${5:-no}
-E=/etc/advanced-vpn/enrolled
-# Updates and installs need the network the egress lock closes (tools/server_egress.py):
+# The counted maintenance window HOST_SETUP and HOST_UPDATE open before apt runs.
+APT_WINDOW = r"""# Updates and installs need the network the egress lock closes (tools/server_egress.py):
 # open a counted maintenance window first. A running supervisor reopens its egress table
-# with root allowed; with none running, the retained lock is removed and the next start
-# rebuilds it. Traffic still counts against the monthly cap; a capped server stays shut.
+# with root, apt's download sandbox and the resolver allowed; with none running, the
+# retained lock is removed and the next start rebuilds it. Traffic still counts against
+# the monthly cap; a capped server stays shut.
 M=/etc/advanced-vpn/metering/enrolled
+STOPPED=no
 sudo -n install -d -m 0700 /etc/advanced-vpn/metering $M
 echo $(( $(date +%s) + 1800 )) | sudo -n tee $M/maintenance-until >/dev/null
-trap 'sudo -n rm -f /etc/advanced-vpn/metering/enrolled/maintenance-until' EXIT
+trap 'rc=$?; sudo -n rm -f /etc/advanced-vpn/metering/enrolled/maintenance-until
+if [ "$STOPPED" = yes ] && { [ "$RESTART" = always ] || [ $rc -ne 0 ]; }; then sudo -n systemctl start advanced-vpn.service || true; fi' EXIT
 if systemctl is-active -q advanced-vpn.service 2>/dev/null; then sleep 7
 else sudo -n nft delete table inet advanced_vpn_egress 2>/dev/null || true; fi
+# The supervisor's own daily update gives way to this window.
+sudo -n systemctl stop advanced-vpn-security-update.service 2>/dev/null || true
+# A supervisor from before 23 November opened its window to root alone, so apt's downloads
+# and every name lookup (other users) stayed shut and updates hung, holding apt's lock.
+# If names still do not resolve, stop it and lift its lock: whoever ran this restarts it.
+if ! timeout 15 getent hosts deb.debian.org >/dev/null 2>&1 && ! timeout 15 getent hosts archive.ubuntu.com >/dev/null 2>&1; then
+  if systemctl is-active -q advanced-vpn.service 2>/dev/null; then sudo -n systemctl stop advanced-vpn.service; STOPPED=yes; fi
+  sudo -n nft delete table inet advanced_vpn_egress 2>/dev/null || true
+fi
+"""
+
+# apt's package lists, refreshed once the window is open (and, in HOST_SETUP, after the
+# logs are in RAM): apt waits for a lock another update holds, and gives up rather than hang.
+APT_UPDATE = r"""APT="sudo -n apt-get -o DPkg::Lock::Timeout=600 -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
+n=0; until $APT update -qq; do n=$((n+1)); [ $n -lt 30 ] || exit 1; sleep 20; done
+"""
+
+HOST_SETUP = (
+    r"""set -e
+ROLE=$1 PORT=$2 REPLACE=$3 SHARED=$4 UNLOCK=${5:-no}
+RESTART=on-failure
+E=/etc/advanced-vpn/enrolled
+@@APT_WINDOW@@
 # An image host (a Fly.io Machine) was built with the package, its logs in RAM and no
 # timers: only its keys are made here.
 IMAGE=no; [ -f /opt/advanced-vpn/IMAGE ] && IMAGE=yes
@@ -1250,7 +1274,7 @@ else
 fi
 if [ "$IMAGE" = no ]; then
 export DEBIAN_FRONTEND=noninteractive
-sudo -n apt-get update -qq
+@@APT_UPDATE@@
 TSS=$(apt-cache search --names-only '^libtss2-(esys|mu|rc|tcti-device)' | awk '{print $1}' | grep -v -- -dev | tr '\n' ' ')
 # unattended-upgrades: the supervisor runs it daily (security only) in a counted window.
 sudo -n apt-get install -y -qq nftables python3-venv unattended-upgrades $TSS >/dev/null
@@ -1339,25 +1363,20 @@ sudo -n rm -f /tmp/avpn-unlock.pub
 echo "protection=$(sudo -n python3 -c 'import json;print(json.load(open("/etc/advanced-vpn/enrolled/protection.json")).get("mode"))' 2>/dev/null || echo unknown) tpm2=$(systemd-analyze has-tpm2 >/dev/null 2>&1 && echo yes || echo no) creds_key=$(sudo -n python3 -c 'import json;print(json.load(open("/etc/advanced-vpn/enrolled/protection.json")).get("creds_key"))')"
 sudo -n rm -rf /tmp/avpn-src /tmp/avpn-src.tgz
 """.replace("@@HARDEN@@", retention.HARDEN.rstrip("\n"))
+    .replace("@@APT_WINDOW@@", APT_WINDOW.rstrip("\n"))
+    .replace("@@APT_UPDATE@@", APT_UPDATE.rstrip("\n"))
+)
 
 # Security updates in a counted maintenance window: bash -s.
 HOST_UPDATE = r"""set -e
-# Updates and installs need the network the egress lock closes (tools/server_egress.py):
-# open a counted maintenance window first. A running supervisor reopens its egress table
-# with root allowed; with none running, the retained lock is removed and the next start
-# rebuilds it. Traffic still counts against the monthly cap; a capped server stays shut.
-M=/etc/advanced-vpn/metering/enrolled
-sudo -n install -d -m 0700 /etc/advanced-vpn/metering $M
-echo $(( $(date +%s) + 1800 )) | sudo -n tee $M/maintenance-until >/dev/null
-trap 'sudo -n rm -f /etc/advanced-vpn/metering/enrolled/maintenance-until' EXIT
-if systemctl is-active -q advanced-vpn.service 2>/dev/null; then sleep 7
-else sudo -n nft delete table inet advanced_vpn_egress 2>/dev/null || true; fi
+RESTART=always
+@@APT_WINDOW@@
 export DEBIAN_FRONTEND=noninteractive
-sudo -n apt-get update -qq
+@@APT_UPDATE@@
 sudo -n apt-get -y -qq -o Dpkg::Options::=--force-confold upgrade >/dev/null
 date -u +%Y-%m-%dT%H:%M:%SZ | sudo -n tee $M/last-update >/dev/null
 echo "updated $(cat /var/run/reboot-required 2>/dev/null && echo '(reboot required)')"
-"""
+""".replace("@@APT_WINDOW@@", APT_WINDOW.rstrip("\n")).replace("@@APT_UPDATE@@", APT_UPDATE.rstrip("\n"))
 
 # Restart an unlocked server's service and report whether it runs.
 HOST_RESTART = r"""set -e

@@ -25,6 +25,20 @@ from sysexec import trusted_exe
 PAYLOAD = "/usr/lib/cypherpunk-vpn/payload"
 COMMANDS = {"cypherpunk": "avpn", "avpn": "avpn", "avpnctl": "avpnctl"}
 ROOT = Path(__file__).resolve().parents[1]
+# The desktop app ships beside the payload, owned by the package manager rather than by
+# the application slots: it runs as the ordinary desktop user and holds no privilege. It
+# reaches the root controller only over the system bus (deploy/dbus, deploy/polkit).
+GUI = "/usr/lib/cypherpunk-vpn/gui/cypherpunk-vpn-gui"
+GUI_COMMAND = "cypherpunk-vpn-gui"
+GUI_ICON = "apps/cypherpunk-vpn/src-tauri/icons/128x128.png"
+GUI_DEB_DEPENDS = "libwebkit2gtk-4.1-0, libgtk-3-0"
+GUI_RPM_REQUIRES = "webkit2gtk4.1, gtk3"
+DESKTOP_ENTRY = (
+    "[Desktop Entry]\nType=Application\nName=Cypherpunk VPN\n"
+    "Comment=Connect and check your cypherpunk_vpn protection\n"
+    "Exec=" + GUI_COMMAND + "\nIcon=cypherpunk-vpn\nTerminal=false\n"
+    "Categories=Network;Security;\nStartupWMClass=cypherpunk-vpn-gui\n"
+)
 
 
 def version(root):
@@ -156,9 +170,24 @@ done
     )
 
 
+SYSTEMCTL = "/usr/bin/systemctl"
+CONTROLLER_UNIT = "cypherpunk-vpn-controller.service"
+
+
 def configure(debian=True):
-    """The verified bundled runtime installs slots and units without starting them."""
-    action = "exec " + PAYLOAD + "/install.sh --apply --package-managed\n"
+    """The verified bundled runtime installs slots and units without starting them.
+
+    A controller already running from the previous install keeps its old worker loaded,
+    so once the new slot is in place it is stopped (never started): the app's next
+    request starts the new version through D-Bus activation. The VPN and guard run in
+    their own units and are untouched. Without this the user had to stop it by hand.
+    """
+    action = (
+        PAYLOAD + "/install.sh --apply --package-managed\n"
+        "if [ -x " + SYSTEMCTL + " ] && " + SYSTEMCTL + " is-active --quiet " + CONTROLLER_UNIT + "; then\n"
+        "    " + SYSTEMCTL + " stop " + CONTROLLER_UNIT + "\n"
+        "fi\n"
+    )
     if debian:
         action = 'case "${1:-}" in configure)\n' + action + ";; esac\n"
     return "#!/bin/sh\nset -eu\n" + action
@@ -179,7 +208,44 @@ def remove(debian=True):
     )
 
 
-def stage(root, runtime, destination):
+def stage_gui(root, gui, destination):
+    """Add the built desktop app, its launcher entry and icon; never privileged files."""
+    gui = Path(gui)
+    if gui.is_symlink() or not gui.is_file():
+        raise ValueError("the desktop app must be a regular file")
+    with gui.open("rb") as binary:
+        if binary.read(4) != b"\x7fELF":
+            raise ValueError("the desktop app is not an ELF executable")
+    target = destination / GUI.lstrip("/")
+    target.parent.mkdir(mode=0o755, parents=True)
+    shutil.copy2(gui, target)
+    target.chmod(0o755)
+    # The app is checked against the same declared baseline as the core binaries: a GUI
+    # built on a newer distribution would install and then fail to start on an older one.
+    needed = preflight.glibc_need(target.parent)
+    if needed > preflight.RELEASE_GLIBC:
+        raise ValueError(
+            "desktop app ABI "
+            + ".".join(map(str, needed))
+            + " exceeds the declared release baseline "
+            + ".".join(map(str, preflight.RELEASE_GLIBC))
+            + "; build the desktop app on the baseline distribution"
+        )
+    applications = destination / "usr/share/applications"
+    applications.mkdir(mode=0o755, parents=True)
+    (applications / "cypherpunk-vpn.desktop").write_text(DESKTOP_ENTRY)
+    icons = destination / "usr/share/icons/hicolor/128x128/apps"
+    icons.mkdir(mode=0o755, parents=True)
+    shutil.copy2(root / GUI_ICON, icons / "cypherpunk-vpn.png")
+    for path in [*applications.iterdir(), *icons.iterdir()]:
+        path.chmod(0o644)
+    for path in (destination / "usr/share").rglob("*"):
+        if path.is_dir():
+            path.chmod(0o755)
+    (destination / "usr/bin" / GUI_COMMAND).symlink_to(GUI)
+
+
+def stage(root, runtime, destination, gui=None):
     """Copy only the reviewed release inputs and pinned runtime into a new payload."""
     bundled_runtime.verify(runtime, root / "tools/hardware-requirements.txt")
     destination.mkdir(mode=0o755, parents=True, exist_ok=False)
@@ -224,10 +290,12 @@ def stage(root, runtime, destination):
     bindir.mkdir(mode=0o755, parents=True)
     for name, target in COMMANDS.items():
         (bindir / name).symlink_to("/opt/advanced-vpn/bin/" + target)
+    if gui is not None:
+        stage_gui(root, gui, destination)
     return payload
 
 
-def debian(root, runtime, output, epoch):
+def debian(root, runtime, output, epoch, gui=None):
     """Build root-owned dpkg metadata without running package scripts or sudo."""
     number = version(root).replace("-", "~", 1) + "-1"
     package = output / ("cypherpunk-vpn_" + number + "_amd64.deb")
@@ -235,7 +303,7 @@ def debian(root, runtime, output, epoch):
         raise FileExistsError("package output already exists")
     with tempfile.TemporaryDirectory(prefix="cypherpunk-deb-", dir=output) as temporary:
         tree = Path(temporary) / "root"
-        stage(root, runtime, tree)
+        stage(root, runtime, tree, gui)
         control = tree / "DEBIAN"
         control.mkdir(mode=0o755)
         (control / "control").write_text(
@@ -243,9 +311,12 @@ def debian(root, runtime, output, epoch):
             "Maintainer: Anonymous\nSection: net\nPriority: optional\n"
             "Depends: libc6 (>= "
             + ".".join(map(str, preflight.RELEASE_GLIBC))
-            + "), libgcc-s1, systemd, nftables, iproute2, mount, passwd, dbus, polkitd | policykit-1\n"
-            "Homepage: https://github.com/R1VER77/ADVANCED_VPN\n"
-            "Description: cypherpunk_vpn private network controller\n"
+            + "), libgcc-s1, systemd, nftables, iproute2, mount, passwd, dbus, polkitd | policykit-1"
+            + (", " + GUI_DEB_DEPENDS if gui is not None else "")
+            + "\nHomepage: https://github.com/R1VER77/ADVANCED_VPN\n"
+            "Description: cypherpunk_vpn private network controller"
+            + (" and desktop app" if gui is not None else "")
+            + "\n"
             " Offline application slots and an independent opt-in boot guard.\n"
             " Installation never starts a tunnel or enrolls a device.\n"
         )
@@ -262,7 +333,7 @@ def debian(root, runtime, output, epoch):
     return package
 
 
-def rpm_spec(number):
+def rpm_spec(number, gui=False):
     """Render an offline RPM recipe with the same reviewed lifecycle hooks."""
     if not re.fullmatch(RPM_NUMBER, number):
         raise ValueError("RPM builds currently require a stable upstream version")
@@ -277,7 +348,7 @@ License: AGPL-3.0-or-later
 URL: https://github.com/R1VER77/ADVANCED_VPN
 Source0: payload.tar
 BuildArch: x86_64
-Requires: glibc >= {".".join(map(str, preflight.RELEASE_GLIBC))}, libgcc, systemd, nftables, iproute, util-linux, shadow-utils, dbus, polkit, policycoreutils
+Requires: glibc >= {".".join(map(str, preflight.RELEASE_GLIBC))}, libgcc, systemd, nftables, iproute, util-linux, shadow-utils, dbus, polkit, policycoreutils{", " + GUI_RPM_REQUIRES if gui else ""}
 AutoReqProv: no
 %description
 Offline application slots and an independent opt-in boot guard. No activation on install.
@@ -299,18 +370,24 @@ tar -xf %{{SOURCE0}} -C %{{buildroot}}
 /usr/bin/avpn
 /usr/bin/avpnctl
 /usr/bin/cypherpunk
-"""
+{GUI_FILES if gui else ""}"""
 
 
-def rpm(root, runtime, output, epoch):
+GUI_FILES = (
+    "/usr/bin/" + GUI_COMMAND + "\n/usr/share/applications/cypherpunk-vpn.desktop\n"
+    "/usr/share/icons/hicolor/128x128/apps/cypherpunk-vpn.png\n"
+)
+
+
+def rpm(root, runtime, output, epoch, gui=None):
     """Build the RPM with unprivileged rpmbuild; no package scripts are executed."""
     number = version(root)
-    spec = rpm_spec(number)
+    spec = rpm_spec(number, gui is not None)
     executable = trusted_exe("rpmbuild")
     with tempfile.TemporaryDirectory(prefix="cypherpunk-rpm-", dir=output) as temporary:
         top = Path(temporary)
         tree = top / "payload"
-        stage(root, runtime, tree)
+        stage(root, runtime, tree, gui)
         for name in ("SOURCES", "SPECS", "BUILD", "BUILDROOT", "RPMS", "SRPMS"):
             (top / name).mkdir(mode=0o755)
         with tarfile.open(top / "SOURCES/payload.tar", "w") as archive:
@@ -348,6 +425,9 @@ def main():
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--format", choices=("deb", "rpm", "both"), default="deb")
     parser.add_argument("--epoch", type=int, required=True)
+    parser.add_argument(
+        "--gui", type=Path, help="the built desktop app (cypherpunk-vpn-gui) to ship with the controller"
+    )
     args = parser.parse_args()
     if os.geteuid() == 0:
         raise PermissionError("build packages as an ordinary user")
@@ -357,7 +437,9 @@ def main():
     packages = []
     for name, builder in (("deb", debian), ("rpm", rpm)):
         if args.format in (name, "both"):
-            package = builder(args.source.resolve(), args.runtime.resolve(), args.out, args.epoch)
+            package = builder(
+                args.source.resolve(), args.runtime.resolve(), args.out, args.epoch, args.gui and args.gui.resolve()
+            )
             packages.append(
                 dict(name=package.name, sha256=bundled_runtime.sha256(package), size=package.stat().st_size)
             )

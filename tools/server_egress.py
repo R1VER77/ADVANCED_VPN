@@ -10,7 +10,10 @@ Two tables, both `inet` (every rule covers IPv4 and IPv6):
   provider's link-local metadata service (EC2 Instance Connect reads keys from it), or
   the ICMP a network needs. Forwarding: only what comes out of the exit's tunnel, and its
   replies. Nothing else on the host (update timers, agents, a stray process) can send.
-  A maintenance window (`avpn cloud host update`) lets root send too, still counted.
+  A maintenance window (`avpn cloud host update`, or the supervisor's daily security
+  update) lets root send too, still counted, and the users root's updates depend on:
+  apt's download sandbox (`_apt`) and the system resolver. Without them the window was
+  useless: apt's downloads and every name lookup are not root's, so updates hung.
 - `advanced_vpn_quota` (not watched: its counter moves; the supervisor reinstalls it from
   the meter if it disappears). It runs after the egress table, so a packet the egress table
   drops never uses up allowance. One kernel quota on everything sent or forwarded past the
@@ -54,7 +57,7 @@ def ports(profile, cfg):
     return sorted(found)
 
 
-def egress_rules(profile, cfg, service_uid, extra_uids=(), maintenance=False, lab_transit=False):
+def egress_rules(profile, cfg, service_uid, extra_uids=(), maintenance=False, lab_transit=False, maintenance_uids=()):
     """The `advanced_vpn_egress` table for a dedicated server. `lab_transit` (namespace labs
     only, `avpnctl --lab`): the namespace doubles as the lab's internet router, so plain
     transit between its non-tunnel interfaces is forwarded; never on a real server."""
@@ -66,6 +69,8 @@ def egress_rules(profile, cfg, service_uid, extra_uids=(), maintenance=False, la
     out_users = "".join("  meta skuid %d accept\n" % u for u in uids)
     if maintenance:
         out_users += "  meta skuid 0 accept\n"  # an update window: counted, then closed
+        # ...with apt's download sandbox and the resolver, which root's updates go through.
+        out_users += "".join("  meta skuid %d accept\n" % int(u) for u in maintenance_uids if int(u) > 0)
     forward = ""
     if lab_transit:
         forward += "  iifname != %s oifname != %s accept\n" % (internal, internal)

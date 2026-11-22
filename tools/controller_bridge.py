@@ -107,6 +107,10 @@ def action(raw):
             or not re.fullmatch(r"/dev/hidraw[0-9]{1,4}" if repair == "install_udev_rule" else r"[0-9]{1,16}", selector)
         ):
             raise Refused("invalid_device_selector")
+    elif name == "key_software":
+        fields.add("mode")
+        if request.get("mode") not in ("install", "upgrade"):
+            raise Refused("invalid_software_mode")
     elif name == "import_bundle":
         fields.update(("bundle_base64", "operator_key_base64", "replace"))
         blob(request.get("bundle_base64"), MAX_BUNDLE)
