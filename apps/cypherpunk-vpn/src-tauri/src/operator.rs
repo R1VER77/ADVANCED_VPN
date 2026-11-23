@@ -232,7 +232,10 @@ mod tests {
             fix_arguments("host_update", Some("cpvpn-relay")).unwrap(),
             ["fix", "host_update", "cpvpn-relay"]
         );
-        assert_eq!(fix_arguments("check_health", None).unwrap(), ["fix", "check_health"]);
+        assert_eq!(
+            fix_arguments("check_health", None).unwrap(),
+            ["fix", "check_health"]
+        );
         for (action, server) in [
             ("host_update", None),
             ("host_update", Some("--name")),
@@ -241,7 +244,10 @@ mod tests {
             ("retry_build", None),
             ("rm", Some("cpvpn-relay")),
         ] {
-            assert!(fix_arguments(action, server).is_err(), "{action} {server:?}");
+            assert!(
+                fix_arguments(action, server).is_err(),
+                "{action} {server:?}"
+            );
         }
     }
 

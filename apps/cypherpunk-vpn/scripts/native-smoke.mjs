@@ -1,5 +1,7 @@
 // Actual native WebKit/IPC-unavailable smoke. Run under xvfb-run + dbus-run-session.
 // No mocked controller, host installation, hardware prompt or privileged action.
+// Without the helper the first-launch agreement cannot be recorded, so the app must stay
+// on it: the trial drives the agreement in real WebKit and requires that it fails closed.
 import assert from 'node:assert/strict'
 import { spawn, execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -111,12 +113,12 @@ try {
         client = await connect(`ws://127.0.0.1:${port}${endpoint[0]}`)
       }
       snapshot = await client.evaluate(expression)
-      if (snapshot.text.includes('Status unknown') && snapshot.background !== 'rgb(255, 255, 255)') break
+      if (snapshot.text.includes('Understand the risks') && snapshot.background !== 'rgb(255, 255, 255)') break
     } catch { client?.close(); client = undefined }
     await delay(250)
   }
-  assert(snapshot?.text.includes('Status unknown'), 'Native frontend never reached its unknown state')
-  assert(snapshot.text.includes('Scope unverified') && !snapshot.text.includes('Connected'))
+  assert(snapshot?.text.includes('Understand the risks'), 'Native frontend never showed the first-launch agreement')
+  assert(!snapshot.text.includes('Connected') && !snapshot.text.includes('Status unknown'))
   assert.equal(snapshot.url, 'tauri://localhost')
   assert(snapshot.scripts.length > 0 && snapshot.styles.length > 0)
   assert([...snapshot.scripts, ...snapshot.styles].every(url => url.startsWith('tauri://localhost/')))
@@ -136,16 +138,42 @@ try {
     assert.fail('Native window remained blank after DOM readiness')
   }
   await capture('desktop.png')
+  // Drive the agreement: Next stays disabled until both risks are acknowledged.
+  const button = label => `[...document.querySelectorAll('button')].find(x => x.textContent.trim() === ${JSON.stringify(label)})`
+  const before = await client.evaluate(`JSON.stringify({ next: ${button('Next')}?.disabled })`)
+  assert.equal(before.next, true, 'Next must wait for both acknowledgements')
+  const ticked = await client.evaluate(`(() => { const boxes = [...document.querySelectorAll('.check input')];
+    boxes.forEach(x => { if (!x.checked) x.click() }); return JSON.stringify({ boxes: boxes.length }) })()`)
+  assert.equal(ticked.boxes, 2)
+  await delay(200)
+  await client.evaluate(`(() => { ${button('Next')}.click(); return '{}' })()`)
+  await delay(300)
+  const terms = await client.evaluate(expression)
+  for (const text of ['Terms and privacy', 'Terms of service', 'Privacy notice', 'Gemma Terms of Use',
+    'Gemma Prohibited Use Policy', 'I have read and accept these terms']) assert(terms.text.includes(text), text)
+  const acceptBefore = await client.evaluate(`JSON.stringify({ accept: ${button('Accept')}?.disabled })`)
+  assert.equal(acceptBefore.accept, true, 'Accept must wait for its checkbox')
+  await client.evaluate(`(() => { document.querySelector('.check input').click(); return '{}' })()`)
+  await delay(200)
+  await client.evaluate(`(() => { ${button('Accept')}.click(); return '{}' })()`)
+  // No helper: acceptance cannot be recorded, so the app says so and stays on the agreement.
+  let refused
+  for (let trial = 0; trial < 40 && !refused?.text.includes('could not be saved'); trial++) {
+    await delay(250)
+    refused = await client.evaluate(expression)
+  }
+  assert(refused.text.includes('could not be saved'), 'An unrecorded acceptance must be refused visibly')
+  assert(!refused.text.includes('Status unknown') && !refused.text.includes('Connected'), 'The app passed the agreement')
   execFileSync('xdotool', ['windowsize', window, '420', '640'])
   await delay(250)
   const narrow = await client.evaluate(expression)
   assert(narrow.width <= 420 && narrow.scroll <= narrow.width + 1, 'Narrow layout overflows')
-  assert(narrow.text.includes('Status unknown') && narrow.passwordFields === 0)
+  assert(narrow.text.includes('Terms and privacy') && narrow.passwordFields === 0)
   await capture('narrow.png')
   const hash = createHash('sha256')
   for await (const chunk of createReadStream(binary)) hash.update(chunk)
-  Object.assign(result, { status: 'passed_native_unknown_state_render', binary_sha256: hash.digest('hex'),
-    embedded_assets_only: true, unknown_without_controller: true, narrow_without_horizontal_overflow: true })
+  Object.assign(result, { status: 'passed_native_agreement_gate', binary_sha256: hash.digest('hex'),
+    embedded_assets_only: true, agreement_fails_closed_without_helper: true, narrow_without_horizontal_overflow: true })
 } catch (error) {
   Object.assign(result, { status: 'failed', error: String(error) })
   process.exitCode = 1
