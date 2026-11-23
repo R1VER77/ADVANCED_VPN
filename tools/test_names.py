@@ -10,7 +10,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 FORBIDDEN = re.compile(
-    r"advanced-vpn|advanced_vpn|ADVANCED_VPN|\bavpn\b|\bAVPN\b|\bavpn[-_:/0-9]|\bAVPN[-_:/0-9]|\.avpn\b"
+    r"advanced-vpn|advanced_vpn|ADVANCED_VPN|ADVANCED VPN|Advanced VPN|\bavpn\b|\bAVPN\b|\bavpn[-_:/0-9]|\bAVPN[-_:/0-9]|\.avpn\b"
 )
 
 # Historical records that intentionally preserve the pre-v0.11.0 name as history.

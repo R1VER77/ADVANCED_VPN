@@ -1,6 +1,6 @@
 {
  "schema": 1,
- "version": "14517525a02973ed66ad3d4e6ae88dbcd46095df7b5502cf194335773b6da17e",
+ "version": "61fa2f1106d3d62fbfd04eaec123ea231fec1d6c4fb167e461503091a6558745",
  "documents": [
   {
    "title": "Terms of service",
@@ -256,7 +256,27 @@
      "blocks": [
       {
        "k": "p",
-       "t": "The optional cypherpunk-vpn-assistant package includes Google's Gemma 3 1B model (gemma-3-1b-it-Q8_0.gguf) so the desktop app can explain setup or server failures locally on your own computer without sending logs over the network. Gemma is provided under and subject to the Gemma Terms of Use found at https://ai.google.dev/gemma/terms and the Gemma Prohibited Use Policy found at https://ai.google.dev/gemma/prohibited_use_policy. By installing or using the optional assistant package, you agree not to use the bundled Gemma model in violation of the Gemma Terms of Use or the Gemma Prohibited Use Policy. The rest of cypherpunk_vpn remains free software under AGPL-3.0-or-later and works in full without the assistant package."
+       "t": "The optional cypherpunk-vpn-assistant package includes Google's Gemma 3 1B model (gemma-3-1b-it-Q8_0.gguf), so the desktop app can explain a failed setup step in plain words on your own computer. It runs without network access, is given only the failure's scrubbed facts, and never decides a fix."
+      },
+      {
+       "k": "p",
+       "t": "Gemma is provided under and subject to the Gemma Terms of Use found at gemma.ai/resources/terms. A copy is in GEMMA_TERMS_OF_USE.md and in the package."
+      },
+      {
+       "k": "p",
+       "t": "As a condition of installing or using the assistant, you must not use Gemma, or anything derived from it:"
+      },
+      {
+       "k": "li",
+       "t": "for the restricted uses set forth in the Gemma Prohibited Use Policy (a copy is in GEMMA_PROHIBITED_USE_POLICY.md), which is incorporated into these terms; or"
+      },
+      {
+       "k": "li",
+       "t": "in violation of applicable laws and regulations."
+      },
+      {
+       "k": "p",
+       "t": "These restrictions pass to anyone you give the assistant to. The rest of cypherpunk_vpn remains free software under AGPL-3.0-or-later and works in full without the assistant package."
       }
      ]
     }
@@ -514,6 +534,470 @@
       {
        "k": "p",
        "t": "Open an issue on the repository. There is no email address, support desk or chat channel. Report security problems privately, as described in SECURITY.md."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "title": "Gemma Terms of Use",
+   "sections": [
+    {
+     "heading": "",
+     "blocks": [
+      {
+       "k": "p",
+       "t": "Copied unmodified from Google's page https://ai.google.dev/gemma/terms (fetched 23 November 2026; \"Last modified: April 1, 2026\"). It governs the Gemma 3 1B model in the optional cypherpunk-vpn-assistant package. The terms below apply to Gemma models listed in the Appendix of the original page. Nothing in it is changed here; only the web page's markup was removed."
+      },
+      {
+       "k": "p",
+       "t": "By using, reproducing, modifying, distributing, performing or displaying any portion or element of Gemma, Model Derivatives including via any Hosted Service, (each as defined below) (collectively, the \" Gemma Services \") or otherwise accepting the terms of this Agreement, you agree to be bound by this Agreement."
+      },
+      {
+       "k": "p",
+       "t": "Section 1: DEFINITIONS"
+      },
+      {
+       "k": "p",
+       "t": "1.1 Definitions"
+      },
+      {
+       "k": "p",
+       "t": "(a) \" Agreement \" or \" Gemma Terms of Use \" means these terms and conditions that govern the use, reproduction, Distribution or modification of the Gemma Services and any terms and conditions incorporated by reference."
+      },
+      {
+       "k": "p",
+       "t": "(b) \" Distribution \" or \" Distribute \" means any transmission, publication, or other sharing of Gemma or Model Derivatives to a third party, including by providing or making Gemma or its functionality available as a hosted service via API, web access, or any other electronic or remote means (\" Hosted Service \")."
+      },
+      {
+       "k": "p",
+       "t": "(c) \" Gemma \" means the set of machine learning language models, trained model weights and parameters identified in the Appendix , regardless of the source that you obtained it from."
+      },
+      {
+       "k": "p",
+       "t": "(d) \" Google \" means Google LLC."
+      },
+      {
+       "k": "p",
+       "t": "(e) \" Model Derivatives \" means all (i) modifications to Gemma, (ii) works based on Gemma, or (iii) any other machine learning model which is created by transfer of patterns of the weights, parameters, operations, or Output of Gemma, to that model in order to cause that model to perform similarly to Gemma, including distillation methods that use intermediate data representations or methods based on the generation of synthetic data Outputs by Gemma for training that model. For clarity, Outputs are not deemed Model Derivatives."
+      },
+      {
+       "k": "p",
+       "t": "(f) \" Output \" means the information content output of Gemma or a Model Derivative that results from operating or otherwise using Gemma or the Model Derivative, including via a Hosted Service."
+      },
+      {
+       "k": "p",
+       "t": "1.2"
+      },
+      {
+       "k": "p",
+       "t": "As used in this Agreement, \" including \" means \" including without limitation \"."
+      },
+      {
+       "k": "p",
+       "t": "Section 2: ELIGIBILITY AND USAGE"
+      },
+      {
+       "k": "p",
+       "t": "2.1 Eligibility"
+      },
+      {
+       "k": "p",
+       "t": "You represent and warrant that you have the legal capacity to enter into this Agreement (including being of sufficient age of consent). If you are accessing or using any of the Gemma Services for or on behalf of a legal entity, (a) you are entering into this Agreement on behalf of yourself and that legal entity, (b) you represent and warrant that you have the authority to act on behalf of and bind that entity to this Agreement and (c) references to \" you \" or \" your \" in the remainder of this Agreement refers to both you (as an individual) and that entity."
+      },
+      {
+       "k": "p",
+       "t": "2.2 Use"
+      },
+      {
+       "k": "p",
+       "t": "You may use, reproduce, modify, Distribute, perform or display any of the Gemma Services only in accordance with the terms of this Agreement, and must not violate (or encourage or permit anyone else to violate) any term of this Agreement."
+      },
+      {
+       "k": "p",
+       "t": "Section 3: DISTRIBUTION AND RESTRICTIONS"
+      },
+      {
+       "k": "p",
+       "t": "3.1 Distribution and Redistribution"
+      },
+      {
+       "k": "p",
+       "t": "You may reproduce or Distribute copies of Gemma or Model Derivatives if you meet all of the following conditions:"
+      },
+      {
+       "k": "li",
+       "t": "You must include the use restrictions referenced in Section 3.2 as an enforceable provision in any agreement (e.g., license agreement, terms of use, etc.) governing the use and/or distribution of Gemma or Model Derivatives and you must provide notice to subsequent users you Distribute to that Gemma or Model Derivatives are subject to the use restrictions in Section 3.2."
+      },
+      {
+       "k": "li",
+       "t": "You must provide all third party recipients of Gemma or Model Derivatives a copy of this Agreement."
+      },
+      {
+       "k": "li",
+       "t": "You must cause any modified files to carry prominent notices stating that you modified the files."
+      },
+      {
+       "k": "li",
+       "t": "All Distributions (other than through a Hosted Service) must be accompanied by a \" Notice \" text file that contains the following notice: \" Gemma is provided under and subject to the Gemma Terms of Use found at gemma.ai/resources/terms \"."
+      },
+      {
+       "k": "p",
+       "t": "You may add your own intellectual property statement to your modifications and, except as set forth in this Section, may provide additional or different terms and conditions for use, reproduction, or Distribution of your modifications, or for any such Model Derivatives as a whole, provided your use, reproduction, modification, Distribution, performance, and display of Gemma otherwise complies with the terms and conditions of this Agreement. Any additional or different terms and conditions you impose must not conflict with the terms of this Agreement."
+      },
+      {
+       "k": "p",
+       "t": "3.2 Use Restrictions"
+      },
+      {
+       "k": "p",
+       "t": "You must not use any of the Gemma Services:"
+      },
+      {
+       "k": "li",
+       "t": "for the restricted uses set forth in the Gemma Prohibited Use Policy at gemma.ai/resources/prohibited_use_policy (\" Prohibited Use Policy \"), which is hereby incorporated by reference into this Agreement; or"
+      },
+      {
+       "k": "li",
+       "t": "in violation of applicable laws and regulations."
+      },
+      {
+       "k": "p",
+       "t": "To the maximum extent permitted by law, Google reserves the right to restrict (remotely or otherwise) usage of any of the Gemma Services that Google reasonably believes are in violation of this Agreement."
+      },
+      {
+       "k": "p",
+       "t": "3.3 Generated Output"
+      },
+      {
+       "k": "p",
+       "t": "Google claims no rights in Outputs you generate using Gemma. You and your users are solely responsible for Outputs and their subsequent uses."
+      },
+      {
+       "k": "p",
+       "t": "Section 4: ADDITIONAL PROVISIONS"
+      },
+      {
+       "k": "p",
+       "t": "4.1 Updates"
+      },
+      {
+       "k": "p",
+       "t": "Google may update Gemma from time to time."
+      },
+      {
+       "k": "p",
+       "t": "4.2 Trademarks"
+      },
+      {
+       "k": "p",
+       "t": "Nothing in this Agreement grants you any rights to use Google's trademarks, trade names, logos or to otherwise suggest endorsement or misrepresent the relationship between you and Google. Google reserves any rights not expressly granted herein."
+      },
+      {
+       "k": "p",
+       "t": "4.3 DISCLAIMER OF WARRANTY"
+      },
+      {
+       "k": "p",
+       "t": "UNLESS REQUIRED BY APPLICABLE LAW, THE GEMMA SERVICES, AND OUTPUTS, ARE PROVIDED ON AN \"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, EITHER EXPRESS OR IMPLIED, INCLUDING ANY WARRANTIES OR CONDITIONS OF TITLE, NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE. YOU ARE SOLELY RESPONSIBLE FOR DETERMINING THE APPROPRIATENESS OF USING, REPRODUCING, MODIFYING, PERFORMING, DISPLAYING OR DISTRIBUTING ANY OF THE GEMMA SERVICES OR OUTPUTS AND ASSUME ANY AND ALL RISKS ASSOCIATED WITH YOUR USE OR DISTRIBUTION OF ANY OF THE GEMMA SERVICES OR OUTPUTS AND YOUR EXERCISE OF RIGHTS AND PERMISSIONS UNDER THIS AGREEMENT."
+      },
+      {
+       "k": "p",
+       "t": "4.4 LIMITATION OF LIABILITY"
+      },
+      {
+       "k": "p",
+       "t": "TO THE FULLEST EXTENT PERMITTED BY APPLICABLE LAW, IN NO EVENT AND UNDER NO LEGAL THEORY, WHETHER IN TORT (INCLUDING NEGLIGENCE), PRODUCT LIABILITY, CONTRACT, OR OTHERWISE, UNLESS REQUIRED BY APPLICABLE LAW, SHALL GOOGLE OR ITS AFFILIATES BE LIABLE TO YOU FOR DAMAGES, INCLUDING ANY DIRECT, INDIRECT, SPECIAL, INCIDENTAL, EXEMPLARY, CONSEQUENTIAL, OR PUNITIVE DAMAGES, OR LOST PROFITS OF ANY KIND ARISING FROM THIS AGREEMENT OR RELATED TO, ANY OF THE GEMMA SERVICES OR OUTPUTS EVEN IF GOOGLE OR ITS AFFILIATES HAVE BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES."
+      },
+      {
+       "k": "p",
+       "t": "4.5 Term, Termination, and Survival"
+      },
+      {
+       "k": "p",
+       "t": "The term of this Agreement will commence upon your acceptance of this Agreement (including acceptance by your use, modification, or Distribution, reproduction, performance or display of any portion or element of the Gemma Services) and will continue in full force and effect until terminated in accordance with the terms of this Agreement. Google may terminate this Agreement if you are in breach of any term of this Agreement. Upon termination of this Agreement, you must delete and cease use and Distribution of all copies of Gemma and Model Derivatives in your possession or control. Sections 1, 2.1, 3.3, 4.2 to 4.9 shall survive the termination of this Agreement."
+      },
+      {
+       "k": "p",
+       "t": "4.6 Governing Law and Jurisdiction"
+      },
+      {
+       "k": "p",
+       "t": "This Agreement will be governed by the laws of the State of California without regard to choice of law principles. The UN Convention on Contracts for the International Sale of Goods does not apply to this Agreement. The state and federal courts of Santa Clara County, California shall have exclusive jurisdiction of any dispute arising out of this Agreement."
+      },
+      {
+       "k": "p",
+       "t": "4.7 Severability"
+      },
+      {
+       "k": "p",
+       "t": "If any provision of this Agreement is held to be invalid, illegal or unenforceable, the remaining provisions shall be unaffected thereby and remain valid as if such provision had not been set forth herein."
+      },
+      {
+       "k": "p",
+       "t": "4.8 Entire Agreement"
+      },
+      {
+       "k": "p",
+       "t": "This Agreement states all the terms agreed between the parties and supersedes all other agreements between the parties as of the date of acceptance relating to its subject matter."
+      },
+      {
+       "k": "p",
+       "t": "4.9 No Waiver"
+      },
+      {
+       "k": "p",
+       "t": "Google will not be treated as having waived any rights by not exercising (or delaying the exercise of) any rights under this Agreement."
+      },
+      {
+       "k": "p",
+       "t": "Appendix"
+      },
+      {
+       "k": "li",
+       "t": "Gemma 1"
+      },
+      {
+       "k": "li",
+       "t": "Gemma 1.1"
+      },
+      {
+       "k": "li",
+       "t": "Gemma 2"
+      },
+      {
+       "k": "li",
+       "t": "Gemma 3"
+      },
+      {
+       "k": "li",
+       "t": "Gemma 3n"
+      },
+      {
+       "k": "li",
+       "t": "FunctionGemma"
+      },
+      {
+       "k": "li",
+       "t": "EmbeddingGemma"
+      },
+      {
+       "k": "li",
+       "t": "PaliGemma"
+      },
+      {
+       "k": "li",
+       "t": "PaliGemma 2"
+      },
+      {
+       "k": "li",
+       "t": "ShieldGemma"
+      },
+      {
+       "k": "li",
+       "t": "ShieldGemma 2"
+      },
+      {
+       "k": "li",
+       "t": "CodeGemma"
+      },
+      {
+       "k": "li",
+       "t": "CodeGemma 1.1"
+      },
+      {
+       "k": "li",
+       "t": "Gemma 2 JPN"
+      },
+      {
+       "k": "li",
+       "t": "DataGemma RIG"
+      },
+      {
+       "k": "li",
+       "t": "DataGemma RAG"
+      },
+      {
+       "k": "li",
+       "t": "RecurrentGemma"
+      },
+      {
+       "k": "li",
+       "t": "Gemma Scope"
+      },
+      {
+       "k": "li",
+       "t": "Gemma-APS"
+      },
+      {
+       "k": "li",
+       "t": "T5Gemma"
+      },
+      {
+       "k": "li",
+       "t": "VaultGemma"
+      },
+      {
+       "k": "li",
+       "t": "FunctionGemma"
+      },
+      {
+       "k": "li",
+       "t": "T5Gemma 2"
+      },
+      {
+       "k": "li",
+       "t": "TranslateGemma"
+      },
+      {
+       "k": "p",
+       "t": "Note"
+      },
+      {
+       "k": "p",
+       "t": "Previous versions of these Terms are archived here ."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "title": "Gemma Prohibited Use Policy",
+   "sections": [
+    {
+     "heading": "",
+     "blocks": [
+      {
+       "k": "p",
+       "t": "Copied unmodified from Google's page https://ai.google.dev/gemma/prohibited_use_policy (fetched 23 November 2026). The Gemma Terms of Use (Section 3.2) incorporate it by reference. Only the web page's markup was removed."
+      },
+      {
+       "k": "p",
+       "t": "Google reserves the right to update this Gemma Prohibited Use Policy from time to time."
+      },
+      {
+       "k": "p",
+       "t": "Last modified: February 21, 2024"
+      },
+      {
+       "k": "p",
+       "t": "You may not use nor allow others to use Gemma or Model Derivatives to:"
+      },
+      {
+       "k": "li",
+       "t": "Generate any content, including the outputs or results generated by Gemma or Model Derivatives, that infringes, misappropriates, or otherwise violates any individual's or entity's rights (including, but not limited to rights in copyrighted content)."
+      },
+      {
+       "k": "li",
+       "t": "Perform or facilitate dangerous, illegal, or malicious activities, including:"
+      },
+      {
+       "k": "li",
+       "t": "Facilitation or promotion of illegal activities or violations of law, such as:"
+      },
+      {
+       "k": "li",
+       "t": "Promoting or generating content related to child sexual abuse or exploitation;"
+      },
+      {
+       "k": "li",
+       "t": "Promoting or facilitating sale of, or providing instructions for synthesizing or accessing, illegal substances, goods, or services;"
+      },
+      {
+       "k": "li",
+       "t": "Facilitating or encouraging users to commit any type of crimes; or"
+      },
+      {
+       "k": "li",
+       "t": "Promoting or generating violent extremism or terrorist content."
+      },
+      {
+       "k": "li",
+       "t": "Engagement in the illegal or unlicensed practice of any vocation or profession including, but not limited to, legal, medical, accounting, or financial professional practices."
+      },
+      {
+       "k": "li",
+       "t": "Abuse, harm, interference, or disruption of services (or enable others to do the same), such as:"
+      },
+      {
+       "k": "li",
+       "t": "Promoting or facilitating the generation or distribution of spam; or"
+      },
+      {
+       "k": "li",
+       "t": "Generating content for deceptive or fraudulent activities, scams, phishing, or malware."
+      },
+      {
+       "k": "li",
+       "t": "Attempts to override or circumvent safety filters or intentionally drive Gemma or Model Derivatives to act in a manner that contravenes this Gemma Prohibited Use Policy."
+      },
+      {
+       "k": "li",
+       "t": "Generation of content that may harm or promote the harm of individuals or a group, such as:"
+      },
+      {
+       "k": "li",
+       "t": "Generating content that promotes or encourages hatred;"
+      },
+      {
+       "k": "li",
+       "t": "Facilitating methods of harassment or bullying to intimidate, abuse, or insult others;"
+      },
+      {
+       "k": "li",
+       "t": "Generating content that facilitates, promotes, or incites violence;"
+      },
+      {
+       "k": "li",
+       "t": "Generating content that facilitates, promotes, or encourages self harm;"
+      },
+      {
+       "k": "li",
+       "t": "Generating personally identifying information for distribution or other harms;"
+      },
+      {
+       "k": "li",
+       "t": "Tracking or monitoring people without their consent;"
+      },
+      {
+       "k": "li",
+       "t": "Generating content that may have unfair or adverse impacts on people, particularly impacts related to sensitive or protected characteristics; or"
+      },
+      {
+       "k": "li",
+       "t": "Generating, gathering, processing, or inferring sensitive personal or private information about individuals without obtaining all rights, authorizations, and consents required by applicable laws."
+      },
+      {
+       "k": "li",
+       "t": "Generate and distribute content intended to misinform, misrepresent or mislead, including:"
+      },
+      {
+       "k": "li",
+       "t": "Misrepresentation of the provenance of generated content by claiming content was created by a human, or represent generated content as original works, in order to deceive;"
+      },
+      {
+       "k": "li",
+       "t": "Generation of content that impersonates an individual (living or dead) without explicit disclosure, in order to deceive;"
+      },
+      {
+       "k": "li",
+       "t": "Misleading claims of expertise or capability made particularly in sensitive areas (e.g. health, finance, government services, or legal);"
+      },
+      {
+       "k": "li",
+       "t": "Making automated decisions in domains that affect material or individual rights or well-being (e.g., finance, legal, employment, healthcare, housing, insurance, and social welfare);"
+      },
+      {
+       "k": "li",
+       "t": "Generation of defamatory content, including defamatory statements, images, or audio content; or"
+      },
+      {
+       "k": "li",
+       "t": "Engaging in the unauthorized or unlicensed practice of any profession including, but not limited to, financial, legal, medical/health, or related professional practices."
+      },
+      {
+       "k": "li",
+       "t": "Generate sexually explicit content, including content created for the purposes of pornography or sexual gratification (e.g. sexual chatbots). Note that this does not include content created for scientific, educational, documentary, or artistic purposes."
       }
      ]
     }

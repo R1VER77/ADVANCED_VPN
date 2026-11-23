@@ -28,6 +28,18 @@ pub fn provider_key(value: &str) -> Result<(), String> {
     }
 }
 
+/// A fix the helper runs itself, with the server it needs (or none).
+pub fn fix_arguments(action: &str, server: Option<&str>) -> Result<Vec<String>, String> {
+    match (action, server) {
+        ("host_update" | "unlock_server", Some(name)) => {
+            server_name(name)?;
+            Ok(vec!["fix".into(), action.into(), name.into()])
+        }
+        ("check_health", None) => Ok(vec!["fix".into(), action.into()]),
+        _ => Err("invalid_fix".into()),
+    }
+}
+
 /// The agreement's version: the SHA-256 of its documents, as 64 lowercase hex digits.
 pub fn agreement_version(value: &str) -> Result<(), String> {
     let ok = value.len() == 64
@@ -213,6 +225,25 @@ impl Builds {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fixes_are_a_fixed_list_with_checked_servers() {
+        assert_eq!(
+            fix_arguments("host_update", Some("cpvpn-relay")).unwrap(),
+            ["fix", "host_update", "cpvpn-relay"]
+        );
+        assert_eq!(fix_arguments("check_health", None).unwrap(), ["fix", "check_health"]);
+        for (action, server) in [
+            ("host_update", None),
+            ("host_update", Some("--name")),
+            ("unlock_server", Some("relay")),
+            ("check_health", Some("cpvpn-relay")),
+            ("retry_build", None),
+            ("rm", Some("cpvpn-relay")),
+        ] {
+            assert!(fix_arguments(action, server).is_err(), "{action} {server:?}");
+        }
+    }
 
     #[test]
     fn agreement_versions_are_sha256_hex() {

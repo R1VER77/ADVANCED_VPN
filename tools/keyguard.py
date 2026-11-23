@@ -73,7 +73,7 @@ def atomic(path, data):
 
 ASK_PASSWORD = "/usr/bin/systemd-ask-password"
 PINENTRY = "/usr/bin/pinentry-gnome3"
-PIN_PROMPT = "ADVANCED VPN: FIDO2 PIN, then touch the Nitrokey when it flashes"
+PIN_PROMPT = "Cypherpunk VPN: FIDO2 PIN, then touch the Nitrokey when it flashes"
 _PROMPT_CALLER = contextvars.ContextVar("cypherpunk_authenticated_prompt_caller", default=None)
 _PROMPT_CANCEL = contextvars.ContextVar("cypherpunk_prompt_cancellation", default=None)
 
@@ -215,7 +215,7 @@ def _ask_pin():
 
 
 PIN_DIALOG = (
-    ("SETTITLE", "ADVANCED VPN"),
+    ("SETTITLE", "Cypherpunk VPN"),
     ("SETDESC", "Enter your Nitrokey PIN, then touch the key when it flashes.\nThis cannot reset or change the PIN."),
     ("SETPROMPT", "PIN:"),
 )
@@ -413,7 +413,7 @@ def enroll(vault):
     device, c = client()
     try:
         # No attestation: nothing about the make, model or batch of the key is asked for.
-        s = Fido2Server({"id": RP, "name": "ADVANCED VPN"}, attestation="none")
+        s = Fido2Server({"id": RP, "name": "Cypherpunk VPN"}, attestation="none")
         options, state = s.register_begin(
             {"id": os.urandom(32), "name": "operator", "displayName": "VPN operator"},
             resident_key_requirement="discouraged",
@@ -479,7 +479,7 @@ def enroll_pq_signer(vault, operator_vault):
     try:
         if holds(device, operator_credential):
             raise RuntimeError("this key holds the operator's credential: use a separate key for ML-DSA-44")
-        s = Fido2Server({"id": RP, "name": "ADVANCED VPN"}, attestation="none")
+        s = Fido2Server({"id": RP, "name": "Cypherpunk VPN"}, attestation="none")
         s.allowed_algorithms = [PublicKeyCredentialParameters(type=PublicKeyCredentialType.PUBLIC_KEY, alg=MLDSA44)]
         options, state = s.register_begin(
             {"id": os.urandom(32), "name": "operator", "displayName": "VPN operator (ML-DSA-44)"},
@@ -514,7 +514,7 @@ def pq_signer_assertion(vault, message):
     credential = AttestedCredentialData(unb64(meta["credential"]))
     device, c = client(credential.credential_id)
     try:
-        s = Fido2Server({"id": RP, "name": "ADVANCED VPN"})
+        s = Fido2Server({"id": RP, "name": "Cypherpunk VPN"})
         options, state = s.authenticate_begin(
             [credential], user_verification="required", challenge=hashlib.sha256(message).digest()
         )
@@ -565,7 +565,7 @@ def hardware_assertion(vault, message=None, salt2=None):
     credential = AttestedCredentialData(unb64(meta["credential"]))
     device, c = client(credential.credential_id)
     try:
-        s = Fido2Server({"id": RP, "name": "ADVANCED VPN"})
+        s = Fido2Server({"id": RP, "name": "Cypherpunk VPN"})
         options, state = s.authenticate_begin(
             [credential],
             user_verification="required",

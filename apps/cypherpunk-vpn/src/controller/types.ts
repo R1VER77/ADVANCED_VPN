@@ -234,3 +234,14 @@ export interface BuildEvent {
   server?: string; profile?: string
 }
 export interface BuildStatus { schema: 1; running: boolean; events: BuildEvent[] }
+
+// Why a route build failed (tools/troubleshoot.py), and the assistant's plain words.
+export type FixAction = 'retry_build' | 'sign_in_aws' | 'host_update' | 'unlock_server' | 'check_health' | 'open_docs'
+export interface Fix { action: FixAction; server?: string | null }
+export interface Finding {
+  schema: 1; code: string; title: string; meaning: string; step: string; server: string | null
+  evidence: string[]; fixes: Fix[]
+}
+export interface AssistReply { schema: 1; source: 'assistant' | 'rules'; why?: string; explanation: string; suggestion: Fix | null }
+export interface Assist { schema: 1; finding: Finding; reply: AssistReply }
+export interface FixResult { schema: 1; action: FixAction; server: string | null; ok: boolean; output: string[] }

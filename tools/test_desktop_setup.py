@@ -177,6 +177,79 @@ class DesktopSetup(unittest.TestCase):
         self.assertEqual(os.stat(kept).st_mode & 0o777, 0o600)
         self.assertNotIn("bundle_base64", out.getvalue())
 
+    def fail_build(self, events):
+        """Run a build whose chain command prints `events` (strings or progress dicts) and fails."""
+
+        class Failing:
+            def __init__(proc, argv, **_):
+                proc.stderr = io.StringIO("\n".join(
+                    cloud.PROGRESS_MARK + json.dumps(e) if isinstance(e, dict) else e for e in events) + "\n")  # fmt: skip
+
+            def wait(proc):
+                return 1
+
+        with mock.patch("sys.stdout", io.StringIO()):
+            return desktop_setup.build("cpvpn-relay,cpvpn-flyexit", 8, Stdin(REQUEST), Failing)
+
+    def test_assist_explains_the_relay_incident_from_the_kept_log(self):
+        self.assertEqual(self.fail_build([
+            dict(plan=["Open the firewalls", "Install cpvpn-relay as the relay", "Sign the chain"]),
+            dict(step=1, state="run"),
+            "E: Could not get lock /var/lib/apt/lists/lock. It is held by process 489333 (apt-get)",
+        ]), 1)  # fmt: skip
+        r = desktop_setup.assist(use_model=False)
+        f = r["finding"]
+        self.assertEqual((f["code"], f["step"], f["server"]), ("apt_lock_held", "Install cpvpn-relay as the relay",
+                                                                 "cpvpn-relay"))  # fmt: skip
+        self.assertEqual(f["fixes"][0], dict(action="retry_build"))
+        self.assertEqual((r["reply"]["source"], r["reply"]["explanation"]), ("rules", f["meaning"]))
+        records = list((desktop_setup.config_dir() / "desktop").glob("failure-*.json"))
+        self.assertEqual([os.stat(x).st_mode & 0o777 for x in records], [0o600])
+
+    def test_assist_after_a_signed_out_route_offers_the_sign_in(self):
+        self.signed_out.add("flashbots")
+        with mock.patch("sys.stdout", io.StringIO()):
+            desktop_setup.build("cpvpn-relay,cpvpn-flyexit", 8, Stdin(REQUEST), mock.Mock())
+        f = desktop_setup.assist(use_model=False)["finding"]
+        self.assertEqual(
+            (f["code"], f["fixes"][0]), ("aws_signed_out", dict(action="sign_in_aws", server="cpvpn-relay"))
+        )
+
+    def test_assist_uses_the_assistant_when_asked(self):
+        self.fail_build(["ssh: connect to host 192.0.2.10 port 22: Connection timed out"])
+        with mock.patch("assistant.explain", return_value=dict(source="assistant")) as explain:
+            self.assertEqual(desktop_setup.assist()["reply"], dict(source="assistant"))
+        self.assertNotIn("192.0.2.10", json.dumps(explain.call_args[0][0]))  # scrubbed before the model
+
+    def test_fix_runs_only_an_offered_fix_as_a_fixed_command(self):
+        self.fail_build([dict(plan=["Install cpvpn-relay as the relay"]), dict(step=0, state="run"),
+                         "E: Could not get lock /var/lib/dpkg/lock-frontend"])  # fmt: skip
+        run = mock.Mock(return_value=mock.Mock(returncode=0, stdout="updated 198.51.100.7\n", stderr=""))
+        r = desktop_setup.fix("host_update", "cpvpn-relay", run=run)
+        argv = run.call_args[0][0]
+        self.assertEqual(argv[-4:], ["host", "update", "--name", "cpvpn-relay"])
+        self.assertTrue(argv[-5].endswith("cloud.py"))
+        self.assertEqual((r["ok"], r["output"]), (True, ["updated <address>"]))
+        for action, server, why in (("unlock_server", "cpvpn-relay", "fix_not_offered"),
+                                    ("host_update", "cpvpn-flyexit", "fix_not_offered"),
+                                    ("host_update", "--name", "fix_not_offered"),
+                                    ("retry_build", None, "app_action")):  # fmt: skip
+            with self.subTest(action=action, server=server):
+                with self.assertRaises(desktop_setup.Refused) as e:
+                    desktop_setup.fix(action, server, run=run)
+                self.assertEqual(str(e.exception), why)
+        self.assertEqual(run.call_count, 1)
+
+    def test_assist_reads_only_logs_the_helper_wrote(self):
+        outside = self.home / "elsewhere.log"
+        outside.write_text("E: Could not get lock /var/lib/apt/lists/lock\n")
+        desktop_setup.record_failure("Sign the chain", None, dict(message="x"), outside)
+        self.assertEqual(desktop_setup.assist(use_model=False)["finding"]["code"], "unknown")
+        with self.assertRaises(desktop_setup.Refused):
+            for f in (desktop_setup.config_dir() / "desktop").glob("failure-*.json"):
+                f.unlink()
+            desktop_setup.assist(use_model=False)
+
     def test_export_saves_only_a_request_shaped_file_into_documents(self):
         with mock.patch.object(desktop_setup, "documents_dir", return_value=self.home / "Docs"):
             out = desktop_setup.export(Stdin(REQUEST))

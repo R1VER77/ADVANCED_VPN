@@ -375,6 +375,7 @@ def debian(root, runtime, output, epoch, gui=None):
             + ".".join(map(str, preflight.RELEASE_GLIBC))
             + "), libgcc-s1, systemd, nftables, iproute2, mount, passwd, dbus, polkitd | policykit-1"
             + (", " + GUI_DEB_DEPENDS if gui is not None else "")
+            + ("\nRecommends: " + ASSISTANT_PACKAGE if gui is not None else "")
             + "\nHomepage: https://github.com/R1VER77/CYPHERPUNK_VPN\n"
             "Description: cypherpunk_vpn private network controller"
             + (" and desktop app" if gui is not None else "")
@@ -392,6 +393,87 @@ def debian(root, runtime, output, epoch, gui=None):
             env=environment,
             timeout=300,
         )
+    return package
+
+
+ASSISTANT_PACKAGE = "cypherpunk-vpn-assistant"
+ASSISTANT_HOME = "/usr/lib/cypherpunk-vpn/assistant"
+ASSISTANT_MODEL = "gemma-3-1b-it-Q8_0.gguf"
+GEMMA_DOCS = ("docs/third_party/GEMMA_TERMS_OF_USE.md", "docs/third_party/GEMMA_PROHIBITED_USE_POLICY.md")
+
+
+def stage_assistant(root, model, server, destination):
+    """The local assistant: llama-server and the pinned Gemma model, with Gemma's terms.
+
+    The model must be exactly the pinned file (tools/assistant.py MODEL_SHA256) and the
+    server a regular ELF built on the release baseline. Gemma's terms (s3.1) need its
+    Notice and a copy of the Terms of Use with every copy distributed.
+    """
+    import assistant
+
+    model, server = Path(model), Path(server)
+    for path, what in ((model, "model"), (server, "server")):
+        if path.is_symlink() or not path.is_file():
+            raise ValueError("the assistant %s must be a regular file" % what)
+    if bundled_runtime.sha256(model) != assistant.MODEL_SHA256:
+        raise ValueError("the assistant model is not the pinned Gemma file")
+    with server.open("rb") as binary:
+        if binary.read(4) != b"\x7fELF":
+            raise ValueError("the assistant server is not an ELF executable")
+    home = destination / ASSISTANT_HOME.lstrip("/")
+    home.mkdir(mode=0o755, parents=True)
+    shutil.copy2(server, home / "llama-server")
+    (home / "llama-server").chmod(0o755)
+    needed = preflight.glibc_need(home)
+    if needed > preflight.RELEASE_GLIBC:
+        raise ValueError("assistant server ABI " + ".".join(map(str, needed)) + " exceeds the release baseline")
+    shutil.copy2(model, home / ASSISTANT_MODEL)
+    (home / (ASSISTANT_MODEL + ".sha256")).write_text(assistant.MODEL_SHA256 + "  " + ASSISTANT_MODEL + "\n")
+    docs = destination / "usr/share/doc" / ASSISTANT_PACKAGE
+    docs.mkdir(mode=0o755, parents=True)
+    shutil.copy2(root / "NOTICE", docs / "NOTICE")
+    for name in GEMMA_DOCS:
+        shutil.copy2(root / name, docs / Path(name).name)
+    (docs / "copyright").write_text(
+        "The Gemma 3 1B model in this package is unmodified.\n"
+        "Gemma is provided under and subject to the Gemma Terms of Use found at gemma.ai/resources/terms\n"
+        "Copies: GEMMA_TERMS_OF_USE.md and GEMMA_PROHIBITED_USE_POLICY.md in this folder.\n"
+        "llama-server is from llama.cpp (MIT licence, github.com/ggml-org/llama.cpp).\n"
+    )
+    for path in [*home.iterdir(), *docs.iterdir()]:
+        if path.name != "llama-server":
+            path.chmod(0o644)
+    for path in (destination / "usr").rglob("*"):
+        if path.is_dir():
+            path.chmod(0o755)
+
+
+def assistant_debian(root, model, server, output, epoch):
+    """The optional assistant package: no scripts, nothing started, nothing privileged."""
+    number = version(root).replace("-", "~", 1) + "-1"
+    package = output / (ASSISTANT_PACKAGE + "_" + number + "_amd64.deb")
+    if package.exists():
+        raise FileExistsError("package output already exists")
+    with tempfile.TemporaryDirectory(prefix="cypherpunk-deb-", dir=output) as temporary:
+        tree = Path(temporary) / "root"
+        stage_assistant(root, model, server, tree)
+        control = tree / "DEBIAN"
+        control.mkdir(mode=0o755)
+        (control / "control").write_text(
+            "Package: " + ASSISTANT_PACKAGE + "\nVersion: " + number + "\nArchitecture: amd64\n"
+            "Maintainer: Anonymous\nSection: net\nPriority: optional\n"
+            "Depends: libc6 (>= "
+            + ".".join(map(str, preflight.RELEASE_GLIBC))
+            + "), libstdc++6, libgcc-s1, util-linux\n"
+            "Enhances: cypherpunk-vpn\nHomepage: https://github.com/R1VER77/CYPHERPUNK_VPN\n"
+            "Description: cypherpunk_vpn local troubleshooting assistant (Gemma 3 1B)\n"
+            " Explains a failed setup step in plain words on this computer, offline and\n"
+            " without network access. Gemma is provided under and subject to the Gemma\n"
+            " Terms of Use found at gemma.ai/resources/terms\n"
+        )
+        (control / "control").chmod(0o644)
+        subprocess.run([trusted_exe("dpkg-deb"), "--root-owner-group", "--build", str(tree), str(package)],
+                       check=True, env=dict(os.environ, SOURCE_DATE_EPOCH=str(epoch)), timeout=600)  # fmt: skip
     return package
 
 
@@ -489,7 +571,11 @@ def main():
     parser.add_argument(
         "--gui", type=Path, help="the built desktop app (cypherpunk-vpn-gui) to ship with the controller"
     )
+    parser.add_argument("--assistant-model", type=Path, help="the pinned Gemma 3 1B file, for the assistant package")
+    parser.add_argument("--assistant-server", type=Path, help="llama-server built by tools/build-assistant.sh")
     args = parser.parse_args()
+    if bool(args.assistant_model) != bool(args.assistant_server):
+        raise ValueError("the assistant package needs both --assistant-model and --assistant-server")
     if os.geteuid() == 0:
         raise PermissionError("build packages as an ordinary user")
     if args.epoch < 0:
@@ -504,6 +590,10 @@ def main():
             packages.append(
                 dict(name=package.name, sha256=bundled_runtime.sha256(package), size=package.stat().st_size)
             )
+    if args.assistant_model:
+        package = assistant_debian(args.source.resolve(), args.assistant_model.resolve(),
+                                   args.assistant_server.resolve(), args.out, args.epoch)  # fmt: skip
+        packages.append(dict(name=package.name, sha256=bundled_runtime.sha256(package), size=package.stat().st_size))
     (args.out / "BUILD.json").write_text(
         json.dumps(dict(schema=1, status="unsigned_unqualified_candidate", packages=packages), indent=2) + "\n"
     )

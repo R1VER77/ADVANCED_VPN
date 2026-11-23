@@ -1,4 +1,4 @@
-# Tor over the tunnel: the tested recipe, and the `--front tor` decision
+# Tor over the tunnel: the recipe, and the `--front tor` decision
 
 Status: recipe approved and specified 21 November 2026 (delegated
 authority, decision D012 in [DECISIONS.md](DECISIONS.md)); the
@@ -6,6 +6,13 @@ authority, decision D012 in [DECISIONS.md](DECISIONS.md)); the
 condition stated in §4. Companion context:
 [COMMERCIAL_FEATURE_GAP_20261119.md](COMMERCIAL_FEATURE_GAP_20261119.md)
 §5 (newly-found rows: "Tor integration").
+
+> **Correction, 23 November 2026.** Until today this page called the recipe
+> *tested* and said its leak test runs in CI. No such test existed: nothing in the
+> test tools or CI runs Tor ([incident](INCIDENTS.md)). The recipe below is a design.
+> Its test is built in v0.12.0 (`cypherpunk tor`, with a live leak test). On
+> 22 November the owner also reopened `--front tor`, to be built in v0.12.0
+> ([D021](DECISIONS.md)); §4 records the earlier reasoning.
 
 ## 1. The honest framing
 
@@ -18,7 +25,7 @@ tunnel entry reached through Tor) is a different, heavier thing with
 worse failure modes (a Tor circuit dropout cuts the tunnel), and is
 not what this recipe builds.
 
-## 2. The recipe (tested shape)
+## 2. The recipe (design; its test is not built yet)
 
 What the namespace already enforces, and why Tor Browser on top of it
 is a clean composition:
@@ -50,14 +57,14 @@ is a clean composition:
    envelope, `fast` for bulk fetches. No special Tor profile is
    warranted — the existing classes describe the trade honestly.
 
-**The gate that makes this a *tested* recipe rather than advice:**
-the namespace's existing leak tests (app-mode and whole-device) plus
-the composition check that Tor Browser's egress appears only through
-the exit — the same `managed_test.py` harness shape the STUN and
-resolver-socket leak tests use, pointed at a lab Tor guard (a local
-Tor instance is a normal userspace process; no network needed for the
-leak-direction assertions). The live end-to-end run (real Tor network,
-real guard) is owner-side.
+**The gate that would make this a tested recipe, not yet built:**
+- the namespace's existing leak tests (app mode and whole device);
+- a composition check that Tor's egress appears only through the exit.
+
+It is planned in the same `managed_test.py` harness shape as the STUN and
+resolver-socket leak tests, pointed at a lab Tor network, plus a live run on the
+owner's chain. Until then, only the namespace's own leak tests are evidence; the Tor
+composition itself is untested.
 
 ## 3. What this recipe does NOT claim
 
@@ -66,7 +73,7 @@ real guard) is owner-side.
   project nor any commercial "Tor over VPN" provider can honestly
   claim a formal composition theorem. What is claimed: leak-direction
   composition (each layer's fail-closed covers the other's failure
-  modes) — which is testable, and tested.
+  modes), which is testable; the test is not built yet (§2).
 - Not censorship-ladder equivalence. A censor who blocks Tor guard IPs
   is defeated by the tunnel (the guard connection rides the cloak);
   a censor who blocks the tunnel is a §censorship-ladder problem, not
@@ -107,7 +114,6 @@ designed against its own threat model, not cloned from the I2P front.
 
 ## 5. Roadmap fit
 
-The recipe is a documentation-and-test deliverable (the §2 gate runs
-in CI); it closes the gap doc §5 "Tor-over-VPN recipe is a tested
-recipe pending" row. The `--front tor` declination is recorded in
+The recipe is documented; its test is not built yet (§2), so the gap doc's §5
+"Tor-over-VPN recipe is a tested recipe pending" row stays open until v0.12.0. The `--front tor` declination is recorded in
 DECISIONS.md (D012) with the reopening condition above.

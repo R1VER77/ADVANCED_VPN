@@ -100,6 +100,6 @@ def desktop_notify(title, body, target=None, run=subprocess.run):
     if uid is not None and os.geteuid() == 0:
         kwargs.update(user=uid, group=gid, extra_groups=[])
     try:
-        return run([exe, "--app-name=ADVANCED VPN", "--urgency=critical", title, body], **kwargs).returncode == 0
+        return run([exe, "--app-name=Cypherpunk VPN", "--urgency=critical", title, body], **kwargs).returncode == 0
     except (OSError, subprocess.TimeoutExpired):
         return False

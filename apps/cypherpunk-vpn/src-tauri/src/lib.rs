@@ -207,6 +207,26 @@ async fn operator_agreement(command: String, version: String) -> Result<String, 
     .map_err(|_| "helper_unavailable")?
 }
 
+/// Why the last build failed: the helper's finding, explained by the local assistant.
+#[tauri::command]
+async fn operator_assist() -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(|| operator::call(&["assist"]))
+        .await
+        .map_err(|_| "helper_unavailable")?
+}
+
+/// Run one fix the last failure offers (the helper checks it against the finding again).
+#[tauri::command]
+async fn operator_fix(action: String, server: Option<String>) -> Result<String, String> {
+    let args = operator::fix_arguments(&action, server.as_deref())?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+        operator::call(&refs)
+    })
+    .await
+    .map_err(|_| "helper_unavailable")?
+}
+
 /// "Reject and quit" on the agreement: close the app.
 #[tauri::command]
 fn quit_app(app: tauri::AppHandle) {
@@ -262,6 +282,8 @@ pub fn run() {
             operator_export,
             operator_signin,
             operator_agreement,
+            operator_assist,
+            operator_fix,
             quit_app
         ])
         .run(tauri::generate_context!())

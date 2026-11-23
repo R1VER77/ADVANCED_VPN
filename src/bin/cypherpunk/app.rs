@@ -178,7 +178,7 @@ impl App {
         vec![
             Line::from(vec![
                 Span::styled(">_ ", t.dim()),
-                Span::styled("ADVANCED VPN", t.brand()),
+                Span::styled("CYPHERPUNK VPN", t.brand()),
                 Span::styled(format!(" (v{})", env!("CARGO_PKG_VERSION")), t.dim()),
             ]),
             Line::default(),
@@ -400,7 +400,7 @@ mod tests {
         let app = App::new(Theme::full(), true, header());
         let s = screen(&app, 90, 14);
         let v = env!("CARGO_PKG_VERSION");
-        let title = format!("│ >_ ADVANCED VPN (v{v})");
+        let title = format!("│ >_ CYPHERPUNK VPN (v{v})");
         assert_eq!(s[0].chars().next(), Some('╭'));
         assert!(s[1].starts_with(&title), "{s:#?}");
         assert!(

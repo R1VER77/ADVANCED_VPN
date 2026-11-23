@@ -8,6 +8,8 @@
     cpvpn-desktop export                save the device request (stdin) to Documents
     cpvpn-desktop signin SERVER         renew the cloud sign-in a recorded server uses (browser)
     cpvpn-desktop agreement state|accept VERSION   the first-launch agreement (local file only)
+    cpvpn-desktop assist [--no-model]     why the last build failed, and the fixes on offer
+    cpvpn-desktop fix ACTION [SERVER]     run one fix the last failure offers (fixed commands)
 
 The root controller holds the device's keys and never sees a cloud credential; this
 helper holds the operator side (cloud sign-ins, the operator's Nitrokey vault, the server
@@ -363,9 +365,11 @@ def build(order, hours, stream=sys.stdin, run=subprocess.Popen):
     for name in names:
         ok, profile = server_sign_in(inv["resources"][name])
         if not ok:
-            emit(event="error", error="signed_out", provider="aws", server=name, profile=profile,
-                 message="Your AWS sign-in for %s (profile %s) has run out. Sign in again, then build."
-                 % (name, profile))  # fmt: skip
+            event = dict(event="error", error="signed_out", provider="aws", server=name, profile=profile,
+                         message="Your AWS sign-in for %s (profile %s) has run out. Sign in again, then build."
+                         % (name, profile))  # fmt: skip
+            record_failure("Check the cloud sign-ins", name, event, None)
+            emit(**event)
             return 1
     work = config_dir() / "desktop"
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -378,7 +382,7 @@ def build(order, hours, stream=sys.stdin, run=subprocess.Popen):
     env = dict(os.environ, CPVPN_PROGRESS="events")
     process = run(build_argv(names, hours, request_file, vault, source), stdin=subprocess.DEVNULL,
                   stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, env=env)  # fmt: skip
-    last = ""
+    last, plan, step = "", [], None
     # The build's own words, kept beside the request (owner-only): a failure on a server
     # is otherwise gone once the app's window is closed.
     log = work / ("build-%s.log" % stamp)
@@ -387,15 +391,23 @@ def build(order, hours, stream=sys.stdin, run=subprocess.Popen):
         for line in process.stderr:
             if line.startswith(cloud.PROGRESS_MARK):
                 try:
-                    emit(event="progress", **json.loads(line[len(cloud.PROGRESS_MARK) :]))
-                except (ValueError, TypeError):
+                    event = json.loads(line[len(cloud.PROGRESS_MARK) :])
+                    if isinstance(event.get("plan"), list):
+                        plan = [str(x)[:120] for x in event["plan"][:40]]
+                    if isinstance(event.get("step"), int) and 0 <= event["step"] < len(plan):
+                        step = plan[event["step"]]
+                    emit(event="progress", **event)
+                except (ValueError, TypeError, AttributeError):
                     pass
             elif line.strip():
                 record.write(line if line.endswith("\n") else line + "\n")
                 record.flush()
                 last = line.strip()[-300:]
     if process.wait() != 0:
-        emit(event="error", message=last or "the chain could not be built", log=str(log))
+        event = dict(event="error", message=last or "the chain could not be built", log=str(log))
+        named = [n for n in names if step and n in step]
+        record_failure(step or "Build the route", named[0] if named else None, event, log)
+        emit(**event)
         return 1
     built = load_inv_chain()
     bundles = Path(built["bundles"])
@@ -410,6 +422,77 @@ def build(order, hours, stream=sys.stdin, run=subprocess.Popen):
         operator_base64=base64.b64encode(operator.read_bytes()).decode(),
     )
     return 0
+
+
+def record_failure(step, server, event, log):
+    """Keep what `assist` needs about a failed build beside its log (owner-only)."""
+    work = config_dir() / "desktop"
+    stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    record = dict(schema=SCHEMA, step=step, server=server, error=event.get("error"), message=event.get("message"),
+                  log=str(log) if log else None)  # fmt: skip
+    write_private(work / ("failure-%s.json" % stamp), json.dumps(record) + "\n")
+
+
+def last_failure():
+    """The most recent failed build's finding (troubleshoot.diagnose), or Refused."""
+    import troubleshoot
+
+    work = config_dir() / "desktop"
+    records = sorted(work.glob("failure-*.json")) if work.is_dir() else []
+    if not records:
+        raise Refused("no_failed_build")
+    try:
+        record = json.loads(records[-1].read_text())
+        if record.get("schema") != SCHEMA:
+            raise ValueError
+    except ValueError:
+        raise Refused("failure_record_unreadable") from None
+    lines = []
+    log = record.get("log")
+    if log:
+        path = Path(log)
+        # Only a log this helper wrote, in its own folder.
+        if path.parent == work and path.name.startswith("build-") and path.is_file():
+            lines = path.read_text(errors="replace").splitlines()[-400:]
+    server = (
+        record.get("server") if isinstance(record.get("server"), str) and NAME.fullmatch(record["server"]) else None
+    )
+    event = dict(error=record.get("error") or "", message=record.get("message") or "")
+    return troubleshoot.diagnose(str(record.get("step") or ""), lines, server, event)
+
+
+def assist(use_model=True):
+    """The last failure's finding, explained by the local assistant when it is installed."""
+    import assistant
+
+    finding = last_failure()
+    reply = assistant.explain(finding) if use_model else assistant.rules_reply(finding, "model_not_asked")
+    return dict(schema=SCHEMA, finding=finding, reply=reply)
+
+
+# The fixes this helper runs itself (fixed argument lists); the app runs a retry and the
+# AWS sign-in through its own commands.
+FIX_COMMANDS = {
+    "host_update": lambda server: ["host", "update", "--name", server],
+    "unlock_server": lambda server: ["unlock", server],
+    "check_health": lambda server: ["health"],
+}
+
+
+def fix(action, server=None, run=subprocess.run):
+    """Run one fix, only if the last failure's finding offers exactly it."""
+    import troubleshoot
+
+    finding = last_failure()
+    wanted = dict(action=action, server=server) if action in troubleshoot.NEEDS_SERVER else dict(action=action)
+    if not troubleshoot.valid_fix(finding, wanted):
+        raise Refused("fix_not_offered")
+    if action not in FIX_COMMANDS:
+        raise Refused("app_action")  # retry_build, sign_in_aws, open_docs: the app's own
+    argv = [sys.executable, "-B", "-E", "-s", str(TOOLS / "cloud.py")] + FIX_COMMANDS[action](server)
+    done = run(argv, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=1800)
+    tail = [troubleshoot.scrub(x) for x in (done.stdout + "\n" + done.stderr).splitlines() if x.strip()][-12:]
+    return dict(schema=SCHEMA, action=action, server=server, ok=done.returncode == 0, output=tail)
 
 
 def documents_dir():
@@ -456,6 +539,10 @@ def main(argv=None):
     for name in ("check", "add", "remove"):
         sub.add_parser(name).add_argument("key")
     sub.add_parser("signin").add_argument("server")
+    sub.add_parser("assist").add_argument("--no-model", action="store_true")
+    fx = sub.add_parser("fix")
+    fx.add_argument("action")
+    fx.add_argument("server", nargs="?")
     g = sub.add_parser("agreement")
     g.add_argument("action", choices=("state", "accept"))
     g.add_argument("version")
@@ -469,6 +556,7 @@ def main(argv=None):
         result = dict(state=state, export=export, check=lambda: check(a.key), add=lambda: add(a.key),
                       remove=lambda: remove(a.key), signin=lambda: sign_in(a.server),
                       agreement=lambda: (agreement_accept if a.action == "accept" else agreement_state)(a.version),
+                      assist=lambda: assist(not a.no_model), fix=lambda: fix(a.action, a.server),
                       )[a.command]()  # fmt: skip
         print(json.dumps(result))
         return 0

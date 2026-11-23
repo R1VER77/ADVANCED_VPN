@@ -1,0 +1,336 @@
+{
+ "schema": 1,
+ "date": "2026-11-23",
+ "model": {
+  "file": "gemma-3-1b-it-Q8_0.gguf",
+  "sha256": "616dfb049ad14288d971d96f5ca4953fdebbf1e3cd407ad159f3bfd47090201d"
+ },
+ "isolation": "unshare -rn (loopback only), llama-server --offline over a Unix socket",
+ "runs": 30,
+ "used": 30,
+ "suggestion_matches_engine_first": 30,
+ "suggestion_dropped_or_absent": 0,
+ "median_seconds": 8.7,
+ "rows": [
+  {
+   "code": "apt_lock_held",
+   "run": 0,
+   "seconds": 8.9,
+   "used": true,
+   "why": null,
+   "explanation": "The VPN route setup failed because the server was busy installing updates, and the build process couldn\u2019t get the package manager\u2019s lock in time. The build process reported that the lock was held by a process, and a simple restart of the build might help.",
+   "suggestion": "retry_build",
+   "engine_first": "retry_build"
+  },
+  {
+   "code": "apt_lock_held",
+   "run": 1,
+   "seconds": 9.6,
+   "used": true,
+   "why": null,
+   "explanation": "The VPN route setup failed because the server was busy installing updates, and the build process couldn\u2019t get the package manager\u2019s lock in time. The build process reported that the lock was held by a process, and a simple restart of the build might resolve the issue.",
+   "suggestion": "retry_build",
+   "engine_first": "retry_build"
+  },
+  {
+   "code": "apt_lock_held",
+   "run": 2,
+   "seconds": 9.6,
+   "used": true,
+   "why": null,
+   "explanation": "The VPN route setup failed because the server was busy installing updates, and the build process couldn\u2019t get the package manager\u2019s lock in time. The build process reported that the lock was held by a specific process, which caused the route to fail to establish.",
+   "suggestion": "retry_build",
+   "engine_first": "retry_build"
+  },
+  {
+   "code": "aws_signed_out",
+   "run": 0,
+   "seconds": 7.7,
+   "used": true,
+   "why": null,
+   "explanation": "The VPN connection failed because the AWS server couldn\u2019t authenticate, meaning the route couldn\u2019t be established properly.",
+   "suggestion": "sign_in_aws",
+   "engine_first": "sign_in_aws"
+  },
+  {
+   "code": "aws_signed_out",
+   "run": 1,
+   "seconds": 8.2,
+   "used": true,
+   "why": null,
+   "explanation": "The VPN setup failed because the AWS sign-in for the server expired, preventing the route from being built.",
+   "suggestion": "sign_in_aws",
+   "engine_first": "sign_in_aws"
+  },
+  {
+   "code": "aws_signed_out",
+   "run": 2,
+   "seconds": 7.3,
+   "used": true,
+   "why": null,
+   "explanation": "The VPN route setup failed because the AWS sign-in for the server expired, preventing the connection to the server.",
+   "suggestion": "sign_in_aws",
+   "engine_first": "sign_in_aws"
+  },
+  {
+   "code": "server_dns_blocked",
+   "run": 0,
+   "seconds": 8.4,
+   "used": true,
+   "why": null,
+   "explanation": "The VPN route setup failed because the server couldn\u2019t find the package information it needed to download updates. A temporary problem with the server\u2019s name resolution prevented the route from being built properly.",
+   "suggestion": "retry_build",
+   "engine_first": "retry_build"
+  },
+  {
+   "code": "server_dns_blocked",
+   "run": 1,
+   "seconds": 8.5,
+   "used": true,
+   "why": null,
+   "explanation": "The VPN route setup failed because the server couldn\u2019t find the package information it needed to download updates. A temporary issue with a specific server prevented the route from being built properly.",
+   "suggestion": "retry_build",
+   "engine_first": "retry_build"
+  },
+  {
+   "code": "server_dns_blocked",
+   "run": 2,
+   "seconds": 8.2,
+   "used": true,
+   "why": null,
+   "explanation": "The VPN route setup failed because the server couldn\u2019t find the package information it needed to download updates. A temporary issue with a specific server prevented the route from being built properly.",
+   "suggestion": "retry_build",
+   "engine_first": "retry_build"
+  },
+  {
+   "code": "server_locked",
+   "run": 0,
+   "seconds": 10.2,
+   "used": true,
+   "why": null,
+   "explanation": "The VPN connection couldn\u2019t be established because the server\u2019s security key wasn\u2019t properly unlocked after the reboot. The system is waiting for you to provide the key to allow the connection to proceed.",
+   "suggestion": "unlock_server",
+   "engine_first": "unlock_server"
+  },
+  {
+   "code": "server_locked",
+   "run": 1,
+   "seconds": 10.5,
+   "used": true,
+   "why": null,
+   "explanation": "The VPN connection couldn\u2019t be established because the server\u2019s security key wasn\u2019t properly unlocked after the reboot. The system is waiting for you to provide the key to allow the VPN to connect.",
+   "suggestion": "unlock_server",
+   "engine_first": "unlock_server"
+  },
+  {
+   "code": "server_locked",
+   "run": 2,
+   "seconds": 9.4,
+   "used": true,
+   "why": null,
+   "explanation": "The VPN connection couldn\u2019t be established because the server\u2019s security key was preventing it from unlocking properly. The server rebooted, requiring a new key to be used.",
+   "suggestion": "unlock_server",
+   "engine_first": "unlock_server"
+  },
+  {
+   "code": "capped",
+   "run": 0,
+   "seconds": 8.5,
+   "used": true,
+   "why": null,
+   "explanation": "The VPN route setup failed because the server couldn\u2019t keep up with its monthly allowance. It\u2019s currently capped until December 1st, and the server stopped sending traffic to avoid exceeding its limit.",
+   "suggestion": "check_health",
+   "engine_first": "check_health"
+  },
+  {
+   "code": "capped",
+   "run": 1,
+   "seconds": 8.7,
+   "used": true,
+   "why": null,
+   "explanation": "The VPN route setup failed because the server couldn\u2019t keep up with the monthly allowance it was supposed to be carrying. It\u2019s currently capped until December 1st, and the server has stopped sending traffic to avoid exceeding that limit.",
+   "suggestion": "check_health",
+   "engine_first": "check_health"
+  },
+  {
+   "code": "capped",
+   "run": 2,
+   "seconds": 8.5,
+   "used": true,
+   "why": null,
+   "explanation": "The VPN route setup failed because the server couldn\u2019t keep up with the monthly allowance it was supposed to be carrying. It\u2019s currently capped and will restart on the first of the month.",
+   "suggestion": "check_health",
+   "engine_first": "check_health"
+  },
+  {
+   "code": "pin_wrong",
+   "run": 0,
+   "seconds": 8.4,
+   "used": true,
+   "why": null,
+   "explanation": "The VPN setup process couldn\u2019t complete because the security key\u2019s PIN was incorrect. The system couldn\u2019t verify the PIN you entered, preventing the route from being built.",
+   "suggestion": "retry_build",
+   "engine_first": "retry_build"
+  },
+  {
+   "code": "pin_wrong",
+   "run": 1,
+   "seconds": 8.3,
+   "used": true,
+   "why": null,
+   "explanation": "The VPN setup process couldn\u2019t complete because the security key\u2019s PIN was incorrect. The system couldn\u2019t verify the PIN you entered, preventing the route from being built.",
+   "suggestion": "retry_build",
+   "engine_first": "retry_build"
+  },
+  {
+   "code": "pin_wrong",
+   "run": 2,
+   "seconds": 9.0,
+   "used": true,
+   "why": null,
+   "explanation": "The VPN setup process couldn\u2019t complete because the security key\u2019s PIN was incorrect. The system couldn\u2019t verify the PIN you entered, preventing the route from being built.",
+   "suggestion": "retry_build",
+   "engine_first": "retry_build"
+  },
+  {
+   "code": "pin_blocked",
+   "run": 0,
+   "seconds": 8.0,
+   "used": true,
+   "why": null,
+   "explanation": "The VPN route setup failed because the security key is preventing the connection because it keeps rejecting incorrect PINs.",
+   "suggestion": "open_docs",
+   "engine_first": "open_docs"
+  },
+  {
+   "code": "pin_blocked",
+   "run": 1,
+   "seconds": 8.7,
+   "used": true,
+   "why": null,
+   "explanation": "The VPN route setup failed because the security key couldn\u2019t be unlocked after repeatedly entering incorrect PINs. The system is preventing the key from working until it\u2019s properly reconnected.",
+   "suggestion": "open_docs",
+   "engine_first": "open_docs"
+  },
+  {
+   "code": "pin_blocked",
+   "run": 2,
+   "seconds": 9.1,
+   "used": true,
+   "why": null,
+   "explanation": "The VPN setup failed because the security key couldn\u2019t be unlocked after repeatedly entering incorrect PINs. The system is preventing the key from working until it\u2019s properly reset.",
+   "suggestion": "open_docs",
+   "engine_first": "open_docs"
+  },
+  {
+   "code": "key_not_touched",
+   "run": 0,
+   "seconds": 9.2,
+   "used": true,
+   "why": null,
+   "explanation": "The VPN route setup failed because the security key didn\u2019t respond quickly enough. The key was waiting for a signal, but it didn\u2019t get it, so the route couldn\u2019t be established.",
+   "suggestion": "retry_build",
+   "engine_first": "retry_build"
+  },
+  {
+   "code": "key_not_touched",
+   "run": 1,
+   "seconds": 9.9,
+   "used": true,
+   "why": null,
+   "explanation": "The VPN setup failed because the security key didn\u2019t respond quickly enough when it was asked to be activated. The key was waiting for a response, but it didn\u2019t get one, so the route couldn\u2019t be established.",
+   "suggestion": "retry_build",
+   "engine_first": "retry_build"
+  },
+  {
+   "code": "key_not_touched",
+   "run": 2,
+   "seconds": 9.8,
+   "used": true,
+   "why": null,
+   "explanation": "The VPN setup process couldn\u2019t complete because the security key didn\u2019t respond to the server\u2019s request for a sign. The key was waiting, but didn\u2019t get a confirmation, so the route couldn\u2019t be established.",
+   "suggestion": "retry_build",
+   "engine_first": "retry_build"
+  },
+  {
+   "code": "ssh_unreachable",
+   "run": 0,
+   "seconds": 8.8,
+   "used": true,
+   "why": null,
+   "explanation": "The VPN setup failed because the server couldn\u2019t respond to the connection request. The build process couldn\u2019t find a working server, suggesting it might be unavailable or stopped.",
+   "suggestion": "check_health",
+   "engine_first": "check_health"
+  },
+  {
+   "code": "ssh_unreachable",
+   "run": 1,
+   "seconds": 8.4,
+   "used": true,
+   "why": null,
+   "explanation": "The VPN setup failed because the server wasn\u2019t responding to the connection request. The system couldn\u2019t find a way to communicate with the server, likely because it was either stopped or unavailable.",
+   "suggestion": "check_health",
+   "engine_first": "check_health"
+  },
+  {
+   "code": "ssh_unreachable",
+   "run": 2,
+   "seconds": 8.7,
+   "used": true,
+   "why": null,
+   "explanation": "The VPN setup process failed because the server the VPN was trying to connect to wasn\u2019t responding. The system couldn\u2019t establish a connection to the server, likely because it was either stopped or unavailable.",
+   "suggestion": "check_health",
+   "engine_first": "check_health"
+  },
+  {
+   "code": "fly_token_missing",
+   "run": 0,
+   "seconds": 8.0,
+   "used": true,
+   "why": null,
+   "explanation": "The VPN setup process couldn\u2019t complete because the necessary token for the Fly.io service wasn\u2019t available. This means the route couldn\u2019t be built correctly, preventing the connection from being established.",
+   "suggestion": "open_docs",
+   "engine_first": "open_docs"
+  },
+  {
+   "code": "fly_token_missing",
+   "run": 1,
+   "seconds": 8.0,
+   "used": true,
+   "why": null,
+   "explanation": "The VPN setup process couldn\u2019t complete because the necessary token for the Fly.io service was not provided. This means the system couldn\u2019t properly connect to the VPN.",
+   "suggestion": "open_docs",
+   "engine_first": "open_docs"
+  },
+  {
+   "code": "fly_token_missing",
+   "run": 2,
+   "seconds": 8.8,
+   "used": true,
+   "why": null,
+   "explanation": "The VPN setup process couldn\u2019t complete because the necessary token for the Fly.io service wasn\u2019t provided. This means the route couldn\u2019t be built correctly, preventing the connection from being established.",
+   "suggestion": "open_docs",
+   "engine_first": "open_docs"
+  }
+ ],
+ "review": {
+  "by": "hand, 23 Nov 2026, first run of each class",
+  "accurate": [
+   "apt_lock_held",
+   "server_dns_blocked",
+   "server_locked",
+   "capped",
+   "pin_wrong",
+   "ssh_unreachable",
+   "fly_token_missing"
+  ],
+  "misleading": {
+   "key_not_touched": "says the key did not respond in time; the person did not touch it, so it reverses who acts"
+  },
+  "vague": {
+   "aws_signed_out": "says the server could not authenticate; the cause is the person's expired sign-in",
+   "pin_blocked": "omits the remedy (unplug and replug the key)"
+  },
+  "conclusion": "The engine's title and meaning are shown first and decide the fix; the model's text is shown under them as a labelled local paraphrase that may be imprecise, never as the diagnosis."
+ }
+}

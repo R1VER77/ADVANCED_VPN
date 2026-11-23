@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { ActionPlan, ActionRequest, AutoconnectPolicy, BuildStatus, MultihopPresets, Operation, OperatorState, ProviderSearchPage, SetupBranch, SetupSnapshot, Status, StreamingEligibility } from './types'
+import type { ActionPlan, ActionRequest, Assist, AutoconnectPolicy, FixResult, BuildStatus, MultihopPresets, Operation, OperatorState, ProviderSearchPage, SetupBranch, SetupSnapshot, Status, StreamingEligibility } from './types'
 
 const MAX_RESPONSE = 256 * 1024
 
@@ -73,6 +73,10 @@ export const operator = {
   buildStatus: () => read<BuildStatus>('operator_build_status'),
   export: (request: string) => helper<{ schema: 1; path: string }>('operator_export', { request }),
   // Opens the browser for the cloud sign-in this recorded server uses; resolves when it is done.
+  // The last failed build's finding, explained by the local assistant when installed.
+  assist: () => helper<Assist>('operator_assist'),
+  // One fix that finding offers, run by the helper (which checks it against the finding again).
+  fix: (action: 'host_update' | 'unlock_server' | 'check_health', server: string | null) => helper<FixResult>('operator_fix', { action, server }),
   signin: (server: string) => helper<{ schema: 1; server: string; profile: string; ready: boolean; why: string }>('operator_signin', { server }),
   agreementState: (version: string) => helper<{ schema: 1; accepted: boolean }>('operator_agreement', { command: 'state', version }),
   acceptAgreement: (version: string) => helper<{ schema: 1; accepted: boolean }>('operator_agreement', { command: 'accept', version }),

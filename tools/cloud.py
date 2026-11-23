@@ -2391,7 +2391,7 @@ def notify_user(title, body):
     exe = shutil.which("notify-send")
     if not exe or not (os.environ.get("WAYLAND_DISPLAY") or os.environ.get("DISPLAY")):
         return False
-    r = subprocess.run([exe, "--app-name=ADVANCED VPN", "--urgency=critical", title, body],
+    r = subprocess.run([exe, "--app-name=Cypherpunk VPN", "--urgency=critical", title, body],
                        capture_output=True, timeout=10, check=False)  # fmt: skip
     return r.returncode == 0
 

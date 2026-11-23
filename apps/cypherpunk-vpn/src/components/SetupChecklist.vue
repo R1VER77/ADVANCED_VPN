@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { controller, operator } from '../controller/real'
 import catalogJson from '../controller/providers.json'
+import AssistPanel from './AssistPanel.vue'
 import ProviderLogo from './ProviderLogo.vue'
 import ProviderSheet from './ProviderSheet.vue'
 import type { ActionRequest, BuildEvent, Operation, OperatorState, ProviderCatalog, RecordedServer, SetupSnapshot, Status } from '../controller/types'
@@ -32,6 +33,9 @@ const scope = ref<'applications' | 'whole-device'>('applications')
 const build = ref<{ running: boolean; plan: string[]; step: number; note: string; installing: boolean; failed: boolean } | null>(null)
 // A route server whose cloud sign-in ran out: the build stops before the key is asked for anything.
 const signedOut = ref<{ server: string; profile: string } | null>(null)
+// A failure the helper recorded (so the assistant can read it), and a key to start its panel afresh.
+const helperFailed = ref(false)
+const failures = ref(0)
 const signingIn = ref(false)
 // The build's own steps, then installing the signed route here; each row is done, working or waiting.
 const INSTALL = 'Install the signed route on this device'
@@ -148,6 +152,7 @@ async function buildRoute() {
   if (!routeReady.value || !setup.value?.device_request) return
   error.value = ''
   signedOut.value = null
+  helperFailed.value = false
   attempted.delete('import')
   try {
     await operator.build(chosen.value.map(s => s.name), hours.value, setup.value.device_request.text)
@@ -168,6 +173,8 @@ async function buildRoute() {
         if (ok) { await loadOperator(); build.value = null }
       } else {
         if (build.value) build.value.failed = true
+        helperFailed.value = true
+        failures.value++
         if (last?.error === 'signed_out' && last.server) signedOut.value = { server: last.server, profile: last.profile ?? '' }
         error.value = last?.message || last?.error || 'The route could not be built.'
       }
@@ -191,6 +198,13 @@ async function signIn() {
     await buildRoute()
   } catch { error.value = 'The AWS sign-in could not be started.' }
   finally { signingIn.value = false }
+}
+
+// The assistant's fixes that the checklist already has.
+async function retryFromAssist() { build.value = null; await buildRoute() }
+async function assistSignIn(server: string) {
+  signedOut.value = { server, profile: '' }
+  await signIn()
 }
 
 async function connect() { await act('Connect', { action: 'connect', scope: scope.value }) }
@@ -300,10 +314,11 @@ onUnmounted(() => window.clearInterval(timer))
                   </li>
                 </ol>
                 <div v-if="signedOut" class="signin">
-                  <p class="note">{{ signingIn ? 'Finish signing in to AWS in the browser window that opened. The route builds by itself afterwards.' : `Your AWS sign-in for ${signedOut.server} (profile ${signedOut.profile}) has run out.` }}</p>
+                  <p class="note">{{ signingIn ? 'Finish signing in to AWS in the browser window that opened. The route builds by itself afterwards.' : `Your AWS sign-in for ${signedOut.server}${signedOut.profile ? ` (profile ${signedOut.profile})` : ''} has run out.` }}</p>
                   <button class="btn small" :disabled="signingIn" @click="signIn">{{ signingIn ? 'Waiting for the browser…' : 'Sign in to AWS' }}</button>
                 </div>
                 <p v-if="build.note" class="hint">{{ build.note }}</p>
+                <AssistPanel v-if="helperFailed && !build.running" :key="failures" @retry="retryFromAssist" @signin="assistSignIn" />
               </template>
               <button v-if="!build?.running" class="btn secondary small" :disabled="!routeReady || busy" @click="buildRoute">Build my route</button>
               <p class="warn">Building reinstalls these servers with fresh keys and signs the route for this device only.<template v-if="ops.chain.hops.length"> Any other device using your current route ({{ ops.chain.hops.join(' → ') }}) stops connecting until it is set up again.</template></p>

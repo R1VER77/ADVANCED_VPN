@@ -221,12 +221,21 @@ these terms retained for the software layer.
 ## 14. Local Gemma troubleshooting assistant
 
 The optional `cypherpunk-vpn-assistant` package includes Google's Gemma 3 1B
-model (`gemma-3-1b-it-Q8_0.gguf`) so the desktop app can explain setup or
-server failures locally on your own computer without sending logs over the
-network. Gemma is provided under and subject to the Gemma Terms of Use found at
-`https://ai.google.dev/gemma/terms` and the Gemma Prohibited Use Policy found
-at `https://ai.google.dev/gemma/prohibited_use_policy`. By installing or using
-the optional assistant package, you agree not to use the bundled Gemma model in
-violation of the Gemma Terms of Use or the Gemma Prohibited Use Policy. The
-rest of `cypherpunk_vpn` remains free software under AGPL-3.0-or-later and
-works in full without the assistant package.
+model (`gemma-3-1b-it-Q8_0.gguf`), so the desktop app can explain a failed setup
+step in plain words on your own computer. It runs without network access, is
+given only the failure's scrubbed facts, and never decides a fix.
+
+Gemma is provided under and subject to the Gemma Terms of Use found at
+gemma.ai/resources/terms. A copy is in
+[GEMMA_TERMS_OF_USE.md](third_party/GEMMA_TERMS_OF_USE.md) and in the package.
+
+As a condition of installing or using the assistant, **you must not use Gemma, or
+anything derived from it**:
+- for the restricted uses set forth in the Gemma Prohibited Use Policy (a copy is in
+  [GEMMA_PROHIBITED_USE_POLICY.md](third_party/GEMMA_PROHIBITED_USE_POLICY.md)),
+  which is incorporated into these terms; or
+- in violation of applicable laws and regulations.
+
+These restrictions pass to anyone you give the assistant to. The rest of
+`cypherpunk_vpn` remains free software under AGPL-3.0-or-later and works in full
+without the assistant package.

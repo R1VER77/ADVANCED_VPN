@@ -10,6 +10,8 @@ from unittest import mock
 import native_package as package
 import test_bundled_runtime as runtime_tests
 
+ROOT = Path(__file__).resolve().parents[1]
+
 
 class NativePackages(unittest.TestCase):
     def setUp(self):
@@ -259,6 +261,54 @@ class NativePackages(unittest.TestCase):
         self.assertEqual(calls, ["install --apply --package-managed"])
         self.assertEqual(self.run_configure(0, True, "abort-upgrade"), (0, []))
 
+    def assistant_fixture(self, marker=b"GLIBC_2.35"):
+        model = self.fixture.root / "gemma-3-1b-it-Q8_0.gguf"
+        model.write_bytes(b"GGUF fixture model")
+        server = self.fixture.root / "llama-server"
+        server.write_bytes(b"\x7fELF assistant server fixture, never run " + marker + b"\x00")
+        server.chmod(0o755)
+        return model, server
+
+    def test_the_assistant_package_ships_only_the_pinned_model_with_gemmas_terms(self):
+        import assistant
+
+        model, server = self.assistant_fixture()
+        tree = self.fixture.root / "assistant-tree"
+        with self.assertRaisesRegex(ValueError, "not the pinned Gemma file"):
+            package.stage_assistant(ROOT, model, server, tree)
+        digest = __import__("hashlib").sha256(model.read_bytes()).hexdigest()
+        with mock.patch.object(assistant, "MODEL_SHA256", digest):
+            package.stage_assistant(ROOT, model, server, tree)
+        home = tree / package.ASSISTANT_HOME.lstrip("/")
+        self.assertEqual(sorted(x.name for x in home.iterdir()),
+                         ["gemma-3-1b-it-Q8_0.gguf", "gemma-3-1b-it-Q8_0.gguf.sha256", "llama-server"])  # fmt: skip
+        self.assertEqual((home / "gemma-3-1b-it-Q8_0.gguf.sha256").read_text().split()[0], digest)
+        self.assertEqual(os.stat(home / "llama-server").st_mode & 0o777, 0o755)
+        self.assertEqual(os.stat(home / package.ASSISTANT_MODEL).st_mode & 0o777, 0o644)
+        docs = tree / "usr/share/doc" / package.ASSISTANT_PACKAGE
+        notice = "Gemma is provided under and subject to the Gemma Terms of Use found at gemma.ai/resources/terms"
+        self.assertIn(notice, (docs / "NOTICE").read_text())
+        self.assertIn(notice, (docs / "copyright").read_text())
+        for name in ("GEMMA_TERMS_OF_USE.md", "GEMMA_PROHIBITED_USE_POLICY.md"):
+            self.assertTrue((docs / name).is_file(), name)
+        # Nothing setuid, nothing outside its own folders.
+        for path in tree.rglob("*"):
+            self.assertFalse(path.stat().st_mode & 0o6000, path)
+        self.assertEqual(sorted(x.name for x in (tree / "usr").iterdir()), ["lib", "share"])
+
+    def test_an_assistant_server_that_is_not_an_elf_or_too_new_is_refused(self):
+        import assistant
+
+        model, server = self.assistant_fixture()
+        digest = __import__("hashlib").sha256(model.read_bytes()).hexdigest()
+        with mock.patch.object(assistant, "MODEL_SHA256", digest):
+            server.write_bytes(b"#!/bin/sh\n")
+            with self.assertRaisesRegex(ValueError, "not an ELF"):
+                package.stage_assistant(ROOT, model, server, self.fixture.root / "t1")
+            _, server = self.assistant_fixture(marker=b"GLIBC_2.39")
+            with self.assertRaisesRegex(ValueError, "exceeds the release baseline"):
+                package.stage_assistant(ROOT, model, server, self.fixture.root / "t2")
+
     def gui_fixture(self, marker=b"GLIBC_2.35"):
         icon = self.root / package.GUI_ICON
         icon.parent.mkdir(parents=True, exist_ok=True)
@@ -323,6 +373,10 @@ class NativePackages(unittest.TestCase):
             ["/usr/bin/dpkg-deb", "--field", str(built), "Depends"], capture_output=True, text=True, check=True
         ).stdout
         self.assertIn(package.GUI_DEB_DEPENDS, depends)
+        recommends = subprocess.run(
+            ["/usr/bin/dpkg-deb", "--field", str(built), "Recommends"], capture_output=True, text=True, check=True
+        ).stdout.strip()
+        self.assertEqual(recommends, package.ASSISTANT_PACKAGE)  # the app suggests its local assistant
         listing = subprocess.run(
             ["/usr/bin/dpkg-deb", "--contents", str(built)], capture_output=True, text=True, check=True
         ).stdout

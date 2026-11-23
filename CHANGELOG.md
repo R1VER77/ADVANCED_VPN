@@ -36,6 +36,28 @@ measured figure in the docs names the version it was measured on.
   - the host-setup and package-script tests ran the old-install cleanup's `rm -rf`
     against the machine running them, stopped only because the stand-in `sudo` was not
     root. Every path they delete is now checked to be inside the sandbox.
+- **Why did my route build fail?** A failed build in the app gets a **Why did this fail?**
+  panel.
+  - **Diagnosis:** fixed rules (`tools/troubleshoot.py`) read the build's kept output and
+    name the cause. There are ten classes, among them a busy server update, names not
+    resolving, an expired AWS sign-in, a locked or unreachable server, a capped server and
+    the security key's PIN or touch.
+  - **Fixes, best first:** build again, sign in, update or unlock the server, or check the
+    servers. The helper runs a fix only if that finding offers it.
+  - **Plain words:** the optional `cypherpunk-vpn-assistant` package adds Google's Gemma 3
+    1B (pinned by SHA-256). It runs on this computer with no network access, in its own
+    network namespace, reached over a Unix socket.
+    - It sees only scrubbed evidence: no addresses, accounts, tokens, keys or PINs.
+    - It never decides a fix, and an answer that reads like a command is refused.
+    - Without the package, the rules' own words are shown.
+  - **Gemma's terms:** the first-launch agreement now includes the Gemma Terms of Use and
+    its Prohibited Use Policy, as those terms require of anyone who redistributes Gemma
+    ([evaluation](docs/evidence/ASSISTANT_EVAL_20261123.json)).
+- Fixed: the PIN dialog, desktop notifications and the terminal view still said "ADVANCED
+  VPN"; the name gate now also catches that spelling.
+- **Correction:** the Tor guide claimed a leak test in CI that never existed
+  ([incident](docs/INCIDENTS.md)); the guide now says the recipe is untested, and the Tor
+  work is planned for v0.12.0 (D021).
 - **Paid services are decided, not built** ([D020](docs/DECISIONS.md),
   [design](docs/PAID_CREDITS_CHECKOUT.md)):
   - blind-token credits through an account-free checkout reached only as a Tor onion

@@ -115,7 +115,7 @@ class InteractiveView(unittest.TestCase):
         s = screen(out)
         text = "\n".join(s)
         self.assertTrue(s[0].startswith("╭") and s[6].startswith("╰"), text)
-        self.assertIn("│ >_ ADVANCED VPN (v", s[1])
+        self.assertIn("│ >_ CYPHERPUNK VPN (v", s[1])
         self.assertIn("│ chain:      client → relay → exit", s[3])
         self.assertIn("│ protection: nitrokey · service supervising", s[5])
         for expected in [

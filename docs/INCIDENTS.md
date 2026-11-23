@@ -55,6 +55,18 @@ private vulnerability reporting (see [SECURITY.md](../SECURITY.md)).
 
 ## Fixed
 
+### The Tor guide claimed a leak test that did not exist (21–23 Nov 2026)
+- **What:** `docs/TOR_RECIPE.md` and decision D012 called Tor over the tunnel a
+  *tested* recipe and said its leak-direction test runs in CI. No such test existed:
+  nothing in the test tools, the managed lab or CI runs Tor.
+- **Effect:** a claim-integrity defect in a published guide. Nothing was shipped that
+  relied on it: there is no Tor code in the product.
+- **Not affected:** the namespace's own leak tests (app mode and whole device), which
+  exist and run.
+- **How found:** a code search while planning the Tor work for v0.12.0.
+- **Fix:** the guide and D012 now say the recipe is a design whose test is not built.
+  The test is part of v0.12.0's Tor work (D021).
+
 ### The open desktop app cut off other signatures on the security key (22 Nov 2026)
 - **What:** while the Cypherpunk VPN desktop app was open on the setup checklist, it polled
   `GetSetup` every 2 s, and each poll ran `hardware_probe.py` (CTAP `getInfo`) against the

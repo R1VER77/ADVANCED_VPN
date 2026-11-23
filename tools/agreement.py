@@ -18,7 +18,13 @@ import re
 import sys
 
 ROOT = Path(__file__).resolve().parent.parent
-SOURCES = ("docs/TERMS_OF_SERVICE.md", "docs/PRIVACY_NOTICE.md")
+SOURCES = (
+    "docs/TERMS_OF_SERVICE.md",
+    "docs/PRIVACY_NOTICE.md",
+    # Gemma Terms of Use s3.1: every recipient of the assistant gets a copy.
+    "docs/third_party/GEMMA_TERMS_OF_USE.md",
+    "docs/third_party/GEMMA_PROHIBITED_USE_POLICY.md",
+)
 OUT = ROOT / "apps/cypherpunk-vpn/src/controller/agreement.json"
 SCHEMA = 1
 

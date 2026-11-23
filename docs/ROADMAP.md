@@ -170,6 +170,16 @@ throughout.
   by the same typed controller checks, with honest progress, actionable failure states
   (including a chain that stops answering) and explicit review of privileged or billable
   changes.
+- [x] D007's first slice, the troubleshooter (v0.11.0): fixed rules (`tools/troubleshoot.py`)
+  diagnose a failed route build from its own output and decide the fixes; a local Gemma 3 1B
+  (the optional `cypherpunk-vpn-assistant` package) only explains the finding in plain words.
+  - It runs offline, in a network namespace with only loopback, reached over a Unix socket.
+  - It sees only scrubbed evidence; command-like answers are refused.
+  - Measured on 30 answers across 10 failure classes
+    ([evidence](evidence/ASSISTANT_EVAL_20261123.json)): every answer passed the checks;
+    by hand, 7 classes were accurate, 2 vague, and 1 misleading (an untouched key described
+    as a slow one). So the rules' own words are shown first, and the model's are labelled
+    as a paraphrase.
 - [ ] Gemma-centric setup (D007): a local Gemma model leads the whole flow conversationally,
   trained for the conversation and tool calls over the narrowed provider catalog, its facts
   from the versioned catalog and provider documentation (training is not a substitute for

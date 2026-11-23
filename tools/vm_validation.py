@@ -579,7 +579,7 @@ def main():
             "  if a.get('Id')=='cypherpunk-vpn:fido2-pin':\n"
             "   s=socket.socket(socket.AF_UNIX,socket.SOCK_DGRAM);s.sendto(b'+'+sys.argv[1].encode(),a['Socket']);print(a.get('Message'));sys.exit(0)\n"
             " time.sleep(.2)\n"
-            "sys.exit('no ADVANCED VPN prompt appeared')\n"
+            "sys.exit('no Cypherpunk VPN prompt appeared')\n"
         )
         message = client_agent.run(["python3", "-c", answer, pin], timeout=60)[1].strip()
         end = time.monotonic() + 20

@@ -20,7 +20,8 @@ class Agreement(unittest.TestCase):
 
     def test_both_documents_are_shipped_whole_as_plain_text(self):
         built = agreement.build()
-        self.assertEqual([d["title"] for d in built["documents"]], ["Terms of service", "Privacy notice"])
+        self.assertEqual([d["title"] for d in built["documents"]],
+                         ["Terms of service", "Privacy notice", "Gemma Terms of Use", "Gemma Prohibited Use Policy"])  # fmt: skip
         for doc, name in zip(built["documents"], agreement.SOURCES, strict=True):
             source = (agreement.ROOT / name).read_text(encoding="utf-8")
             headings = [line.lstrip("#").strip() for line in source.splitlines() if line.startswith("## ")]
@@ -35,6 +36,18 @@ class Agreement(unittest.TestCase):
         self.assertIn(
             "Websites. Can see: The exit's address and what you send them. Cannot see: Your address.", privacy
         )
+
+    def test_the_gemma_terms_obligations_are_met(self):
+        """Gemma Terms of Use s3.1: the exact Notice, s3.2 as an enforceable term, a copy of both."""
+        notice = "Gemma is provided under and subject to the Gemma Terms of Use found at gemma.ai/resources/terms"
+        self.assertIn(notice, (agreement.ROOT / "NOTICE").read_text())
+        terms = " ".join((agreement.ROOT / "docs/TERMS_OF_SERVICE.md").read_text().split())
+        self.assertIn("you must not use Gemma, or anything derived from it", terms)
+        self.assertIn("restricted uses set forth in the Gemma Prohibited Use Policy", terms)
+        self.assertIn("in violation of applicable laws and regulations", terms)
+        shipped = (agreement.ROOT / "docs/third_party/GEMMA_TERMS_OF_USE.md").read_text()
+        self.assertIn("3.2 Use Restrictions", shipped)
+        self.assertIn(notice, " ".join(shipped.split()))
 
     def test_any_change_to_a_document_changes_the_version(self):
         with tempfile.TemporaryDirectory() as tmp:
