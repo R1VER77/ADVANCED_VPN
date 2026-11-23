@@ -215,6 +215,7 @@ mod tests {
             expires: 1_000 + DESCRIPTOR_TTL_SECONDS,
             exit_policy: None,
             streaming: None,
+            v6: None,
             signature: "c2ln".into(),
         }
     }

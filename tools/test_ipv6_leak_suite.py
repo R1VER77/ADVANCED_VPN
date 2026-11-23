@@ -456,5 +456,76 @@ class RecordShapeTests(unittest.TestCase):
         self.assertIn(record["overall"], ("pass", "leak", "unavailable"))
 
 
+class Stage2GuardRules(unittest.TestCase):
+    """The per-family kill-switch symmetry of IPV6_TUNNELING_DESIGN section 3,
+    as a generated, mechanically-checked rule text - and the honest pin that
+    the live supervisor still ships the stage-0 posture until the Rust data
+    plane lands."""
+
+    def test_every_rule_role_exists_once_per_family(self):
+        """Per-family symmetry, checked structurally: each RULE ROLE (source
+        guard, private-destination drop, in-tunnel accept, destination guard)
+        appears exactly once for v4 and once for v6 - same verbs, same order,
+        only the family swapped. The addresses differ by design (the tunnel's
+        v4 and v6 inner prefixes); the structure may not."""
+        rules = suite.stage2_forwarding_rules().splitlines()
+
+        def family(line):
+            if " ip " in line or "nfproto ipv4" in line:
+                return "v4"
+            if " ip6 " in line or "nfproto ipv6" in line:
+                return "v6"
+            return None
+
+        def role(line):
+            for verb in ("saddr !=", "daddr {", "nfproto", "daddr !="):
+                if verb in line:
+                    return verb
+            return None
+
+        seen: dict = {}
+        for line in rules:
+            fam, part = family(line), role(line)
+            self.assertIsNotNone(fam, line)
+            self.assertIsNotNone(part, line)
+            seen.setdefault(part, []).append(fam)
+        self.assertEqual(
+            {part: sorted(fams) for part, fams in seen.items()},
+            {"saddr !=": ["v4", "v6"], "daddr {": ["v4", "v6"], "nfproto": ["v4", "v6"], "daddr !=": ["v4", "v6"]},
+        )
+
+    def test_both_families_are_dropped_outside_the_tunnel(self):
+        rules = suite.stage2_forwarding_rules()
+        self.assertIn('oifname "avpn0" ip daddr != 10.77.0.2 drop', rules)
+        self.assertIn('oifname "avpn0" ip6 daddr != 2001:db8:1:2::/64 drop', rules)
+
+    def test_v6_inside_the_tunnel_is_accepted_exactly_when_v4_is(self):
+        rules = suite.stage2_forwarding_rules().splitlines()
+        accepts = [l for l in rules if "accept" in l]
+        self.assertEqual(len(accepts), 2)
+        self.assertIn("nfproto ipv4", accepts[0] + accepts[1])
+        self.assertIn("nfproto ipv6", accepts[0] + accepts[1])
+
+    def test_private_destinations_are_dropped_per_family(self):
+        rules = suite.stage2_forwarding_rules()
+        self.assertIn("fc00::/7", rules)  # v6 ULA, the v4 RFC1918 counterpart
+        self.assertIn("fe80::/10", rules)  # v6 link-local, the v4 169.254 counterpart
+        self.assertIn("2001:db8::/32", rules)  # documentation space never egresses
+
+    def test_the_generator_refuses_a_non_global_tunnel_prefix(self):
+        with self.assertRaisesRegex(ValueError, "global 2000::/3"):
+            suite.stage2_forwarding_rules(tunnel_v6_prefix="fc00:dead:beef::")
+        with self.assertRaisesRegex(ValueError, "global 2000::/3"):
+            suite.stage2_forwarding_rules(tunnel_v6_prefix="fe80::")
+
+    def test_the_live_supervisor_still_ships_the_stage0_posture(self):
+        """The honest pin: until the Rust dual-stack data plane lands, the
+        shipping supervisor keeps v6 dropped from the tunnel interface; the
+        flip to stage 2 is a visible change to this test, never a drift."""
+        avpnctl = (Path(__file__).resolve().parent / "avpnctl.py").read_text()
+        self.assertIn(suite.stage0_forwarding_line(), avpnctl)
+        self.assertNotIn("meta nfproto ipv6 accept", avpnctl)
+
+
 if __name__ == "__main__":
     unittest.main()

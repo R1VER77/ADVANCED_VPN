@@ -524,3 +524,54 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+# ------------------------------------------------- stage 2: per-family guard
+#
+# IPV6_TUNNELING_DESIGN.md section 3, "Kill switch: per-family symmetry": the
+# guard drops, per family, v4 outside the tunnel (unchanged), v6 outside the
+# tunnel (new - was: v6 everywhere), nothing else. The live supervisor still
+# ships the stage-0 posture (v6 dropped from the tunnel interface too: a
+# namespace with no v6 route forwards none, and the explicit drop is the
+# defense-in-depth that posture runs on); this generator is the stage-2 rule
+# text the Rust data plane (dual-stack namespace routing) will install when a
+# dual-stack exit's chain is up - published here so the symmetry itself is a
+# tested artifact instead of a prose promise.
+
+# The private-destination drop, per family (the stage-0 text names v4 only).
+PRIVATE_V4 = (
+    "ip daddr {0.0.0.0/8,10.0.0.0/8,100.64.0.0/10,127.0.0.0/8,"
+    "169.254.0.0/16,172.16.0.0/12,192.168.0.0/16,224.0.0.0/4} drop"
+)
+PRIVATE_V6 = "ip6 daddr {::/128,::1/128,fc00::/7,fe80::/10,ff00::/8,2001:db8::/32} drop"
+
+
+def stage2_forwarding_rules(tunnel_v4: str = "10.77.0.2", tunnel_v6_prefix: str = "2001:db8:1:2::") -> str:
+    """The stage-2 forwarding chain, per family symmetric: for every v4 rule
+    there is a v6 rule of identical structure (and vice versa), v6 inside the
+    tunnel is accepted exactly when v4 is, and both families are dropped
+    outside the tunnel. `tunnel_v6_prefix` is the tunnel's inside /64 (the
+    design's family-honest prefix; the generator takes no exit-side address
+    because forwarding only ever happens toward the carrier)."""
+    if not is_global_v6(tunnel_v6_prefix + "1"):
+        raise ValueError("the tunnel's v6 prefix must be a global 2000::/3 /64")
+    lines = [
+        f'iifname "avpn0" ip saddr != {tunnel_v4} drop',
+        f'iifname "avpn0" ip6 saddr != {tunnel_v6_prefix}/64 drop',
+        f'  iifname "avpn0" {PRIVATE_V4}',
+        f'  iifname "avpn0" {PRIVATE_V6}',
+        '  iifname "avpn0" meta nfproto ipv4 accept',
+        '  iifname "avpn0" meta nfproto ipv6 accept',
+        f'oifname "avpn0" ip daddr != {tunnel_v4} drop',
+        f'oifname "avpn0" ip6 daddr != {tunnel_v6_prefix}/64 drop',
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def stage0_forwarding_line() -> str:
+    """The fail-closed stage-0 line the live supervisor ships today: v6 from
+    the tunnel interface is dropped outright, because the namespace has no v6
+    route and the drop is the defense-in-depth that posture runs on. Pinned
+    here so the live flip to stage 2 is a visible, tested change - not a
+    silent drift."""
+    return 'iifname "avpn0" meta nfproto ipv6 drop'

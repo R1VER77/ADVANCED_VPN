@@ -1,0 +1,84 @@
+// voucher_spend.spthy — Tamarin model of voucher redemption and spent-state recovery
+//
+// STATUS (22 November, on landing): a draft, NOT registered in tools/tamarin_check.py.
+// `executable` and `no_double_redeem` verify in seconds; `revoked_forever` does not
+// terminate (over 13 minutes and 8 GB) because `redeem` consumes and re-creates the linear
+// Key token, so the backward search unrolls ever-longer redemption chains; plain
+// [use_induction] does not cut it. It needs an invariant over the Key token before it can
+// join CI, where a non-terminating model would fail the formal-models job.
+// (ROADMAP section 6, the voucher proofs row). Companion to tools/voucher.py and
+// formal/credits/credits.spthy (the vouchers and the mesh credits share the Ledger).
+//
+// MODELED: the mint publishes an epoch key after its payment webhook (the HMAC is
+// abstracted - one mint key per epoch); a buyer presents (voucher secret, signature)
+// at a relay; the relay checks the signature against the published key and a
+// persistent spent set shared by all relays; when the supply audit finds more
+// redemptions than the mint issued under an epoch key (Ledger.audit_supply, the
+// Inflation containment), the key is revoked and redemption under it never succeeds
+// again - spent-state recovery that re-issuing under the old key cannot undo.
+// The revocation is modeled with a linear Key token that redemption BORROWS and
+// returns and the audit consumes permanently, which is what makes "never again"
+// checkable rather than aspirational.
+// NOT MODELED: tiers (on the face of the voucher, not part of the spend state),
+// the ledger file format, and the webhook's HMAC (the mint key simply exists).
+//
+// LEMMAS:
+//  0. executable       webhook issue, present and redeem exist, repeatedly.
+//  1. no_double_redeem a voucher secret is redeemed at most once across relays
+//                      sharing the spent set (the restriction tools/voucher.py
+//                      shares with tools/mesh_tokens.py).
+//  2. revoked_forever  after an epoch key's supply audit revokes it, no further
+//                      redemption succeeds under that key.
+//
+// MUTANTS (edits in tools/tamarin_check.py; each must be falsified):
+//  - redemption does not hold the live-key token;
+//  - the audit returns the key token (revocation is not forever).
+theory voucher_spend
+begin
+
+builtins: hashing, signing
+
+restriction equality:
+  "All x y #i. Eq(x, y) @i ==> x = y"
+
+restriction spent_set:
+  "All t #i. NotSpent(t) @i ==> not (Ex #j. Spent(t) @j & #j < #i)"
+
+rule mint_epoch_key:
+  [ Fr(~sk) ]
+  --[ MintKey(~sk) ]->
+  [ !Mint(~sk), !MintPub(pk(~sk)), Key(pk(~sk)), Out(pk(~sk)) ]
+
+rule webhook_issue:
+  [ !Mint(sk), Fr(~secret) ]
+  --[ Issued(~secret, pk(sk)) ]->
+  [ !Voucher(~secret, sign(~secret, sk)) ]
+
+rule present:
+  [ !Voucher(t, s) ]
+  --[ Presented(t) ]->
+  [ Out(<t, s>) ]
+
+rule audit_revoke:
+  [ Key(pkm) ]
+  --[ AuditOverSupply(pkm), Revoked(pkm) ]->
+  [ ]
+
+rule redeem:
+  [ !MintPub(pkm), Key(pkm), In(<secret, sig>) ]
+  --[ Eq(verify(sig, secret, pkm), true), NotSpent(secret), Spent(secret), Redeemed(secret, pkm) ]->
+  [ Key(pkm) ]
+
+lemma executable:
+  exists-trace
+  "Ex secret pkm #i #j. Issued(secret, pkm) @i & Redeemed(secret, pkm) @j"
+
+lemma no_double_redeem:
+  "All secret pkm #i. Redeemed(secret, pkm) @i ==>
+     not (Ex #j pkm2. Redeemed(secret, pkm2) @j & #i < #j)"
+
+lemma revoked_forever:
+  "All secret pkm #i. Redeemed(secret, pkm) @i ==>
+     not (Ex #j. Revoked(pkm) @j & #j < #i)"
+
+end

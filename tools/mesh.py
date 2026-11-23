@@ -169,6 +169,34 @@ def verify_descriptor(descriptor: dict) -> bool:
 
 STREAMING_KEYS = {"service", "region", "result", "checked", "transport_profile"}
 
+# The exit's advertised v6 egress (IPV6_TUNNELING_DESIGN.md section 3):
+# "both" carries native v6 payloads, "v6" is v6-only, "v4" is v4-only even
+# though the operator runs v6 locally (a routing fact, not a capability).
+V6_EGRESS = ("both", "v4", "v6")
+
+
+def _is_global_v6_prefix(prefix) -> bool:
+    """A globally routable (2000::/3) /64 - the same scope rule the leak
+    suite pins (tools/ipv6_leak_suite.py is_global_v6). An exit may only
+    advertise a prefix the tunnel could actually egress from; a ULA or
+    link-local prefix here would be a lie the chain planner refuses."""
+    import socket as _socket
+
+    if not isinstance(prefix, str) or len(prefix) > 64 or not prefix.endswith("/64"):
+        return False
+    try:
+        packed = _socket.inet_pton(_socket.AF_INET6, prefix[:-3])
+    except (OSError, ValueError):
+        return False
+    return (packed[0] & 0xE0) == 0x20  # 2000::/3: the top three bits are 001
+
+
+def v6_egress(descriptor: dict) -> str:
+    """The exit's advertised v6 egress; "none" when the field is absent (the
+    honest default: an exit that never says, egresses v4 only)."""
+    v6 = descriptor.get("v6") if isinstance(descriptor, dict) else None
+    return v6["egress"] if isinstance(v6, dict) and v6.get("egress") in V6_EGRESS else "none"
+
 
 def validate(descriptor: dict, now: float | None = None) -> list[str]:
     """Structural checks mirroring Descriptor::validate in src/mesh/descriptor.rs."""
@@ -224,6 +252,19 @@ def validate(descriptor: dict, now: float | None = None) -> list[str]:
                 errors.append(f"streaming row {i}: transport profile too long")
             if row["region"] is not None and (not isinstance(row["region"], str) or len(row["region"]) > 64):
                 errors.append(f"streaming row {i}: region too long")
+    # The exit's IPv6 egress (IPV6_TUNNELING_DESIGN.md section 3, stage 1): a
+    # family-honest descriptor. Absent is the honest default - the exit
+    # egresses v4 only, exactly today's posture - so an absent field never
+    # widens what a chain may rely on.
+    if "v6" in descriptor:
+        v6 = descriptor["v6"]
+        if not (
+            isinstance(v6, dict)
+            and set(v6) == {"prefix", "egress"}
+            and v6.get("egress") in V6_EGRESS
+            and _is_global_v6_prefix(v6.get("prefix"))
+        ):
+            errors.append("v6: {prefix: a global 2000::/3 /64, egress: both|v4|v6}")
     return errors
 
 
@@ -281,12 +322,32 @@ def select_chain(
     allow_weaker_diversity: bool = False,
     own_operator: str | None = None,
     allow_same_jurisdiction: bool = False,
+    dual_stack: bool = False,
 ) -> list[dict]:
     """Diversity first: every hop a distinct operator, provider and country; the
     member's own node as the entry; the exit in another legal sphere than the entry.
-    Mirrors NodeDb::select_chain in src/mesh/directory.rs."""
+    Mirrors NodeDb::select_chain in src/mesh/directory.rs.
+
+    `dual_stack` (IPV6_TUNNELING_DESIGN.md stage 1) requires the exit to
+    advertise v6 egress (v6.egress "both" or "v6"): a v4-only exit REFUSES a
+    dual-stack chain - loudly, never by silently falling back to v4-only,
+    which is the design's own no-silent-fallback rule."""
     if not 1 <= hops <= 3:
         raise SystemExit("chains have 1 to 3 hops")
+    if dual_stack:
+        exits = [d for d in nodes if "exit" in d.get("roles", []) and d.get("group", "public") == group]
+        capable = [d for d in exits if v6_egress(d) in ("both", "v6")]
+        if not capable:
+            raise SystemExit(
+                "no exit in group `%s` advertises v6 egress; a dual-stack chain is refused "
+                "rather than silently built v4-only (IPV6_TUNNELING_DESIGN section 4)" % group
+            )
+        capable_ids = {d["node_id"] for d in capable}
+        nodes = [
+            d
+            for d in nodes
+            if "exit" not in d.get("roles", []) or d.get("group", "public") != group or d["node_id"] in capable_ids
+        ]
     roles = {1: ["exit"], 2: ["entry", "exit"], 3: ["entry", "relay", "exit"]}[hops]
     chosen, ops, provs, cts = [], set(), set(), set()
     for i, role in enumerate(roles):
@@ -352,7 +413,9 @@ def quota_view(now: float | None = None) -> dict:
     Private-group credits are HMAC-based (a group trusts its members); the
     public pool uses blind-RSA credits in the control plane
     (tools/mesh_tokens.py) while the Rust data plane stays fail-closed until
-    the scheme is reviewed and vendored (src/mesh/tokens.rs).
+    the scheme is reviewed and vendored (src/mesh/tokens.rs). The 22 November
+    membership-and-credit review added the classical/PQ labels both pools
+    carry wherever they are stated (docs/PQ_INVENTORY.md exceptions 1 and 6).
     """
     t = load_tokens()
     epoch = current_epoch(now)
@@ -364,7 +427,12 @@ def quota_view(now: float | None = None) -> dict:
         "spent_today": len(spent),
         "balance": len(fresh) - len(spent),
         "public_pool": "blind-RSA credits via tools/mesh_tokens.py (control plane); "
-        "data-plane redemption stays fail-closed until vendored in Rust",
+        "data-plane redemption stays fail-closed until vendored in Rust; "
+        "classical unforgeability, unlinkability survives a quantum adversary "
+        "(PQ_INVENTORY exception 1)",
+        "private_groups": "VOPRF credits via tools/mesh_voprf.py; classical "
+        "unforgeability, unlinkability survives a quantum adversary (PQ_INVENTORY "
+        "exception 6)",
     }
 
 
@@ -951,6 +1019,7 @@ def cmd_quota(_args) -> dict:
             {"label": "spent", "value": f"{q['spent_today']} credits (chains through others)"},
             {"label": "balance", "value": str(q["balance"])},
             {"label": "public pool", "value": q["public_pool"]},
+            {"label": "private groups", "value": q["private_groups"]},
         ],
         **q,
     }

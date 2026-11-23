@@ -28,7 +28,7 @@ falling back. Authentication is a separate property:** post-quantum on the inner
 (ML-DSA-65 certificates) and on the cloak (protocol v2: both ends prove the enrolled
 symmetric key with a role-separated HMAC over the hybrid exporter; the ECDSA certificate is
 a facade), but classical on the exit's DNS upstream (WebPKI). Enrolment bundles carry both
-an Ed25519 and an ML-DSA-65 signature. The four exceptions below are named, with what each
+an Ed25519 and an ML-DSA-65 signature. The seven exceptions below are named, with what each
 one exposes. The claim never says "post-quantum throughout" while one of them stands, and
 the cloak v2 composition is this project's own, tested but not independently reviewed.
 
@@ -105,6 +105,25 @@ classical authentication that only an active, quantum-capable attacker could exp
    exit's address, as the member's traffic does. A recorded exit uplink therefore shows the
    names, as it shows the destinations of the traffic itself; DNSSEC, classical, protects the
    answers. The chain itself is unchanged, and the default stays the hybrid DoT forwarder.
+6. **Private-group contribution credits** (`tools/mesh_voprf.py`; added by the 22 November
+   membership-and-credit review). RFC 9497 VOPRF on ristretto255: classical
+   unforgeability - Shor recovers the group's epoch key from its published public key and
+   lets a quantum adversary mint credits. As in exception 1, unlinkability survives: the
+   client blinds with a uniformly random scalar, which in a prime-order group is
+   perfectly hiding, so not even the key holder can match a redemption to its issuance.
+   (The review first said a quantum adversary links them; corrected on landing.) Forgery
+   is contained by the epoch keys and the ledger; the HMAC scheme this replaced let the
+   issuer link every redemption, with no quantum computer. Labeled in the module (`QUANTUM_STATUS`, pinned by
+   `test_mesh_fail_closed.py`); the Rust data plane stays fail-closed for it (exception 1's
+   gate covers private groups too). The STARK membership credits are the post-quantum
+   replacement for both pools.
+7. **The voucher engine's blind RSA** (`tools/voucher.py`, REVENUE_ARCHITECTURE Model 1;
+   named here by the same review, which consolidated the label that lived only in the
+   module's docstring and COMPARISON note 8). Same primitive and same split as exception 1:
+   blindness is information-theoretic (unlinkability survives), unforgeability is classical
+   (a forger mints vouchers, buying rate class, not decryption). Contained the same way -
+   monthly epoch keys bound the window, and the double-spend ledger plus supply audit make
+   forgery loud. It follows exception 1 to the lattice or STARK replacement.
 
 ## Not in the product
 

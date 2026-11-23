@@ -110,8 +110,9 @@ bench records per family rather than hiding.
 | Stage | Work | Gate |
 |---|---|---|
 | 0 (done) | Leak suite against the fail-closed posture | 19 gates green; v6 egress impossible with the tunnel up |
-| 1 | Exit descriptors gain the `v6` field; chain planning honors it | descriptor-validation tests; a v4-only exit refuses dual-stack chains |
-| 2 | Namespace dual-stack routing + v6-aware kill switch + AAAA inside DoT | leak suite re-run with a v6-capable lab exit; both controls hold |
+| 1 (Python half done, 22 Nov) | Exit descriptors gain the `v6` field; chain planning honors it | descriptor-validation tests (11 new shared-fixture cases, Python + Rust); a v4-only exit refuses dual-stack chains, loudly |
+| 1 (Rust half, CI-pending) | `Descriptor::validate` learns the `v6` field | the shared fixture runs in the Rust test; the CI compile is the remaining gate |
+| 2 (rule half done, 22 Nov) | Namespace dual-stack routing + v6-aware kill switch + AAAA inside DoT | the per-family symmetric guard text is generated and mechanically symmetry-checked in the leak suite (25 gates); the live flip waits for the Rust data plane, pinned |
 | 3 | Rate-class per-family throughput recording | bench reports v4/v6 goodput separately; cell size unchanged |
 | 4 | `avpn stream-check` records the family the service saw | eligibility rows carry `family` |
 

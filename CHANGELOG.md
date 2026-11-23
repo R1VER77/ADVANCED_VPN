@@ -73,6 +73,25 @@ measured figure in the docs names the version it was measured on.
   could not reach them. The app's own-servers setup above replaces them; the controller
   code and its tests remain.
 
+- **GLM5.3's 22 November follow-through, reviewed and corrected on landing.** Taken: the
+  profile store (`tools/profile_store.py`; not yet shown by the app), the mesh
+  membership-and-credit review with its fail-closed pins, the research batch (secret
+  allocation, the versioned curve-migration drill, handshake accounting, the whitepaper
+  claims gate) and IPv6 stage 1 (the `v6` exit-descriptor field and dual-stack chain
+  planning). Corrected:
+  - the Rust `v6` validator did not compile in tests and checked only the first group of
+    the prefix; it now parses the whole address as Python does, pinned by three new
+    shared-fixture cases;
+  - the ProVerif voucher model did not parse, and one of its mutants held vacuously; it
+    now proves, with all three mutants refuted, and runs in CI;
+  - the Tamarin voucher spent-state model's `revoked_forever` does not terminate; it stays
+    a draft outside CI;
+  - the review said a quantum adversary links the private groups' VOPRF credits; their
+    blinding is perfectly hiding, so only forgery falls, as with the public pool;
+  - a second copy of the curve inventory was dropped for the existing one.
+  Not taken: the setup wizard's write screens and controller writes (v0.11.0's setup
+  checklist and user-side helper replace them), the entity analysis (private), and the
+  sandbox's records.
 - Fixed: the desktop PIN dialog discarded the PIN typed into it since `150dd4c` (a raw line
   break in its text), which made every hardware operation ask twice in a terminal and fail
   in the background ([incident](docs/INCIDENTS.md)).

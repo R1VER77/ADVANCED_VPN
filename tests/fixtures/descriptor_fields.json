@@ -1,5 +1,5 @@
 {
- "about": "Descriptor exit_policy and streaming fields: every case must be accepted or refused alike by tools/mesh.py validate (Python) and Descriptor::validate (src/mesh/descriptor.rs).",
+ "about": "Descriptor exit_policy, streaming and v6 fields: every case must be accepted or refused alike by tools/mesh.py validate (Python) and Descriptor::validate (src/mesh/descriptor.rs).",
  "accept": [
   {
    "exit_policy": {
@@ -57,6 +57,24 @@
   },
   {
    "streaming": []
+  },
+  {
+   "v6": {
+    "prefix": "2001:db8:1234:5678::/64",
+    "egress": "both"
+   }
+  },
+  {
+   "v6": {
+    "prefix": "2600:beef::/64",
+    "egress": "v6"
+   }
+  },
+  {
+   "v6": {
+    "prefix": "2a01::/64",
+    "egress": "v4"
+   }
   }
  ],
  "refuse": [
@@ -314,6 +332,86 @@
      "transport_profile": "cli"
     }
    ]
+  },
+  {
+   "v6": {
+    "prefix": "2001:db8::/64",
+    "egress": "sometimes"
+   }
+  },
+  {
+   "v6": {
+    "prefix": "2001:db8::/63",
+    "egress": "both"
+   }
+  },
+  {
+   "v6": {
+    "prefix": "2001:db8::/64",
+    "egress": "both",
+    "extra": 1
+   }
+  },
+  {
+   "v6": {
+    "prefix": "fc00::/64",
+    "egress": "both"
+   }
+  },
+  {
+   "v6": {
+    "prefix": "fe80::/64",
+    "egress": "both"
+   }
+  },
+  {
+   "v6": {
+    "prefix": "ff00::/64",
+    "egress": "both"
+   }
+  },
+  {
+   "v6": {
+    "prefix": "::/64",
+    "egress": "both"
+   }
+  },
+  {
+   "v6": {
+    "prefix": "",
+    "egress": "both"
+   }
+  },
+  {
+   "v6": {
+    "prefix": "2001:db8::/64"
+   }
+  },
+  {
+   "v6": {
+    "egress": "both"
+   }
+  },
+  {
+   "v6": "2001:db8::/64"
+  },
+  {
+   "v6": {
+    "prefix": "2001:zz::/64",
+    "egress": "both"
+   }
+  },
+  {
+   "v6": {
+    "prefix": "2001:db8:::/64",
+    "egress": "both"
+   }
+  },
+  {
+   "v6": {
+    "prefix": "2001:db8::1::2/64",
+    "egress": "both"
+   }
   }
  ]
 }

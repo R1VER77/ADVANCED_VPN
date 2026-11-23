@@ -150,6 +150,14 @@ throughout.
 - [ ] A profile store: the client holds more than one enrolled chain with an active
   selection, and a viability check (verified, current, protection intact, servers healthy)
   that decides what each launch shows.
+  **Store delivered** (22 November): [profile_store](../tools/profile_store.py) (29
+  tests) holds inactive chains beside the unchanged enrolled directory, swaps by
+  crash-safe rename with a two-phase selection marker (every crash window repairs
+  from existence facts), refuses a swap beneath a guard, and answers the four
+  viability questions honestly - live reachability stays the connection check's
+  claim and is labeled probe "not_run" unless the controller supplies a probe.
+  Remaining: controller/GUI surfacing of the launch view (connect/choose/setup)
+  on the owner's build.
 - [ ] The GUI ([`apps/cypherpunk-vpn`](../apps/cypherpunk-vpn)) appears when provisioning
   completes, and on later launches offers the viable profiles or adding one. **v0.11.0**
   ships it inside the native `.deb` with one *Start setup* checklist: key check and access,
@@ -219,9 +227,20 @@ throughout.
   sets. Evaluate integration with an existing compatible anonymity network.
 - [ ] Review mesh membership and credit verification; keep unreviewed mechanisms
   fail-closed and clearly label classical versus post-quantum security assumptions.
+  **Reviewed** (22 November): the [review](MESH_CREDIT_REVIEW_20261122.md) walks every
+  membership and credit mechanism; the one unlabeled scheme (the private groups'
+  ristretto255 VOPRF credits: classical unforgeability, while their perfectly hiding
+  blinding keeps unlinkability against a quantum adversary, as the public pool's does) is
+  now labeled in the module and the quota output
+  (PQ_INVENTORY exception 6), the voucher engine's label is consolidated into the
+  inventory (exception 7), and 9 pin tests (`tools/test_mesh_fail_closed.py`) hold the
+  fail-closed posture: the Rust data plane still rejects every spend, the ZK prototype
+  stays wired into nothing, and the membership-proof artifact stays unconsumed until a
+  verifier exists. The data-plane verifier and the ZK credits' own open items remain.
 
 See [mesh](MESH_DESIGN.md), [mix lane](MIX_LANE_DESIGN.md),
-[DC-net control](DCNET_CONTROL_DESIGN.md), [membership](ZK_MEMBERSHIP_DESIGN.md)
+[DC-net control](DCNET_CONTROL_DESIGN.md), [membership](ZK_MEMBERSHIP_DESIGN.md),
+the [membership-and-credit review](MESH_CREDIT_REVIEW_20261122.md)
 and the [post-quantum inventory](PQ_INVENTORY.md).
 
 ## 5. Name migration and reach
@@ -252,8 +271,19 @@ The owner's full-stack hybrid-PQ and SafeCurves requirements remain target polic
 - [ ] Specify and prove voucher issuance, redemption, quantum unlinkability,
   nullifier binding and spent-state recovery. A classical VOPRF plus KEM/hash inputs
   is not by itself a proof of those properties. Keep public admission fail-closed.
-  Implemented on 21 November ([tools/voucher.py](../tools/voucher.py), [tools/voprf.py](../tools/voprf.py), RFC 9497 vectors);
-  the proofs remain.
+  Implemented on 21 November ([tools/voucher.py](../tools/voucher.py), [tools/voprf.py](../tools/voprf.py), RFC 9497 vectors).
+  The proof halves landed on 22 November: the ProVerif unlinkability model
+  ([formal/voucher/voucher_unlinkability.pv](../formal/voucher/voucher_unlinkability.pv),
+  within-tier by construction - cross-tier is not claimed, the tier is on the face of
+  the voucher) and the Tamarin spent-state model
+  ([formal/voucher/voucher_spend.spthy](../formal/voucher/voucher_spend.spthy):
+  no-double-redeem and revoked-forever, with the audit's revocation modeled as a
+  consumed key token), pinned by [tools/test_voucher_proofs.py](../tools/test_voucher_proofs.py).
+  Checked on landing: the ProVerif model proves, with all three mutants refuted (it first
+  lacked its declarations, and one mutant held vacuously until fixed); it is registered in
+  CI. In the Tamarin model `no_double_redeem` verifies but `revoked_forever` does not
+  terminate, so it stays a draft outside CI until an invariant over the key token cuts the
+  loop. That, and nullifier binding on the ZK side, remain.
 - [ ] Implement/authenticate a consistent PIR directory with secure randomness and
   explicit independent-operator assumptions. Distinguish XOR reference timings from
   deployed DPF results and from network reservations.
@@ -262,8 +292,20 @@ The owner's full-stack hybrid-PQ and SafeCurves requirements remain target polic
 - [ ] Account for all handshake flights and parameter generations. Retain the
   established hybrid/ML-DSA baseline while evaluating MAYO; category-1 MAYO-1 does
   not supply category-3 authentication. Preserve PMTU/fallback and downgrade protection.
+  Accounted on 22 November ([tools/handshake_accounting.py](../tools/handshake_accounting.py), 9 tests): every
+  handshake in the stack with its flights, fresh-material generations, classification
+  and the inventory surface it must agree with; the MAYO row pins category-1-not-3,
+  the corrected 1,456/464-byte sizes, the retained ML-DSA-65 baseline, the versioned
+  migration path and the PMTU/downgrade rule. The flight-split arithmetic for a real
+  MAYO deployment remains an owner-side analysis.
 - [ ] Allocate disjoint, durably consumed material to DC-net masks and session PSKs;
   qualify physical entropy/custody and cross-plane linkage before operational IT claims.
+  The in-sandbox half landed on 22 November
+  ([tools/secret_allocation.py](../tools/secret_allocation.py), 16 tests): pairwise
+  non-prefix domains with the tag inside the KDF info, an append-only consumption
+  ledger (digests, never material; replay refused across reloads), and a finite
+  ratchet whose exhaustion answers rekey_required instead of "never runs out". The
+  physical entropy/custody and cross-plane-linkage halves remain owner-side.
 - [ ] Resolve DC-net scheduling versus the bootstrap target, logical broadcast versus
   physical fanout/bandwidth, and jamming abort versus event authorization.
 - [ ] Validate complete DLEQ batches, authenticated event effects and jamming/fallback
@@ -274,11 +316,23 @@ The owner's full-stack hybrid-PQ and SafeCurves requirements remain target polic
   batches over the real ristretto255 VOPRF, authenticated event effects (a substitution
   attack shown, then closed) and jamming/fallback dependencies (detection, never
   attribution). Open: the whitepaper draft corrections in the research review.
+  The corrections became a machine-checked regeneration gate on 22 November
+  ([tools/test_whitepaper_claims.py](../tools/test_whitepaper_claims.py), named in the
+  [review](RESEARCH_REVIEW_20261118.md)): a blocklist of the struck claims (negations
+  pass - denying a claim is honest), the required honesty labels, a self-arming scan
+  over any future whitepaper* artifact, and the standing docs already passing; the
+  owner-supplied specification stays a preserved input whose over-claims are recorded
+  findings, corrected at publication.
 - [ ] Complete the interface/curve inventory and versioned migration. Preserve current
   device keys, document compatibility dependencies and test the PQ property of each
   interface; do not silently reset hardware to satisfy a design mandate.
   The inventory landed on 21 November ([tools/test_curve_inventory.py](../tools/test_curve_inventory.py), which scans this
-  tree); the versioned migration remains.
+  tree); the versioned migration became an executable drill on 22 November
+  ([tools/curve_rotation.py](../tools/curve_rotation.py), 12 tests): stages in order
+  with a bounded dual period, cutover gated by the row's own PQ test, no key reset
+  (the forbidden act modeled and refused), and no downgrade - run over every open
+  migration the inventory records. A physical rotation on real hardware remains
+  owner-side.
 - [ ] Publish scientific claims/whitepaper figures only after the corresponding formal,
   live empirical and independent-review gates. Synthetic chance-level classification
   and primitive timings remain labelled research results.
@@ -311,6 +365,16 @@ Landed, each with its tests (`python -m unittest tools.test_<name>`):
 - [x] The IPv6 leak suite ([tools/ipv6_leak_suite.py](../tools/ipv6_leak_suite.py)).
 - [ ] IPv6 inside the user's tunnel ([design](IPV6_TUNNELING_DESIGN.md), D009). IPv6 between servers
   shipped separately: TCP links and the egress lock ([fee guard](FEE_GUARD.md)).
+  Stage 1 landed on 22 November: exit descriptors carry the family-honest `v6` field
+  ({prefix: a global 2000::/3 /64, egress: both|v4|v6}), validated alike by the Python
+  control plane and every Rust node through the shared fixture (14 new cases), and
+  chain planning honors it - a dual-stack chain through a v4-only exit is refused
+  loudly, never silently built v4-only. Stage 2's rule half is published and tested
+  (per-family kill-switch symmetry as a generated nft text in the leak suite, with the
+  honest pin that the live supervisor still ships the stage-0 posture). Remaining:
+  the Rust dual-stack namespace data plane (src/netns.rs, src/tun.rs); stages 3-4 stay
+  owner-side. The Rust validator half was compiled and tested on landing, and now parses
+  the whole prefix as Python does (three shared cases pin a malformed rest it once admitted).
 - [ ] Router deployment on GL-MT6000/GL-MT3000 ([design](ROUTER_DEPLOYMENT.md), D010); signed
   deployment-side auto-update (D011); [Tor over the tunnel](TOR_RECIPE.md) (D012).
 - [x] The GUI's write side: the create/join setup branches over three branch-bound actions

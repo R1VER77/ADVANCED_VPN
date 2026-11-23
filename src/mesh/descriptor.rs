@@ -119,6 +119,48 @@ pub struct StreamingRow {
     pub transport_profile: String,
 }
 
+/// The exit's advertised IPv6 egress (IPV6_TUNNELING_DESIGN.md section 3, stage 1;
+/// the same rules as tools/mesh.py `_is_global_v6_prefix`). Absent on a descriptor:
+/// the exit egresses v4 only, exactly the pre-v6 posture.
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct V6Egress {
+    /// A globally routable /64 the tunnel egresses from (2000::/3; never a
+    /// ULA or link-local prefix - that would be a lie the planner refuses).
+    pub prefix: String,
+    /// "both" carries native v6 payloads; "v6" is v6-only; "v4" is v4-only
+    /// even though the operator runs v6 locally (a routing fact).
+    pub egress: String,
+}
+
+impl V6Egress {
+    /// The same structural rules as tools/mesh.py's `v6` validation: a
+    /// 2000::/3 /64 and a known egress word.
+    pub fn validate(&self) -> Result<()> {
+        ensure!(
+            matches!(self.egress.as_str(), "both" | "v4" | "v6"),
+            "v6 egress must be both, v4 or v6"
+        );
+        ensure!(self.prefix.len() <= 64, "v6 prefix too long");
+        // Parsed as a whole address, exactly as tools/mesh.py does with inet_pton:
+        // a first-group check alone would admit a malformed rest.
+        let addr = self
+            .prefix
+            .strip_suffix("/64")
+            .ok_or_else(|| anyhow::anyhow!("v6 prefix must be a /64"))?;
+        let ip: std::net::Ipv6Addr = addr
+            .parse()
+            .map_err(|_| anyhow::anyhow!("malformed v6 prefix"))?;
+        // Global scope: 2000::/3, the top three bits 001 (tools/ipv6_leak_suite.py
+        // is_global_v6 pins the same rule).
+        ensure!(
+            ip.octets()[0] & 0xE0 == 0x20,
+            "v6 prefix must be global (2000::/3)"
+        );
+        Ok(())
+    }
+}
+
 fn ports_ok(spec: &str) -> bool {
     let (lo, hi) = spec.split_once('-').unwrap_or((spec, spec));
     let parse = |x: &str| {
@@ -222,6 +264,9 @@ pub struct Descriptor {
     /// Dated streaming measurements, one per service.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub streaming: Option<Vec<StreamingRow>>,
+    /// The exit's advertised IPv6 egress (stage 1 of the tunneling design).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub v6: Option<V6Egress>,
     /// ML-DSA-65 signature over the canonical serialization of every field
     /// above (base64). Verified in the control plane at ingestion.
     pub signature: String,
@@ -262,6 +307,9 @@ impl Descriptor {
             !self.cloak_endpoint.is_empty() && self.cloak_endpoint.len() <= 260,
             "cloak endpoint required"
         );
+        if let Some(v6) = &self.v6 {
+            v6.validate()?;
+        }
         if let Some(policy) = &self.exit_policy {
             policy.validate()?;
         }
@@ -333,6 +381,7 @@ mod tests {
             expires: 1_000 + DESCRIPTOR_TTL_SECONDS,
             exit_policy: None,
             streaming: None,
+            v6: None,
             signature: "c2ln".into(),
         }
     }

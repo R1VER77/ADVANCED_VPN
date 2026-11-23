@@ -1,5 +1,5 @@
-"""The descriptor's exit_policy and streaming fields: tools/mesh.py accepts and refuses
-exactly the cases in tests/fixtures/descriptor_fields.json, which the Rust
+"""The descriptor's exit_policy, streaming and v6 fields: tools/mesh.py accepts and
+refuses exactly the cases in tests/fixtures/descriptor_fields.json, which the Rust
 Descriptor::validate test (src/mesh/descriptor.rs) runs too, so a descriptor the Python
 side signs is never one every Rust node refuses."""
 
@@ -31,7 +31,9 @@ class SharedFixture(unittest.TestCase):
     def test_refused_cases_are_refused(self):
         for i, case in enumerate(FIXTURE["refuse"]):
             with self.subTest(case=i):
-                errors = [e for e in mesh.validate(descriptor(case)) if e.startswith(("exit_policy", "streaming"))]
+                errors = [
+                    e for e in mesh.validate(descriptor(case)) if e.startswith(("exit_policy", "streaming", "v6"))
+                ]
                 self.assertTrue(errors, case)
 
     def test_the_rust_test_reads_the_same_file(self):

@@ -1,0 +1,80 @@
+(* voucher_unlinkability.pv - ProVerif model of blind-voucher unlinkability
+   (ROADMAP section 6, the voucher proofs row; docs/RESEARCH_REVIEW_20261118.md
+   "Ristretto + ML-KEM + SHA-3 voucher" decision gate: define the games, then prove them).
+   Companion to tools/voucher.py (REVENUE_ARCHITECTURE Model 1) and
+   formal/credits/credits_unlinkability.pv (the mesh credits share the primitive).
+
+   PROPERTY: a mint that sees every payment webhook and every blinded issuance cannot
+   tell which issuance a redeemed voucher came from - the payment rail and the network
+   stay separated. Two buyers each buy the SAME tier; afterwards (phase 1) both vouchers
+   are redeemed. In one world the redemptions come in issuance order, in the other
+   swapped; the two worlds are observationally equivalent.
+
+   ADVERSARY: the mint, also running the redemption ledger. It holds the epoch signing
+   key, sees every webhook (payment reference, tier) and blinded value, signs whatever
+   it is sent, may answer a webhook with any value it likes, and sees every redemption.
+
+   MODELED, as tools/voucher.py does it: a fresh random 256-bit voucher secret per
+   purchase; the buyer blinds the secret's FDH (`blind`), the mint blind-signs after the
+   webhook (the HMAC-authenticated webhook is abstracted: the mint signs only after
+   seeing a payment event); the buyer unblinds (`unblind`) and checks the signature
+   under the published CURRENT epoch key before keeping the voucher; a redemption shows
+   (secret, signature, tier) (`redeem_voucher`), from which the ledger derives its
+   digest. Key consistency: redemption accepts only the published epoch key
+   (`redeem_voucher`'s mint_public_key argument is the caller's pinned key, and
+   LIVE_EPOCHS bounds it to the current or previous epoch - modeled as one published
+   key).
+
+   NOT CLAIMED (by design, and visible in the model): cross-TIER unlinkability. The tier
+   is on the face of the voucher - the price class it bought - so two vouchers of
+   different tiers are distinguishable at redemption no matter what blinding does; the
+   model proves unlinkability WITHIN a tier, and the tier-differing mutant below shows
+   the equivalence failing, so the claim is not vacuous. Also not modeled: the RSA
+   multiplicative structure (the standard blind-signature equational theory, as in the
+   credits model - the real-arithmetic tagging attack is refuted by tests in
+   tools/test_voucher.py), one-more unforgeability (computational), and timing (a
+   voucher redeemed immediately after its webhook is linkable by wall-clock, which no
+   blinding hides; tools/voucher.py documents the epoch-bounded exposure instead).
+
+   MUTANTS (edits in tools/proverif_check.py; each must fail to prove):
+   - a buyer sends its secret's hash unblinded at issuance;
+   - the two vouchers are minted under different epoch keys, named in the redemption;
+   - the two vouchers are for different tiers. *)
+
+free c: channel.
+
+type skey.
+type pkey.
+
+fun pk(skey): pkey.
+fun fdh(bitstring): bitstring.
+fun sign(bitstring, skey): bitstring.
+fun blind(bitstring, bitstring): bitstring.
+reduc forall m: bitstring, k: skey; checksign(sign(m, k), pk(k)) = m.
+reduc forall m: bitstring, r: bitstring; unblind(blind(m, r), r) = m;
+      forall m: bitstring, r: bitstring, k: skey; unblind(sign(blind(m, r), k), r) = sign(m, k).
+
+const tier: bitstring.
+
+process
+  (* the adversary is the mint and holds the epoch key, so it can answer (or refuse,
+     or tamper with) every issuance itself - the equivalence is not vacuous *)
+  new sk: skey;
+  out(c, sk);
+  ! (
+    new secretA: bitstring; new rA: bitstring;
+    new secretB: bitstring; new rB: bitstring;
+    new payA: bitstring; new payB: bitstring;
+    (* two payment webhooks, distinct references, same tier *)
+    out(c, (payA, tier, blind(fdh(secretA), rA)));
+    out(c, (payB, tier, blind(fdh(secretB), rB)));
+    in(c, signedA: bitstring);
+    in(c, signedB: bitstring);
+    let sigA = unblind(signedA, rA) in
+    let sigB = unblind(signedB, rB) in
+    if checksign(sigA, pk(sk)) = fdh(secretA) then
+    if checksign(sigB, pk(sk)) = fdh(secretB) then
+    phase 1;
+    out(c, choice[(secretA, sigA, tier), (secretB, sigB, tier)]);
+    out(c, choice[(secretB, sigB, tier), (secretA, sigA, tier)])
+  )

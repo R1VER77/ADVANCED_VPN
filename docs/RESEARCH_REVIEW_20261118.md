@@ -228,6 +228,23 @@ proposed features and retain the requested author **Anonymous** and supplied Sim
 contact. The draft's different author credit is not adopted by this review. Writing
 the whitepaper does not close protocol implementation or independent-review gates.
 
+## Whitepaper regeneration gate (added 22 November)
+
+The corrections above are now a machine-checked gate, not just prose:
+[tools/test_whitepaper_claims.py](../tools/test_whitepaper_claims.py) holds a
+blocklist of the claims this review struck (unconditional, zero-linkability,
+attack-immunity, production throughput, "never runs out", unbreakable,
+perfect secrecy, universal non-traceability, "mathematically proven
+anonymous") and the honesty labels a published paper must carry (synthetic
+traces, chance-level classification, measured versus proposed figures). The
+scan arms itself on any `whitepaper*` artifact under the repo the moment one
+appears - no artifact exists today, and that fact is itself asserted - and
+the standing documentation already passes the same blocklist, so the
+discipline the drafts were corrected to cannot quietly erode before
+publication. Narrowing note: SHA-3's immunity to length extension is a
+property of the hash function and stays quotable; the blocklist forbids
+system-level attack-immunity claims.
+
 ## Executed review counterchecks
 
 The reviewed model functions were evaluated in a bounded local check without running

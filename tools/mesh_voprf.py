@@ -45,6 +45,25 @@ The Rust data plane remains the authority on what the wire accepts; the
 wire shapes here (grant/spend dictionaries with hex fields) mirror
 `src/mesh/tokens.rs` TokenGrant/TokenSpend for the day the reviewed
 crate lands and the private-group flow moves into the tunnel itself.
+
+Quantum status (labeled here because it differs from the public pool's)
+---------------------------------------------------------------------
+This scheme's UNFORGEABILITY is CLASSICAL: ristretto255 is a
+Curve25519 discrete-log group (RFC 9497), so Shor's algorithm recovers
+the group's epoch key from its published public key and lets a quantum
+adversary mint credits. Its UNLINKABILITY is information-theoretic, as
+the public pool's blind RSA is: the client blinds with a uniformly
+random scalar r (voprf.random_scalar), and in a prime-order group r*H(x)
+is equally consistent with every input x, so even the key holder - or a
+quantum adversary that recovered the key - cannot tell which issuance a
+redemption came from. Forgery is the half that falls, and it is contained
+the same way (epoch keys, the ledger). (Corrected on landing, 22 November:
+the membership-and-credit review had said a quantum adversary links
+redemptions here; recovering the key does not undo perfectly hiding
+blinding.) The HMAC scheme this replaced did link redemptions to the
+issuer, with no quantum computer at all. The STARK membership credits
+(ZK_MEMBERSHIP_DESIGN.md) are the post-quantum replacement for both
+pools and are not wired into any command yet.
 """
 
 from __future__ import annotations
@@ -58,6 +77,14 @@ import voprf
 SCHEMA = 2
 TOKEN_INPUT_BYTES = 32
 EPOCH_SECONDS = 86400
+# The security-assumption label the fail-closed review test pins
+# (docs/MESH_CREDIT_REVIEW_20261122.md): classical unforgeability; the blinding
+# is perfectly hiding, so unlinkability survives, as with the public pool's blind RSA.
+QUANTUM_STATUS = (
+    "classical unforgeability (ristretto255 discrete log): a quantum adversary "
+    "recovers the group key and forges credits; unlinkability survives a quantum "
+    "adversary (uniformly random blinding in a prime-order group is perfectly hiding)"
+)
 # One day of grace: a credit earned under epoch k's key redeems until the
 # end of epoch k+1, matching mesh_tokens.LIVE_EPOCHS.
 LIVE_EPOCHS = 2

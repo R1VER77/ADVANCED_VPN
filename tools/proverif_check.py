@@ -23,6 +23,7 @@ EQUIVALENT = "Observational equivalence is true."
 MODELS = {
     "formal/ohttp/ohttp_unlinkability.pv": [EQUIVALENT],
     "formal/credits/credits_unlinkability.pv": [EQUIVALENT],
+    "formal/voucher/voucher_unlinkability.pv": [EQUIVALENT],
 }
 
 # (model, [(old, new), ...], what the mutant breaks). Each must NOT prove.
@@ -76,6 +77,53 @@ MUTANTS = [
             ),
         ],
         "each member trusts its own issuer key, named in the spend",
+    ),
+    (
+        "formal/voucher/voucher_unlinkability.pv",
+        [
+            ("out(c, (payA, tier, blind(fdh(secretA), rA)));", "out(c, (payA, tier, fdh(secretA)));"),
+            ("out(c, (payB, tier, blind(fdh(secretB), rB)));", "out(c, (payB, tier, fdh(secretB)));"),
+            # ...and keeps the signature as returned: otherwise `unblind` fails, both
+            # buyers stop before phase 1 and the equivalence holds vacuously.
+            ("let sigA = unblind(signedA, rA) in", "let sigA = signedA in"),
+            ("let sigB = unblind(signedB, rB) in", "let sigB = signedB in"),
+        ],
+        "a buyer sends its voucher secret's hash unblinded at issuance",
+    ),
+    (
+        "formal/voucher/voucher_unlinkability.pv",
+        [
+            (
+                "  new sk: skey;\n  out(c, sk);\n  ! (\n",
+                "  ! (\n    new skA: skey; new skB: skey;\n    out(c, (skA, skB));\n",
+            ),
+            ("checksign(sigA, pk(sk))", "checksign(sigA, pk(skA))"),
+            ("checksign(sigB, pk(sk))", "checksign(sigB, pk(skB))"),
+            (
+                "out(c, choice[(secretA, sigA, tier), (secretB, sigB, tier)]);",
+                "out(c, choice[(secretA, sigA, pk(skA)), (secretB, sigB, pk(skB))]);",
+            ),
+            (
+                "out(c, choice[(secretB, sigB, tier), (secretA, sigA, tier)])",
+                "out(c, choice[(secretB, sigB, pk(skB)), (secretA, sigA, pk(skA))])",
+            ),
+        ],
+        "the two vouchers are minted under different epoch keys, named in the redemption",
+    ),
+    (
+        "formal/voucher/voucher_unlinkability.pv",
+        [
+            ("out(c, (payB, tier, blind(fdh(secretB), rB)));", "out(c, (payB, payB, blind(fdh(secretB), rB)));"),
+            (
+                "out(c, choice[(secretA, sigA, tier), (secretB, sigB, tier)]);",
+                "out(c, choice[(secretA, sigA, tier), (secretB, sigB, payB)]);",
+            ),
+            (
+                "out(c, choice[(secretB, sigB, tier), (secretA, sigA, tier)])",
+                "out(c, choice[(secretB, sigB, payB), (secretA, sigA, tier)])",
+            ),
+        ],
+        "the two vouchers are for different tiers (cross-tier unlinkability is not claimed)",
     ),
 ]
 

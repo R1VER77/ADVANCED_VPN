@@ -24,7 +24,7 @@
 The **CYPHERPUNKS** protocol is a proposed asymmetric multi-plane network architecture investigating the classic trilemma of anonymous communications: **Information-Theoretic Anonymity**, **Traffic-Analysis Immunity**, and **Line-Rate Broadband Performance**.
 
 Historically, cryptographic privacy networks were forced to trade throughput for privacy:
-- **DC-Nets** deliver unconditional (information-theoretic) anonymity but collapse under high traffic due to $O(N^2)$ message amplification and vulnerability to jamming.
+- **DC-Nets** deliver information-theoretic anonymity under their pad assumptions (independent, non-reused one-time pads; the research review restricts the label to that ideal construction) but collapse under high traffic due to $O(N^2)$ message amplification and vulnerability to jamming.
 - **Mix-Nets** defeat global passive adversaries through Poisson delays but impose seconds of latency, destroying real-time interactivity.
 - **Onion Routing / Traditional VPNs** deliver high bandwidth and low latency but leak traffic metadata (timing, packet bursts, jitter) and rely strictly on computational hardness assumptions vulnerable to compromised relays or quantum breakthroughs.
 

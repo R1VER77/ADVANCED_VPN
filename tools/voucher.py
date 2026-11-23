@@ -37,11 +37,14 @@ What is deliberately NOT here:
 - No account, no IP logging, no identity: the mint's records are the
   voucher digests required to refuse double-spends, exactly like the
   mesh ledger, nothing else.
-- Quantum honesty (COMPARISON.md note 8): blind RSA is classical; a
-  quantum adversary could forge vouchers without breaking any tunnel.
-  The lattice blind-signature migration the credits await covers this
-  engine too; until then the mint key's monthly rotation bounds the
-  exposure window.
+- Quantum honesty (COMPARISON.md note 8 and PQ_INVENTORY exception 7, where
+  the 22 November membership-and-credit review consolidated this label):
+  blind RSA is classical; a quantum adversary could forge vouchers without
+  breaking any tunnel. Unlinkability survives (blinding is
+  information-theoretic), forgery is loud (the double-spend ledger and
+  supply audit), and monthly epoch keys bound the window. The lattice
+  blind-signature migration the credits await covers this engine too; until
+  then the mint key's monthly rotation bounds the exposure window.
 """
 
 from __future__ import annotations
