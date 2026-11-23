@@ -91,6 +91,7 @@ def payload(work, deb):
     size = "%dM" % (deb.stat().st_size // (1 << 20) + 256)
     subprocess.run(["/usr/sbin/mke2fs", "-q", "-t", "ext4", "-L", "cpvpnassist", "-d", str(p), str(img), size],
                    check=True)  # fmt: skip
+    shutil.rmtree(p)  # the image holds them; a second copy of a 1 GB package filled the disk once
     return img
 
 

@@ -20,6 +20,11 @@ measured figure in the docs names the version it was measured on.
   - The package refuses to upgrade while the previous version's VPN, guard or kill switch
     is on, and says how to stop them.
   - Once they are stopped, it removes the previous install and says so.
+  - Fixed before release: the upgrade stopped on the I2P router's AppArmor fragment, whose
+    previous block the rename had changed. Blocks earlier releases wrote are now replaced,
+    and edits are still refused ([incident](docs/INCIDENTS.md)). Upgrading from the previous
+    release is proved in a Debian 13 guest
+    ([evidence](docs/evidence/UPGRADE_FROM_PREVIOUS_20261123.json)).
   - The test vectors that carry labels were regenerated from their real sources:
     - session leaves and fuzz seeds from the vector generator;
     - the cloak proof inputs, checked against the data plane;

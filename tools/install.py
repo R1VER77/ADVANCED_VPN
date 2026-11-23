@@ -544,6 +544,14 @@ def install_stable_file(source, destination, mode=0o755, known_hashes=()):
 
 APPARMOR_BEGIN = b"# BEGIN cypherpunk_vpn managed I2P access\n"
 APPARMOR_END = b"# END cypherpunk_vpn managed I2P access\n"
+# Managed blocks earlier releases wrote, by SHA-256 of the block (markers included). An
+# upgrade replaces exactly these; any other content is an administrator's and is refused.
+# On 23 Nov 2026 the rename's new paths made the previous release's own block look
+# modified, and the package could not configure. Changing deploy/apparmor/usr.bin.i2pd.local
+# fails test_install until the block it replaces is listed here.
+PREVIOUS_APPARMOR_BLOCKS = {
+    "c6fd14efea51363e2b84d3135efde51f53981683892ad022ab576fa59ab302bc": "v0.9.0 to the rename (dd3662c)",
+}
 
 
 def apparmor_update(source, existing):
@@ -553,9 +561,13 @@ def apparmor_update(source, existing):
         if existing.count(APPARMOR_BEGIN) != 1 or existing.count(APPARMOR_END) != 1:
             raise ValueError("ambiguous AppArmor managed block; review the local policy")
         start, end = existing.index(APPARMOR_BEGIN), existing.index(APPARMOR_END) + len(APPARMOR_END)
-        if end < start or existing[start:end] != block:
+        if end < start:
             raise ValueError("modified AppArmor managed block; review the local policy")
-        return existing
+        if existing[start:end] == block:
+            return existing
+        if hashlib.sha256(existing[start:end]).hexdigest() in PREVIOUS_APPARMOR_BLOCKS:
+            return existing[:start] + block + existing[end:]  # an earlier release's block: replace it
+        raise ValueError("modified AppArmor managed block; review the local policy")
     if existing == source:
         return block  # Exact prior installer content: adopt without duplication.
     return existing + (b"\n" if existing and not existing.endswith(b"\n") else b"") + block

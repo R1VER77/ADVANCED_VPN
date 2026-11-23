@@ -55,6 +55,28 @@ private vulnerability reporting (see [SECURITY.md](../SECURITY.md)).
 
 ## Fixed
 
+### The renamed package could not upgrade the previous release (23 Nov 2026, before release)
+- **What:** upgrading the owner's laptop from the previous 0.11.0 build stopped in the
+  package's post-install step: `modified AppArmor managed block; review the local policy`.
+  - The installer manages one marked block in the I2P router's local AppArmor policy, and
+    refuses any block that is not byte-identical to its own, to protect an
+    administrator's edits.
+  - The rename changed the block's paths, so the previous release's own, unedited block
+    looked like such an edit.
+  - The package was left unpacked but unconfigured, and the previous install untouched.
+- **Not affected:** nothing was removed or started; the old install kept working.
+- **How found:** the first end-to-end install (owner), then reproduced in a Debian 13
+  KVM guest (`tools/upgrade_vm_test.py`).
+- **Fix:** blocks earlier releases wrote are listed by SHA-256
+  (`install.PREVIOUS_APPARMOR_BLOCKS`; the v0.9.0 block was proven to be the installer's
+  output from `dd3662c`) and replaced; any other difference is still refused.
+  - A test pins the current block's digest, so the fragment cannot change again without
+    listing the block it replaces.
+  - In the guest, upgrading from the previous release, and from the half-configured
+    state the failure left, now succeeds.
+  - Also found: the VM payloads once filled the disk; the tests now drop their staging
+    copies.
+
 ### The Tor guide claimed a leak test that did not exist (21–23 Nov 2026)
 - **What:** `docs/TOR_RECIPE.md` and decision D012 called Tor over the tunnel a
   *tested* recipe and said its leak-direction test runs in CI. No such test existed:

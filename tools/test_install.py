@@ -1,5 +1,6 @@
 """User installation and release packaging (`install.py --user` / `--pack`)."""
 
+import hashlib
 import json
 import os
 import re
@@ -281,6 +282,44 @@ class NextStepTests(unittest.TestCase):
         source = Path(install.__file__).read_text()
         self.assertEqual(source.count("print(next_servers_step())"), 2, "both call sites must use the check")
         self.assertNotIn("print(SUGGEST)", source)
+
+
+class AppArmorManagedBlock(unittest.TestCase):
+    """The I2P router's local AppArmor fragment: one managed block, upgraded only when known."""
+
+    SOURCE = b"/run/cypherpunk-vpn-runtime-*/ r,\n"
+    ADMIN = b"# the administrator's own rule\n/srv/extra r,\n"
+
+    def block(self, source):
+        return install.APPARMOR_BEGIN + source.rstrip(b"\n") + b"\n" + install.APPARMOR_END
+
+    def test_an_earlier_releases_block_is_replaced_and_the_administrators_lines_kept(self):
+        old = self.block(b"/run/older-runtime-*/ r,\n")
+        existing = self.ADMIN + old + b"# after\n"
+        known = {hashlib.sha256(old).hexdigest(): "test"}
+        with mock.patch.object(install, "PREVIOUS_APPARMOR_BLOCKS", known):
+            updated = install.apparmor_update(self.SOURCE, existing)
+            self.assertEqual(updated, self.ADMIN + self.block(self.SOURCE) + b"# after\n")
+            self.assertEqual(install.apparmor_update(self.SOURCE, updated), updated)  # idempotent
+
+    def test_a_block_no_release_wrote_is_refused(self):
+        edited = self.block(b"/run/older-runtime-*/ rw,\n")  # edited by hand
+        with self.assertRaisesRegex(ValueError, "modified AppArmor managed block"):
+            install.apparmor_update(self.SOURCE, self.ADMIN + edited)
+
+    def test_new_and_current_installs(self):
+        self.assertEqual(install.apparmor_update(self.SOURCE, b""), self.block(self.SOURCE))
+        self.assertEqual(install.apparmor_update(self.SOURCE, self.ADMIN), self.ADMIN + self.block(self.SOURCE))
+        self.assertEqual(install.apparmor_update(self.SOURCE, self.SOURCE), self.block(self.SOURCE))
+
+    def test_changing_the_fragment_requires_listing_the_block_it_replaces(self):
+        """Edit deploy/apparmor/usr.bin.i2pd.local only together with PREVIOUS_APPARMOR_BLOCKS:
+        add this pinned digest there (the block the old release wrote), then pin the new one."""
+        source = (install.ROOT / "deploy/apparmor/usr.bin.i2pd.local").read_bytes()
+        self.assertEqual(hashlib.sha256(self.block(source)).hexdigest(),
+                         "fc235f708d3075bafde209b191ff0a8f2b3946c32fa3d614d927253da87b9a70")  # fmt: skip
+        self.assertNotIn("fc235f708d3075bafde209b191ff0a8f2b3946c32fa3d614d927253da87b9a70",
+                         install.PREVIOUS_APPARMOR_BLOCKS)  # fmt: skip
 
 
 if __name__ == "__main__":

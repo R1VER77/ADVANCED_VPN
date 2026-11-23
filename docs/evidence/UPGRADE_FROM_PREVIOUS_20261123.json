@@ -1,0 +1,44 @@
+{
+ "schema": 1,
+ "date": "2026-11-23",
+ "image": "debian-13-genericcloud-amd64.qcow2",
+ "old": "cypherpunk-vpn_0.11.0-1_amd64.deb",
+ "new": "cypherpunk-vpn_0.11.0-1_amd64.deb",
+ "assistant": "cypherpunk-vpn-assistant_0.11.0-1_amd64.deb",
+ "os": "Debian GNU/Linux 13 (trixie)",
+ "old_install": {
+  "code": 0,
+  "tail": [
+   "aspell-autobuildhash: processing: en [en_US-wo_accents-only].",
+   "Processing triggers for libc-bin (2.41-12+deb13u4) ...",
+   "Processing triggers for libgdk-pixbuf-2.0-0:amd64 (2.42.12+dfsg-4+deb13u1) ..."
+  ]
+ },
+ "old_state": [
+  "ls: cannot access '/opt/cypherpunk-vpn': No such file or directory",
+  "/opt/advanced-vpn",
+  "3",
+  ""
+ ],
+ "upgrade": {
+  "exit": "apt-exit=0",
+  "errors": [],
+  "notices": [
+   "Removed the previous version (/opt/advanced-vpn) and its stopped services."
+  ]
+ },
+ "dpkg_status": [
+  "ii  cypherpunk-vpn",
+  "ii  cypherpunk-vpn-assistant"
+ ],
+ "after": {
+  "old_root": false,
+  "new_root": true,
+  "old_units": "0",
+  "old_commands": "0",
+  "fragment_old_paths": "0",
+  "fragment_new_paths": "3",
+  "cli": "ok"
+ },
+ "passed": true
+}
