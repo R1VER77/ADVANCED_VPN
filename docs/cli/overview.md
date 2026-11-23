@@ -1,16 +1,16 @@
-# avpn
+# cypherpunk
 
-`avpn` is the command-line front end of ADVANCED_VPN, a self-hosted,
-post-quantum VPN. Run `avpn` with no arguments in a terminal for the interactive
+`cypherpunk` is the command-line front end of cypherpunk_vpn, a self-hosted,
+post-quantum VPN. Run `cypherpunk` with no arguments in a terminal for the interactive
 view, or give it a command.
 
 ## Usage
 
-    avpn [--state DIR] [--json] [--no-color] [--reduced-motion] [COMMAND] [ARGS...]
+    cypherpunk [--state DIR] [--json] [--no-color] [--reduced-motion] [COMMAND] [ARGS...]
 
 ## Global options
 
-- `--state DIR`: the enrollment directory. Default `/etc/advanced-vpn/enrolled`.
+- `--state DIR`: the enrollment directory. Default `/etc/cypherpunk-vpn/enrolled`.
 - `--json`: print the controller's JSON object instead of the rendered view. Use it in scripts.
 - `--no-color`: no colour. `NO_COLOR` in the environment, or output that is not a terminal, does the same.
 - `--reduced-motion`: no spinner animation in the interactive view.
@@ -52,11 +52,11 @@ Maintenance:
 
 ## Help topics
 
-`avpn help COMMAND` shows a command's page. These concept topics are also available:
+`cypherpunk help COMMAND` shows a command's page. These concept topics are also available:
 `chains`, `endpoints`, `front`, `keys`, `privacy`, `threat-model`, `retention`, `interactive`.
 
 ## Privileges
 
 Commands that change the network or read the root-owned enrollment need root:
-`sudo avpn ...`. The `avpn` binary renders results only. All privileged work happens
-in the controller, `/opt/advanced-vpn/bin/avpnctl`, which validates every option itself.
+`sudo cypherpunk ...`. The `cypherpunk` binary renders results only. All privileged work happens
+in the controller, `/opt/cypherpunk-vpn/bin/cypherpunkctl`, which validates every option itself.

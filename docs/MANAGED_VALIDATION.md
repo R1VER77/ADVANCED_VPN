@@ -74,7 +74,7 @@ stays false.
 
 ### Key custody: device-generated keys, hardware operator ([evidence](evidence/HARDWARE_MANAGED.json))
 
-Every device runs `avpn request`; private keys are generated and protected there
+Every device runs `cypherpunk request`; private keys are generated and protected there
 and never transferred. Bundles carry only public data and the WireGuard PSK,
 hybrid X25519 + ML-KEM-768 encrypted to each recipient. With the physical
 Nitrokey, four PIN + touch operations covered the whole flow:
@@ -123,7 +123,7 @@ and the original per-layer shrink broke that floor. The layer budget is now
 built from the inside out (1312/1256/1200).
 
 In installed Debian 13 VMs, after real traffic, the relay and exit wrote nothing
-under `/etc/advanced-vpn` and had zero journal lines for the VPN units. Boot
+under `/etc/cypherpunk-vpn` and had zero journal lines for the VPN units. Boot
 ordering is now taken from systemd's in-memory timestamps, because the units no
 longer log: the guard was active at 5.74 s, before systemd-networkd started at 6.32 s.
 

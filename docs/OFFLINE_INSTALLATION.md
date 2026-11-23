@@ -35,7 +35,7 @@ sudo ./install.sh --apply
 
 `--out` stages files only. `--user` installs operator commands under the user's home;
 it cannot install or activate the system tunnel. `--apply` checks host readiness before
-staging, installs under `/opt/advanced-vpn`, creates service identities and installs
+staging, installs under `/opt/cypherpunk-vpn`, creates service identities and installs
 units. It never starts or enables VPN services. Enrolling a role, unlocking a key and
 connecting remain explicit actions. Do not run root installation merely to try the UI.
 
@@ -83,7 +83,7 @@ or every live upgrade failure point. User-only installation has its own replacem
 path; the system-slot guarantee does not extend to that path.
 
 User removal is `./install.sh --user --uninstall`; it preserves
-`~/.config/advanced-vpn`, including cloud inventory and SSH material. System removal is
+`~/.config/cypherpunk-vpn`, including cloud inventory and SSH material. System removal is
 `sudo ./install.sh --apply --uninstall` from the verified unpacked release. It refuses
 while a unit is active/enabled, a VPN firewall table, namespace or managed interface
 exists, an installed program is running, or required checks fail. Modified/foreign

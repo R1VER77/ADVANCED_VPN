@@ -1,14 +1,14 @@
-# avpn enroll
+# cypherpunk enroll
 
 Verify this device's signed bundle and install it. No network settings change.
 
 ## Usage
 
-    sudo avpn enroll BUNDLE --operator-key FILE [--replace]
+    sudo cypherpunk enroll BUNDLE --operator-key FILE [--replace]
 
 ## Options
 
-- `BUNDLE`: the `.avpn` file the operator produced for this device.
+- `BUNDLE`: the `.cpvpn` file the operator produced for this device.
 - `--operator-key FILE`: the operator's public key. Get it out of band, not with the bundle.
 - `--replace`: switch this device to a new chain. Its keys are kept. Disconnect first.
 

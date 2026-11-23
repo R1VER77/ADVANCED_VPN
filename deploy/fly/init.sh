@@ -9,17 +9,17 @@ mount -t tmpfs -o mode=0755,size=16m tmpfs /run
 mount -t tmpfs -o nosuid,nodev,noexec,mode=0755,size=16m tmpfs /var/log
 mount -t tmpfs -o mode=1777,size=16m tmpfs /tmp
 swapoff -a 2>/dev/null || true
-mkdir -p /data/advanced-vpn
-chmod 0700 /data/advanced-vpn
-ln -sfn /data/advanced-vpn /etc/advanced-vpn
-# The supervisor, restarted whenever it ends (a locked server waits for `avpn cloud unlock`;
-# `systemctl stop` here holds it until `start`). Same command as advanced-vpn.service.
+mkdir -p /data/cypherpunk-vpn
+chmod 0700 /data/cypherpunk-vpn
+ln -sfn /data/cypherpunk-vpn /etc/cypherpunk-vpn
+# The supervisor, restarted whenever it ends (a locked server waits for `cypherpunk cloud unlock`;
+# `systemctl stop` here holds it until `start`). Same command as cypherpunk-vpn.service.
 while :; do
-  if [ -f /etc/advanced-vpn/enrolled/profile.json ] && [ ! -e /run/avpn-stopped ]; then
-    /opt/advanced-vpn/bin/avpnctl connect &
-    echo $! > /run/avpn-supervisor.pid
+  if [ -f /etc/cypherpunk-vpn/enrolled/profile.json ] && [ ! -e /run/cpvpn-stopped ]; then
+    /opt/cypherpunk-vpn/bin/cypherpunkctl connect &
+    echo $! > /run/cpvpn-supervisor.pid
     wait $!
-    rm -f /run/avpn-supervisor.pid
+    rm -f /run/cpvpn-supervisor.pid
   fi
   sleep 3
 done

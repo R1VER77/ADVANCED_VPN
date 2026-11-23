@@ -2,10 +2,10 @@
 idle Always Free reclaim), locked after a reboot (operator protection), out of credits or
 unreachable shows up on the client as a chain that stops answering. The supervisor feeds
 each protection verdict here; after a grace period it raises one desktop notification and
-puts a notice in `avpn status`, and another when the chain answers again.
+puts a notice in `cypherpunk status`, and another when the chain answers again.
 
 Nothing here touches the network: the provider APIs that say *why* are asked only when the
-person runs `avpn cloud health` (calling them on a timer from home would tie this address
+person runs `cypherpunk cloud health` (calling them on a timer from home would tie this address
 to the servers in the providers' logs)."""
 
 import os
@@ -15,7 +15,7 @@ import time
 
 DOWN_GRACE = 60  # seconds without an answer, after it had worked
 START_GRACE = 120  # seconds after start without ever answering
-NEXT = "on your computer, as yourself: avpn cloud health  (it says why, and the fix)"
+NEXT = "on your computer, as yourself: cypherpunk cloud health  (it says why, and the fix)"
 
 
 def _clock(ts):

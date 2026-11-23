@@ -1,5 +1,5 @@
 /target/
-/crates/avpn-kani/target/
+/crates/cpvpn-kani/target/
 /fuzz/target/
 /fuzz/corpus/
 /fuzz/artifacts/
@@ -12,7 +12,7 @@
 *.age
 *.pcap
 credential.json
-*.avpn
+*.cpvpn
 *.bin
 __pycache__/
 .venv/

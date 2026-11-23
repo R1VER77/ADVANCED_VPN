@@ -1,10 +1,10 @@
-"""avpnctl.firmware_coprocessor: the read-only Intel ME / AMD PSP report in `avpn doctor`."""
+"""cypherpunkctl.firmware_coprocessor: the read-only Intel ME / AMD PSP report in `cypherpunk doctor`."""
 
 import tempfile
 import unittest
 from pathlib import Path
 
-import avpnctl
+import cypherpunkctl
 
 
 def machine(tmp, vendor, ver=None, hfsts1=None):
@@ -21,7 +21,7 @@ def machine(tmp, vendor, ver=None, hfsts1=None):
 class FirmwareCoprocessorTests(unittest.TestCase):
     def report(self, *args, **kw):
         with tempfile.TemporaryDirectory() as tmp:
-            return avpnctl.firmware_coprocessor(*machine(tmp, *args, **kw))
+            return cypherpunkctl.firmware_coprocessor(*machine(tmp, *args, **kw))
 
     def test_this_laptops_csme_12_is_reported_active_and_too_new_for_me_cleaner(self):
         r = self.report("GenuineIntel", "12.0.20.1307", 0x90000245)  # read from the owner's VAIO
@@ -47,7 +47,7 @@ class FirmwareCoprocessorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             sysfs, cpu = machine(tmp, "GenuineIntel", "12.0.1.1", 0)
             (sysfs / "class/mei/mei0/fw_status").write_text("garbage\n")
-            self.assertEqual(avpnctl.firmware_coprocessor(sysfs, cpu), "Intel ME present (unreadable)")
+            self.assertEqual(cypherpunkctl.firmware_coprocessor(sysfs, cpu), "Intel ME present (unreadable)")
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-"""The supervisor's daily security update (avpnctl.ServerFees.security_update): when it runs,
+"""The supervisor's daily security update (cypherpunkctl.ServerFees.security_update): when it runs,
 when it does not, and that it opens the counted maintenance window while it runs."""
 
 import os
@@ -11,7 +11,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import avpnctl  # noqa: E402
+import cypherpunkctl  # noqa: E402
 
 
 class SecurityUpdate(unittest.TestCase):
@@ -38,7 +38,7 @@ class SecurityUpdate(unittest.TestCase):
         patch = mock.patch.dict(os.environ, PATH=str(d / "bin") + ":" + os.environ["PATH"])
         patch.start()
         self.addCleanup(patch.stop)
-        f = avpnctl.ServerFees.__new__(avpnctl.ServerFees)
+        f = cypherpunkctl.ServerFees.__new__(cypherpunkctl.ServerFees)
         f.lab = f.shared = f.image = False
         f.cap = 100
         f.last_update_path = d / "last-update"
@@ -77,9 +77,9 @@ class SecurityUpdate(unittest.TestCase):
         self.finish()
         args = self.unit_args.read_text().splitlines()
         self.assertEqual(args[:3], ["--wait", "--collect", "--quiet"])
-        self.assertIn("--unit=" + avpnctl.ServerFees.UPDATE_UNIT, args)
+        self.assertIn("--unit=" + cypherpunkctl.ServerFees.UPDATE_UNIT, args)
         limit = int(next(a for a in args if a.startswith("--property=RuntimeMaxSec=")).split("=")[-1])
-        self.assertLess(limit, avpnctl.ServerFees.UPDATE_TIMEOUT)
+        self.assertLess(limit, cypherpunkctl.ServerFees.UPDATE_TIMEOUT)
         script = args[args.index("--") + 3]
         self.assertIn("Acquire::https::Timeout=30", script)
         self.assertEqual(self.calls.read_text(), "ran\n")
@@ -94,7 +94,7 @@ class SecurityUpdate(unittest.TestCase):
         self.f.security_update(now + 10, 0)  # not straight away: it held apt's lock and the window
         self.assertIsNone(self.f.update_proc)
         self.assertFalse(self.f.in_maintenance(now + 10))
-        self.f.security_update(now + 10 + avpnctl.ServerFees.UPDATE_RETRY, 0)
+        self.f.security_update(now + 10 + cypherpunkctl.ServerFees.UPDATE_RETRY, 0)
         self.assertIsNotNone(self.f.update_proc)
         self.f.update_proc.wait(timeout=10)
 
@@ -103,7 +103,7 @@ class SecurityUpdate(unittest.TestCase):
         (Path(self.tmp.name) / "bin" / "sleep").unlink()  # the real sleep
         now = time.time()
         self.f.security_update(now, 0)
-        self.f.security_update(now + avpnctl.ServerFees.UPDATE_TIMEOUT + 1, 0)
+        self.f.security_update(now + cypherpunkctl.ServerFees.UPDATE_TIMEOUT + 1, 0)
         self.assertIsNone(self.f.update_proc)
         self.assertFalse(self.f.last_update_path.exists())
 
@@ -115,7 +115,7 @@ class FrontRouterEgress(unittest.TestCase):
     def lock(self, front_uid):
         import server_egress
 
-        f = avpnctl.ServerFees.__new__(avpnctl.ServerFees)
+        f = cypherpunkctl.ServerFees.__new__(cypherpunkctl.ServerFees)
         f.se, f.uid, f.front_uid, f.maintenance, f.lab = server_egress, 1001, front_uid, False, False
         f.profile = dict(role="relay", network=dict(relay_endpoint="198.51.100.1:443"))
         f.cfg = dict(core=dict(listen="10.78.0.1:4444"), cloak=dict(listen="0.0.0.0:8443"))
@@ -132,11 +132,11 @@ class FrontRouterEgress(unittest.TestCase):
         admitting root alone left both shut, and every update hung holding apt's lock."""
         import server_egress
 
-        f = avpnctl.ServerFees.__new__(avpnctl.ServerFees)
+        f = cypherpunkctl.ServerFees.__new__(cypherpunkctl.ServerFees)
         f.se, f.uid, f.front_uid, f.maintenance, f.lab = server_egress, 1001, None, True, False
         f.profile = dict(role="relay", network=dict(relay_endpoint="198.51.100.1:443"))
         f.cfg = dict(core=dict(listen="10.78.0.1:4444"), cloak=dict(listen="0.0.0.0:8443"))
-        with mock.patch.object(avpnctl.ServerFees, "update_helper_uids", return_value=[42, 990]):
+        with mock.patch.object(cypherpunkctl.ServerFees, "update_helper_uids", return_value=[42, 990]):
             text = f.egress_text()
             self.assertIn("meta skuid 0 accept", text)
             self.assertIn("meta skuid 42 accept", text)
@@ -157,7 +157,7 @@ class FrontRouterEgress(unittest.TestCase):
             return mock.Mock(pw_uid=users[name])
 
         with mock.patch.object(pwd, "getpwnam", side_effect=getpwnam):
-            self.assertEqual(avpnctl.ServerFees.__new__(avpnctl.ServerFees).update_helper_uids(), [42, 990])
+            self.assertEqual(cypherpunkctl.ServerFees.__new__(cypherpunkctl.ServerFees).update_helper_uids(), [42, 990])
 
     def test_without_a_front_only_the_data_plane_may_send(self):
         text = self.lock(None)

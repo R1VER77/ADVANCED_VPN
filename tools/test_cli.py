@@ -11,7 +11,7 @@ from provision import provision
 from keyguard import memory_fd
 
 ROOT = Path(__file__).resolve().parents[1]
-BINARY = ROOT / "target/release/advanced-vpn"
+BINARY = ROOT / "target/release/cypherpunk-vpn"
 
 
 class CliGuards(unittest.TestCase):

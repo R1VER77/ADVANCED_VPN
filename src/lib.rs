@@ -1,4 +1,4 @@
-//! ADVANCED_VPN data plane: nested hybrid post-quantum QUIC layers (X25519MLKEM768,
+//! cypherpunk_vpn data plane: nested hybrid post-quantum QUIC layers (X25519MLKEM768,
 //! ML-DSA-65 authentication), one per hop, carried inside WireGuard + DAITA.
 #![deny(missing_docs)]
 /// HTTP/3 camouflage for the WireGuard carrier to the first hop.
@@ -7,14 +7,14 @@ pub mod cloak;
 pub mod config;
 /// The DAITA (Maybenot) machines of the WireGuard carrier: strong, on every hop.
 pub mod daita;
-/// DC-net control channel for AVPN/Mesh (library only: no command reaches it yet).
+/// DC-net control channel for CPVPN/Mesh (library only: no command reaches it yet).
 /// One-time pads only (docs/DCNET_CONTROL_DESIGN.md): information-theoretic among members
 /// joined by pads handed over in person, computational for pads sent over the network.
 pub mod dcnet;
 /// Constant-rate, encrypted links between consecutive servers (per-hop shaping).
 pub mod link;
 mod link_bounds;
-/// AVPN/Mesh: community node identity, signed descriptors, the node directory
+/// CPVPN/Mesh: community node identity, signed descriptors, the node directory
 /// and unlinkable contribution credits. See docs/MESH_DESIGN.md.
 pub mod mesh;
 /// Relay, exit and client session loops.

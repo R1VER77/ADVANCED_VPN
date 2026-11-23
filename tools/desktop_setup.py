@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """The desktop app's own-servers side, run as the signed-in user (never root).
 
-    avpn-desktop state                 the profile, recorded servers and chain (no network)
-    avpn-desktop check KEY             is this provider's tool installed and signed in?
-    avpn-desktop add KEY | remove KEY  add or drop a provider in the profile
-    avpn-desktop build --order A[,B[,C]] [--hours N]   (the device request on stdin)
-    avpn-desktop export                save the device request (stdin) to Documents
-    avpn-desktop signin SERVER         renew the cloud sign-in a recorded server uses (browser)
-    avpn-desktop agreement state|accept VERSION   the first-launch agreement (local file only)
+    cpvpn-desktop state                 the profile, recorded servers and chain (no network)
+    cpvpn-desktop check KEY             is this provider's tool installed and signed in?
+    cpvpn-desktop add KEY | remove KEY  add or drop a provider in the profile
+    cpvpn-desktop build --order A[,B[,C]] [--hours N]   (the device request on stdin)
+    cpvpn-desktop export                save the device request (stdin) to Documents
+    cpvpn-desktop signin SERVER         renew the cloud sign-in a recorded server uses (browser)
+    cpvpn-desktop agreement state|accept VERSION   the first-launch agreement (local file only)
 
 The root controller holds the device's keys and never sees a cloud credential; this
 helper holds the operator side (cloud sign-ins, the operator's Nitrokey vault, the server
@@ -39,7 +39,7 @@ sys.path.insert(0, str(TOOLS))
 import providers  # noqa: E402
 
 SCHEMA = 1
-NAME = re.compile(r"avpn-[a-z0-9-]{1,40}\Z")
+NAME = re.compile(r"cpvpn-[a-z0-9-]{1,40}\Z")
 MAX_REQUEST = 64 * 1024
 MAX_FILE = 1024 * 1024
 HOURS = (2, 4, 6, 8, 12, 16, 24)
@@ -59,7 +59,7 @@ class Refused(Exception):
 
 def config_dir():
     """The cloud tool's configuration folder."""
-    return Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "advanced-vpn"
+    return Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "cypherpunk-vpn"
 
 
 def profile_path():
@@ -375,7 +375,7 @@ def build(order, hours, stream=sys.stdin, run=subprocess.Popen):
     profile["hours_per_day"] = hours
     save_profile(profile)
     source = PAYLOAD if (PAYLOAD / "target/release").is_dir() else TOOLS.parent
-    env = dict(os.environ, AVPN_PROGRESS="events")
+    env = dict(os.environ, CPVPN_PROGRESS="events")
     process = run(build_argv(names, hours, request_file, vault, source), stdin=subprocess.DEVNULL,
                   stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, env=env)  # fmt: skip
     last = ""
@@ -399,7 +399,7 @@ def build(order, hours, stream=sys.stdin, run=subprocess.Popen):
         return 1
     built = load_inv_chain()
     bundles = Path(built["bundles"])
-    client, operator = bundles / "client.avpn", bundles / "operator.pub"
+    client, operator = bundles / "client.cpvpn", bundles / "operator.pub"
     if client.stat().st_size > MAX_FILE or operator.stat().st_size > 8192:
         emit(event="error", message="the signed bundle is larger than the app accepts")
         return 1
@@ -449,7 +449,7 @@ def main(argv=None):
     if os.geteuid() == 0:
         print(json.dumps(dict(schema=SCHEMA, error="run_as_your_user")))
         return 2
-    parser = argparse.ArgumentParser(prog="avpn-desktop")
+    parser = argparse.ArgumentParser(prog="cpvpn-desktop")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("state")
     sub.add_parser("export")

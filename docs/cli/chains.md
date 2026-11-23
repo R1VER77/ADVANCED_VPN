@@ -12,5 +12,5 @@ layer. The WireGuard + DAITA carrier runs innermost, and travels to the first ho
 QUIC datagrams on UDP 443, so that link looks like HTTP/3. Inner packets are 1100
 bytes, and each outer layer adds 56 bytes of budget.
 
-Switch chains with `avpn init` (new bundles), then `avpn enroll BUNDLE --replace` on
+Switch chains with `cypherpunk init` (new bundles), then `cypherpunk enroll BUNDLE --replace` on
 each device.

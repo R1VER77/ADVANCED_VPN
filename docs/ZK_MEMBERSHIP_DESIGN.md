@@ -18,7 +18,7 @@ stays unlinkable against a quantum adversary but becomes forgeable
 A member never shows a key. It shows a proof:
 
 - **Join.** The member's hardware key releases a secret `s` (FIDO2 hmac-secret, PIN and
-  touch), and the member registers only `C = SHA-256("avpn/member/v1" || s)`. The network
+  touch), and the member registers only `C = SHA-256("cpvpn/member/v1" || s)`. The network
   keeps the registered commitments as leaves of a Merkle tree.
 - **Act.** To act (spend a credit, join a cell, report), the member proves in zero
   knowledge: *I know an `s` whose commitment is a leaf of the tree with root `R`*, and
@@ -43,13 +43,13 @@ is not post-quantum.
 ## Forward-private nullifiers
 
 With one long-lived secret `s`, a device seized later gives up every past nullifier at
-once: `SHA-256("avpn/nullifier/v1" || s || epoch || scope)` can be recomputed for every
+once: `SHA-256("cpvpn/nullifier/v1" || s || epoch || scope)` can be recomputed for every
 epoch and scope, and every anonymous action the member ever took becomes linkable. The
 prototype therefore uses a secret that only moves forward:
 
 - **Enrol.** A tree has a public start epoch E0 and lifetime N (365 daily epochs in the
   prototype). The member draws `s0` and registers
-  `C = SHA-256("avpn/member/v2" || H^N(s0))` with `H(x) = SHA-256("avpn/fp-step/v1" || x)`.
+  `C = SHA-256("cpvpn/member/v2" || H^N(s0))` with `H(x) = SHA-256("cpvpn/fp-step/v1" || x)`.
 - **Hold.** In epoch E0 + k the device holds only `x_k = H^k(s0)`. At each epoch change it
   computes `x_{k+1} = H(x_k)` and erases `x_k`. `tools/zkid.py` keeps it this way at rest:
   `s0` from kernel XOR Nitrokey, only the current `x_k` stored, in padbook's opaque file
@@ -57,7 +57,7 @@ prototype therefore uses a secret that only moves forward:
   hashes are checked against the prototype's, built in Rust). The prototype's host, a
   test, recomputes each `x_k` from `s0` in memory.
 - **Prove.** The statement becomes: *I know an `x` such that `H^(N-k)(x)` is committed in a
-  leaf of the tree with root `R`*, with nullifier `SHA-256("avpn/nullifier/v2" || x || epoch
+  leaf of the tree with root `R`*, with nullifier `SHA-256("cpvpn/nullifier/v2" || x || epoch
   || scope)`. E0 and N belong to the tree, so they say nothing about who proves. The
   journal also carries `action = SHA-256(request)`, which the verifier checks, so an
   intercepted proof cannot be attached to another action and burn the member's nullifier.
@@ -113,9 +113,9 @@ sanctions history is a separate matter.
 
 | | Ours (v2, forward-private) | Zcash Orchard | Tornado Cash |
 |---|---|---|---|
-| Commitment | `SHA-256("avpn/member/v2" ‖ H^N(s0))` | Sinsemilla note commitment | `Pedersen(nullifier ‖ secret)` |
+| Commitment | `SHA-256("cpvpn/member/v2" ‖ H^N(s0))` | Sinsemilla note commitment | `Pedersen(nullifier ‖ secret)` |
 | Tree | SHA-256 Merkle | Sinsemilla Merkle | MiMC Merkle (depth 20) |
-| Nullifier | `SHA-256("avpn/nullifier/v2" ‖ x_k ‖ epoch ‖ scope)` | `Extract([(F_nk(ρ) + ψ)]G + cm)`: keyed, bound to the note commitment | `Pedersen(nullifier)` |
+| Nullifier | `SHA-256("cpvpn/nullifier/v2" ‖ x_k ‖ epoch ‖ scope)` | `Extract([(F_nk(ρ) + ψ)]G + cm)`: keyed, bound to the note commitment | `Pedersen(nullifier)` |
 | Proof | RISC Zero STARK (succinct receipt) | Halo 2 (Pallas/Vesta) | circom/snarkjs, trusted setup |
 | Trusted setup | none | none | yes (a ceremony) |
 | Post-quantum | yes: hashes only | no: ZIP 2005 says its note commitments are "not post-quantum binding" | no: Pedersen and pairing-based proofs rest on discrete log |

@@ -2,6 +2,7 @@
 
 import os
 from pathlib import Path
+import re
 import subprocess
 import unittest
 from unittest import mock
@@ -21,15 +22,15 @@ class NativePackages(unittest.TestCase):
         (self.root / "tools/install-offline.sh").write_text("#!/bin/sh\nexit 99\n")
         (self.root / "tools/install-offline.sh").chmod(0o755)
         (self.root / "target/release").mkdir(parents=True)
-        (self.root / "target/release/avpn").write_bytes(b"\x7fELF test ABI marker, never run GLIBC_2.35\x00")
-        (self.root / "target/release/avpn").chmod(0o755)
+        (self.root / "target/release/cypherpunk").write_bytes(b"\x7fELF test ABI marker, never run GLIBC_2.35\x00")
+        (self.root / "target/release/cypherpunk").chmod(0o755)
         (self.root / "Cargo.toml").write_text('[package]\nversion = "1.2.3"\n')
         (self.root / "LICENSE").write_text("fixture license")
         self.output = self.fixture.root / "output"
         self.output.mkdir(mode=0o755)
         for patcher in (
             mock.patch.object(package.install, "SOURCES", ["tools", "LICENSE"]),
-            mock.patch.object(package.install, "BINARIES", ["avpn"]),
+            mock.patch.object(package.install, "BINARIES", ["cypherpunk"]),
         ):
             patcher.start()
             self.addCleanup(patcher.stop)
@@ -39,7 +40,7 @@ class NativePackages(unittest.TestCase):
         payload = package.stage(self.root, self.fixture.bundle, tree)
         self.assertFalse((tree / "etc").exists())
         for name, target in package.COMMANDS.items():
-            self.assertEqual(os.readlink(tree / "usr/bin" / name), "/opt/advanced-vpn/bin/" + target)
+            self.assertEqual(os.readlink(tree / "usr/bin" / name), "/opt/cypherpunk-vpn/bin/" + target)
         package.bundled_runtime.verify(payload / "runtime", payload / "tools/hardware-requirements.txt")
         self.assertTrue((payload / "PACKAGE_CONTENTS.json").is_file())
 
@@ -51,7 +52,7 @@ class NativePackages(unittest.TestCase):
         self.assertFalse(tree.exists())
 
     def test_newer_glibc_binary_cannot_be_mislabelled_as_the_release_baseline(self):
-        (self.root / "target/release/avpn").write_bytes(b"\x7fELF test ABI marker, never run GLIBC_2.38\x00")
+        (self.root / "target/release/cypherpunk").write_bytes(b"\x7fELF test ABI marker, never run GLIBC_2.38\x00")
         with self.assertRaisesRegex(ValueError, "exceeds the declared release baseline"):
             package.debian(self.root, self.fixture.bundle, self.output, epoch=1_700_000_000)
         self.assertFalse(list(self.output.glob("*.deb")))
@@ -161,13 +162,88 @@ class NativePackages(unittest.TestCase):
         )
         for name in ("install.sh", "systemctl"):
             (bin_dir / name).chmod(0o755)
-        script = (
-            package.configure()
-            .replace(package.PAYLOAD, str(bin_dir))
-            .replace(package.SYSTEMCTL, str(bin_dir / "systemctl"))
-        )
+        script = self.sandboxed(package.configure(), bin_dir)
         result = subprocess.run(["/bin/sh", "-c", script, "postinst", argument], capture_output=True, text=True)
         return result.returncode, log.read_text().splitlines()
+
+    def sandboxed(self, script, bin_dir):
+        """Point a package script's paths into the fixture, and prove it deletes nothing outside.
+
+        On 22 Nov 2026 the postinst's removal of the pre-rename install ran
+        `rm -rf` on the pre-rename install directory of the machine running these tests.
+        """
+        host = self.fixture.root / "host"
+        script = (
+            script.replace(package.PAYLOAD, str(bin_dir))
+            .replace(package.SYSTEMCTL, str(bin_dir / "systemctl"))
+            .replace(package.NFT, str(bin_dir / "nft"))
+            .replace(package.LEGACY_ROOT, str(host) + package.LEGACY_ROOT)
+            .replace(package.SYSTEMD_UNITS, str(host) + package.SYSTEMD_UNITS)
+            .replace("/usr/bin/avpn", str(host) + "/usr/bin/avpn")
+        )
+        for line in script.splitlines():
+            if re.search(r"\brm\s+-", line):
+                for target in re.findall(r"(?<![\w$\"])(/[\w./*-]+)", line.split("rm", 1)[1]):
+                    self.assertTrue(target.startswith(str(self.fixture.root)), "unsandboxed delete: " + target)
+        return script
+
+    def stand_ins(self, active=(), table=False):
+        """systemctl and nft stand-ins: which old units are active, whether the old table is loaded."""
+        bin_dir = self.fixture.root / "legacy-bin"
+        bin_dir.mkdir(exist_ok=True)
+        log = bin_dir / "calls"
+        log.write_text("")
+        (bin_dir / "systemctl").write_text(
+            '#!/bin/sh\necho "systemctl $*" >> %s\nif [ "$1" = is-active ]; then\n  case " %s " in *" $3 "*) exit 0;; esac\n'
+            "  exit 3\nfi\nexit 0\n" % (log, " ".join(active))
+        )
+        (bin_dir / "nft").write_text('#!/bin/sh\necho "nft $*" >> %s\nexit %d\n' % (log, 0 if table else 1))
+        for name in ("systemctl", "nft"):
+            (bin_dir / name).chmod(0o755)
+        return bin_dir, log
+
+    def run_legacy_guard(self, **kw):
+        bin_dir, log = self.stand_ins(**kw)
+        script = "#!/bin/sh\nset -eu\n" + self.sandboxed(package.legacy_running_guard(), bin_dir)
+        r = subprocess.run(["/bin/sh", "-c", script], capture_output=True, text=True)
+        return r.returncode, r.stderr
+
+    def test_an_upgrade_over_a_running_old_vpn_is_refused_with_how_to_stop_it(self):
+        for unit in package.LEGACY_UNITS:
+            with self.subTest(unit=unit):
+                code, err = self.run_legacy_guard(active=(unit,))
+                self.assertNotEqual(code, 0)
+                self.assertIn("previous version's " + unit + " is running", err)
+                self.assertIn("sudo systemctl stop " + " ".join(package.LEGACY_UNITS), err)
+        code, err = self.run_legacy_guard(table=True)
+        self.assertNotEqual(code, 0)
+        self.assertIn("sudo nft delete table " + package.LEGACY_TABLE, err)
+        self.assertEqual(self.run_legacy_guard(), (0, ""))  # nothing old running: no refusal
+        # Both package formats refuse before extraction.
+        for script in (package.preinstall("1.2.3-1"), package.preinstall("1.2.3", debian=False)):
+            self.assertIn(package.legacy_running_guard(), script)
+
+    def test_a_stopped_old_install_is_removed_and_the_owner_told(self):
+        bin_dir, log = self.stand_ins()
+        host = self.fixture.root / "host"
+        old = host / package.LEGACY_ROOT.lstrip("/")
+        (old / "bin").mkdir(parents=True)
+        units = host / package.SYSTEMD_UNITS.lstrip("/")
+        units.mkdir(parents=True)
+        (units / "advanced-vpn.service").write_text("")
+        (units / "other.service").write_text("")
+        script = "#!/bin/sh\nset -eu\n" + self.sandboxed(package.legacy_cleanup(), bin_dir)
+        r = subprocess.run(["/bin/sh", "-c", script], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertFalse(old.exists())
+        self.assertFalse((units / "advanced-vpn.service").exists())
+        self.assertTrue((units / "other.service").exists())
+        self.assertIn("systemctl disable " + " ".join(package.LEGACY_UNITS), log.read_text())
+        self.assertIn("Removed the previous version", r.stderr)
+        # Without an old install it does nothing and says nothing.
+        log.write_text("")
+        r = subprocess.run(["/bin/sh", "-c", script], capture_output=True, text=True)
+        self.assertEqual((r.returncode, r.stderr, log.read_text()), (0, "", ""))
 
     def test_upgrade_stops_a_running_controller_only_after_the_new_install_succeeds(self):
         code, calls = self.run_configure(0, controller_active=True)

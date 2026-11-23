@@ -13,7 +13,7 @@ of growing a daemon:
     trusted"); everything else — every new network, every open Wi-Fi,
     every hotel and conference SSID — is untrusted;
   - the ACTION is exactly one thing: bring the tunnel up
-    (`avpn connect`, the supervisor the enrolled unit already runs).
+    (`cypherpunk connect`, the supervisor the enrolled unit already runs).
     The module NEVER disconnects: auto-disconnect would sever a live
     session without the user asking, and the kill switch already
     handles the dangerous direction (tunnel down -> no traffic).
@@ -38,7 +38,7 @@ import sys
 from pathlib import Path
 
 SCHEMA = 1
-POLICY_PATH = Path("/etc/advanced-vpn/autoconnect.json")
+POLICY_PATH = Path("/etc/cypherpunk-vpn/autoconnect.json")
 SSID_MAX = 32  # IEEE 802.11 SSID length
 
 # What the dispatcher may ask us to do about a decision.
@@ -106,9 +106,9 @@ def connect_command() -> list[str]:
     """The action: the enrolled supervisor's connect, nothing else.
 
     Runs as the dispatcher's user (root) but targets the user service
-    the same way `avpn connect` does; the kill switch and namespace
+    the same way `cypherpunk connect` does; the kill switch and namespace
     model are unchanged — this module adds a trigger, not a privilege."""
-    return ["/opt/advanced-vpn/bin/avpn", "connect"]
+    return ["/opt/cypherpunk-vpn/bin/cypherpunk", "connect"]
 
 
 def handle(event: dict, policy: dict | None, run=None) -> dict:

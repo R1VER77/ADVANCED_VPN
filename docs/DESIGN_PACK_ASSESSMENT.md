@@ -9,14 +9,14 @@ we prove it? This page records the verdicts, what was checked, and what the chec
 
 | Item | Verdict | Where it landed |
 |---|---|---|
-| PQ-Sphinx option E (entry ML-KEM-768 + inner X25519, 1,396-byte header at 3 hops) | **Research, not shipped** (decided 13 Nov) | `crates/avpn-mix-lane`, `crates/avpn-pq-sphinx`, `advanced-vpn-mixnode --experimental` stay as tested research. Its inner hops are classical X25519, so it cannot carry the full post-quantum claim; it is never on by default and is excluded from that claim |
-| Post-quantum mix lane (Katzenpost) | **Adopted, and the lane we keep** | `avpn mix` requires X-Wing Sphinx, X-Wing links and hybrid (Ed25519 + SPHINCS+) directory signatures, and refuses anything classical. Its fetch service is our PQ-only plugin (`tools/kp_pq_fetch.py`). Its cost in speed and bandwidth is being measured against the anonymity it buys (a parameter sweep on the live lab), before any setting changes |
-| AntiTracker (filter formats, allowlist, CNAME cloaking) | **Adopted** | the exit's DNS forwarder (`src/bin/advanced-vpn-dns.rs`), signed `--dns-allowlist` |
+| PQ-Sphinx option E (entry ML-KEM-768 + inner X25519, 1,396-byte header at 3 hops) | **Research, not shipped** (decided 13 Nov) | `crates/cpvpn-mix-lane`, `crates/cpvpn-pq-sphinx`, `cypherpunk-vpn-mixnode --experimental` stay as tested research. Its inner hops are classical X25519, so it cannot carry the full post-quantum claim; it is never on by default and is excluded from that claim |
+| Post-quantum mix lane (Katzenpost) | **Adopted, and the lane we keep** | `cypherpunk mix` requires X-Wing Sphinx, X-Wing links and hybrid (Ed25519 + SPHINCS+) directory signatures, and refuses anything classical. Its fetch service is our PQ-only plugin (`tools/kp_pq_fetch.py`). Its cost in speed and bandwidth is being measured against the anonymity it buys (a parameter sweep on the live lab), before any setting changes |
+| AntiTracker (filter formats, allowlist, CNAME cloaking) | **Adopted** | the exit's DNS forwarder (`src/bin/cypherpunk-vpn-dns.rs`), signed `--dns-allowlist` |
 | Kill-switch drift audit | **Adopted** | the supervisor's `TableWatch` restores any deleted or altered kill-switch table |
 | DC-net control channel | **Library + model, not wired** | `src/dcnet.rs`, `tools/dcnet_reference.py`, `formal/dcnet/` |
 | RAM-only attestation in descriptors | Roadmap | needs TPM2 / SEV-SNP quote verification |
 | MASQUE CONNECT-UDP front | Roadmap | needs a real HTTP/3 MASQUE stack |
-| Split tunnelling | Declined | it lowers protection by design; `avpn run` already tunnels per application, fail-secure |
+| Split tunnelling | Declined | it lowers protection by design; `cypherpunk run` already tunnels per application, fail-secure |
 | `obfs_stream` bucket ladder | Declined | the TCP fallback already sends one fixed 1,420-byte cell size, which leaks less than a ladder of sizes |
 | Multi-platform rule generators | Declined | Linux only for now |
 
@@ -59,5 +59,5 @@ The full inventory, with the code that enforces each layer and the test that pro
 ## The mix lane stays opt-in
 
 Everything goes through the fast lane by default. The mix lane runs only after an explicit
-`avpn mix start`, as Mullvad's DAITA is a choice. Seconds of latency, and cover traffic that
+`cypherpunk mix start`, as Mullvad's DAITA is a choice. Seconds of latency, and cover traffic that
 costs bandwidth even when idle, are a trade users accept only when they choose it.

@@ -1,4 +1,4 @@
-# Python tooling for ADVANCED_VPN (tools/). Servers may run Python 3.10.
+# Python tooling for cypherpunk_vpn (tools/). Servers may run Python 3.10.
 target-version = "py310"
 line-length = 120
 

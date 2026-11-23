@@ -64,7 +64,7 @@ jobs:
           # would compile the vendored gotatun fork's maybenot as a second unit (a test-cfg
           # resolution quirk; the normal build above and `cargo build` below compile them
           # cleanly), so scope the test run to the targets that actually have tests.
-          cargo test --locked --lib --bin advanced-vpn --bin advanced-vpn-dns
+          cargo test --locked --lib --bin cypherpunk-vpn --bin cypherpunk-vpn-dns
           cargo build --release --locked
           sh tools/build-bootstrap.sh
           cargo clippy --locked -p cypherpunk-preflight -p cypherpunk-bootguard -p cypherpunk-controller --all-targets -- -D warnings
@@ -78,22 +78,22 @@ jobs:
         run: unshare --user --map-root-user --net --mount python tools/guard_network_test.py --out /tmp/cypherpunk-guard-network
       - name: Mix lane option E (audited-primitives crate, reference oracle, byte identity)
         run: |
-          cargo clippy --locked -p avpn-mix-lane -p avpn-pq-sphinx --all-targets -- -D warnings
-          cargo test --locked --release -p avpn-mix-lane -p avpn-pq-sphinx
+          cargo clippy --locked -p cpvpn-mix-lane -p cpvpn-pq-sphinx --all-targets -- -D warnings
+          cargo test --locked --release -p cpvpn-mix-lane -p cpvpn-pq-sphinx
           # The reference crate must regenerate the committed full-cell vectors exactly:
           # any protocol drift in either crate fails here.
-          cargo run --locked --release -p avpn-pq-sphinx --example dump_cells > /tmp/cells.txt
-          cmp /tmp/cells.txt crates/avpn-pq-sphinx/cells.txt
-          cmp /tmp/cells.txt crates/avpn-mix-lane/cells.txt
+          cargo run --locked --release -p cpvpn-pq-sphinx --example dump_cells > /tmp/cells.txt
+          cmp /tmp/cells.txt crates/cpvpn-pq-sphinx/cells.txt
+          cmp /tmp/cells.txt crates/cpvpn-mix-lane/cells.txt
           # The primitive vectors come from independent Python implementations; regenerate
           # them and check both crates against the fresh set (X25519 keys are random per run).
           python -m venv /tmp/vecenv
           /tmp/vecenv/bin/pip install -q kyber-py==1.2.0 blake3==1.0.11 cryptography==50.0.2
-          mkdir -p /tmp/vec && cp crates/avpn-pq-sphinx/gen_vectors.py /tmp/vec/
+          mkdir -p /tmp/vec && cp crates/cpvpn-pq-sphinx/gen_vectors.py /tmp/vec/
           /tmp/vecenv/bin/python -I /tmp/vec/gen_vectors.py
-          for c in avpn-pq-sphinx avpn-mix-lane; do cp /tmp/vec/vectors.txt crates/$c/vectors.txt; done
-          cargo test --locked --release -p avpn-pq-sphinx -p avpn-mix-lane --test vectors
-          git checkout -- crates/avpn-pq-sphinx/vectors.txt crates/avpn-mix-lane/vectors.txt
+          for c in cpvpn-pq-sphinx cpvpn-mix-lane; do cp /tmp/vec/vectors.txt crates/$c/vectors.txt; done
+          cargo test --locked --release -p cpvpn-pq-sphinx -p cpvpn-mix-lane --test vectors
+          git checkout -- crates/cpvpn-pq-sphinx/vectors.txt crates/cpvpn-mix-lane/vectors.txt
       - name: Wire clock keeps packets on their slots under fq (own network namespace)
         run: |
           cargo test --locked --lib --no-run
@@ -101,27 +101,27 @@ jobs:
       - name: Build and run isolated routed VPN
         run: |
           cargo build --release --locked
-          unshare -Urnm python tools/namespace_test.py --state /tmp/advanced-vpn-ci
+          unshare -Urnm python tools/namespace_test.py --state /tmp/cypherpunk-vpn-ci
       - name: Managed WireGuard DAITA, constant cells and unprivileged service proof
-        run: unshare --user --map-root-user --map-auto --net --mount python tools/managed_test.py --state /tmp/advanced-vpn-managed-ci
+        run: unshare --user --map-root-user --map-auto --net --mount python tools/managed_test.py --state /tmp/cypherpunk-vpn-managed-ci
       - name: The relay-exit link over TCP on IPv6 only (an IPv6-only exit), whole cells on the wire
-        run: unshare --user --map-root-user --map-auto --net --mount python tools/managed_test.py --state /tmp/advanced-vpn-managed-tcp-ci --link-transport tcp
+        run: unshare --user --map-root-user --map-auto --net --mount python tools/managed_test.py --state /tmp/cypherpunk-vpn-managed-tcp-ci --link-transport tcp
       - name: Server egress lock and monthly quota (IPv4 and IPv6, real nftables)
         run: unshare --user --map-root-user --map-auto --net --mount python tools/server_egress_test.py
       - name: Privacy budget lifecycle (opt-in cap, refunds, blocked-not-exited)
-        run: unshare --user --map-root-user --map-auto --net --mount python tools/budget_test.py --state /tmp/advanced-vpn-budget-ci
+        run: unshare --user --map-root-user --map-auto --net --mount python tools/budget_test.py --state /tmp/cypherpunk-vpn-budget-ci
       - name: Tunnel throughput floor (default per-session limits)
-        run: unshare --user --map-root-user --map-auto --net --mount python tools/throughput_bench.py --state /tmp/advanced-vpn-bench-ci --rate line --mib 32 --min-mbit 50 --shape-idle 5 --max-rate-change 0.15
+        run: unshare --user --map-root-user --map-auto --net --mount python tools/throughput_bench.py --state /tmp/cypherpunk-vpn-bench-ci --rate line --mib 32 --min-mbit 50 --shape-idle 5 --max-rate-change 0.15
       - name: A path below the cloak's 1448-byte minimum runs the tunnel over TLS/TCP
-        run: unshare --user --map-root-user --map-auto --net --mount python tools/throughput_bench.py --state /tmp/avpn-lowmtu --rate standard --mib 8 --underlay-mtu 1400
+        run: unshare --user --map-root-user --map-auto --net --mount python tools/throughput_bench.py --state /tmp/cpvpn-lowmtu --rate standard --mib 8 --underlay-mtu 1400
       - name: Multi-hop chains, switching, onion and no-retained-data audits
         run: |
-          unshare --user --map-root-user --map-auto --net --mount python tools/throughput_bench.py --state /tmp/avpn-hops-3-1 --hops 3 --switch-to 1 --rate line --mib 16 --min-mbit 20 --shape-idle 5 --max-rate-change 0.15
-          unshare --user --map-root-user --map-auto --net --mount python tools/throughput_bench.py --state /tmp/avpn-hops-2-3 --hops 2 --switch-to 3 --rate line --mib 16 --min-mbit 20 --shape-idle 5 --shape-link last --max-rate-change 0.15
+          unshare --user --map-root-user --map-auto --net --mount python tools/throughput_bench.py --state /tmp/cpvpn-hops-3-1 --hops 3 --switch-to 1 --rate line --mib 16 --min-mbit 20 --shape-idle 5 --max-rate-change 0.15
+          unshare --user --map-root-user --map-auto --net --mount python tools/throughput_bench.py --state /tmp/cpvpn-hops-2-3 --hops 2 --switch-to 3 --rate line --mib 16 --min-mbit 20 --shape-idle 5 --shape-link last --max-rate-change 0.15
       - name: Self-healing chain (standby exit failover, no leak) and oblivious control plane
         run: |
-          unshare --user --map-root-user --map-auto --net --mount python tools/failover_lab.py --state /tmp/avpn-failover --rate standard
-          unshare --user --map-root-user --map-auto --net --mount python tools/ohttp_lab.py --state /tmp/avpn-ohttp
+          unshare --user --map-root-user --map-auto --net --mount python tools/failover_lab.py --state /tmp/cpvpn-failover --rate standard
+          unshare --user --map-root-user --map-auto --net --mount python tools/ohttp_lab.py --state /tmp/cpvpn-ohttp
       - name: I2P front (private I2P network; the entry never sees the client, only I2P leaves)
         run: |
           # i2pd 2.56 from Debian, pinned by hash: Ubuntu 24.04's 2.49 rejects the private
@@ -136,7 +136,7 @@ jobs:
             | sha256sum -c
           for d in *.deb; do dpkg -x "$d" /tmp/i2pd-root; done
           cd "$GITHUB_WORKSPACE"
-          unshare --user --map-root-user --map-auto --net --mount python tools/i2p_lab.py --state /tmp/avpn-i2p --i2pd-root /tmp/i2pd-root --rate metered
+          unshare --user --map-root-user --map-auto --net --mount python tools/i2p_lab.py --state /tmp/cpvpn-i2p --i2pd-root /tmp/i2pd-root --rate metered
       - name: Known dependency vulnerabilities
         run: |
           cargo install cargo-audit --version 0.22.1 --locked
@@ -195,19 +195,19 @@ jobs:
           python tools/native_package.py --runtime offline-runtime --out native-package \
             --format deb --epoch "$(git show -s --format=%ct HEAD)" --gui "$(cat desktop-app-path.txt)"
           dpkg-deb --contents native-package/*.deb | grep -q '/usr/share/applications/cypherpunk-vpn.desktop$'
-          avpn_test_keyring=$(mktemp -d)
-          export GNUPGHOME="$avpn_test_keyring"
-          trap 'gpgconf --homedir "$avpn_test_keyring" --kill gpg-agent; rm -rf -- "$avpn_test_keyring"' EXIT
+          cpvpn_test_keyring=$(mktemp -d)
+          export GNUPGHOME="$cpvpn_test_keyring"
+          trap 'gpgconf --homedir "$cpvpn_test_keyring" --kill gpg-agent; rm -rf -- "$cpvpn_test_keyring"' EXIT
           gpg --no-options --batch --pinentry-mode loopback --passphrase '' \
             --quick-generate-key 'cypherpunk disposable CI repository key' ed25519 sign 1d
           gpg --no-options --batch --with-colons --list-secret-keys > test-key-record.txt
-          avpn_test_fingerprint=$(python -c 'from pathlib import Path; print(next(line.split(":")[9] for line in Path("test-key-record.txt").read_text().splitlines() if line.startswith("fpr:")))')
-          gpg --no-options --batch --export "$avpn_test_fingerprint" > test-public-key.gpg
+          cpvpn_test_fingerprint=$(python -c 'from pathlib import Path; print(next(line.split(":")[9] for line in Path("test-key-record.txt").read_text().splitlines() if line.startswith("fpr:")))')
+          gpg --no-options --batch --export "$cpvpn_test_fingerprint" > test-public-key.gpg
           python tools/signed_repo.py build --packages native-package/*.deb \
-            --out test-repository --fingerprint "$avpn_test_fingerprint" --testing
+            --out test-repository --fingerprint "$cpvpn_test_fingerprint" --testing
           docker pull ubuntu@sha256:74b12b11ffa550fba1929ad4d8d16533c34f6612728469671afba1b03b66881c
           python tools/signed_repo_apt_test.py --repo test-repository \
-            --public-key test-public-key.gpg --fingerprint "$avpn_test_fingerprint" \
+            --public-key test-public-key.gpg --fingerprint "$cpvpn_test_fingerprint" \
             --package "cypherpunk-vpn=$(dpkg-deb --field native-package/*.deb Version)" \
             --image ubuntu@sha256:74b12b11ffa550fba1929ad4d8d16533c34f6612728469671afba1b03b66881c \
             --work apt-client-evidence
@@ -265,7 +265,7 @@ jobs:
           PATH="$HOME/bin:$PATH" python3 tools/proverif_check.py --timeout 600
   kani:
     # Bounded model checking of the link's replay window and reply credit, over the very
-    # file the data plane compiles (src/link_bounds.rs via crates/avpn-kani): no replay,
+    # file the data plane compiles (src/link_bounds.rs via crates/cpvpn-kani): no replay,
     # nothing older than the window, no amplification. Kani pinned by version.
     runs-on: ubuntu-24.04
     timeout-minutes: 45
@@ -276,7 +276,7 @@ jobs:
           cargo install --locked kani-verifier --version 0.67.0
           cargo kani setup
       - name: Prove the link's arithmetic state
-        working-directory: crates/avpn-kani
+        working-directory: crates/cpvpn-kani
         run: cargo kani
   fuzz:
     # Coverage-guided fuzzing (libFuzzer via cargo-fuzz) of every parser that takes bytes
@@ -353,7 +353,7 @@ jobs:
           rustup toolchain install 1.95.0 --profile minimal --component clippy --component rustfmt
       - name: Rust and Python suites, static bootstrap
         run: |
-          cargo test --locked --lib --bin advanced-vpn --bin advanced-vpn-dns
+          cargo test --locked --lib --bin cypherpunk-vpn --bin cypherpunk-vpn-dns
           cargo build --release --locked
           sh tools/build-bootstrap.sh
           cargo test --locked -p cypherpunk-preflight -p cypherpunk-bootguard -p cypherpunk-controller
@@ -362,15 +362,15 @@ jobs:
         run: unshare --user --map-root-user --net --mount python tools/guard_network_test.py --out /tmp/cypherpunk-guard-network
       - name: Isolated routed VPN, managed WireGuard + DAITA, budget
         run: |
-          unshare -Urnm python tools/namespace_test.py --state /tmp/advanced-vpn-ci
-          unshare --user --map-root-user --map-auto --net --mount python tools/managed_test.py --state /tmp/advanced-vpn-managed-ci
-          unshare --user --map-root-user --map-auto --net --mount python tools/managed_test.py --state /tmp/advanced-vpn-managed-tcp-ci --link-transport tcp
-          unshare --user --map-root-user --map-auto --net --mount python tools/budget_test.py --state /tmp/advanced-vpn-budget-ci
+          unshare -Urnm python tools/namespace_test.py --state /tmp/cypherpunk-vpn-ci
+          unshare --user --map-root-user --map-auto --net --mount python tools/managed_test.py --state /tmp/cypherpunk-vpn-managed-ci
+          unshare --user --map-root-user --map-auto --net --mount python tools/managed_test.py --state /tmp/cypherpunk-vpn-managed-tcp-ci --link-transport tcp
+          unshare --user --map-root-user --map-auto --net --mount python tools/budget_test.py --state /tmp/cypherpunk-vpn-budget-ci
       - name: Failover, oblivious control plane, TLS/TCP fallback
         run: |
-          unshare --user --map-root-user --map-auto --net --mount python tools/failover_lab.py --state /tmp/avpn-failover --rate standard
-          unshare --user --map-root-user --map-auto --net --mount python tools/ohttp_lab.py --state /tmp/avpn-ohttp
-          unshare --user --map-root-user --map-auto --net --mount python tools/throughput_bench.py --state /tmp/avpn-lowmtu --rate standard --mib 8 --underlay-mtu 1400
+          unshare --user --map-root-user --map-auto --net --mount python tools/failover_lab.py --state /tmp/cpvpn-failover --rate standard
+          unshare --user --map-root-user --map-auto --net --mount python tools/ohttp_lab.py --state /tmp/cpvpn-ohttp
+          unshare --user --map-root-user --map-auto --net --mount python tools/throughput_bench.py --state /tmp/cpvpn-lowmtu --rate standard --mib 8 --underlay-mtu 1400
   linux-desktop:
     runs-on: ubuntu-24.04
     timeout-minutes: 45

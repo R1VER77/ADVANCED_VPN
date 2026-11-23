@@ -101,7 +101,7 @@ class RefreshedLeaves(unittest.TestCase):
             for lane in ("outer", "inner"):
                 k = mldsa.MLDSA65PrivateKey.generate()
                 (root / (lane + "-cert.der")).write_bytes(
-                    mp.device_certificate("client-%s.advanced-vpn.internal" % lane, k)
+                    mp.device_certificate("client-%s.cypherpunk-vpn.internal" % lane, k)
                 )
                 (root / (lane + "-cert.der")).chmod(0o600)
                 keys[lane] = k.private_bytes(
@@ -306,7 +306,7 @@ class Signer(unittest.TestCase):
                 self.assertIn(reason, json.loads(r.stdout)["error"])  # for the supervisor
 
     def test_the_signer_keeps_the_terminal_for_the_pin_and_the_touch_prompt(self):
-        # Live laptop, 20 Nov 2026: `sudo avpnctl connect` in a terminal failed with "no
+        # Live laptop, 20 Nov 2026: `sudo cypherpunkctl connect` in a terminal failed with "no
         # terminal ... for the PIN", because the request was the signer's stdin. The real
         # launch path runs here under a pseudo-terminal with a probe in the signer's place.
         import os

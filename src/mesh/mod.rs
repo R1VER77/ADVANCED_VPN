@@ -1,4 +1,4 @@
-//! AVPN/Mesh: the community layer of ADVANCED_VPN.
+//! CPVPN/Mesh: the community layer of cypherpunk_vpn.
 //!
 //! Every member contributes at least one server (an always-free cloud VM is
 //! enough); in return they build chains across nodes contributed by other

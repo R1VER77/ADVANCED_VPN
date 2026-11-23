@@ -118,13 +118,13 @@ def provision(root, relay, exit_address, hours=12, adversarial=False, algorithm=
     root.mkdir(mode=0o700, parents=False, exist_ok=False)
     for name in ["offline", "relay", "client", "exit"]:
         (root / name).mkdir(mode=0o700)
-    authorities = {lane: authority("advanced-vpn-" + lane, algorithm) for lane in ["outer", "inner"]}
+    authorities = {lane: authority("cypherpunk-vpn-" + lane, algorithm) for lane in ["outer", "inner"]}
     for lane, pair in authorities.items():
         put(root / "offline" / (lane + "-ca.key"), key_bytes(pair[0]))
     peers = {}
     for role in ["relay", "client-outer", "exit", "client-inner"]:
         lane = "outer" if role in ["relay", "client-outer"] else "inner"
-        peers[role] = leaf(role + ".advanced-vpn.internal", authorities[lane], hours, algorithm=algorithm)
+        peers[role] = leaf(role + ".cypherpunk-vpn.internal", authorities[lane], hours, algorithm=algorithm)
 
     def identity(directory, role, peer, lane):
         put(directory / (lane + "-ca.der"), authorities[lane][1].public_bytes(serialization.Encoding.DER))
@@ -135,7 +135,7 @@ def provision(root, relay, exit_address, hours=12, adversarial=False, algorithm=
             cert=str(directory / (lane + "-cert.der")),
             key=str(directory / (lane + "-key.der")),
             peer_sha256=peers[peer][1].fingerprint(hashes.SHA256()).hex(),
-            server_name=peer + ".advanced-vpn.internal",
+            server_name=peer + ".cypherpunk-vpn.internal",
         )
 
     configs = {}
@@ -149,7 +149,7 @@ def provision(root, relay, exit_address, hours=12, adversarial=False, algorithm=
             exit=exit_address if role == "relay" else None,
             outer=None,
             inner=None,
-            tun=None if role == "relay" else "avpn0",
+            tun=None if role == "relay" else "cpvpn0",
             local_ip="10.77.0.2" if role == "client" else "10.77.0.1" if role == "exit" else None,
             peer_ip="10.77.0.1" if role == "client" else "10.77.0.2" if role == "exit" else None,
             destinations=[],
@@ -179,7 +179,7 @@ def provision(root, relay, exit_address, hours=12, adversarial=False, algorithm=
             ("expired", authorities["outer"], True, algorithm),
             ("classical", authorities["outer"], False, "ecdsa"),
         ]:
-            k, c = leaf(name + ".advanced-vpn.internal", ca, hours, expired, algorithm=alg)
+            k, c = leaf(name + ".cypherpunk-vpn.internal", ca, hours, expired, algorithm=alg)
             put(tests / (name + "-key.der"), key_bytes(k))
             put(tests / (name + "-cert.der"), c.public_bytes(serialization.Encoding.DER))
     receipt = dict(

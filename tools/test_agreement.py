@@ -32,7 +32,9 @@ class Agreement(unittest.TestCase):
         terms = " ".join(b["t"] for s in built["documents"][0]["sections"] for b in s["blocks"])
         self.assertIn("You may not impose further restrictions", terms)
         privacy = [b["t"] for s in built["documents"][1]["sections"] for b in s["blocks"]]
-        self.assertIn("Websites. Can see: The exit's address and what you send them. Cannot see: Your address.", privacy)
+        self.assertIn(
+            "Websites. Can see: The exit's address and what you send them. Cannot see: Your address.", privacy
+        )
 
     def test_any_change_to_a_document_changes_the_version(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -1,11 +1,11 @@
 [package]
-name = "advanced-vpn"
+name = "cypherpunk-vpn"
 version = "0.11.0"
 edition = "2024"
 rust-version = "1.95"
 license = "AGPL-3.0-or-later"
 description = "Experimental nested hybrid-PQ tunnel with a ciphertext-only cloud relay"
-default-run = "advanced-vpn"
+default-run = "cypherpunk-vpn"
 
 [dependencies]
 anyhow = "=1.0.104"
@@ -18,7 +18,7 @@ serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = "=1.0.154"
 sha2 = "=0.10.9"
 hmac = "=0.12.1"
-avpn-mix-lane = { path = "crates/avpn-mix-lane" }
+cpvpn-mix-lane = { path = "crates/cpvpn-mix-lane" }
 tokio = { version = "=1.54.1", features = ["rt", "macros", "net", "time", "signal", "sync", "io-util"] }
 x509-parser = "=0.18.1"
 zeroize = "=1.9.1"
@@ -54,7 +54,7 @@ undocumented_unsafe_blocks = "deny"
 # Members: the mix lane's PQ-Sphinx option E on audited crates, and its std-only reference
 # implementation, kept only as the byte-identity oracle for tests (crates/*/IMPLEMENTATION_NOTES.md).
 [workspace]
-members = ["crates/avpn-mix-lane", "crates/avpn-pq-sphinx", "crates/cypherpunk-preflight", "crates/cypherpunk-controller", "crates/cypherpunk-bootguard"]
+members = ["crates/cpvpn-mix-lane", "crates/cpvpn-pq-sphinx", "crates/cypherpunk-preflight", "crates/cypherpunk-controller", "crates/cypherpunk-bootguard"]
 # research/zk-membership is its own RISC Zero workspace (rzup toolchain), never built here.
 exclude = ["research"]
 resolver = "3"

@@ -191,7 +191,7 @@ class IntegrationTests(unittest.TestCase):
     def test_descriptor_with_policy_validates(self):
         """The mesh descriptor validator accepts a descriptor carrying
         a valid exit_policy (and rejects an invalid one) via the hook
-        below — the same check `avpn mesh publish` runs."""
+        below — the same check `cypherpunk mesh publish` runs."""
         import json
 
         descriptor = {

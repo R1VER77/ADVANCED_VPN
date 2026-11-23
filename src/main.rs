@@ -1,4 +1,4 @@
-use advanced_vpn::{config, run, sandbox, tls};
+use cypherpunk_vpn::{config, run, sandbox, tls};
 #[cfg(test)]
 mod crypto_tests;
 use anyhow::Result;
@@ -75,12 +75,12 @@ async fn entry() -> Result<()> {
     // Every file this process needs is its configuration and its layers' certificates
     // and keys (handshakes re-read the certificate); confine before any socket or TUN
     // is opened, so the whole data plane runs confined (src/sandbox.rs). The labs'
-    // cell audit (AVPN_CELL_AUDIT) is the only file it ever writes.
+    // cell audit (CPVPN_CELL_AUDIT) is the only file it ever writes.
     let mut files: Vec<&std::path::Path> = vec![a.config.as_path()];
     for (_, i) in c.lanes() {
         files.extend([i.ca.as_path(), i.cert.as_path(), i.key.as_path()]);
     }
-    let audit = std::env::var_os("AVPN_CELL_AUDIT")
+    let audit = std::env::var_os("CPVPN_CELL_AUDIT")
         .map(|p| sandbox::Policy::parent_of(std::path::Path::new(&p)));
     sandbox::confine(&sandbox::Policy::daemon(files, audit, true))?;
     let work = async {

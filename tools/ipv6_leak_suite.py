@@ -38,7 +38,7 @@ exercised by real network I/O, not by stubs.
 
 Output: a dated JSON verdict file, one row per check, with the
 policy posture ("blocked" or "tunneled") recorded in every record - the
-same honesty discipline as avpn stream-check: a dated measurement, not a
+same honesty discipline as cypherpunk stream-check: a dated measurement, not a
 promise.
 """
 
@@ -556,14 +556,14 @@ def stage2_forwarding_rules(tunnel_v4: str = "10.77.0.2", tunnel_v6_prefix: str 
     if not is_global_v6(tunnel_v6_prefix + "1"):
         raise ValueError("the tunnel's v6 prefix must be a global 2000::/3 /64")
     lines = [
-        f'iifname "avpn0" ip saddr != {tunnel_v4} drop',
-        f'iifname "avpn0" ip6 saddr != {tunnel_v6_prefix}/64 drop',
-        f'  iifname "avpn0" {PRIVATE_V4}',
-        f'  iifname "avpn0" {PRIVATE_V6}',
-        '  iifname "avpn0" meta nfproto ipv4 accept',
-        '  iifname "avpn0" meta nfproto ipv6 accept',
-        f'oifname "avpn0" ip daddr != {tunnel_v4} drop',
-        f'oifname "avpn0" ip6 daddr != {tunnel_v6_prefix}/64 drop',
+        f'iifname "cpvpn0" ip saddr != {tunnel_v4} drop',
+        f'iifname "cpvpn0" ip6 saddr != {tunnel_v6_prefix}/64 drop',
+        f'  iifname "cpvpn0" {PRIVATE_V4}',
+        f'  iifname "cpvpn0" {PRIVATE_V6}',
+        '  iifname "cpvpn0" meta nfproto ipv4 accept',
+        '  iifname "cpvpn0" meta nfproto ipv6 accept',
+        f'oifname "cpvpn0" ip daddr != {tunnel_v4} drop',
+        f'oifname "cpvpn0" ip6 daddr != {tunnel_v6_prefix}/64 drop',
     ]
     return "\n".join(lines) + "\n"
 
@@ -574,4 +574,4 @@ def stage0_forwarding_line() -> str:
     route and the drop is the defense-in-depth that posture runs on. Pinned
     here so the live flip to stage 2 is a visible, tested change - not a
     silent drift."""
-    return 'iifname "avpn0" meta nfproto ipv6 drop'
+    return 'iifname "cpvpn0" meta nfproto ipv6 drop'

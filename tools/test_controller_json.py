@@ -1,4 +1,4 @@
-"""The controller's machine interface (`--json`), which the Rust `avpn` CLI renders.
+"""The controller's machine interface (`--json`), which the Rust `cypherpunk` CLI renders.
 
 Every command must print exactly one JSON object on stdout, errors included, and
 read-only queries must not create runtime state."""
@@ -12,15 +12,15 @@ import tempfile
 import unittest
 from unittest import mock
 
-from avpnctl import runtime_dir
+from cypherpunkctl import runtime_dir
 from managed_profile import lab_setup
 
-CTL = Path(__file__).resolve().parent / "avpnctl.py"
+CTL = Path(__file__).resolve().parent / "cypherpunkctl.py"
 
 # The controller's runtime directories go to a private place for these tests, so they
-# do not depend on whether this machine runs the VPN (its /run/advanced-vpn is root's).
+# do not depend on whether this machine runs the VPN (its /run/cypherpunk-vpn is root's).
 RUNTIME = tempfile.TemporaryDirectory()
-_env = mock.patch.dict(os.environ, {"AVPN_RUNTIME_ROOT": RUNTIME.name})
+_env = mock.patch.dict(os.environ, {"CPVPN_RUNTIME_ROOT": RUNTIME.name})
 
 
 def setUpModule():
@@ -121,42 +121,45 @@ class ControllerJsonTests(unittest.TestCase):
             self.assertIn(reason, err)
 
     def test_doctor_reports_when_no_resolver_socket_exists(self):
-        import avpnctl
+        import cypherpunkctl
 
-        saved = avpnctl.RESOLVER_DIRS, avpnctl.SYSTEM_BUS_SOCKETS
-        avpnctl.RESOLVER_DIRS, avpnctl.SYSTEM_BUS_SOCKETS = ("/nonexistent-avpn-a",), ("/nonexistent-avpn-b",)
+        saved = cypherpunkctl.RESOLVER_DIRS, cypherpunkctl.SYSTEM_BUS_SOCKETS
+        cypherpunkctl.RESOLVER_DIRS, cypherpunkctl.SYSTEM_BUS_SOCKETS = (
+            ("/nonexistent-cpvpn-a",),
+            ("/nonexistent-cpvpn-b",),
+        )
         try:
-            checks = avpnctl.doctor(self.root / "client")
+            checks = cypherpunkctl.doctor(self.root / "client")
         finally:
-            avpnctl.RESOLVER_DIRS, avpnctl.SYSTEM_BUS_SOCKETS = saved
+            cypherpunkctl.RESOLVER_DIRS, cypherpunkctl.SYSTEM_BUS_SOCKETS = saved
         detail = next(c["detail"] for c in checks if c["check"] == "resolver isolation")
         self.assertEqual(detail, "hidden from protected apps: none present")
 
     def test_doctor_shows_a_chain_that_stopped_answering(self):
         # Owner, 20 Nov 2026: a stopped, reclaimed or locked server must be obvious.
-        import avpnctl
+        import cypherpunkctl
         from unittest import mock
 
         status = dict(state="supervising", detail="no answer through the chain since 10:00. A server may be stopped",
-                      next="on your computer, as yourself: avpn cloud health")  # fmt: skip
-        with mock.patch.object(avpnctl, "read_status", lambda state, default=None: status):
-            checks = {c["check"]: c for c in avpnctl.doctor(self.root / "client")}
+                      next="on your computer, as yourself: cypherpunk cloud health")  # fmt: skip
+        with mock.patch.object(cypherpunkctl, "read_status", lambda state, default=None: status):
+            checks = {c["check"]: c for c in cypherpunkctl.doctor(self.root / "client")}
         self.assertFalse(checks["chain answering"]["ok"])
-        self.assertIn("avpn cloud health", checks["chain answering"]["detail"])
-        with mock.patch.object(avpnctl, "read_status", lambda state, default=None: dict(state="supervising")):
-            self.assertNotIn("chain answering", {c["check"] for c in avpnctl.doctor(self.root / "client")})
+        self.assertIn("cypherpunk cloud health", checks["chain answering"]["detail"])
+        with mock.patch.object(cypherpunkctl, "read_status", lambda state, default=None: dict(state="supervising")):
+            self.assertNotIn("chain answering", {c["check"] for c in cypherpunkctl.doctor(self.root / "client")})
 
     def test_doctor_reports_missing_tools_instead_of_crashing(self):
-        import avpnctl
+        import cypherpunkctl
 
         def missing(name):
             raise FileNotFoundError("trusted executable not found: " + name)
 
-        with mock.patch.object(avpnctl, "trusted_exe", missing):
-            checks = avpnctl.doctor(self.root / "client", check_egress=True)
+        with mock.patch.object(cypherpunkctl, "trusted_exe", missing):
+            checks = cypherpunkctl.doctor(self.root / "client", check_egress=True)
         by_name = {c["check"]: c for c in checks}
         self.assertFalse(by_name["trusted nft"]["ok"])
-        self.assertEqual(by_name["advanced-vpn.service installed"]["detail"], "systemctl not found")
+        self.assertEqual(by_name["cypherpunk-vpn.service installed"]["detail"], "systemctl not found")
         self.assertEqual(by_name["address the first hop sees (outside the tunnel)"]["detail"], "curl not found")
 
     def test_doctor_returns_structured_checks(self):
@@ -178,15 +181,15 @@ class RootOnlyStatusTests(unittest.TestCase):
     def test_read_only_commands_work_and_point_to_sudo(self):
         with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as run:
             lab_setup(Path(d), "192.0.2.1:41194", "198.51.100.2:4444")
-            os.chmod(run, 0o000)  # as /run/advanced-vpn is to you: no way in
+            os.chmod(run, 0o000)  # as /run/cypherpunk-vpn is to you: no way in
             try:
-                with mock.patch.dict(os.environ, {"AVPN_RUNTIME_ROOT": run}):
+                with mock.patch.dict(os.environ, {"CPVPN_RUNTIME_ROOT": run}):
                     for action in ["info", "hops", "doctor"]:
                         rc, out, err = ctl(Path(d) / "client", action)
                         self.assertEqual((rc, out["ok"]), (0, True), (action, err))
                     rc, out, _ = ctl(Path(d) / "client", "info")
                     self.assertEqual(out["info"]["status"]["state"], "unknown")
-                    self.assertEqual(out["info"]["status"]["next"], "sudo avpn status")
+                    self.assertEqual(out["info"]["status"]["next"], "sudo cypherpunk status")
                     rc, out, _ = ctl(Path(d) / "client", "status")
                     self.assertEqual((rc, out["status"]["state"]), (0, "unknown"))
                     rc, out, _ = ctl(Path(d) / "client", "doctor")
@@ -195,13 +198,13 @@ class RootOnlyStatusTests(unittest.TestCase):
                 os.chmod(run, 0o700)
 
     def test_root_never_honours_the_runtime_override(self):
-        import avpnctl
+        import cypherpunkctl
 
-        with mock.patch.dict(os.environ, {"AVPN_RUNTIME_ROOT": "/tmp/elsewhere"}):  # noqa: S108 - never used
-            with mock.patch.object(avpnctl.os, "geteuid", return_value=0):
-                self.assertEqual(avpnctl.runtime_root(), Path("/run/advanced-vpn"))
-            with mock.patch.object(avpnctl.os, "geteuid", return_value=1000):
-                self.assertEqual(avpnctl.runtime_root(), Path("/tmp/elsewhere"))  # noqa: S108
+        with mock.patch.dict(os.environ, {"CPVPN_RUNTIME_ROOT": "/tmp/elsewhere"}):  # noqa: S108 - never used
+            with mock.patch.object(cypherpunkctl.os, "geteuid", return_value=0):
+                self.assertEqual(cypherpunkctl.runtime_root(), Path("/run/cypherpunk-vpn"))
+            with mock.patch.object(cypherpunkctl.os, "geteuid", return_value=1000):
+                self.assertEqual(cypherpunkctl.runtime_root(), Path("/tmp/elsewhere"))  # noqa: S108
 
 
 class PrePaddingChainTests(unittest.TestCase):
@@ -229,10 +232,10 @@ class PrePaddingChainTests(unittest.TestCase):
         self.assertNotIn("cells", profile["core"])
 
     def test_kill_switch_reset_and_info_still_load_it(self):
-        import avpnctl
+        import cypherpunkctl
 
         # reset and guard go through load_profile: they must never lock the user out.
-        self.assertEqual(avpnctl.load_profile(self.root / "client")["role"], "client")
+        self.assertEqual(cypherpunkctl.load_profile(self.root / "client")["role"], "client")
         rc, out, _ = ctl(self.root / "client", "info")
         self.assertEqual(rc, 0)
         self.assertIs(out["info"]["padded"], False)
@@ -241,20 +244,20 @@ class PrePaddingChainTests(unittest.TestCase):
         rc, out, _ = ctl(self.root / "client", "doctor")
         row = next(c for c in out["checks"] if c["check"] == "constant-cell padding")
         self.assertFalse(row["ok"])
-        self.assertIn("avpn cloud chain --apply", row["detail"])
+        self.assertIn("cypherpunk cloud chain --apply", row["detail"])
 
     def test_connect_refuses_before_changing_the_host(self):
-        import avpnctl
+        import cypherpunkctl
         from managed_profile import PADDING_REQUIRED
 
         touched = mock.Mock(side_effect=AssertionError("host touched before the padding check"))
         with (
-            mock.patch.object(avpnctl, "root_guard", lambda lab: None),
-            mock.patch.object(avpnctl, "service_identity", touched),
-            mock.patch.object(avpnctl, "ensure_network", touched),
+            mock.patch.object(cypherpunkctl, "root_guard", lambda lab: None),
+            mock.patch.object(cypherpunkctl, "service_identity", touched),
+            mock.patch.object(cypherpunkctl, "ensure_network", touched),
         ):
             with self.assertRaises(RuntimeError) as e:
-                avpnctl.supervise(self.root / "client", self.root / "bin", lab=True)
+                cypherpunkctl.supervise(self.root / "client", self.root / "bin", lab=True)
         self.assertEqual(str(e.exception), PADDING_REQUIRED)
         touched.assert_not_called()
 
@@ -263,7 +266,7 @@ class PrePaddingChainTests(unittest.TestCase):
 
         ops = self.root / "operator"
         with self.assertRaises(ValueError) as e:
-            enroll(ops / "client.avpn", ops / "operator.pub", self.root / "client", replace=True)
+            enroll(ops / "client.cpvpn", ops / "operator.pub", self.root / "client", replace=True)
         self.assertEqual(str(e.exception), PADDING_REQUIRED)
 
 
@@ -293,9 +296,9 @@ class PreCloakChainTests(unittest.TestCase):
         self.assertEqual(profile["carrier"]["endpoint"], "192.0.2.1:41194")
 
     def test_kill_switch_reset_and_info_still_load_it(self):
-        import avpnctl
+        import cypherpunkctl
 
-        self.assertEqual(avpnctl.load_profile(self.root / "client")["role"], "client")
+        self.assertEqual(cypherpunkctl.load_profile(self.root / "client")["role"], "client")
         rc, _, _ = ctl(self.root / "client", "info")
         self.assertEqual(rc, 0)
 
@@ -303,20 +306,20 @@ class PreCloakChainTests(unittest.TestCase):
         rc, out, _ = ctl(self.root / "client", "doctor")
         row = next(c for c in out["checks"] if c["check"] == "HTTP/3 camouflage")
         self.assertFalse(row["ok"])
-        self.assertIn("avpn cloud chain --apply", row["detail"])
+        self.assertIn("cypherpunk cloud chain --apply", row["detail"])
 
     def test_connect_refuses_before_changing_the_host(self):
-        import avpnctl
+        import cypherpunkctl
         from managed_profile import CLOAK_REQUIRED
 
         touched = mock.Mock(side_effect=AssertionError("host touched before the cloak check"))
         with (
-            mock.patch.object(avpnctl, "root_guard", lambda lab: None),
-            mock.patch.object(avpnctl, "service_identity", touched),
-            mock.patch.object(avpnctl, "ensure_network", touched),
+            mock.patch.object(cypherpunkctl, "root_guard", lambda lab: None),
+            mock.patch.object(cypherpunkctl, "service_identity", touched),
+            mock.patch.object(cypherpunkctl, "ensure_network", touched),
         ):
             with self.assertRaises(RuntimeError) as e:
-                avpnctl.supervise(self.root / "client", self.root / "bin", lab=True)
+                cypherpunkctl.supervise(self.root / "client", self.root / "bin", lab=True)
         self.assertEqual(str(e.exception), CLOAK_REQUIRED)
         touched.assert_not_called()
 
@@ -325,7 +328,7 @@ class PreCloakChainTests(unittest.TestCase):
 
         ops = self.root / "operator"
         with self.assertRaises(ValueError) as e:
-            enroll(ops / "client.avpn", ops / "operator.pub", self.root / "client", replace=True)
+            enroll(ops / "client.cpvpn", ops / "operator.pub", self.root / "client", replace=True)
         self.assertEqual(str(e.exception), CLOAK_REQUIRED)
 
 
@@ -346,7 +349,7 @@ class ServerRetentionGateTests(unittest.TestCase):
         """Raised by the first step after the gate: the server would have started."""
 
     def start(self, role, failing, shared=False, lab=False):
-        import avpnctl
+        import cypherpunkctl
         import retention
 
         marker = self.root / ("shared-%s" % shared)
@@ -354,13 +357,13 @@ class ServerRetentionGateTests(unittest.TestCase):
             marker.write_text("")
         reached = mock.Mock(side_effect=self.Reached)
         with (
-            mock.patch.object(avpnctl, "root_guard", lambda lab: None),
-            mock.patch.object(avpnctl, "service_identity", reached),
+            mock.patch.object(cypherpunkctl, "root_guard", lambda lab: None),
+            mock.patch.object(cypherpunkctl, "service_identity", reached),
             mock.patch.object(retention, "failures", lambda: failing),
             mock.patch.object(retention, "SHARED_MARKER", marker),
         ):
             try:
-                avpnctl.supervise(self.root / role, self.root / "bin", lab=lab)
+                cypherpunkctl.supervise(self.root / role, self.root / "bin", lab=lab)
             except self.Reached:
                 return "started"
             except RuntimeError as e:
@@ -381,7 +384,7 @@ class ServerRetentionGateTests(unittest.TestCase):
         self.assertEqual(self.start("client", failing), "started")
 
     def test_doctor_shows_the_checks_on_servers_only(self):
-        import avpnctl
+        import cypherpunkctl
         import retention
 
         rows = [("no swap", False, "/swapfile"), ("/var/log in RAM", True, "tmpfs")]
@@ -390,15 +393,15 @@ class ServerRetentionGateTests(unittest.TestCase):
             mock.patch.object(retention, "checks", lambda: rows),
             mock.patch.object(retention, "SHARED_MARKER", missing),
         ):
-            server = {c["check"]: c for c in avpnctl.doctor(self.root / "relay")}
-            client = {c["check"] for c in avpnctl.doctor(self.root / "client")}
+            server = {c["check"]: c for c in cypherpunkctl.doctor(self.root / "relay")}
+            client = {c["check"] for c in cypherpunkctl.doctor(self.root / "client")}
         self.assertFalse(server["no swap"]["ok"])
         self.assertTrue(server["/var/log in RAM"]["ok"])
         self.assertNotIn("no swap", client)
         marker = self.root / "shared-doctor"
         marker.write_text("")
         with mock.patch.object(retention, "SHARED_MARKER", marker):
-            server = {c["check"]: c for c in avpnctl.doctor(self.root / "relay")}
+            server = {c["check"]: c for c in cypherpunkctl.doctor(self.root / "relay")}
         self.assertFalse(server["no retained data"]["ok"])
         self.assertIn("shared host", server["no retained data"]["detail"])
 

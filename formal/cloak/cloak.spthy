@@ -37,22 +37,22 @@ rule leak:
   [ Out(ck) ]
 
 rule client_proof:
-  let proof = mac(ck, <'advanced-vpn/cloak/v2/client', exporter>)
+  let proof = mac(ck, <'cypherpunk-vpn/cloak/v2/client', exporter>)
   in
   [ !ClientKey(ck), !Connection(exporter) ]
   --[ ClientProofSent(ck, exporter, proof) ]->
   [ Out(proof), AwaitConfirmation(ck, exporter) ]
 
 rule server_accept:
-  let client_proof = mac(ck, <'advanced-vpn/cloak/v2/client', exporter>)
-      server_proof = mac(ck, <'advanced-vpn/cloak/v2/server', exporter>)
+  let client_proof = mac(ck, <'cypherpunk-vpn/cloak/v2/client', exporter>)
+      server_proof = mac(ck, <'cypherpunk-vpn/cloak/v2/server', exporter>)
   in
   [ !ServerKey(ck), !Connection(exporter), In(client_proof) ]
   --[ TunnelAccepted(ck, exporter, client_proof), ServerProofSent(ck, exporter, server_proof) ]->
   [ Out(server_proof) ]
 
 rule client_confirm:
-  let proof = mac(ck, <'advanced-vpn/cloak/v2/server', exporter>)
+  let proof = mac(ck, <'cypherpunk-vpn/cloak/v2/server', exporter>)
   in
   [ AwaitConfirmation(ck, exporter), In(proof) ]
   --[ ClientConfirmed(ck, exporter, proof) ]->

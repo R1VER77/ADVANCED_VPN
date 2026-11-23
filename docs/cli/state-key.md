@@ -1,4 +1,4 @@
-# avpn state-key
+# cypherpunk state-key
 
 Operator only. Release the key that encrypts OpenTofu's state and saved plans, for the
 cloud provisioner (`tools/tofu_run.py`). The key is 32 random bytes sealed in the
@@ -7,7 +7,7 @@ is printed as JSON to a pipe only; the command refuses to print it to a terminal
 
 ## Usage
 
-    avpn --json state-key (--vault DIR | --software-operator DIR) | ...
+    cypherpunk --json state-key (--vault DIR | --software-operator DIR) | ...
 
 ## Options
 

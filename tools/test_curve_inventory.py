@@ -208,13 +208,13 @@ REGISTRY = [
         "migration": "open: PQ-HPKE mode addition, versioned by config id; the ohttp Tamarin model already records the boundary",
     },
     {
-        "interface": "mix lane Sphinx (crates/avpn-mix-lane)",
+        "interface": "mix lane Sphinx (crates/cpvpn-mix-lane)",
         "primitives": ["X25519", "ML-KEM-768", "ML-KEM-1024", "ChaCha20-Poly1305", "SHA-512", "HKDF", "X-Wing"],
         "classification": "hybrid",
         "classical_half": "X25519 in the X-Wing combiner",
         "pq_half": "ML-KEM-768 in the X-Wing combiner (the sphinx header seal); ML-KEM-1024-X25519 is a listed PQ_WIRE option (tools/mix.py) with its ciphertext budget pinned (mix_lane_math)",
         "hardware": "none (relay keys are server-side; operator unlock guards them at rest)",
-        "pq_test": "crates/avpn-mix-lane/tests/vectors.rs + the mix-lane Tamarin models + mutation controls",
+        "pq_test": "crates/cpvpn-mix-lane/tests/vectors.rs + the mix-lane Tamarin models + mutation controls",
         "migration": "landed X-Wing hybrid; the ML-KEM-1024 wire option is the sized-for-future variant",
     },
     {

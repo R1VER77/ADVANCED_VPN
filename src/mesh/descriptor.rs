@@ -1,6 +1,6 @@
 //! The signed node descriptor: what a contributed server announces to the mesh.
 //!
-//! This is the AVPN/Mesh equivalent of Meshtastic's NodeInfo gossip. Every
+//! This is the CPVPN/Mesh equivalent of Meshtastic's NodeInfo gossip. Every
 //! contributed node periodically publishes one, signed with its ML-DSA-65 node
 //! key by the control plane (`tools/mesh.py`). Descriptors flood the mesh with
 //! a hop limit of 3 and duplicate suppression; beacons store-and-forward them
@@ -32,7 +32,7 @@ pub enum Role {
     /// Middle hop: sees only its two neighbours.
     Relay,
     /// Last hop: sees destinations, never the member. Opt-in with abuse and
-    /// provider-ToS guidance (`avpn mesh offer --guided`, role exit).
+    /// provider-ToS guidance (`cypherpunk mesh offer --guided`, role exit).
     Exit,
 }
 

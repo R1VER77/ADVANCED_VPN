@@ -1,6 +1,6 @@
-> **Status (November 2026):** reference design. Adopted: the option E header (crates/avpn-mix-lane, flag-gated; Katzenpost with X-Wing Sphinx remains the shipping mix lane until the cutover gates pass) and the relay mix pipeline. Added beyond this text: R3/R4 (crates/avpn-mix-lane/IMPLEMENTATION_NOTES.md) and the reply-block pool that lets a third party receive requests (docs/DESIGN_PACK_ASSESSMENT.md). The §2.3 re-blinding remains review-pending.
+> **Status (November 2026):** reference design. Adopted: the option E header (crates/cpvpn-mix-lane, flag-gated; Katzenpost with X-Wing Sphinx remains the shipping mix lane until the cutover gates pass) and the relay mix pipeline. Added beyond this text: R3/R4 (crates/cpvpn-mix-lane/IMPLEMENTATION_NOTES.md) and the reply-block pool that lets a third party receive requests (docs/DESIGN_PACK_ASSESSMENT.md). The §2.3 re-blinding remains review-pending.
 
-# MIX_LANE_DESIGN.md — Async mixnet lane + PQ-Sphinx for AVPN/Mesh
+# MIX_LANE_DESIGN.md — Async mixnet lane + PQ-Sphinx for CPVPN/Mesh
 
 Status: design proposal. Complements `MESH_DESIGN.md`; implements the "mixnet lane
 for async traffic" already named in the repo's Limits section.
@@ -322,7 +322,7 @@ Key observations from the tables:
   15% at 5000 cells/s. The bottleneck is RAM/queue, not crypto.
 
 **Recommendation: option E, S = 4096, v = 3 default / v = 5 optional.**
-This mirrors the existing AVPN pattern (PQ at the trust boundary — the entry
+This mirrors the existing CYPHERPUNK pattern (PQ at the trust boundary — the entry
 is where long-term identity linking matters most) while keeping inner hops
 cheap. Trade-off to state in the docs: inner-hop path cryptography remains
 classical; an adversary who can break X25519 blinding AND observes multiple
@@ -365,7 +365,7 @@ contributes entropy the adversary does not hold.
 
 ---
 
-## 3. Integration with existing AVPN/Mesh components
+## 3. Integration with existing CPVPN/Mesh components
 
 | Existing piece | Role in the mix lane |
 |---|---|

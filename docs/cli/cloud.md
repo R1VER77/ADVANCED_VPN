@@ -1,4 +1,4 @@
-# avpn cloud
+# cypherpunk cloud
 
 Find, create, record and remove the servers a chain runs on, then join them into one
 multi-hop chain. Run it as yourself, not with sudo: it uses your own signed-in `aws`
@@ -6,33 +6,34 @@ and `oci` command-line tools, and plain SSH for everything else.
 
 ## Usage
 
-    avpn cloud suggest [--profile P]
-    avpn cloud status [--live]
-    avpn cloud audit [--profile P] [--oci-profile NAME]
-    avpn cloud aws relay --apply [--name avpn-NAME] [--role relay|middle|exit] [--allow-from IP|any] [--profile P] ...
-    avpn cloud aws relay --teardown [--name avpn-NAME] [--profile P]
-    avpn cloud aws allow --apply [--name avpn-NAME] [--allow-from IP|any ...] [--admin-ip IP] [--profile P]
-    avpn cloud aws admin-endpoint --apply [--name avpn-NAME] [--profile P]
-    avpn cloud oci server --apply [--name avpn-NAME] [--role relay|middle|exit] [--shape micro|arm] [--bastion OCID] ...
-    avpn cloud oci server --teardown [--name avpn-NAME]
-    avpn cloud oci allow --apply --name avpn-NAME --security-list OCID --allow-from IP [--port N] [--protocol udp|tcp]
-    avpn cloud oci allow --teardown --name avpn-NAME --security-list OCID
-    avpn cloud azure server --apply --allow-from IP --vault DIR [--name avpn-NAME] [--role ROLE] [--location L] \
-        [--size S] [--port N] [--admin-via avpn-RELAY]
-    avpn cloud azure server --teardown --vault DIR [--name avpn-NAME]
-    avpn cloud host add --name avpn-NAME --ssh USER@HOST --key FILE [--provider P] [--shared]
-    avpn cloud host setup --name avpn-NAME --out FILE [--role ROLE] [--replace] [--vault DIR]
-    avpn cloud host bastion --name avpn-NAME --bastion-id OCID --instance-id OCID --host ALIAS \
+    cypherpunk cloud suggest [--profile P]
+    cypherpunk cloud status [--live]
+    cypherpunk cloud audit [--profile P] [--oci-profile NAME]
+    cypherpunk cloud aws relay --apply [--name cpvpn-NAME] [--role relay|middle|exit] [--allow-from IP|any] [--profile P] ...
+    cypherpunk cloud aws relay --teardown [--name cpvpn-NAME] [--profile P]
+    cypherpunk cloud aws allow --apply [--name cpvpn-NAME] [--allow-from IP|any ...] [--admin-ip IP] [--profile P]
+    cypherpunk cloud aws admin-endpoint --apply [--name cpvpn-NAME] [--profile P]
+    cypherpunk cloud oci server --apply [--name cpvpn-NAME] [--role relay|middle|exit] [--shape micro|arm] [--bastion OCID] ...
+    cypherpunk cloud oci server --teardown [--name cpvpn-NAME]
+    cypherpunk cloud oci allow --apply --name cpvpn-NAME --security-list OCID --allow-from IP [--port N] [--protocol udp|tcp]
+    cypherpunk cloud oci allow --teardown --name cpvpn-NAME --security-list OCID
+    cypherpunk cloud azure server --apply --allow-from IP --vault DIR [--name cpvpn-NAME] [--role ROLE] [--location L] \
+        [--size S] [--port N] [--admin-via cpvpn-RELAY]
+    cypherpunk cloud azure server --teardown --vault DIR [--name cpvpn-NAME]
+    cypherpunk cloud host add --name cpvpn-NAME --ssh USER@HOST --key FILE [--provider P] [--shared]
+    cypherpunk cloud host setup --name cpvpn-NAME --out FILE [--role ROLE] [--replace] [--vault DIR]
+    cypherpunk cloud host bastion --name cpvpn-NAME --bastion-id OCID --instance-id OCID --host ALIAS \
         --public-key FILE [--user U] [--oci-profile NAME]
-    avpn cloud host forget --name avpn-NAME
-    avpn cloud host update --name avpn-NAME
-    avpn cloud cap [avpn-NAME] [--gb N | --unlimited | --auto] [--apply]
-    avpn cloud rotate --name avpn-NAME [--strategy reallocate|reprovision] [--reason R] --tunnel-down [--profile P] [--region R]
-    avpn cloud fly server --apply|--teardown [--name avpn-NAME] [--app APP] [--region R] [--image REF]
-    avpn cloud chain --apply --client-request FILE --vault DIR [--order A,B,C] [--allow-same-provider] \
+    cypherpunk cloud host forget --name cpvpn-NAME
+    cypherpunk cloud host update --name cpvpn-NAME
+    cypherpunk cloud cap [cpvpn-NAME] [--gb N | --unlimited | --auto] [--apply]
+    cypherpunk cloud rotate --name cpvpn-NAME [--strategy reallocate|reprovision] [--reason R] --tunnel-down [--profile P] [--region R]
+    cypherpunk cloud fly server --apply|--teardown [--name cpvpn-NAME] [--app APP] [--region R] [--image REF]
+    cypherpunk cloud chain --apply --client-request FILE --vault DIR [--order A,B,C] [--allow-same-provider] \
         [--hours-per-day H] [--accept-cost]
-    avpn cloud unlock avpn-NAME [--vault DIR]
-    avpn cloud health [--notify]
+    cypherpunk cloud unlock cpvpn-NAME [--vault DIR]
+    cypherpunk cloud health [--notify]
+    cypherpunk cloud adopt-legacy
 
 Every `--apply` and `--teardown` first shows its plan and asks before changing
 anything. `--dry-run` stops after the plan. `--yes` skips the question; scripts
@@ -40,20 +41,20 @@ using `--json` must pass it.
 
 ## Getting started
 
-1. `avpn cloud suggest` ranks the free places to run servers (`avpn help endpoints`) and says which you are already signed in to.
+1. `cypherpunk cloud suggest` ranks the free places to run servers (`cypherpunk help endpoints`) and says which you are already signed in to.
 2. Create servers (`aws relay`, `oci server`) or record ones you have (`host add`). Two servers on two providers give a 2-hop chain where no single provider sees both your address and your destinations.
-3. `avpn cloud chain --apply` installs every server, signs the chain once with your Nitrokey, enrolls the servers and starts them.
-4. On the client: `sudo avpn enroll ... --replace` and `sudo avpn connect`, as the chain's last lines say.
+3. `cypherpunk cloud chain --apply` installs every server, signs the chain once with your Nitrokey, enrolls the servers and starts them.
+4. On the client: `sudo cypherpunk enroll ... --replace` and `sudo cypherpunk connect`, as the chain's last lines say.
 
 ## Safety rules
 
-- Everything it creates is tagged (`avpn:managed=true` and `avpn:name=NAME` on AWS, freeform `avpn-managed`/`avpn-name` on OCI), and names start with `avpn-`. A teardown deletes only resources carrying both tags, and checks each one before deleting it. Nothing else in the account is touched.
+- Everything it creates is tagged (`cpvpn:managed=true` and `cpvpn:name=NAME` on AWS, freeform `cpvpn-managed`/`cpvpn-name` on OCI), and names start with `cpvpn-`. A teardown deletes only resources carrying both tags, and checks each one before deleting it. Nothing else in the account is touched.
 - One region per account: the AWS profile's Region, and OCI's home region (Always Free exists only there). Anything else is refused.
 - The first hop's tunnel port is open to any address: it is WireGuard, which never answers a peer it was not enrolled with (proven by the lab test and a live probe), so the provider's firewall configuration never names you. Every later hop admits only the previous server's single address. Private, documentation, IPv6 and range addresses are refused.
 - Plans show a `caller` row: the address the provider will record as the API caller (AWS CloudTrail keeps it 90 days, OCI Audit 365 days, whatever you configure). Run provider commands while connected through a chain, and it records the exit's address instead of yours.
-- A local inventory, `~/.config/advanced-vpn/cloud.json` (mode 0600, no secrets), records what was created or added.
+- A local inventory, `~/.config/cypherpunk-vpn/cloud.json` (mode 0600, no secrets), records what was created or added.
 
-## avpn cloud suggest
+## cypherpunk cloud suggest
 
 The endpoint catalog, ranked by usable monthly outbound transfer, with each
 provider's free terms, caveats, whether it is ready to use from this machine, and the
@@ -61,7 +62,7 @@ exact next command. It ends with a recommendation based on what is recorded.
 
 - `--profile P`: the AWS CLI profile whose sign-in to check (default `$AWS_PROFILE`).
 
-## avpn cloud audit
+## cypherpunk cloud audit
 
 What the cloud providers log about you, checked against your own accounts. It only
 reads; nothing is changed.
@@ -87,22 +88,22 @@ It also states the logs that are always on and cannot be turned off: AWS CloudTr
 90-day history, with how many caller addresses it holds now, and OCI Audit's 365 days.
 Running the audit is itself recorded there, under the address you run it from.
 
-What happens on the servers themselves is checked by `avpn doctor` on each server
-(`avpn help retention`).
+What happens on the servers themselves is checked by `cypherpunk doctor` on each server
+(`cypherpunk help retention`).
 
-## avpn cloud status
+## cypherpunk cloud status
 
 The recorded resources, by name.
 
 - `--live`: also ask AWS whether each instance still exists.
 
-## avpn cloud aws relay
+## cypherpunk cloud aws relay
 
 One chain server on EC2.
 
 - `--apply`: create it. It refuses if an instance with this name already exists.
 - `--teardown`: delete everything tagged with `--name`: instances first, then the firewall, key pair, image and snapshot.
-- `--name avpn-NAME`: the resource name and tag (default `avpn-relay`).
+- `--name cpvpn-NAME`: the resource name and tag (default `cpvpn-relay`).
 - `--role relay|middle|exit`: what the server is in the chain. It sets the default port.
 - `--profile P`: the AWS CLI profile (default `$AWS_PROFILE`, else `default`).
 - `--region R`: must equal the profile's Region; omit it to use that Region.
@@ -116,27 +117,27 @@ One chain server on EC2.
 
 What `--apply` creates:
 1. A copy of the newest official Debian 13 amd64 image (encrypted), re-registered with UEFI boot, NitroTPM 2.0 and IMDSv2. The intermediate copy is deregistered.
-2. A throwaway ed25519 SSH key, kept in `~/.config/advanced-vpn/ssh/NAME`, and its key pair.
+2. A throwaway ed25519 SSH key, kept in `~/.config/cypherpunk-vpn/ssh/NAME`, and its key pair.
 3. A security group: UDP on the tunnel port from `--allow-from`, and TCP 22 from `--admin-ip`. A relay's port (443) is also opened on TCP for the same sources: the camouflage's TLS fallback, used where the path is too small for its QUIC.
 4. The instance:
    - IMDSv2 required, hop limit 1;
    - `standard` CPU credits, so no surplus charges;
    - an encrypted gp3 root disk, deleted with the instance;
    - no instance profile;
-   - first-boot user data that keeps every log in RAM before `sshd` accepts the first login (`avpn help retention`).
+   - first-boot user data that keeps every log in RAM before `sshd` accepts the first login (`cypherpunk help retention`).
 
 The plan shows a rough monthly list price. On the free plan, credits pay for it; AWS
 Billing shows the real cost. If your sign-in has expired, the error says to run
 `aws login --profile P`.
 
-## avpn cloud aws allow
+## cypherpunk cloud aws allow
 
 Replace who may reach a server this tool created.
 
-    avpn cloud aws allow --apply --name avpn-relay --allow-from any --admin-ip auto
+    cypherpunk cloud aws allow --apply --name cpvpn-relay --allow-from any --admin-ip auto
 
 - `--apply`: change the security group (required; the plan is shown first).
-- `--name avpn-NAME`: the server (default `avpn-relay`). Its security group must carry both tags.
+- `--name cpvpn-NAME`: the server (default `cpvpn-relay`). Its security group must carry both tags.
 - `--allow-from IP`: the new tunnel sources: `any` (first hop only), a public IPv4, or `auto`. Repeat it to admit several. The tunnel rule then admits exactly these.
 - `--admin-ip IP`: the new address allowed to SSH in, or `auto`.
 - `--profile P`, `--region R`: as for `aws relay`.
@@ -155,14 +156,14 @@ A first hop open to `any` never needs updating when your address changes. Single
 addresses do: `auto` asks `checkip.amazonaws.com`, which sees the address your
 traffic leaves from, and behind a commercial VPN that can change at any reconnect.
 
-## avpn cloud oci server
+## cypherpunk cloud oci server
 
 One Oracle Cloud Always Free server with its own network. It needs the `oci` CLI,
 configured once with `oci setup config`.
 
 - `--apply`: create it. It refuses if the name is already recorded.
 - `--teardown`: delete everything recorded for `--name`: instance, subnet, security list, internet gateway, VCN. Each must carry this tool's tags.
-- `--name avpn-NAME`: the resource name and tag (default `avpn-exit`).
+- `--name cpvpn-NAME`: the resource name and tag (default `cpvpn-exit`).
 - `--role relay|middle|exit`: what the server is in the chain (default `exit`).
 - `--shape micro|arm`: `micro` is VM.Standard.E2.1.Micro (AMD, 1 GB, up to 2 per tenancy); `arm` is VM.Standard.A1.Flex.
 - `--ocpus N`, `--memory-gib N`: A1 only (Always Free: 2 OCPU and 12 GB in total; defaults 1 and 6).
@@ -170,27 +171,27 @@ configured once with `oci setup config`.
 - `--vcn VCN`: put the server in an existing VCN instead of creating one (a free tenancy has only two). The server gets its own subnet (the next free /24 in the VCN), route table and security list, all tagged as its own; the VCN and its internet gateway are used and never changed, and a teardown removes only the server's own parts.
 - `--oci-profile NAME`: the profile in `~/.oci/config` (default `DEFAULT`). Its region must be the tenancy's home region.
 - `--port N`, `--allow-from IP`, `--admin-ip IP`: as for `aws relay`.
-- `--bastion OCID`: administer the server only through this OCI Bastion, with no SSH address rule (one breaks whenever your address changes, as behind a VPN). The server goes in the bastion's VCN (its own subnet); its security list admits SSH only from the bastion's private endpoint; the instance runs the Oracle Cloud Agent's Bastion plugin; an SSH config jumping through the bastion is written to `~/.config/advanced-vpn/ssh/NAME.conf`, and sessions are created and renewed automatically (`host bastion`). `--admin-ip` is then unused.
+- `--bastion OCID`: administer the server only through this OCI Bastion, with no SSH address rule (one breaks whenever your address changes, as behind a VPN). The server goes in the bastion's VCN (its own subnet); its security list admits SSH only from the bastion's private endpoint; the instance runs the Oracle Cloud Agent's Bastion plugin; an SSH config jumping through the bastion is written to `~/.config/cypherpunk-vpn/ssh/NAME.conf`, and sessions are created and renewed automatically (`host bastion`). `--admin-ip` is then unused.
 - `--wait-capacity MINUTES`: Always Free A1 is often refused with "Out of host capacity". Keep retrying the launch every 2 minutes, across fault domains, for up to this long. Without it, a refused launch stops; its network stays recorded, and running the same `--apply` again later resumes with it (only the instance is launched).
 - `--dry-run`, `--yes`: as above.
 
 What `--apply` creates, all tagged with the name:
 1. A VCN (`10.77.100.0/24`), an internet gateway and a default route to it.
 2. A security list of its own: UDP on the tunnel port from `--allow-from` (a relay's 443 also on TCP, for the camouflage's TLS fallback), TCP 22 from `--admin-ip`, and all egress. The subnet uses only this list, not the VCN's default one (which allows SSH from anywhere).
-3. A throwaway ed25519 SSH key in `~/.config/advanced-vpn/ssh/NAME`.
-4. The instance: the newest full Canonical Ubuntu 24.04 image for the shape, a public address, and legacy (unauthenticated) metadata endpoints disabled. Its first-boot user data keeps every log in RAM before `sshd` accepts the first login (`avpn help retention`).
+3. A throwaway ed25519 SSH key in `~/.config/cypherpunk-vpn/ssh/NAME`.
+4. The instance: the newest full Canonical Ubuntu 24.04 image for the shape, a public address, and legacy (unauthenticated) metadata endpoints disabled. Its first-boot user data keeps every log in RAM before `sshd` accepts the first login (`cypherpunk help retention`).
 
 OCI reclaims Always Free instances that stay idle (CPU, network and memory all under
 20% for 7 days); a hop carrying your traffic is normally busy enough.
 
-## avpn cloud oci allow
+## cypherpunk cloud oci allow
 
 One ingress rule on an existing OCI security list, from the previous hop only. Use it
 for OCI servers this tool did not create.
 
 - `--apply`: add the rule. Re-applying replaces it rather than duplicating it.
 - `--teardown`: remove it. Rules not created by this command are never touched.
-- `--name avpn-NAME`: the rule's name, stored in its description as `advanced-vpn:NAME`.
+- `--name cpvpn-NAME`: the rule's name, stored in its description as `cypherpunk-vpn:NAME`.
 - `--security-list OCID`: the security list to change.
 - `--allow-from IP`: the previous hop's public IPv4, or `auto`.
 - `--port N`: the destination port (default 4444).
@@ -199,21 +200,21 @@ for OCI servers this tool did not create.
 
 Every other ingress rule, and every egress rule, is kept exactly as it was.
 
-## avpn cloud aws admin-endpoint
+## cypherpunk cloud aws admin-endpoint
 
 Administer an AWS server with no SSH address rule at all, so changing networks (a
 commercial VPN, travel) never locks you out and never needs a firewall update.
 
-    avpn cloud aws admin-endpoint --apply --name avpn-relay
+    cypherpunk cloud aws admin-endpoint --apply --name cpvpn-relay
 
 - `--apply`: create the endpoint and switch SSH to it (required; the plan is shown first).
-- `--name avpn-NAME`: the server (default `avpn-relay`).
+- `--name cpvpn-NAME`: the server (default `cpvpn-relay`).
 - `--profile P`, `--region R`: as for `aws relay`.
 - `--dry-run`, `--yes`: as above.
 
 What it does:
 1. Creates an EC2 Instance Connect Endpoint in the server's subnet (free), with its own
-   security group `avpn-NAME-admin`: no inbound rule, outbound SSH to the server only.
+   security group `cpvpn-NAME-admin`: no inbound rule, outbound SSH to the server only.
 2. Admits SSH to the server from that group, then removes every address from the
    server's SSH rule. Port 22 is no longer reachable from the internet, so the server
    also stops answering as an SSH server, which its HTTPS camouflage prefers.
@@ -224,22 +225,22 @@ What it does:
 
 `aws relay --teardown` removes the endpoint and its group with the server.
 
-## avpn cloud azure server
+## cypherpunk cloud azure server
 
 One chain server on Azure, made by OpenTofu (the pinned binary and the `azure-server`
 module; [setup flow](../GEMMA_SETUP_FLOW.md)). Sign in first with `az login`.
 
 - `--apply`: show the exact OpenTofu plan, then create it.
 - `--teardown`: destroy everything in its OpenTofu state (its resource group).
-- `--name avpn-NAME`: the resource group and tag (default `avpn-exit-az`).
+- `--name cpvpn-NAME`: the resource group and tag (default `cpvpn-exit-az`).
 - `--role relay|middle|exit`: what it is in the chain (default `exit`; it sets the port).
 - `--location L`: the Azure region (default `swedencentral`).
 - `--size S`: the VM size (default `Standard_B1s`, one of Azure's free-services sizes).
 - `--port N`: the tunnel port (default by role).
 - `--allow-from IP`: the previous hop's public IPv4 (required with `--apply`).
-- `--admin-via avpn-RELAY`: the relay SSH goes through (default `avpn-relay`).
+- `--admin-via cpvpn-RELAY`: the relay SSH goes through (default `cpvpn-relay`).
 - `--vault DIR`: the operator's Nitrokey vault, which holds the key that encrypts the
-  OpenTofu state and plan (`avpn help state-key`; one PIN + touch per run).
+  OpenTofu state and plan (`cypherpunk help state-key`; one PIN + touch per run).
 - `--dry-run`, `--yes`: as above.
 
 What `--apply` creates, all in one tagged resource group:
@@ -252,61 +253,61 @@ What `--apply` creates, all in one tagged resource group:
 4. An SSH config reaching it through the relay, itself reached through its Instance
    Connect Endpoint, and an inventory record (`engine: tofu`).
 
-## avpn cloud host add
+## cypherpunk cloud host add
 
 Record a server you already have, on any provider (Azure, Google, a VPS) or your own
 machine, so `host setup` and `chain` can use it. It checks that SSH works with
 passwordless sudo.
 
-- `--name avpn-NAME`: a name for it.
+- `--name cpvpn-NAME`: a name for it.
 - `--ssh USER@HOST`: how to reach it, as a sudo user. With `--ssh-config`, HOST can be an alias from that file.
 - `--key FILE`: its SSH private key (mode 600; SSH never asks for a password).
 - `--ssh-config FILE`: an SSH config file, for bastions, jump hosts or other ports.
 - `--address IP`: its public IPv4, if HOST is not it (for example behind a bastion).
-- `--provider KEY`: where it runs (default `own`): `oci`, `aws`, `azure`, `gcp` or `own`, or a paid host listed by `avpn cloud suggest` and `avpn help endpoints` (`racknerd`, `ionos`, `ovh`, `netcup`, `hetzner`, `1984`, `infomaniak`, `exoscale`). It sets the allowance used to order a chain and the legal sphere shown in its plan.
+- `--provider KEY`: where it runs (default `own`): `oci`, `aws`, `azure`, `gcp` or `own`, or a paid host listed by `cypherpunk cloud suggest` and `cypherpunk help endpoints` (`racknerd`, `ionos`, `ovh`, `netcup`, `hetzner`, `1984`, `infomaniak`, `exoscale`). It sets the allowance used to order a chain and the legal sphere shown in its plan.
 - `--shared`: the host also runs other things: setup leaves its system journal alone.
 
 This tool does not manage the firewall of an added server. The chain plan says which
 port to open, and from where.
 
-## avpn cloud host setup
+## cypherpunk cloud host setup
 
 Install or upgrade the package on a recorded server over SSH and fetch its public
 request. `chain` does this for every hop; use it on its own to prepare one server.
 
-- `--name avpn-NAME`: the recorded server.
+- `--name cpvpn-NAME`: the recorded server.
 - `--source DIR`: a built checkout or unpacked release to install from (default: this one). It must contain `target/release/` with every binary.
 - `--source-arm DIR`: a built ARM (aarch64) checkout, for ARM servers such as OCI's Ampere A1. Each server reports its processor (`uname -m`); an ARM server gets this build, the others `--source`, and an ARM server without `--source-arm` is refused rather than given binaries it cannot run.
-- `--out FILE`: where to save the public request. Give it to `avpn init`.
+- `--out FILE`: where to save the public request. Give it to `cypherpunk init`.
 - `--role relay|middle|exit`: the role to make keys for (default: its recorded role).
 - `--replace`: replace keys made for another role. Without it, a role change is refused.
 - `--vault DIR`: the operator's Nitrokey vault. A server without a usable TPM2 locks its keys to the vault's unlock key (made on first use: PIN + touch); without `--vault`, such a server is refused.
 
 What it does on the server:
 1. Installs `nftables`, `python3-venv` and the TSS2 runtime libraries. Without TSS2, systemd-creds would silently fall back to the host key.
-2. Unless the host is shared, first of all: keeps every log in RAM (`avpn help retention`). That covers the journal, syslog daemons, `/var/log`, login databases and swap. Otherwise `sshd` would keep a persistent record of the admin's address, which is your address. A shared host is only marked as shared, and `doctor` reports it.
+2. Unless the host is shared, first of all: keeps every log in RAM (`cypherpunk help retention`). That covers the journal, syslog daemons, `/var/log`, login databases and swap. Otherwise `sshd` would keep a persistent record of the admin's address, which is your address. A shared host is only marked as shared, and `doctor` reports it.
 3. On images that reject by default (OCI's Ubuntu), accepts the tunnel port in the host firewall, and saves it unless the host is shared (saving would also persist its other runtime rules).
 4. Installs or upgrades the package (the service is not enabled).
-5. Tests the host first: it seals and opens a throwaway credential with systemd-creds using the host and TPM2 key. If that works, the keys are sealed to the TPM2 (protection `systemd-creds`) and the server restarts unattended. If not (systemd older than 250, as on Ubuntu 22.04, or no TPM, as on OCI's Always Free shapes), they are locked to the operator's Nitrokey (protection `operator`, `avpn help request`): the server cannot open them after a reboot until you run `avpn cloud unlock`. Keys are never stored as plain files, nor sealed with the host key alone, whose secret sits on the same disk.
+5. Tests the host first: it seals and opens a throwaway credential with systemd-creds using the host and TPM2 key. If that works, the keys are sealed to the TPM2 (protection `systemd-creds`) and the server restarts unattended. If not (systemd older than 250, as on Ubuntu 22.04, or no TPM, as on OCI's Always Free shapes), they are locked to the operator's Nitrokey (protection `operator`, `cypherpunk help request`): the server cannot open them after a reboot until you run `cypherpunk cloud unlock`. Keys are never stored as plain files, nor sealed with the host key alone, whose secret sits on the same disk.
 6. Keeps existing keys only when they were made for the same role and are protected that way: sealed to a TPM2, or locked to this operator's unlock key. Anything weaker is replaced with new keys, not re-wrapped, because copies may survive on the disk or in its backups; the client then enrolls the new chain.
 
 Binaries are copied as built, so the server needs a C library at least as new as the
 build machine's (release builds need glibc 2.34: Debian 12+, Ubuntu 22.04+).
 
-## avpn cloud health
+## cypherpunk cloud health
 
 Whether the chain's servers run, and why not. For each server: its provider's view
 (running, stopped by the provider, as free tiers do with idle servers, or gone), then over
 SSH whether the VPN service runs and whether its keys are locked since a reboot. For each
 account: AWS's free-plan credits and end date, Oracle's plan (a free tier stops Always
-Free servers idle for 7 days). Every problem comes with its fix (the start command, `avpn
-cloud unlock NAME`, …), and the result is kept in `~/.config/advanced-vpn/health.json`.
+Free servers idle for 7 days). Every problem comes with its fix (the start command, `cypherpunk
+cloud unlock NAME`, …), and the result is kept in `~/.config/cypherpunk-vpn/health.json`.
 
 - `--notify`: also show a desktop notification when something is wrong.
 
 It asks the providers, so it runs only when you ask, or when the VPN tells you to: when a
 connected client's chain stops answering for a minute (or never answers after a start),
-the client shows a desktop notification and `avpn status` shows the notice and this
+the client shows a desktop notification and `cypherpunk status` shows the notice and this
 command. Checking on a timer from your own address would tie it to the servers in the
 providers' logs.
 
@@ -314,16 +315,16 @@ It also shows every server's month: what it has sent against its cap, and the da
 would stop at this month's pace. A server at 80% of its cap, on pace to reach it, capped,
 or with no cap at all is a problem.
 
-## avpn cloud rotate
+## cypherpunk cloud rotate
 
 Trade an exit's public address for a fresh one, when `stream-check` shows the address is
 newly blocked ([streaming eligibility](../STREAMING_GEO_PARITY_20261120.md) §4.4). Only
 servers this tool created and tagged are touched.
 
-    avpn cloud rotate --name avpn-exit --reason netflix-blocked --dry-run
-    avpn cloud rotate --name avpn-exit --reason netflix-blocked --tunnel-down
+    cypherpunk cloud rotate --name cpvpn-exit --reason netflix-blocked --dry-run
+    cypherpunk cloud rotate --name cpvpn-exit --reason netflix-blocked --tunnel-down
 
-- `--name avpn-NAME`: the server.
+- `--name cpvpn-NAME`: the server.
 - `--strategy reallocate` (default): the server stays and its address is traded. An
   Elastic IP is disassociated, a new one allocated and associated, then the old one
   released, in that order, so a failure part-way puts the old address back. A server on
@@ -335,13 +336,13 @@ servers this tool created and tagged are touched.
   stopped (rotating a live hop would break sessions). Nothing overrides it.
 - `--profile P`, `--region R`: the AWS profile; the Region must be the project's own.
 
-The same address handed back counts as a failure, not a pass. Afterwards run `avpn cloud
+The same address handed back counts as a failure, not a pass. Afterwards run `cypherpunk cloud
 chain --apply`. A new address changes what the previous hop's firewall must admit, and on
 an IPv6 next hop, the relay's egress rule. The rebuild rewrites both, and re-signs the
 chain and writes each server's monthly cap again. Then run `stream-check` once more:
 eligibility is a dated measurement, never a promise.
 
-## avpn cloud fly server
+## cypherpunk cloud fly server
 
 An exit on a Fly.io Machine, within the personal organization's $5 waiver (see
 [the Fly.io exit](../FLY_EXIT.md)). The fee guard is asked first. Then the image is built
@@ -349,29 +350,29 @@ from this tree and pushed to the app's registry, and the tool creates a 1 GB enc
 volume with snapshots off, the app's free IPv6 (never a paid IPv4), and a 256 MB Machine
 serving raw TCP on port 4444. It is administered through the Machines API, not SSH.
 
-    avpn cloud fly server --apply --name avpn-flyexit --region fra
-    avpn cloud fly server --teardown --name avpn-flyexit
+    cypherpunk cloud fly server --apply --name cpvpn-flyexit --region fra
+    cypherpunk cloud fly server --teardown --name cpvpn-flyexit
 
-- `--name avpn-NAME`: the server (default avpn-flyexit).
-- `--app APP`: the Fly.io app the deploy token is for (default advanced-vpn).
+- `--name cpvpn-NAME`: the server (default cpvpn-flyexit).
+- `--app APP`: the Fly.io app the deploy token is for (default cypherpunk-vpn).
 - `--region R`: a Fly.io region (default fra; iad and ewr are the cheapest).
 - `--role exit|middle`: default exit.
 - `--image REF`: an image already pushed (default: build and push this tree's).
 
-The deploy token is read from `~/.config/advanced-vpn/fly-deploy-token` (mode 600).
+The deploy token is read from `~/.config/cypherpunk-vpn/fly-deploy-token` (mode 600).
 
-## avpn cloud cap
+## cypherpunk cloud cap
 
 Each server's monthly outbound cap, so contributing a free-tier account never produces a
 bill. A server counts what it sends in the UTC month and stops serving at its cap until
 the 1st; nothing but VPN traffic may leave it (an egress lock), and a kernel quota stops it
 exactly at what is left of the month. See [the fee guard](../FEE_GUARD.md).
 
-    avpn cloud cap                       # plan every hop's cap
-    avpn cloud cap --apply               # and write them to the servers
-    avpn cloud cap avpn-home --unlimited --apply
+    cypherpunk cloud cap                       # plan every hop's cap
+    cypherpunk cloud cap --apply               # and write them to the servers
+    cypherpunk cloud cap cpvpn-home --unlimited --apply
 
-- `avpn-NAME`: one server (default: every hop of the chain).
+- `cpvpn-NAME`: one server (default: every hop of the chain).
 - `--gb N`: set this server's cap, in decimal GB as providers bill.
 - `--unlimited`: no cap, for a host whose traffic costs you nothing (your own machine).
 - `--auto`: back to the cap from its account's free allowance.
@@ -380,41 +381,41 @@ exactly at what is left of the month. See [the fee guard](../FEE_GUARD.md).
 The cap is the provider's free allowance per account (Oracle 10 TB, AWS 100 GB, Azure
 100 GB), less 10%, shared by every server in that account. On Fly.io, the whole bill must
 stay under the $5 waiver: the machine and volume come off first, and only one server per
-organization fits. `avpn cloud chain --apply` plans the caps before it changes anything,
+organization fits. `cypherpunk cloud chain --apply` plans the caps before it changes anything,
 stops if a hop's account has no allowance on record, and writes them before each server
 starts. A server without a cap refuses to start.
 
-## avpn cloud host update
+## cypherpunk cloud host update
 
 Apply updates on a server now. Each server already applies security updates daily by
 itself (`unattended-upgrade`, security origins only), in a window counted against its cap.
 This command runs a full upgrade on demand, in a maintenance window that lets the server
 reach its package mirrors for up to 30 minutes. A capped server cannot fetch updates until
-the month turns. `avpn cloud health` warns when security updates are more than 3 days old
+the month turns. `cypherpunk cloud health` warns when security updates are more than 3 days old
 (a Fly.io exit: when its image is more than 14 days old).
 
-    avpn cloud host update --name avpn-exit
+    cypherpunk cloud host update --name cpvpn-exit
 
-## avpn cloud unlock
+## cypherpunk cloud unlock
 
 Start a server whose keys are locked to the operator, after it has restarted (a reboot,
 a provider's maintenance). Until then it does not run, and the chain through it is down.
 
-    avpn cloud unlock avpn-exit
+    cypherpunk cloud unlock cpvpn-exit
 
-- `avpn-NAME`: the recorded server.
+- `cpvpn-NAME`: the recorded server.
 - `--vault DIR`: the operator's Nitrokey vault (default: the one the chain was signed with).
 
 What it does:
 1. Reads the server's wrapped data key (ciphertext) over SSH.
 2. Unwraps it with the Nitrokey (PIN + touch), bound to your own copy of that server's request, so a server cannot have another server's data key unwrapped for it.
-3. Sends the data key to the server on stdin (`avpn server-unlock`), where it is held in RAM until the next reboot, and restarts the VPN service.
+3. Sends the data key to the server on stdin (`cypherpunk server-unlock`), where it is held in RAM until the next reboot, and restarts the VPN service.
 
 It needs SSH to the server, through the path `host add` recorded; an OCI bastion session is
 renewed first if needed (`host bastion`).
 Servers sealed to a TPM2 restart on their own and are refused here.
 
-## avpn cloud host bastion
+## cypherpunk cloud host bastion
 
 Record that a server is reached through an OCI Bastion (its SSH config jumps through a Host
 whose User is a bastion session). Sessions last at most 3 hours; from then on, before any
@@ -423,7 +424,7 @@ less than 20 minutes left, creates a managed SSH session for 3 hours and writes 
 that Host's User line (closing connections cached for the old one). So `cloud unlock` works
 whenever the server restarts.
 
-- `--name avpn-NAME`: the recorded server (added with `host add --ssh-config`).
+- `--name cpvpn-NAME`: the recorded server (added with `host add --ssh-config`).
 - `--bastion-id OCID`: the bastion.
 - `--instance-id OCID`: the server's instance.
 - `--host ALIAS`: the bastion's Host in the server's SSH config.
@@ -431,23 +432,23 @@ whenever the server restarts.
 - `--user U`: the login user on the server (default `ubuntu`).
 - `--oci-profile NAME`: the OCI CLI profile (default `DEFAULT`); its region must be the bastion's.
 
-## avpn cloud host forget
+## cypherpunk cloud host forget
 
 Drop a server from the inventory. Nothing on the server or in the provider changes.
 
-- `--name avpn-NAME`: the recorded server.
+- `--name cpvpn-NAME`: the recorded server.
 
-## avpn cloud chain
+## cypherpunk cloud chain
 
 Join the recorded servers into one chain and start it.
 
 - `--apply`: build the chain, or rebuild it after adding or removing a server.
-- `--client-request FILE`: the client device's public request (from its installer, or `sudo avpn request --role client`).
+- `--client-request FILE`: the client device's public request (from its installer, or `sudo cypherpunk request --role client`).
 - `--vault DIR`: the operator's Nitrokey vault; the chain is signed once (PIN + touch).
 - `--order A,B,C`: the hop order from the client side, overriding the automatic one.
 - `--allow-same-provider`: allow the entry and the exit on one provider. Without it, `chain` refuses such a chain, because that provider would see your address and your destinations together. Other hops sharing a provider are allowed, and the plan names the provider and how many hops it holds.
 - `--source DIR`: the package to install on the servers, as for `host setup`.
-- `--hours-per-day H`: hours you are connected per day (default 8). The rate class is the fastest whose constant stream fits the smallest hop allowance at this many hours (`avpn help init`); a relay pays for two paced links.
+- `--hours-per-day H`: hours you are connected per day (default 8). The rate class is the fastest whose constant stream fits the smallest hop allowance at this many hours (`cypherpunk help init`); a relay pays for two paced links.
 - `--accept-cost`: sign the class even when it exceeds a hop's free allowance. Without it, a chain whose slowest class still does not fit is refused, with the numbers.
 - `--dry-run`, `--yes`: as above.
 
@@ -459,22 +460,28 @@ sees both your address and your destinations. A chain can carry about as much pe
 month as its smallest hop allowance; the plan shows it. The plan also shows the legal
 sphere of each end and warns when both answer to the same law: every free tier is a
 US company, and the US CLOUD Act reaches US providers wherever their servers stand, so
-put one end on a non-US host (`avpn cloud suggest` lists some) for ends in different
+put one end on a non-US host (`cypherpunk cloud suggest` lists some) for ends in different
 spheres.
 
 What `--apply` does:
 1. Firewalls of managed servers (`aws relay`, `oci server`): the first hop's UDP 443 (the HTTP/3 camouflage in front of WireGuard) and TCP 443 (its TLS fallback, for paths below 1448 bytes) open to any address, and any older WireGuard port rule removed; each later hop's port (4445 middle, 4444 exit) only from the previous server; SSH from here for setup.
 2. Makes the operator's unlock key in the vault if it is not there yet (PIN + touch, once ever).
 3. Installs or upgrades every server and fetches its request for its role (`host setup`). A server whose role changes, or whose keys are not TPM-sealed or locked to this operator, gets new keys.
-4. Signs the whole chain once: `avpnctl init` with your client request and every server's. The same PIN and touch unwraps the data key of every server locked to the operator, into this process's memory only.
+4. Signs the whole chain once: `cypherpunkctl init` with your client request and every server's. The same PIN and touch unwraps the data key of every server locked to the operator, into this process's memory only.
 5. Enrolls and restarts each server, exit first, and checks it is running. A locked server first receives its data key over SSH, on stdin.
 6. Removes SSH from your address. From then on you administer the servers while connected: the other hops admit SSH from the exit's address (which is where your traffic now comes from), and the exit answers at `10.77.0.1`, its own address inside the tunnel, which needs no firewall rule. The exit's public address does not work from inside the tunnel, because cloud servers do not hold it locally. So no rule names you. Rerun `chain` (or `aws allow --admin-ip auto`) to get back in when you are not connected.
 
 Every chain is padded to constant cells on every hop, every link between two servers
 is a paced, encrypted constant-rate stream (per-hop shaping), and the client's link to
 the first hop looks like HTTP/3 on UDP 443; there is no option to turn any of them off
-(`avpn help threat-model`). On AWS the first hop presents its provider DNS name as
+(`cypherpunk help threat-model`). On AWS the first hop presents its provider DNS name as
 its server name, so name and address agree.
 
-The bundles go to `~/.config/advanced-vpn/chains/TIMESTAMP/bundles`. The last lines
+The bundles go to `~/.config/cypherpunk-vpn/chains/TIMESTAMP/bundles`. The last lines
 give the client's enroll and connect commands.
+
+## cypherpunk cloud adopt-legacy
+
+One-time migration of the operator's local configuration directory: moves
+`~/.config/advanced-vpn` to `~/.config/cypherpunk-vpn` and renames recorded inventory entries
+from `avpn-*` to `cpvpn-*` while preserving each record's provider identifiers.

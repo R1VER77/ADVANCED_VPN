@@ -93,7 +93,7 @@ class TrustedExecutableTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 trusted_exe(bad)
         with self.assertRaises(FileNotFoundError):
-            trusted_exe("definitely-not-a-real-binary-avpn")
+            trusted_exe("definitely-not-a-real-binary-cypherpunk")
 
 
 class PinPromptTests(unittest.TestCase):
@@ -262,7 +262,7 @@ class PinDialogTests(unittest.TestCase):
         self.assertIn("cancelled", str(value))
 
     def test_never_a_dialog_over_ssh_or_when_switched_off(self):
-        for extra in [{"SSH_CONNECTION": "1.2.3.4 5 6.7.8.9 22"}, {"AVPN_PIN_DIALOG": "0"}]:
+        for extra in [{"SSH_CONNECTION": "1.2.3.4 5 6.7.8.9 22"}, {"CPVPN_PIN_DIALOG": "0"}]:
             value, calls = self.prompt(env={"WAYLAND_DISPLAY": "wayland-0", **extra})
             self.assertEqual((value, calls), ("tty-pin", []), extra)
 
@@ -323,10 +323,10 @@ class OnePinPerCommand(unittest.TestCase):
     def test_long_running_and_broker_paths_scope_it_to_one_operation(self):
         import inspect
 
-        import avpnctl
+        import cypherpunkctl
         import controller_backend
 
-        main = inspect.getsource(avpnctl.main)
+        main = inspect.getsource(cypherpunkctl.main)
         self.assertIn('("connect", "run")', main)  # the supervisor never holds a PIN
         broker = inspect.getsource(controller_backend)
         self.assertEqual(broker.count("with one_pin():"), 2)

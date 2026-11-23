@@ -89,7 +89,7 @@ QUANTUM_STATUS = (
 # end of epoch k+1, matching mesh_tokens.LIVE_EPOCHS.
 LIVE_EPOCHS = 2
 
-DOMAIN = b"avpn-group-credit/v2"
+DOMAIN = b"cpvpn-group-credit/v2"
 
 
 class CreditError(Exception):

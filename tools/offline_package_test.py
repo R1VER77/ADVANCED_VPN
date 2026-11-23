@@ -18,7 +18,7 @@ import vm_validation as vm
 
 SCRIPT = r"""set -eux
 mkdir -p /mnt/pkg /tmp/offline-release
-mount -o ro LABEL=avpnpkg /mnt/pkg
+mount -o ro LABEL=cpvpnpkg /mnt/pkg
 tar -xzf /mnt/pkg/release.tar.gz -C /tmp/offline-release
 cd /tmp/offline-release
 modprobe tun
@@ -26,44 +26,44 @@ modprobe nf_tables
 # All install and upgrade subprocesses inherit an isolated network namespace.
 # systemd communicates over the local Unix socket; it is never asked to activate.
 unshare -n ./install.sh --apply
-/opt/advanced-vpn/venv/bin/python3 -B -E -s -c 'import sys; assert sys.version.split()[0] == "@PYTHON_VERSION@"'
-/opt/advanced-vpn/bin/avpn --version
-/opt/advanced-vpn/bin/avpn --json --state /tmp/not-enrolled hops > /tmp/offline-hops.json
-/opt/advanced-vpn/venv/bin/python3 -B -E -s -c 'import json; assert json.load(open("/tmp/offline-hops.json"))["ok"]'
-/opt/advanced-vpn/bin/avpn --json preflight > /tmp/offline-preflight.json
-/opt/advanced-vpn/bin/avpn --json doctor > /tmp/offline-doctor.json || true
-/opt/advanced-vpn/venv/bin/python3 -B -E -s -c '
+/opt/cypherpunk-vpn/venv/bin/python3 -B -E -s -c 'import sys; assert sys.version.split()[0] == "@PYTHON_VERSION@"'
+/opt/cypherpunk-vpn/bin/cypherpunk --version
+/opt/cypherpunk-vpn/bin/cypherpunk --json --state /tmp/not-enrolled hops > /tmp/offline-hops.json
+/opt/cypherpunk-vpn/venv/bin/python3 -B -E -s -c 'import json; assert json.load(open("/tmp/offline-hops.json"))["ok"]'
+/opt/cypherpunk-vpn/bin/cypherpunk --json preflight > /tmp/offline-preflight.json
+/opt/cypherpunk-vpn/bin/cypherpunk --json doctor > /tmp/offline-doctor.json || true
+/opt/cypherpunk-vpn/venv/bin/python3 -B -E -s -c '
 import json
 assert json.load(open("/tmp/offline-preflight.json"))["preflight"]["ready"]
 rows = json.load(open("/tmp/offline-doctor.json"))["checks"]
 host = [row for row in rows if row["check"].startswith("host: ")]
 assert host and all(row["ok"] for row in host), host
 '
-for unit in advanced-vpn.service advanced-vpn-guard.service; do
+for unit in cypherpunk-vpn.service cypherpunk-vpn-guard.service; do
     test "$(systemctl is-enabled "$unit" || true)" = disabled
     test "$(systemctl is-active "$unit" || true)" = inactive
 done
 test -z "$(nft list tables)"
-printf '%s\n' 'preserve existing private state' > /etc/advanced-vpn/offline-test-state
+printf '%s\n' 'preserve existing private state' > /etc/cypherpunk-vpn/offline-test-state
 unshare -n ./install.sh --apply
-test "$(cat /etc/advanced-vpn/offline-test-state)" = 'preserve existing private state'
-for unit in advanced-vpn.service advanced-vpn-guard.service; do
+test "$(cat /etc/cypherpunk-vpn/offline-test-state)" = 'preserve existing private state'
+for unit in cypherpunk-vpn.service cypherpunk-vpn-guard.service; do
     test "$(systemctl is-enabled "$unit" || true)" = disabled
     test "$(systemctl is-active "$unit" || true)" = inactive
 done
 test -z "$(nft list tables)"
 # User/operator installation is also offline and keeps its configuration on removal.
-install -d -m 700 -o tester -g tester /home/tester/.config/advanced-vpn
-printf '{"schema":1,"resources":{}}\n' > /home/tester/.config/advanced-vpn/cloud.json
-chown tester:tester /home/tester/.config/advanced-vpn/cloud.json
+install -d -m 700 -o tester -g tester /home/tester/.config/cypherpunk-vpn
+printf '{"schema":1,"resources":{}}\n' > /home/tester/.config/cypherpunk-vpn/cloud.json
+chown tester:tester /home/tester/.config/cypherpunk-vpn/cloud.json
 unshare -n runuser -u tester -- ./install.sh --user
 unshare -n runuser -u tester -- ./install.sh --user
-runuser -u tester -- /home/tester/.local/bin/avpn --json cloud status > /tmp/offline-cloud.json
+runuser -u tester -- /home/tester/.local/bin/cypherpunk --json cloud status > /tmp/offline-cloud.json
 ./runtime/bin/python3 -B -E -s -c 'import json; assert json.load(open("/tmp/offline-cloud.json"))["ok"]'
 runuser -u tester -- ./install.sh --user --uninstall
-test ! -e /home/tester/.local/bin/avpn
-test -f /home/tester/.config/advanced-vpn/cloud.json
-./runtime/bin/python3 -B -E -s tools/bundled_runtime.py --verify /opt/advanced-vpn/venv
+test ! -e /home/tester/.local/bin/cypherpunk
+test -f /home/tester/.config/cypherpunk-vpn/cloud.json
+./runtime/bin/python3 -B -E -s tools/bundled_runtime.py --verify /opt/cypherpunk-vpn/venv
 # Corruption refuses before creating the requested stage, keeping the installed tree.
 cp runtime/lib/python3.13/colorsys.py /tmp/original-colorsys.py
 printf 'corrupt' >> runtime/lib/python3.13/colorsys.py
@@ -72,46 +72,46 @@ if ./install.sh --out /tmp/should-not-exist > /tmp/refusal.log 2>&1; then
 fi
 test ! -e /tmp/should-not-exist
 grep -q 'runtime files differ' /tmp/refusal.log
-test "$(cat /etc/advanced-vpn/offline-test-state)" = 'preserve existing private state'
+test "$(cat /etc/cypherpunk-vpn/offline-test-state)" = 'preserve existing private state'
 cp /tmp/original-colorsys.py runtime/lib/python3.13/colorsys.py
-for unit in advanced-vpn.service advanced-vpn-guard.service; do
+for unit in cypherpunk-vpn.service cypherpunk-vpn-guard.service; do
     test "$(systemctl is-enabled "$unit" || true)" = disabled
     test "$(systemctl is-active "$unit" || true)" = inactive
 done
 test -z "$(nft list tables)"
 # Removal never disables an enabled guard, even when no tunnel has been started.
-systemctl enable advanced-vpn-guard.service
+systemctl enable cypherpunk-vpn-guard.service
 if ./install.sh --apply --uninstall > /tmp/remove-enabled.log 2>&1; then
     echo 'removed an enabled guard' >&2; exit 1
 fi
-test -d /opt/advanced-vpn
-test "$(systemctl is-enabled advanced-vpn-guard.service)" = enabled
-systemctl disable advanced-vpn-guard.service
+test -d /opt/cypherpunk-vpn
+test "$(systemctl is-enabled cypherpunk-vpn-guard.service)" = enabled
+systemctl disable cypherpunk-vpn-guard.service
 # A synthetic, hookless table tests refusal without restricting guest networking.
-nft add table inet advanced_vpn
+nft add table inet cypherpunk_vpn
 if ./install.sh --apply --uninstall > /tmp/remove-table.log 2>&1; then
     echo 'removed files beneath a retained guard' >&2; exit 1
 fi
-nft list table inet advanced_vpn
-test -d /opt/advanced-vpn
-nft delete table inet advanced_vpn
+nft list table inet cypherpunk_vpn
+test -d /opt/cypherpunk-vpn
+nft delete table inet cypherpunk_vpn
 # Foreground programs count even though both services are inactive.
-/opt/advanced-vpn/venv/bin/python3 -B -E -s -c 'import time; time.sleep(300)' &
+/opt/cypherpunk-vpn/venv/bin/python3 -B -E -s -c 'import time; time.sleep(300)' &
 test_pid=$!
 if ./install.sh --apply --uninstall > /tmp/remove-running.log 2>&1; then
     kill "$test_pid"; echo 'removed a running installed program' >&2; exit 1
 fi
-test -d /opt/advanced-vpn
+test -d /opt/cypherpunk-vpn
 kill "$test_pid"
 wait "$test_pid" || true
 ./install.sh --apply --uninstall
-test ! -e /opt/advanced-vpn
-test ! -e /etc/systemd/system/advanced-vpn.service
-test ! -e /etc/systemd/system/advanced-vpn-guard.service
-test ! -e /usr/local/bin/avpn
-test ! -e /usr/local/bin/avpnctl
-test "$(cat /etc/advanced-vpn/offline-test-state)" = 'preserve existing private state'
-test -f /home/tester/.config/advanced-vpn/cloud.json
+test ! -e /opt/cypherpunk-vpn
+test ! -e /etc/systemd/system/cypherpunk-vpn.service
+test ! -e /etc/systemd/system/cypherpunk-vpn-guard.service
+test ! -e /usr/local/bin/cypherpunk
+test ! -e /usr/local/bin/cypherpunkctl
+test "$(cat /etc/cypherpunk-vpn/offline-test-state)" = 'preserve existing private state'
+test -f /home/tester/.config/cypherpunk-vpn/cloud.json
 test -z "$(nft list tables)"
 printf '%s\n' SYSTEM_REMOVAL_PASS
 cat /etc/os-release
@@ -126,7 +126,7 @@ def run(base, package, work):
     payload.mkdir()
     shutil.copy2(package, payload / "release.tar.gz")
     disk_mb = max(256, (package.stat().st_size >> 20) * 2 + 64)
-    subprocess.run(["/usr/sbin/mke2fs", "-q", "-t", "ext4", "-L", "avpnpkg", "-d", str(payload),
+    subprocess.run(["/usr/sbin/mke2fs", "-q", "-t", "ext4", "-L", "cpvpnpkg", "-d", str(payload),
                     str(work / "pkg.img"), str(disk_mb) + "M"], check=True)  # fmt: skip
     # Save module settings when imported by another harness in the same process.
     previous_vms, previous_packages = vm.VMS, vm.PACKAGES

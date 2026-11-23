@@ -27,7 +27,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-RP = "advanced-vpn.local"
+RP = "cypherpunk-vpn.local"
 F_ADD_SEALS = getattr(fcntl, "F_ADD_SEALS", 1033)
 F_GET_SEALS = getattr(fcntl, "F_GET_SEALS", 1034)
 F_SEAL_WRITE = getattr(fcntl, "F_SEAL_WRITE", 8)
@@ -102,7 +102,7 @@ def desktop_session():
     sudo: the invoking user's session (SUDO_UID), found from their /run/user
     directory, since sudo strips the display variables and root cannot use their
     session bus. Never over SSH: the dialog would open on another screen."""
-    if os.environ.get("SSH_CONNECTION") or os.environ.get("AVPN_PIN_DIALOG") == "0":
+    if os.environ.get("SSH_CONNECTION") or os.environ.get("CPVPN_PIN_DIALOG") == "0":
         return None
     uid, gid = os.environ.get("SUDO_UID", ""), os.environ.get("SUDO_GID", "")
     home = os.environ.get("HOME", "/")
@@ -138,7 +138,7 @@ def desktop_session():
 # ask twice). Held in memory only inside one_pin(); never on disk, never in a keyring,
 # never past the command. A long-running process (the supervisor, the GUI's broker)
 # scopes it to one operation, never to its own lifetime.
-_HELD_PIN = contextvars.ContextVar("advanced_vpn_held_pin", default=None)
+_HELD_PIN = contextvars.ContextVar("cypherpunk_vpn_held_pin", default=None)
 
 
 @contextlib.contextmanager
@@ -170,7 +170,7 @@ def _ask_pin():
     """PIN source, in order: a desktop dialog (pinentry-gnome3) on the session of the
     person at this keyboard, also under sudo; a terminal (no-echo prompt with a
     visible label); a systemd service without either, e.g. the whole-device unit at
-    boot (systemd's password agents: boot console or `avpn unlock`). Anything else
+    boot (systemd's password agents: boot console or `cypherpunk unlock`). Anything else
     is refused; there is no unattended bypass. Cancelling the dialog stops; a dialog
     that cannot open falls back to the terminal.
 
@@ -199,7 +199,7 @@ def _ask_pin():
             [
                 ASK_PASSWORD,
                 "--timeout=300",
-                "--id=advanced-vpn:fido2-pin",
+                "--id=cypherpunk-vpn:fido2-pin",
                 "--icon=security-high",
                 "--echo=no",
                 PIN_PROMPT,
@@ -683,7 +683,7 @@ def _kem_key(classical, pq, context, eph, ct, recipient):
         algorithm=hashes.SHA256(),
         length=32,
         salt=None,
-        info=b"advanced-vpn/hybrid-kem/v1|" + context + b"|" + hashlib.sha256(eph + ct + recipient).digest(),
+        info=b"cypherpunk-vpn/hybrid-kem/v1|" + context + b"|" + hashlib.sha256(eph + ct + recipient).digest(),
     ).derive(classical + pq)
 
 
@@ -735,7 +735,7 @@ def kem_open(private, value, context):
 # wrapped to the operator's unlock key, whose private half is sealed in the operator's
 # hardware vault. The server cannot open its own keys after a reboot: the operator
 # unwraps the data key with a PIN and touch and sends it into the server's RAM.
-SERVER_UNLOCK = b"advanced-vpn/server-unlock/v1"
+SERVER_UNLOCK = b"cypherpunk-vpn/server-unlock/v1"
 DATA_KEY = 32
 
 
@@ -750,7 +750,9 @@ def unlock_context(role, certificates):
 
 def _server_header(name, binding):
     return json.dumps(
-        dict(schema=1, domain="advanced-vpn/server-key", role=name, binding_sha256=hashlib.sha256(binding).hexdigest()),
+        dict(
+            schema=1, domain="cypherpunk-vpn/server-key", role=name, binding_sha256=hashlib.sha256(binding).hexdigest()
+        ),
         sort_keys=True,
     ).encode()
 
@@ -758,7 +760,7 @@ def _server_header(name, binding):
 def _server_key(data_key):
     if len(data_key) != DATA_KEY:
         raise ValueError("wrong data key")
-    return HKDF(algorithm=hashes.SHA256(), length=32, salt=None, info=b"advanced-vpn/server-key/v1").derive(data_key)
+    return HKDF(algorithm=hashes.SHA256(), length=32, salt=None, info=b"cypherpunk-vpn/server-key/v1").derive(data_key)
 
 
 def lock_bytes(data_key, name, binding, value):
@@ -833,7 +835,7 @@ def aad(role, cert, meta):
     return json.dumps(
         dict(
             schema=1,
-            domain="advanced-vpn/key-envelope",
+            domain="cypherpunk-vpn/key-envelope",
             rp=RP,
             role=role,
             certificate_sha256=hashlib.sha256(cert).hexdigest(),
@@ -846,7 +848,7 @@ def aad(role, cert, meta):
 def wrapping_key(secret, meta):
     """Derive the AES-256-GCM wrapping key from the hmac-secret and the vault salt."""
     return HKDF(
-        algorithm=hashes.SHA256(), length=32, salt=unb64(meta["salt"]), info=b"advanced-vpn/key-envelope/v1"
+        algorithm=hashes.SHA256(), length=32, salt=unb64(meta["salt"]), info=b"cypherpunk-vpn/key-envelope/v1"
     ).derive(secret)
 
 
@@ -879,7 +881,7 @@ def memory_fd(key):
     create = libc.memfd_create
     create.argtypes = [ctypes.c_char_p, ctypes.c_uint]
     create.restype = ctypes.c_int
-    fd = create(b"avpn-key", 3)  # Linux MFD_CLOEXEC | MFD_ALLOW_SEALING
+    fd = create(b"cpvpn-key", 3)  # Linux MFD_CLOEXEC | MFD_ALLOW_SEALING
     if fd < 0:
         raise OSError(ctypes.get_errno(), "memfd_create refused")
     os.write(fd, key)
@@ -915,7 +917,7 @@ def mesh_seal(vault, key_path, cert_path, envelope_path, remove_plaintext=False)
 def mesh_sign(vault, envelope_path, cert_path, descriptor_path, role=None):
     """One PIN + touch: unseal the mesh operator key in memory, sign the
     canonical descriptor, and print the signed descriptor as the last stdout
-    line (the avpn helper JSON contract).
+    line (the cypherpunk helper JSON contract).
 
     Also emits the FIDO2 assertion over SHA-256(canonical descriptor): the
     hardware-bound membership proof (a member IS their device - Nitrokey
@@ -931,7 +933,7 @@ def mesh_sign(vault, envelope_path, cert_path, descriptor_path, role=None):
     descriptor = json.loads(read_private(descriptor_path))
     message = canonical(descriptor)
     secret, meta, assertion = hardware_assertion(vault, message)
-    # The operator's own key (`avpn init --vault`, role operator-mldsa65) or a separately
+    # The operator's own key (`cypherpunk init --vault`, role operator-mldsa65) or a separately
     # sealed mesh key (mesh-seal, role mesh-operator).
     if role not in (None, MESH_ROLE, "operator-mldsa65"):
         raise ValueError("unknown mesh signing role")
@@ -982,7 +984,8 @@ def main():
     p.add_argument("--envelope", type=Path, help="with mesh-seal/mesh-sign: the sealed-key envelope")
     p.add_argument("--descriptor", type=Path, help="with mesh-sign: the descriptor JSON to sign")
     p.add_argument(
-        "--role", help="with mesh-sign: the envelope's role, operator-mldsa65 (avpn init) or mesh-operator (mesh-seal)"
+        "--role",
+        help="with mesh-sign: the envelope's role, operator-mldsa65 (cypherpunk init) or mesh-operator (mesh-seal)",
     )
     a = p.parse_args()
     if a.action == "enroll":

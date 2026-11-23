@@ -13,17 +13,17 @@ import subprocess
 from keyguard import atomic, read_private
 from sysexec import trusted_exe
 
-MARKER = Path("/etc/advanced-vpn/whole-device.guard")
+MARKER = Path("/etc/cypherpunk-vpn/whole-device.guard")
 MARKER_BYTES = b"cypherpunk-vpn whole-device guard v1\n"
 NATIVE = Path("/usr/libexec/cypherpunk-vpn-bootguard")
-UNIT = "advanced-vpn-guard.service"
+UNIT = "cypherpunk-vpn-guard.service"
 POLICY = json.loads((Path(__file__).resolve().parents[1] / "deploy/bootguard-policy.json").read_text())
 if POLICY.get("schema") != 1:
     raise ValueError("unknown boot guard dependency policy")
 MANAGERS = tuple(POLICY["managers"])
 DROPIN = POLICY["dropin"]
 REQUIRE = POLICY["requires"].encode()
-STATE = Path("/etc/advanced-vpn/enrolled")
+STATE = Path("/etc/cypherpunk-vpn/enrolled")
 UNITS = Path("/etc/systemd/system")
 
 

@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Install ADVANCED_VPN from a built checkout or a release package.
+"""Install cypherpunk_vpn from a built checkout or a release package.
 
 - `--out DIR [--apply] [--role ROLE --protect MODE]`: stage the system installation in
-  DIR; with --apply, install (or upgrade) it into /opt/advanced-vpn as root and put
-  `avpn` on root's PATH (/usr/local/bin). With --role, also generate this device's
+  DIR; with --apply, install (or upgrade) it into /opt/cypherpunk-vpn as root and put
+  `cypherpunk` on root's PATH (/usr/local/bin). With --role, also generate this device's
   keys and write its public request. The VPN service is never enabled.
 - `--user [--uninstall]`: install the command line for this user only (no root, no
-  services), for an operator machine. `avpn` lands in ~/.local/bin.
+  services), for an operator machine. `cypherpunk` lands in ~/.local/bin.
 - `--pack FILE`: write the release package (the files every installation needs).
 
 No enrollment secrets are bundled. Activation is a separate explicit operator action
@@ -34,14 +34,14 @@ sys.path.insert(0, str(ROOT / "tools"))
 from sysexec import trusted_exe  # noqa: E402  (standard library only)
 
 
-# What a built checkout must provide; the VM harness and `avpn cloud host setup` pack
+# What a built checkout must provide; the VM harness and `cypherpunk cloud host setup` pack
 # exactly these, so the three never disagree.
 BINARIES = [
-    "advanced-vpn",
-    "advanced-vpn-wireguard",
-    "advanced-vpn-dns",
-    "advanced-vpn-cloak",
-    "avpn",
+    "cypherpunk-vpn",
+    "cypherpunk-vpn-wireguard",
+    "cypherpunk-vpn-dns",
+    "cypherpunk-vpn-cloak",
+    "cypherpunk",
     "cypherpunk-preflight",
     "cypherpunk-controller",
     "cypherpunk-bootguard",
@@ -56,8 +56,10 @@ PACKAGE_OWNER_BYTES = b"cypherpunk-vpn package ownership v1\n"
 PIP_PATIENCE = ["--retries", "10", "--timeout", "60"]
 
 
-SUGGEST = "No servers yet? avpn cloud suggest lists free places to run them; avpn cloud chain --apply joins them."
-HAVE_SERVERS = "avpn cloud status lists your servers; avpn cloud chain --apply joins them into a chain."
+SUGGEST = (
+    "No servers yet? cypherpunk cloud suggest lists free places to run them; cypherpunk cloud chain --apply joins them."
+)
+HAVE_SERVERS = "cypherpunk cloud status lists your servers; cypherpunk cloud chain --apply joins them into a chain."
 
 
 def next_servers_step(home=None):
@@ -76,9 +78,9 @@ def next_servers_step(home=None):
                 home = None
     if home is not None:
         # Another user's inventory: their .config, never the inherited XDG variable.
-        inventory = Path(home) / ".config" / "advanced-vpn" / "cloud.json"
+        inventory = Path(home) / ".config" / "cypherpunk-vpn" / "cloud.json"
     else:
-        inventory = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "advanced-vpn" / "cloud.json"
+        inventory = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "cypherpunk-vpn" / "cloud.json"
     try:
         resources = json.loads(inventory.read_text())["resources"] if inventory.exists() else {}
     except (OSError, ValueError, KeyError):
@@ -128,8 +130,8 @@ def available_runtime():
 
 
 def user_paths():
-    """Where a user installation lives: (data directory, directory on PATH for `avpn`)."""
-    data = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share") / "advanced-vpn"
+    """Where a user installation lives: (data directory, directory on PATH for `cypherpunk`)."""
+    data = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share") / "cypherpunk-vpn"
     return data, Path.home() / ".local/bin"
 
 
@@ -204,16 +206,16 @@ def install_user(data, bin_dir, python=None, adopt_legacy=False):
     available_runtime()  # Verify before creating the installation directory.
     from release_slots import Store
 
-    wrapper = bin_dir / "avpn"
+    wrapper = bin_dir / "cypherpunk"
     if wrapper.exists() or wrapper.is_symlink():
         if (
             wrapper.is_symlink()
             or not wrapper.is_file()
             or not wrapper.read_text().startswith(
-                "#!/bin/sh\n# ADVANCED_VPN command line, user installation (tools/install.py --user).\n"
+                "#!/bin/sh\n# cypherpunk_vpn command line, user installation (tools/install.py --user).\n"
             )
         ):
-            raise ValueError("foreign avpn command; user installation refused without overwriting it")
+            raise ValueError("foreign cypherpunk command; user installation refused without overwriting it")
     app = data / "app"
     legacy = app.exists() and not app.is_symlink()
     if legacy:
@@ -234,17 +236,12 @@ def install_user(data, bin_dir, python=None, adopt_legacy=False):
         # child launches cannot mix their application/runtime paths.
         q = shlex.quote
         launcher(
-            bin_dir / "avpn",
-            "# ADVANCED_VPN command line, user installation (tools/install.py --user).\n"
+            bin_dir / "cypherpunk",
+            "# cypherpunk_vpn command line, user installation (tools/install.py --user).\n"
             "slot=$(CDPATH= cd -P %s && pwd -P) || exit 1\n"
-            'export AVPN_CONTROLLER="$slot/bin/avpnctl" AVPN_CLOUD="$slot/bin/avpn-cloud" '
-            'AVPN_MESH="$slot/bin/avpn-mesh"\nexec "$slot/bin/avpn" "$@"' % q(str(app)),
+            'export CPVPN_CONTROLLER="$slot/bin/cypherpunkctl" CPVPN_CLOUD="$slot/bin/cpvpn-cloud" '
+            'CPVPN_MESH="$slot/bin/cpvpn-mesh"\nexec "$slot/bin/cypherpunk" "$@"' % q(str(app)),
         )
-        alias = bin_dir / "cypherpunk"
-        if not alias.exists() and not alias.is_symlink():
-            alias.symlink_to("avpn")
-        elif not (alias.is_symlink() and os.readlink(alias) == "avpn"):
-            print("warning: foreign cypherpunk command retained: " + str(alias), file=sys.stderr)
         return app
 
 
@@ -272,7 +269,7 @@ def _build_user(data, python, stage):
         # Venv's interpreter works after relocation (launchers never run its pip
         # entry-point script, whose shebang would name the staging directory).
         venv = stage / "venv"
-        marker = venv / ".advanced-vpn-requirements.sha256"
+        marker = venv / ".cypherpunk-vpn-requirements.sha256"
         digest = hashlib.sha256(lock).hexdigest()
         candidates = [data / "app/venv", data / "venv"]
         previous = next((p for p in candidates if (p / marker.name).is_file()
@@ -298,17 +295,17 @@ def _build_user(data, python, stage):
 
 def write_tool_launchers(stage, python=None):
     """Pin script, interpreter and binaries to the same resolved release slot."""
-    # Resolve the launcher itself first: /usr/local/bin/avpnctl is a symlink to it, and
+    # Resolve the launcher itself first: /usr/local/bin/cypherpunkctl is a symlink to it, and
     # dirname of that link would name /usr/local instead of this slot.
     header = 'slot=$(CDPATH= cd -P "$(dirname -- "$(readlink -f -- "$0")")/.." && pwd -P) || exit 1\n'
     interpreter = shlex.quote(str(python)) if python is not None else '"$slot/venv/bin/python3"'
     for name, script in (
-        ("avpnctl", "avpnctl.py"),
-        ("avpn-cloud", "cloud.py"),
-        ("avpn-mesh", "mesh.py"),
-        ("avpn-desktop", "desktop_setup.py"),
+        ("cypherpunkctl", "cypherpunkctl.py"),
+        ("cpvpn-cloud", "cloud.py"),
+        ("cpvpn-mesh", "mesh.py"),
+        ("cpvpn-desktop", "desktop_setup.py"),
     ):
-        arguments = ' --bin-dir "$slot/bin"' if name == "avpnctl" else ""
+        arguments = ' --bin-dir "$slot/bin"' if name == "cypherpunkctl" else ""
         launcher(
             stage / "bin" / name, header + 'exec %s -B -E -s "$slot/tools/%s"%s "$@"' % (interpreter, script, arguments)
         )
@@ -329,18 +326,15 @@ def compatibility_link(path, destination):
 def check_application(slot):
     """Check inert commands only; installation never activates networking/services."""
     result = subprocess.run(
-        [str(slot / "bin/avpn"), "--version"], capture_output=True, text=True, check=True, timeout=30
+        [str(slot / "bin/cypherpunk"), "--version"], capture_output=True, text=True, check=True, timeout=30
     )
-    if not result.stdout.startswith("avpn "):
+    if not result.stdout.startswith("cypherpunk "):
         raise ValueError("installed command failed its version check")
 
 
 def uninstall_user(data, bin_dir):
     """Remove a user installation. Cloud inventory and SSH keys in ~/.config are kept."""
-    wrapper = bin_dir / "avpn"
-    alias = bin_dir / "cypherpunk"
-    if alias.is_symlink() and os.readlink(alias) == "avpn":
-        alias.unlink()
+    wrapper = bin_dir / "cypherpunk"
     if wrapper.exists() and "tools/install.py --user" in wrapper.read_text():
         wrapper.unlink()
     from release_slots import Store
@@ -468,7 +462,7 @@ def _build_system(package, target, new):
             f.chmod(0o755 if f.is_dir() or f.parent.name == "bin" else 0o644)
     lock = (new / "tools/hardware-requirements.txt").read_bytes()
     digest = hashlib.sha256(lock).hexdigest()
-    marker = ".advanced-vpn-requirements.sha256"
+    marker = ".cypherpunk-vpn-requirements.sha256"
     old_venv = target / "venv"
     if bundled:
         # All dependency resolution happened during the ordinary-user build.
@@ -488,11 +482,11 @@ def _build_system(package, target, new):
 
 
 def link_commands(target, bin_dir=Path("/usr/local/bin")):
-    """Put `avpn` and `avpnctl` on root's PATH: sudo searches only system directories."""
+    """Put `cypherpunk` and `cypherpunkctl` on root's PATH: sudo searches only system directories."""
     ok = True
     bin_dir.mkdir(parents=True, exist_ok=True)
-    for name in ["avpn", "avpnctl", "cypherpunk"]:
-        link, dest = bin_dir / name, target / "bin" / ("avpn" if name == "cypherpunk" else name)
+    for name in ["cypherpunk", "cypherpunkctl"]:
+        link, dest = bin_dir / name, target / "bin" / name
         if link.is_symlink() and os.readlink(link) == str(dest):
             continue
         if link.exists() or link.is_symlink():
@@ -615,7 +609,7 @@ def system_installation_lock():
         os.close(fd)
 
 
-def removal_checks(target=Path("/opt/advanced-vpn"), proc=Path("/proc")):
+def removal_checks(target=Path("/opt/cypherpunk-vpn"), proc=Path("/proc")):
     """Read-only, fail-closed removal gate: retain every guard and running program."""
     import guard_policy
 
@@ -627,7 +621,7 @@ def removal_checks(target=Path("/opt/advanced-vpn"), proc=Path("/proc")):
         dependency = guard_policy.UNITS / (manager + ".d") / guard_policy.DROPIN
         if dependency.exists() or dependency.is_symlink():
             raise RuntimeError("Removal refused: a network manager still requires the independent guard.")
-    for unit in ("advanced-vpn.service", "advanced-vpn-guard.service", "cypherpunk-vpn-controller.service"):
+    for unit in ("cypherpunk-vpn.service", "cypherpunk-vpn-guard.service", "cypherpunk-vpn-controller.service"):
         r = subprocess.run([trusted_exe("systemctl"), "show", unit, "--property=LoadState",
                             "--property=ActiveState", "--property=UnitFileState"],
                            capture_output=True, text=True, check=True, timeout=15)  # fmt: skip
@@ -649,10 +643,10 @@ def removal_checks(target=Path("/opt/advanced-vpn"), proc=Path("/proc")):
     for item in tables:
         if not isinstance(item, dict):
             raise ValueError("cannot verify firewall state")
-        if "table" in item and item["table"]["name"].startswith("advanced_vpn"):
+        if "table" in item and item["table"]["name"].startswith("cypherpunk_vpn"):
             raise RuntimeError("Removal refused: a VPN firewall table is still present; its guard is retained.")
-    for command, field, value in [(["ip", "-j", "netns", "list"], "name", "avpn-app"),
-                                  (["ip", "-j", "link", "show"], "ifalias", "advanced-vpn-managed")]:  # fmt: skip
+    for command, field, value in [(["ip", "-j", "netns", "list"], "name", "cpvpn-app"),
+                                  (["ip", "-j", "link", "show"], "ifalias", "cypherpunk-vpn-managed")]:  # fmt: skip
         command[0] = trusted_exe(command[0])
         r = subprocess.run(command, capture_output=True, text=True, check=True, timeout=15)
         # iproute2 emits no output for an empty namespace list, even with -j.
@@ -674,7 +668,7 @@ def removal_checks(target=Path("/opt/advanced-vpn"), proc=Path("/proc")):
 
 
 def uninstall_system(
-    target=Path("/opt/advanced-vpn"), units=Path("/etc/systemd/system"), bin_dir=Path("/usr/local/bin")
+    target=Path("/opt/cypherpunk-vpn"), units=Path("/etc/systemd/system"), bin_dir=Path("/usr/local/bin")
 ):
     """Remove inactive owned application files; never clear networking or private state."""
     if os.geteuid() != 0:
@@ -687,7 +681,7 @@ def uninstall_system(
     from release_slots import digest, read_json, sync_directory
 
     owned_units = []
-    for name in ("advanced-vpn.service", "advanced-vpn-guard.service", "cypherpunk-vpn-controller.service"):
+    for name in ("cypherpunk-vpn.service", "cypherpunk-vpn-guard.service", "cypherpunk-vpn-controller.service"):
         path = units / name
         if path.exists() or path.is_symlink():
             if path.is_symlink() or path.read_bytes() != (ROOT / "deploy" / name).read_bytes():
@@ -731,9 +725,9 @@ def uninstall_system(
         path.unlink()
         receipt.unlink(missing_ok=True)
         sync_directory(path.parent)
-    for name in ("avpn", "avpnctl", "cypherpunk"):
+    for name in ("cypherpunk", "cypherpunkctl"):
         path = bin_dir / name
-        destination = target / "bin" / ("avpn" if name == "cypherpunk" else name)
+        destination = target / "bin" / name
         if path.is_symlink() and os.readlink(path) == str(destination):
             path.unlink()
     if target.exists():
@@ -748,7 +742,7 @@ def uninstall_system(
 def prepare_device(target, role, protect, vault=None, insecure=False, unlock_key=None):
     """Generate this device's keys with the installed controller (the vault is created on
     first use) and leave the public request in the sudo user's home directory."""
-    state = Path("/etc/advanced-vpn/enrolled")
+    state = Path("/etc/cypherpunk-vpn/enrolled")
     if state.exists():
         print("This device already has keys (%s); not generating new ones." % state)
         return
@@ -756,8 +750,8 @@ def prepare_device(target, role, protect, vault=None, insecure=False, unlock_key
 
     uid = os.environ.get("SUDO_UID")
     home = Path(pwd.getpwuid(int(uid)).pw_dir) if uid else Path("/root")
-    out = home / ("advanced-vpn-%s.req" % role)
-    argv = [str(target / "bin/avpnctl"), "request", "--role", role, "--protect", protect, "--out", str(out)]
+    out = home / ("cypherpunk-vpn-%s.req" % role)
+    argv = [str(target / "bin/cypherpunkctl"), "request", "--role", role, "--protect", protect, "--out", str(out)]
     if insecure:
         argv.append("--insecure-plaintext-keys")
     if vault:
@@ -765,11 +759,14 @@ def prepare_device(target, role, protect, vault=None, insecure=False, unlock_key
     if unlock_key:
         argv += ["--unlock-key", str(unlock_key.resolve())]
     subprocess.run(argv, check=True)
-    print("Next: give %s to the operator (avpn init), then: sudo avpn enroll BUNDLE --operator-key operator.pub" % out)
+    print(
+        "Next: give %s to the operator (cypherpunk init), then: sudo cypherpunk enroll BUNDLE --operator-key operator.pub"
+        % out
+    )
     if protect == "operator":
         print(
             "This server's keys are locked to the operator's Nitrokey: it cannot open them after a reboot "
-            "until the operator unlocks it (avpn cloud unlock NAME, or avpn unwrap + avpn server-unlock)."
+            "until the operator unlocks it (cypherpunk cloud unlock NAME, or cypherpunk unwrap + cypherpunk server-unlock)."
         )
     if role == "client":
         print(next_servers_step())
@@ -807,7 +804,7 @@ def main():
     mode.add_argument("--out", type=Path, help="stage the system installation in this new directory (to review it)")
     mode.add_argument("--user", action="store_true", help="install the command line for this user only")
     mode.add_argument("--pack", type=Path, help="write the release package to this .tar.gz")
-    p.add_argument("--apply", action="store_true", help="install or upgrade /opt/advanced-vpn (root)")
+    p.add_argument("--apply", action="store_true", help="install or upgrade /opt/cypherpunk-vpn (root)")
     p.add_argument("--runtime", type=Path, help="with --pack: include this verified pinned offline runtime")
     p.add_argument("--package-managed", action="store_true", help="with --apply: package-owned /usr/bin commands")
     p.add_argument(
@@ -825,9 +822,11 @@ def main():
         help="with --role: how the keys are sealed (a server: systemd-creds needs a usable TPM2, else operator)",
     )
     p.add_argument(
-        "--unlock-key", type=Path, help="with --protect operator: the operator's unlock public key (avpn unlock-key)"
+        "--unlock-key",
+        type=Path,
+        help="with --protect operator: the operator's unlock public key (cypherpunk unlock-key)",
     )
-    p.add_argument("--vault", type=Path, help="with --protect nitrokey: vault (default /etc/advanced-vpn/vault)")
+    p.add_argument("--vault", type=Path, help="with --protect nitrokey: vault (default /etc/cypherpunk-vpn/vault)")
     p.add_argument(
         "--insecure-plaintext-keys", action="store_true", help="allow --protect none (keys as plain files; tests only)"
     )
@@ -874,16 +873,18 @@ def main():
         data, bin_dir = user_paths()
         if a.uninstall:
             uninstall_user(data, bin_dir)
-            print("Removed the user installation; ~/.config/advanced-vpn (cloud inventory, SSH keys) is kept.")
+            print("Removed the user installation; ~/.config/cypherpunk-vpn (cloud inventory, SSH keys) is kept.")
             return
         if os.geteuid() == 0:
             raise RuntimeError("--user installs for an ordinary user, not root")
         installation_preflight(operator_target=data)
         app = install_user(data, bin_dir, adopt_legacy=a.adopt_legacy)
-        version = subprocess.run([str(app / "bin/avpn"), "--version"], capture_output=True, text=True).stdout.strip()
-        print("Installed %s for this user: %s (command: %s)" % (version, app, bin_dir / "avpn"))
+        version = subprocess.run(
+            [str(app / "bin/cypherpunk"), "--version"], capture_output=True, text=True
+        ).stdout.strip()
+        print("Installed %s for this user: %s (command: %s)" % (version, app, bin_dir / "cypherpunk"))
         if str(bin_dir) not in os.environ.get("PATH", "").split(":"):
-            print("Add %s to PATH to run avpn." % bin_dir)
+            print("Add %s to PATH to run cypherpunk." % bin_dir)
         print(next_servers_step())
         return
     if a.out is None:
@@ -891,10 +892,10 @@ def main():
 
         if os.geteuid() != 0:
             raise RuntimeError("--apply requires root")
-        a.out = Path(tempfile.mkdtemp(prefix="advanced-vpn-stage-")) / "stage"
+        a.out = Path(tempfile.mkdtemp(prefix="cypherpunk-vpn-stage-")) / "stage"
     runtime = available_runtime()
     a.out.mkdir(mode=0o700, parents=False, exist_ok=False)
-    package = a.out / "opt/advanced-vpn"
+    package = a.out / "opt/cypherpunk-vpn"
     (package / "bin").mkdir(parents=True)
     (package / "tools").mkdir()
     for name in BINARIES:
@@ -912,9 +913,9 @@ def main():
         shutil.copytree(runtime, package / "venv", symlinks=True)
     # -E -s, not -I: ignore PYTHON* variables and the user site directory, but keep the
     # (root-owned) script directory on sys.path, which -I drops on Python 3.11+.
-    # `avpn` is the Rust front end. It runs `avpnctl` (the privileged controller,
-    # in the hash-locked venv), `avpn-cloud` (stdlib only; runs as the user, whose
-    # own provider sign-in it uses) and `avpn-mesh` (the mesh tool; the venv again,
+    # `cypherpunk` is the Rust front end. It runs `cypherpunkctl` (the privileged controller,
+    # in the hash-locked venv), `cpvpn-cloud` (stdlib only; runs as the user, whose
+    # own provider sign-in it uses) and `cpvpn-mesh` (the mesh tool; the venv again,
     # for ML-DSA descriptor signing and verification).
     write_tool_launchers(package)
     (package / "docs").mkdir()
@@ -924,7 +925,7 @@ def main():
             shutil.copy2(ROOT / name, package / name)
     units = a.out / "etc/systemd/system"
     units.mkdir(parents=True)
-    for name in ["advanced-vpn.service", "advanced-vpn-guard.service", "cypherpunk-vpn-controller.service"]:
+    for name in ["cypherpunk-vpn.service", "cypherpunk-vpn-guard.service", "cypherpunk-vpn-controller.service"]:
         shutil.copy2(ROOT / "deploy" / name, units / name)
     stable = a.out / "usr/libexec"
     stable.mkdir(parents=True)
@@ -967,16 +968,16 @@ def apply_system(a, package, units, apparmor, stable):
     """Root-only deployment under the global installation lock; never activate a tunnel."""
     if os.geteuid() != 0:
         raise RuntimeError("system deployment requires root")
-    target = Path("/opt/advanced-vpn")
+    target = Path("/opt/cypherpunk-vpn")
     # An unprivileged-writable parent would permit replacing root-executed code.
     if Path("/opt").stat().st_uid != 0 or Path("/opt").stat().st_mode & 0o022:
         raise RuntimeError("unsafe installation parent")
     if target.exists() and (target.is_symlink() or target.stat().st_uid != 0 or target.stat().st_mode & 0o022):
-        raise RuntimeError("existing /opt/advanced-vpn is not a root-owned installation; not replacing it")
+        raise RuntimeError("existing /opt/cypherpunk-vpn is not a root-owned installation; not replacing it")
     import pwd
 
-    # The data plane's user, and the I2P front's router's own user (avpn help front).
-    for name in ["advanced-vpn", "advanced-vpn-i2p"]:
+    # The data plane's user, and the I2P front's router's own user (cypherpunk help front).
+    for name in ["cypherpunk-vpn", "cypherpunk-vpn-i2p"]:
         try:
             pwd.getpwnam(name)
         except KeyError:
@@ -991,7 +992,7 @@ def apply_system(a, package, units, apparmor, stable):
     pins = history["owned_unit_sha256"]
     # Make boot protection independent before changing any application path.
     # Known signed-version hashes permit exact adoption, never foreign units.
-    guard_unit = Path("/etc/systemd/system/advanced-vpn-guard.service")
+    guard_unit = Path("/etc/systemd/system/cypherpunk-vpn-guard.service")
     install_stable_file(units / guard_unit.name, guard_unit, mode=0o644, known_hashes=pins.get(guard_unit.name, ()))
     subprocess.run([trusted_exe("systemctl"), "daemon-reload"], check=True, timeout=15)
     import guard_policy
@@ -1007,7 +1008,7 @@ def apply_system(a, package, units, apparmor, stable):
     ):
         guard_policy.arm()
     upgraded = install_system(package, target, adopt_legacy=a.adopt_legacy)
-    Path("/etc/advanced-vpn").mkdir(mode=0o700, exist_ok=True)
+    Path("/etc/cypherpunk-vpn").mkdir(mode=0o700, exist_ok=True)
     for source in units.glob("*.service"):
         install_stable_file(
             source, Path("/etc/systemd/system") / source.name, mode=0o644, known_hashes=pins.get(source.name, ())
@@ -1042,12 +1043,12 @@ def apply_system(a, package, units, apparmor, stable):
             atomic(PACKAGE_OWNER, PACKAGE_OWNER_BYTES)
     print(
         ("Upgraded" if upgraded else "Installed")
-        + " /opt/advanced-vpn without activation"
+        + " /opt/cypherpunk-vpn without activation"
         + (": nothing is enabled or started." if a.package_managed else "; ")
         + (
             ""
             if a.package_managed
-            else "`sudo avpn` now works."
+            else "`sudo cypherpunk` now works."
             if linked
             else "see the warning above about /usr/local/bin."
         ),
@@ -1059,7 +1060,7 @@ def apply_system(a, package, units, apparmor, stable):
     if a.package_managed:
         print("Open Cypherpunk VPN from your applications menu and choose Start setup.")
         return
-    print("Next: sudo avpn request --role ROLE --protect MODE --out ROLE.req, or rerun with --role.")
+    print("Next: sudo cypherpunk request --role ROLE --protect MODE --out ROLE.req, or rerun with --role.")
 
 
 if __name__ == "__main__":

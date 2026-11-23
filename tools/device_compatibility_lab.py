@@ -504,7 +504,7 @@ def worker(out, vpn_commit, backend="solo1-pc"):
                     subprocess.Popen(
                         ["/simulator", *selected.get("args", ())],
                         cwd=own,
-                        env=dict(environment, AVPN_CTAPHID_PORTS="%d,%d" % ports),
+                        env=dict(environment, CPVPN_CTAPHID_PORTS="%d,%d" % ports),
                         stdin=subprocess.DEVNULL,
                         stdout=simulator_log,
                         stderr=simulator_log,

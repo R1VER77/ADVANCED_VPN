@@ -13,7 +13,7 @@ seconds, which hands the attacker where every page ended. --fixed S instead give
 load the same S seconds from its true start, the fairer view of a constant-rate stream.
 
 usage: wf_attack.py RUN_DIR [RUN_DIR ...] [--tail 3] [--fixed 6]
-Needs scikit-learn, numpy and Docker with an image `avpn-tshark:1` that has tshark
+Needs scikit-learn, numpy and Docker with an image `cpvpn-tshark:1` that has tshark
 (Debian trixie-slim plus the tshark package). Not run in CI.
 """
 
@@ -32,7 +32,7 @@ UP = {"192.0.2.2", "198.51.100.1"}
 
 def packets(run, pcap):
     """(time, direction, UDP length) of every UDP packet; GSO super-frames split into wire packets."""
-    cmd = ["docker", "run", "--rm", "-v", "%s:/d:ro" % run, "avpn-tshark:1", "tshark", "-r", "/d/" + pcap,
+    cmd = ["docker", "run", "--rm", "-v", "%s:/d:ro" % run, "cpvpn-tshark:1", "tshark", "-r", "/d/" + pcap,
            "-Y", "udp && !icmp", "-T", "fields", "-E", "separator=,", "-E", "occurrence=f",
            "-e", "frame.time_epoch", "-e", "ip.src", "-e", "udp.length"]  # fmt: skip
     rows = []

@@ -1,4 +1,4 @@
-"""Security-key diagnostics for setup (`avpn setup`): exact checks, typed findings, repairs
+"""Security-key diagnostics for setup (`cypherpunk setup`): exact checks, typed findings, repairs
 only by plan and confirmation.
 
 What it checks, in order, from what the system itself reports:
@@ -9,7 +9,7 @@ What it checks, in order, from what the system itself reports:
 3. A plugged-in Yubico device with no usable FIDO2 interface: only a vendor report can
    establish disabled USB FIDO2; absence alone never authorizes changing a device.
 4. For each openable key, without a PIN or a touch: CTAP2 support, the hmac-secret
-   extension (AVPN derives its keys from it), whether a PIN is set, and the PIN retries left.
+   extension (CYPHERPUNK derives its keys from it), whether a PIN is set, and the PIN retries left.
 
 Repairs are plans: what changes, the commands, whether root is needed and how to undo it.
 Nothing runs without explicit confirmation, and the caller checks again afterwards; success
@@ -76,12 +76,12 @@ def rank(vendor, product, on_device):
     return tier, (1 if firmware == "open" else 3) + (0 if on_device else 1)
 
 
-UDEV_RULE_PATH = "/etc/udev/rules.d/70-avpn-security-keys.rules"
+UDEV_RULE_PATH = "/etc/udev/rules.d/70-cpvpn-security-keys.rules"
 # Reclassify FIDO HID interfaces if the distribution's classification rule is absent.
 # Wallet access is restricted to the FIDO interface: never grant their wallet APDU
 # interface, group-wide access or world-writable device permissions.
 UDEV_RULE = (
-    "# AVPN: local-session access to recognized security-key interfaces\n"
+    "# CYPHERPUNK: local-session access to recognized security-key interfaces\n"
     'KERNEL=="hidraw*", SUBSYSTEM=="hidraw", IMPORT{program}="fido_id"\n'
     'KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ATTRS{idVendor}=="20a0", ATTRS{idProduct}=="42b1|42b2", TAG+="uaccess"\n'
     'KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1050", TAG+="uaccess"\n'
@@ -344,7 +344,7 @@ def diagnose(devices, usb, probe=ctap_probe, management=yubikey_info):
             else:
                 findings.append(Finding(
                     "permission_denied", "blocker",
-                    f"The {name} is there, but this system does not let you open it. Installing AVPN's "
+                    f"The {name} is there, but this system does not let you open it. Installing CYPHERPUNK's "
                     "device rule gives the signed-in user access to supported keys.",
                     d.node, dict(vendor=d.vendor, product=d.product),
                     "install_udev_rule" if key_name(d.vendor, d.product) else None,
@@ -366,13 +366,13 @@ def diagnose(devices, usb, probe=ctap_probe, management=yubikey_info):
                 ("The Ledger currently offers only U2F. Unlock it and open the Security Key app, then check again. "
                  "Do not reset the wallet or enter its recovery phrase."
                  if d.vendor == LEDGER else
-                 f"The {name} only speaks the old U2F protocol. AVPN needs a FIDO2 key."), d.node, base,
+                 f"The {name} only speaks the old U2F protocol. CYPHERPUNK needs a FIDO2 key."), d.node, base,
             ))  # fmt: skip
             continue
         if not p.get("hmac_secret"):
             findings.append(Finding(
                 "no_hmac_secret", "blocker",
-                f"The {name} does not offer hmac-secret, which AVPN uses to protect your keys. "
+                f"The {name} does not offer hmac-secret, which CYPHERPUNK uses to protect your keys. "
                 "This key cannot be used.", d.node, base,
             ))  # fmt: skip
             continue
@@ -380,7 +380,7 @@ def diagnose(devices, usb, probe=ctap_probe, management=yubikey_info):
         if not p.get("pin_set") and not uv:
             findings.append(Finding(
                 "pin_not_set", "blocker",
-                f"The {name} has no PIN yet. Set one with the key's own tool; AVPN never asks for your PIN "
+                f"The {name} has no PIN yet. Set one with the key's own tool; CYPHERPUNK never asks for your PIN "
                 "in its window.", d.node, base,
             ))  # fmt: skip
             continue
@@ -389,7 +389,7 @@ def diagnose(devices, usb, probe=ctap_probe, management=yubikey_info):
             findings.append(Finding(
                 "pin_blocked", "blocker",
                 f"The {name}'s PIN is blocked. Only a reset helps, and a reset deletes every credential on "
-                "the key, so it is your decision, not a repair AVPN makes.", d.node, base,
+                "the key, so it is your decision, not a repair CYPHERPUNK makes.", d.node, base,
             ))  # fmt: skip
             continue
         if retries is not None and retries <= LOW_PIN_RETRIES:

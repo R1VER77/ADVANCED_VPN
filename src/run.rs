@@ -68,7 +68,7 @@ impl Budget {
         true
     }
 }
-/// Constant-cell padding (`avpn help threat-model`), always on. Every datagram on every
+/// Constant-cell padding (`cypherpunk help threat-model`), always on. Every datagram on every
 /// hop is framed `[len: u16 big-endian][payload][zero padding]` up to the layer's `cell`
 /// size, so the real packet size never shows on the wire — not just on the first hop,
 /// the way DAITA alone would leave it. The receiver reads `len` and ignores the padding.
@@ -103,7 +103,7 @@ fn cell_size(layer_payload: usize) -> usize {
     layer_payload - CELL_RESERVE
 }
 
-/// Test-only: when `AVPN_CELL_AUDIT` names a path, every process records the distinct
+/// Test-only: when `CPVPN_CELL_AUDIT` names a path, every process records the distinct
 /// datagram payload sizes it sends to `<path>.<role>.<pid>`. The namespace lab asserts that
 /// under constant-cell padding each hop's set collapses to one size — which catches any
 /// send path that forgot to pad, not just the padding helper in isolation. No file, no
@@ -114,7 +114,7 @@ fn audit(role: &str, len: usize) {
     static SEEN: std::sync::Mutex<
         Option<std::collections::BTreeMap<String, std::collections::BTreeSet<usize>>>,
     > = std::sync::Mutex::new(None);
-    if let Some(path) = std::env::var_os("AVPN_CELL_AUDIT") {
+    if let Some(path) = std::env::var_os("CPVPN_CELL_AUDIT") {
         let mut guard = SEEN.lock().unwrap();
         let seen = guard.get_or_insert_with(Default::default);
         if seen.entry(role.to_string()).or_default().insert(len) {

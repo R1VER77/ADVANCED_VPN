@@ -1,10 +1,10 @@
 # Ethos-Preserving Revenue Architecture: Commercialization Blueprint for cypherpunk_vpn
 
 **Document Version:** 1.0.0  
-**Project:** `cypherpunk_vpn` (`ADVANCED_VPN`)  
-**Status:** Approved Architectural Blueprint  
+**Project:** `cypherpunk_vpn`  
+**Status:** Proposal (17 Nov 2026); the owner's decision is [D020](DECISIONS.md), the checkout design [PAID_CREDITS_CHECKOUT.md](PAID_CREDITS_CHECKOUT.md). Figures below are the proposal's own and are unverified.  
 **Date:** 17 November 2026  
-**License:** Apache-2.0  
+**License:** AGPL-3.0-or-later with commercial dual licensing ([LICENSE](../LICENSE))  
 
 ---
 
@@ -19,7 +19,7 @@ flowchart TD
     subgraph NonNegotiable["Non-Negotiable Cypherpunk Ethos"]
         P1["Zero Accounts & Zero KYC\n(No emails, user tables, or customer records)"]
         P2["Privacy by Construction\n(Cryptographically unlinked payment-to-traffic rails)"]
-        P3["Software Freedom\n(Core data plane & PQ crypto remain 100% Apache-2.0)"]
+        P3["Software Freedom\n(Core data plane & PQ crypto remain AGPL-3.0-or-later)"]
         P4["Hardware-Anchored Sovereignty\n(Keys sealed in user hardware; zero host custody)"]
         P5["No Anonymity Fee Traps\n(No custodial money transmission inside the mixnet)"]
     end
@@ -49,7 +49,7 @@ flowchart TD
 ### Model 1: Cryptographic Blind Vouchers & Privacy-Pass Subscriptions
 
 #### The Problem It Solves
-The public mesh requires members to contribute at least one relay-capable server (`avpn mesh offer`). However, non-technical consumers, mobile users, and high-risk individuals often lack the technical ability, credit card, or willingness to spin up an OCI or AWS cloud VPS.
+The public mesh requires members to contribute at least one relay-capable server (`cypherpunk mesh offer`). However, non-technical consumers, mobile users, and high-risk individuals often lack the technical ability, credit card, or willingness to spin up an OCI or AWS cloud VPS.
 
 #### Operational & Cryptographic Flow
 Instead of traditional accounts, users buy **unlinked cryptographic vouchers**:
@@ -77,7 +77,7 @@ sequenceDiagram
 ```
 
 #### Cryptographic Implementation Architecture
-* **Underlying Primitive:** Extends the existing Chaum blind RSA-FDH system in [`tools/mesh_tokens.py`](tools/mesh_tokens.py) and future VOPRF / lattice-based STARK membership proofs ([docs/ZK_MEMBERSHIP_DESIGN.md](ZK_MEMBERSHIP_DESIGN.md)).
+* **Underlying Primitive:** Extends the existing Chaum blind RSA-FDH system in [`tools/mesh_tokens.py`](../tools/mesh_tokens.py) and future VOPRF / lattice-based STARK membership proofs ([docs/ZK_MEMBERSHIP_DESIGN.md](ZK_MEMBERSHIP_DESIGN.md)).
 * **Double-Spend Prevention:** Relays maintain an in-memory bloom filter and persistent digest ledger of `SHA-256(T)`.
 * **Epoch Keys:** Issuer keys rotate every 30 days (`EPOCH_SECONDS = 86400 * 30`). Expired tokens expire cleanly without tracking users.
 
@@ -127,7 +127,7 @@ Hardware-backed identity (`!xxxxxxxx`), FIDO2 `hmac-secret` key custody, and ope
 ### Model 3: Zero-Knowledge Sovereign Multi-Cloud Fleet Automation ("Sovereign Fleet SaaS")
 
 #### The Problem It Solves
-Single-operator sovereign chains ([docs/COMPARISON.md](COMPARISON.md) §1) require setting up 3 VPS instances across 3 distinct cloud providers in 3 different legal jurisdictions (e.g., Entry in Iceland, Middle in Switzerland, Exit in Finland). While [`tools/cloud.py`](tools/cloud.py) automates the commands, managing multi-cloud provider accounts and security policies remains an operational hurdle.
+Single-operator sovereign chains ([docs/COMPARISON.md](COMPARISON.md) §1) require setting up 3 VPS instances across 3 distinct cloud providers in 3 different legal jurisdictions (e.g., Entry in Iceland, Middle in Switzerland, Exit in Finland). While [`tools/cloud.py`](../tools/cloud.py) automates the commands, managing multi-cloud provider accounts and security policies remains an operational hurdle.
 
 #### The Zero-Knowledge Concierge Architecture
 A managed subscription service ($19 to $49/month) where the user clicks "Provision Sovereign Chain":
@@ -170,7 +170,7 @@ flowchart LR
 * Crypto protocol core teams, high-value decentralized treasuries, and family offices.
 
 #### Product Offering
-* **Private Mesh Enclaves:** Custom deployment of private group meshes ([docs/MESH_DESIGN.md](docs/MESH_DESIGN.md) §5) sharing a cryptographically isolated group key. Team members' traffic never touches public relays; it traverses private, dedicated, unlisted DAITA relays.
+* **Private Mesh Enclaves:** Custom deployment of private group meshes ([docs/MESH_DESIGN.md](MESH_DESIGN.md) §5) sharing a cryptographically isolated group key. Team members' traffic never touches public relays; it traverses private, dedicated, unlisted DAITA relays.
 * **Continuous Adversarial Red-Teaming:** Incorporates the project's automated website fingerprinting harnesses (`tools/wf_attack.py`, `tools/gpa.py`) to benchmark and audit the organization's network traffic against correlation attacks.
 * **Commercial Support & SLAs:**
   * 24/7 incident response for network blocking and censorship events.
@@ -196,14 +196,14 @@ flowchart LR
 | **Mozilla Technology Fund** | Privacy & Open Source | AI-resistant traffic analysis defenses and fingerprinting countermeasures | $25,000 – $75,000 |
 
 #### Governance Alignment
-Per [docs/FUNDING.md](FUNDING.md), all grants are publicly disclosed in the voluntary funding record. Grants are non-dilutive, impose no commercial constraints, and require zero compromises on Apache-2.0 open licensing.
+Per [docs/FUNDING.md](FUNDING.md), all grants are publicly disclosed in the voluntary funding record. Grants are non-dilutive, impose no commercial constraints, and require zero compromises on AGPL-3.0-or-later open licensing.
 
 ---
 
 ### Model 6: Oblivious L402 / Cashu Exit Bandwidth Micropayment Settlement
 
 #### The Problem It Solves
-Exit nodes incur real monthly bandwidth and transit costs. The community mesh ([docs/MESH_DESIGN.md](docs/MESH_DESIGN.md)) relies on voluntary exit node operators who bear these costs.
+Exit nodes incur real monthly bandwidth and transit costs. The community mesh ([docs/MESH_DESIGN.md](MESH_DESIGN.md)) relies on voluntary exit node operators who bear these costs.
 
 #### Protocol Flow
 * **HTTP 402 / L402 Protocol:** When a client routes egress traffic through an exit node, the exit node challenges high-volume requests with an L402 token challenge.

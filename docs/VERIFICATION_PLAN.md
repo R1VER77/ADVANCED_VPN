@@ -13,7 +13,7 @@ the abstraction its model states: `formal/README.md` lists what each model leave
 which lemmas rest on an assumption. The ProVerif equivalences (ohttp and credit
 unlinkability) are proved in the same CI job (`tools/proverif_check.py`, results in
 `docs/evidence/PROVERIF.json`). Kani proves the link's replay window and reply credit on the
-code itself (`src/link_bounds.rs` via `crates/avpn-kani`, CI job `kani`), and every parser of
+code itself (`src/link_bounds.rs` via `crates/cpvpn-kani`, CI job `kani`), and every parser of
 outside bytes is fuzzed (`fuzz/`, coverage-guided, CI job `fuzz`; `tools/test_parser_fuzz.py`
 for the Python ones). Still planned: the live Rust vectors for items 1–2. Nothing in the
 documentation may claim a property from this list until its model and its gates are in CI.
@@ -126,10 +126,10 @@ colluding member, exact decoding while the honest pair's pad becomes derivable. 
   rounds through the MAC.
 - The claim stays computational (PRG pads), never information-theoretic.
 
-### 8. Option E's re-blinding (`crates/avpn-mix-lane`, design §2.3)
+### 8. Option E's re-blinding (`crates/cpvpn-mix-lane`, design §2.3)
 
 The one non-standard construction in the option E header: the entry hop removes an XOR
-pad from hop 2's X25519 element. Model: `crates/avpn-mix-lane/tamarin/pq_sphinx_reblind.spthy`
+pad from hop 2's X25519 element. Model: `crates/cpvpn-mix-lane/tamarin/pq_sphinx_reblind.spthy`
 (rewritten 15 Nov 2026: the pack's file was a skeleton that did not parse).
 
 - **Proved (Tamarin, in CI):** an observer of the entry link never learns hop 2's element

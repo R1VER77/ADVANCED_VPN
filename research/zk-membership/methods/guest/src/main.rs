@@ -2,8 +2,8 @@
 //! (a STARK).
 //!
 //! Every member of a tree enrols at the tree's start epoch E0 with a random `s0` and
-//! registers `leaf = SHA-256("avpn/member/v2" || H^N(s0))`, where
-//! `H(x) = SHA-256("avpn/fp-step/v1" || x)` and N is the tree's lifetime in epochs. In
+//! registers `leaf = SHA-256("cpvpn/member/v2" || H^N(s0))`, where
+//! `H(x) = SHA-256("cpvpn/fp-step/v1" || x)` and N is the tree's lifetime in epochs. In
 //! epoch E0 + k the member holds only `x_k = H^k(s0)`; at each epoch change it computes
 //! `x_{k+1} = H(x_k)` and erases `x_k`.
 //!
@@ -11,7 +11,7 @@
 //! purpose ("scope"), the nullifier and the action it authorizes. The statement:
 //!
 //!   0 <= k = epoch - E0 <= N;  folding H^(N - k)(x_k) into a leaf and up the path gives
-//!   `root`;  nullifier = SHA-256("avpn/nullifier/v2" || x_k || epoch || scope).
+//!   `root`;  nullifier = SHA-256("cpvpn/nullifier/v2" || x_k || epoch || scope).
 //!
 //! Forward privacy: a device seized in epoch E0 + k gives up `x_k` and everything after it,
 //! never an earlier `x_j` (j < k), which is a preimage of `x_k` under SHA-256. So nullifiers
@@ -46,16 +46,16 @@ fn main() {
     assert!(epoch >= start && epoch - start <= lifetime, "epoch outside the tree's lifetime");
     let mut top = x;
     for _ in 0..(lifetime - (epoch - start)) {
-        top = h(&[b"avpn/fp-step/v1", &top]);
+        top = h(&[b"cpvpn/fp-step/v1", &top]);
     }
-    let mut node = h(&[b"avpn/member/v2", &top]);
+    let mut node = h(&[b"cpvpn/member/v2", &top]);
     for (sibling, right) in &path {
         node = if *right {
-            h(&[b"avpn/node/v1", &node, sibling])
+            h(&[b"cpvpn/node/v1", &node, sibling])
         } else {
-            h(&[b"avpn/node/v1", sibling, &node])
+            h(&[b"cpvpn/node/v1", sibling, &node])
         };
     }
-    let nullifier = h(&[b"avpn/nullifier/v2", &x, &epoch.to_be_bytes(), &scope]);
+    let nullifier = h(&[b"cpvpn/nullifier/v2", &x, &epoch.to_be_bytes(), &scope]);
     env::commit(&(node, lifetime, start, epoch, scope, nullifier, action));
 }

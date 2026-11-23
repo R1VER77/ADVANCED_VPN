@@ -43,14 +43,14 @@ GitHub Actions provenance, an independent security audit or physical qualificati
 
 ## Corrections required before protocol promotion
 
-1. **Website-fingerprinting evidence.** `avpn_test_wf.py` generates every shaped trace
+1. **Website-fingerprinting evidence.** `cpvpn_test_wf.py` generates every shaped trace
    as the same fixed-duration, fixed-size grid and its feature extractor discards the
    real/decoy indicators. Equal observables are built into that model. No production
    transport, OS scheduler, link loss, retransmission, page-completion duration or
    payload queue is measured. Accuracy around the 1% chance level and a computed
    0% count delta therefore do not prove live immunity. Keep the positive-control,
    failure-retention, grouped uncertainty and cross-environment gates in the main plan.
-2. **PIR scope.** `avpn_test_pir.py` implements uncompressed XOR queries to two local
+2. **PIR scope.** `cpvpn_test_pir.py` implements uncompressed XOR queries to two local
    array evaluations. DPF bandwidth is an analytical comparison, not an implemented
    DPF protocol. The seeded NumPy RNG is a reproducibility fixture, not secret query
    randomness. A deployed construction needs a CSPRNG; information-theoretic query
@@ -65,7 +65,7 @@ GitHub Actions provenance, an independent security audit or physical qualificati
    amount/spend binding. The current dual-anchor script times operations; it does
    not implement or attack a working voucher protocol. [RFC 9497](https://www.rfc-editor.org/rfc/rfc9497.html)
    defines the prime-order-group VOPRF; the stronger proposed combiner needs its own analysis.
-4. **VOPRF timing.** `avpn_test_dualanchor.py` uses X25519 operations as a Ristretto
+4. **VOPRF timing.** `cpvpn_test_dualanchor.py` uses X25519 operations as a Ristretto
    proxy, an assumed 1.25 multiplier, and separate SHA-3/HMAC timings. Its reported
    full-with-DLEQ band is 246.7 microseconds, above the headline 150-microsecond
    target; this is still an estimate rather than an actual RFC 9497 implementation.

@@ -28,7 +28,7 @@ if [ "$install_mode" = 1 ] && [ "$removal" = 0 ]; then
         exit 1
     fi
     if [ "$operator_only" = 1 ]; then
-        "$preflight" --package "$package_dir" --target "${XDG_DATA_HOME:-$HOME/.local/share}/advanced-vpn" --operator-only
+        "$preflight" --package "$package_dir" --target "${XDG_DATA_HOME:-$HOME/.local/share}/cypherpunk-vpn" --operator-only
     elif [ "$package_managed" = 1 ]; then
         # Inside apt: one line when the checks pass, the full report only when they do not.
         if report=$("$preflight" --package "$package_dir" --target /opt --protect "$protection"); then

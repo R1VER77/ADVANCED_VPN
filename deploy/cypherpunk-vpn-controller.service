@@ -5,7 +5,7 @@ After=dbus.service
 [Service]
 Type=dbus
 BusName=org.cypherpunk_vpn.Controller1
-ExecStart=/opt/advanced-vpn/bin/cypherpunk-controller
+ExecStart=/opt/cypherpunk-vpn/bin/cypherpunk-controller
 UMask=0077
 NoNewPrivileges=yes
 CapabilityBoundingSet=CAP_NET_ADMIN CAP_SETPCAP CAP_SETUID CAP_SETGID CAP_CHOWN CAP_DAC_OVERRIDE CAP_KILL

@@ -112,7 +112,7 @@ class TableTests(unittest.TestCase):
 
     def test_claim_format_attached(self):
         table = st.build_table([])
-        self.assertIn("avpn stream-check", table["claim"])
+        self.assertIn("cypherpunk stream-check", table["claim"])
         self.assertIn("No blanket", table["claim"])
 
     def test_version_pinned(self):

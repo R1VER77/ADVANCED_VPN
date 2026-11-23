@@ -1,5 +1,5 @@
 [package]
-name = "advanced-vpn-fuzz"
+name = "cypherpunk-vpn-fuzz"
 version = "0.0.0"
 edition = "2024"
 license = "AGPL-3.0-or-later"
@@ -8,12 +8,12 @@ publish = false
 [package.metadata]
 cargo-fuzz = true
 
-# Its own root, like crates/avpn-kani: fuzzing builds never touch the main workspace.
+# Its own root, like crates/cpvpn-kani: fuzzing builds never touch the main workspace.
 [workspace]
 
 [dependencies]
 libfuzzer-sys = "=0.4.10"
-advanced-vpn = { path = ".." }
+cypherpunk-vpn = { path = ".." }
 serde_json = "=1.0.154"
 
 [[bin]]

@@ -27,7 +27,7 @@ p = argparse.ArgumentParser()
 p.add_argument("--out", type=Path, required=True)
 p.add_argument("--dark", action="store_true")
 p.add_argument("--url", default="http://localhost:5173")
-p.add_argument("--geckodriver", default=str(Path.home() / "vm/advanced-vpn/wf-real/tools/geckodriver"))
+p.add_argument("--geckodriver", default=str(Path.home() / "vm/cypherpunk-vpn/wf-real/tools/geckodriver"))
 a = p.parse_args()
 a.out.mkdir(parents=True, exist_ok=True)
 

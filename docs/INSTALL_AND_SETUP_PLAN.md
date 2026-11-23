@@ -8,7 +8,7 @@ into the main local tree. Installed host binaries/services were not upgraded. Pi
 offline runtime tarballs and guarded inactive removal are now implemented; clean-VM
 evidence and limits are linked from [offline installation](OFFLINE_INSTALLATION.md).
 Native packages, the apt repository, OpenTofu and vendor-library migration remain open.
-Names follow the CYPHERPUNK_VPN rename when it lands (`avpn` becomes `cypherpunk`);
+Names follow the CYPHERPUNK_VPN rename when it lands (`cypherpunk` becomes `cypherpunk`);
 nothing here depends on the old name.
 
 ## Goals
@@ -24,16 +24,16 @@ nothing here depends on the old name.
 
 | Piece | Where | State |
 |---|---|---|
-| Data plane, `avpn` command | Rust, `src/` | Release tarball, x86_64, glibc ≥ 2.35 (built on Ubuntu 22.04) |
-| Controller, cloud, enrollment | Python, `tools/` | Runs in a hash-locked venv at `/opt/advanced-vpn/venv` |
+| Data plane, `cypherpunk` command | Rust, `src/` | Release tarball, x86_64, glibc ≥ 2.35 (built on Ubuntu 22.04) |
+| Controller, cloud, enrollment | Python, `tools/` | Runs in a hash-locked venv at `/opt/cypherpunk-vpn/venv` |
 | Installer | `tools/install.py` | Runtime-bearing tarballs use bundled Python and offline dependencies; source/legacy installation still needs host Python ≥ 3.10 with `venv` and may fetch PyPI packages |
-| Post-install self-check | `avpnctl.doctor()` (`avpn doctor`) | Checks `ip`, `nft`, `mount` and `systemctl`, the PQ library, keys, enrollment, units and the kill-switch table |
+| Post-install self-check | `cypherpunkctl.doctor()` (`cypherpunk doctor`) | Checks `ip`, `nft`, `mount` and `systemctl`, the PQ library, keys, enrollment, units and the kill-switch table |
 | Cloud | `tools/cloud.py`, `providers.py` | Creates servers on AWS and OCI through their CLIs; Azure, GCP and own servers are joined over SSH (`cloud host add/setup`) |
 | Security keys | `tools/hwkey.py`, `tools/setup_flow.py`, `tools/setup_cli.py` | Implemented and integrated: typed diagnostics, confirmed repairs and current-evidence resumable setup; physical four-device evidence in `docs/evidence/SETUP_HARDWARE_20261117.json` |
 
 What the host must actually provide, read from the code rather than assumed:
 - `/dev/net/tun` (`src/tun.rs`). WireGuard runs in user space (GotaTun), so no kernel module.
-- `nft` and the kernel's nf_tables (kill switch, `avpnctl.nft`).
+- `nft` and the kernel's nf_tables (kill switch, `cypherpunkctl.nft`).
 - `ip` (iproute2), `mount`, `systemctl`; `resolvectl` when systemd-resolved manages DNS.
 - seccomp (required: the sandbox refuses an unsupported architecture). Landlock is best effort: without it the filesystem stays open, so this is a warning, not a blocker.
 - systemd ≥ 250 only for `--protect systemd-creds`. Ubuntu 22.04 has 249 (known bug 9).
@@ -45,7 +45,7 @@ What the host must actually provide, read from the code rather than assumed:
 ## Decisions
 
 - **Language:** keep the split.
-  - Rust: the `avpn` command and network data plane.
+  - Rust: the `cypherpunk` command and network data plane.
   - Python: orchestration and the privileged controller, shipped with its own interpreter
     (python-build-standalone, pinned by sha256). The runtime-bearing package removes the
     host-Python dependency; Python remains part of the privileged trusted code base.
@@ -69,7 +69,7 @@ What the host must actually provide, read from the code rather than assumed:
 
 ## Phases
 
-### Phase 1: `avpn preflight` (built first)
+### Phase 1: `cypherpunk preflight` (built first)
 The host checks needed *before* installing, as typed findings in the style of `hwkey.py`:
 each has a severity (blocker / warning / info), a plain-language reason, and a repair plan
 that is shown, never run silently.
@@ -92,7 +92,7 @@ Checks:
 | Other VPNs active (WireGuard interfaces, OpenVPN, NetworkManager VPNs) | Info: nothing is replaced, but routes may conflict |
 
 - **Missing packages:** mapped to the right package names for apt, dnf, pacman and zypper, and shown as one install command.
-- **Output:** a human summary, or `--json` for the `avpn` front end and the setup checklist.
+- **Output:** a human summary, or `--json` for the `cypherpunk` front end and the setup checklist.
 - **Shared with `doctor`:** the host checks live in one module, so before and after installation report the same facts the same way.
 - **Security-key and cloud-login checks** plug in through the same registry:
   - `hwkey.py`, implemented alongside this phase;
@@ -185,7 +185,7 @@ Acceptance:
 - **Order:** 1 → 2 → 3 → 4 → 5, and from 20 Nov phase 5 sets the target: phase 3 (OpenTofu,
   with the key work of phase 4 inside it) first, then the profile store and GUI, with Gemma
   leading throughout. Phase 1 needs no Rust build, so it can proceed during measurement runs.
-- **Rust builds** (phase 1b, the `avpn preflight` subcommand wiring) wait until the CPU-sensitive measurement on the build host has finished.
+- **Rust builds** (phase 1b, the `cypherpunk preflight` subcommand wiring) wait until the CPU-sensitive measurement on the build host has finished.
 - **`hwkey.py`, `setup_flow.py` and `setup_cli.py`** are consolidated in this branch. The
   preflight registry and controller use the same diagnostics; no separate session handoff
   or model is required for their operation.

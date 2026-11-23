@@ -28,7 +28,7 @@ class Workspace(unittest.TestCase):
 
     def make(self):
         return tofu_run.workspace(
-            "avpn-exit-x", "oci-server", dict(name="avpn-exit-x", port=4444), dict(profile="DEFAULT", region="r")
+            "cpvpn-exit-x", "oci-server", dict(name="cpvpn-exit-x", port=4444), dict(profile="DEFAULT", region="r")
         )
 
     def test_the_workspace_pins_the_provider_and_holds_no_secret(self):

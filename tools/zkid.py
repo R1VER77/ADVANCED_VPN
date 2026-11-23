@@ -4,7 +4,7 @@
 
 A member enrols into a tree with start epoch E0 and lifetime N: it draws s0 from hardware
 (kernel XOR Nitrokey, as padbook's contributions), registers
-leaf = SHA-256("avpn/member/v2" || H^N(s0)) with H(x) = SHA-256("avpn/fp-step/v1" || x),
+leaf = SHA-256("cpvpn/member/v2" || H^N(s0)) with H(x) = SHA-256("cpvpn/fp-step/v1" || x),
 and keeps only x_k = H^k(s0) for the current epoch E0 + k. Opening the store in a later
 epoch steps the secret forward and saves it before handing it out, so the stored file never
 again holds an earlier x: a device seized in epoch E0 + k gives up x_k and later secrets,
@@ -43,8 +43,8 @@ def h(*parts):
 
 
 def step(x):
-    """One epoch forward: H(x) = SHA-256("avpn/fp-step/v1" || x)."""
-    return h(b"avpn/fp-step/v1", x)
+    """One epoch forward: H(x) = SHA-256("cpvpn/fp-step/v1" || x)."""
+    return h(b"cpvpn/fp-step/v1", x)
 
 
 def walk(x, n):
@@ -55,8 +55,8 @@ def walk(x, n):
 
 
 def leaf(s0, lifetime):
-    """The commitment a member registers: SHA-256("avpn/member/v2" || H^N(s0))."""
-    return h(b"avpn/member/v2", walk(s0, lifetime))
+    """The commitment a member registers: SHA-256("cpvpn/member/v2" || H^N(s0))."""
+    return h(b"cpvpn/member/v2", walk(s0, lifetime))
 
 
 def leaf_from(x, epoch, start, lifetime):
@@ -64,14 +64,14 @@ def leaf_from(x, epoch, start, lifetime):
     k = epoch - start
     if not 0 <= k <= lifetime:
         raise ValueError("epoch outside the tree's lifetime")
-    return h(b"avpn/member/v2", walk(x, lifetime - k))
+    return h(b"cpvpn/member/v2", walk(x, lifetime - k))
 
 
 def nullifier(x, epoch, scope):
-    """SHA-256("avpn/nullifier/v2" || x || epoch (8 bytes, big-endian) || scope)."""
+    """SHA-256("cpvpn/nullifier/v2" || x || epoch (8 bytes, big-endian) || scope)."""
     if len(scope) != 32:
         raise ValueError("scope is 32 bytes")
-    return h(b"avpn/nullifier/v2", x, epoch.to_bytes(8, "big"), scope)
+    return h(b"cpvpn/nullifier/v2", x, epoch.to_bytes(8, "big"), scope)
 
 
 def epoch_now(now=None):

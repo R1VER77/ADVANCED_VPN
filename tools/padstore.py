@@ -42,7 +42,7 @@ def layer_salt(passphrase):
     """Hardware hmac-secret context; distinct from the unsupported v1 format."""
     if not passphrase:
         raise ValueError("a layer needs a passphrase")
-    return hashlib.sha256(b"advanced-vpn/padstore/v2|layer|" + passphrase.encode()).digest()
+    return hashlib.sha256(b"cypherpunk-vpn/padstore/v2|layer|" + passphrase.encode()).digest()
 
 
 def _slot_keys(layer_secret, salt):

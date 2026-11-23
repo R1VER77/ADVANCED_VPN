@@ -1,4 +1,4 @@
-//! DC-net control channel for AVPN/Mesh — see `docs/DCNET_CONTROL_DESIGN.md`.
+//! DC-net control channel for CPVPN/Mesh — see `docs/DCNET_CONTROL_DESIGN.md`.
 //!
 //! Scope of this module: round core, frame codec, one-time pad books, group
 //! aggregation and decoding. Making, sealing and delivering the books
@@ -1014,11 +1014,11 @@ mod tests {
     /// from padbook's books, frames over UDP) through this module: from the pads each
     /// member took, `CellPads` must give the body it broadcast, and `group_sum` over the
     /// round's frames the outcome every member decoded. Run by the lab with
-    /// AVPN_DCNET_TRACE set; ignored otherwise.
+    /// CPVPN_DCNET_TRACE set; ignored otherwise.
     #[test]
     #[ignore]
     fn a_recorded_cell_run_matches_the_rust_cell() {
-        let path = std::env::var("AVPN_DCNET_TRACE").expect("AVPN_DCNET_TRACE: a lab trace");
+        let path = std::env::var("CPVPN_DCNET_TRACE").expect("CPVPN_DCNET_TRACE: a lab trace");
         let t: serde_json::Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
         let n = t["members"].as_u64().unwrap() as usize;
         let first = t["first_round"].as_u64().unwrap();

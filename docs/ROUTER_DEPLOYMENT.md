@@ -40,7 +40,7 @@ its two named production consumers.
 The single-operator mode is naturally router-shaped: headless, systemd
 units, no GUI. The deployment is OpenWrt-first:
 
-1. **Stage 1 — OpenWrt package.** `avpn` as an OpenWrt package (opkg),
+1. **Stage 1 — OpenWrt package.** `cypherpunk` as an OpenWrt package (opkg),
    built by the existing aarch64 musl cross-build, installing the same
    systemd-less unit shape the offline installer already supports
    (the pinned-runtime design from
@@ -59,7 +59,7 @@ units, no GUI. The deployment is OpenWrt-first:
 
 AircoveOS's groups — each device in **VPN** (with a chosen exit),
 **No VPN**, or **No internet** — are a routing primitive this
-project's model already half-has: `avpn run` is per-*application* on a
+project's model already half-has: `cypherpunk run` is per-*application* on a
 laptop; a router needs per-*device*. The mapping:
 
 - A **group** is a named set of devices (by MAC or DHCP reservation)
@@ -104,7 +104,7 @@ project's existing security posture rather than inventing new trust:
   release key (the same hybrid Ed25519 + ML-DSA-65 signatures
   enrollment bundles use); the router verifies the signature before
   applying anything. No third-party updater, no vendor cloud.
-- **When:** manual by default (`avpn update` on the router checks,
+- **When:** manual by default (`cypherpunk update` on the router checks,
   verifies, applies, and *refuses removal beneath a guard* — D006's
   rule). An automatic overnight window (`--auto 04:00`) is opt-in per
   the Aircove pattern, off out of the box.
@@ -134,5 +134,5 @@ is the last mile and is owner-side, listed in the delivery manifest.
 
 No hardware product, no firmware fork, no ExpressVPN-style cloud
 management. The router runs the same pinned, signed, offline-first
-software a laptop runs, one `avpn` CLI at a time — the GUI (gap #2)
+software a laptop runs, one `cypherpunk` CLI at a time — the GUI (gap #2)
 renders the same typed controller checks over the same bridge.

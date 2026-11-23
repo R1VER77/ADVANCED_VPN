@@ -18,8 +18,8 @@ terraform {
 variable "name" {
   type = string
   validation {
-    condition     = can(regex("^avpn-[a-z0-9-]{1,35}$", var.name))
-    error_message = "name must start with avpn- and use a-z, 0-9 and -."
+    condition     = can(regex("^cpvpn-[a-z0-9-]{1,35}$", var.name))
+    error_message = "name must start with cpvpn- and use a-z, 0-9 and -."
   }
 }
 variable "location" { type = string }
@@ -51,7 +51,7 @@ variable "address_space" {
 }
 
 locals {
-  tags = { "avpn-managed" = "true", "avpn-name" = var.name }
+  tags = { "cpvpn-managed" = "true", "cpvpn-name" = var.name }
 }
 
 resource "azurerm_resource_group" "this" {
@@ -91,7 +91,7 @@ resource "azurerm_network_security_group" "this" {
     destination_port_range     = tostring(var.port)
     source_address_prefixes    = var.tunnel_sources
     destination_address_prefix = "*"
-    description                = "ADVANCED_VPN previous hop"
+    description                = "cypherpunk_vpn previous hop"
   }
   dynamic "security_rule" {
     for_each = var.tcp_fallback ? [1] : []
@@ -105,7 +105,7 @@ resource "azurerm_network_security_group" "this" {
       destination_port_range     = tostring(var.port)
       source_address_prefixes    = var.tunnel_sources
       destination_address_prefix = "*"
-      description                = "ADVANCED_VPN camouflage TLS fallback"
+      description                = "cypherpunk_vpn camouflage TLS fallback"
     }
   }
   security_rule {

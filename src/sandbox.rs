@@ -204,7 +204,7 @@ mod tests {
                 "--test-threads",
                 "1",
             ])
-            .env("AVPN_SANDBOX_PROBE", probe)
+            .env("CPVPN_SANDBOX_PROBE", probe)
             .output()
             .unwrap();
         String::from_utf8_lossy(&out.stdout).into_owned()
@@ -212,12 +212,12 @@ mod tests {
 
     #[test]
     fn child() {
-        let Ok(probe) = std::env::var("AVPN_SANDBOX_PROBE") else {
+        let Ok(probe) = std::env::var("CPVPN_SANDBOX_PROBE") else {
             return;
         };
         let dir =
-            PathBuf::from(std::env::var("AVPN_SANDBOX_DIR").unwrap_or_else(|_| "/tmp".into()));
-        let writable = std::env::temp_dir().join(format!("avpn-sandbox-{}", std::process::id()));
+            PathBuf::from(std::env::var("CPVPN_SANDBOX_DIR").unwrap_or_else(|_| "/tmp".into()));
+        let writable = std::env::temp_dir().join(format!("cpvpn-sandbox-{}", std::process::id()));
         std::fs::create_dir_all(&writable).unwrap();
         let c = confine(&Policy::writing([writable.clone()])).unwrap();
         println!("landlock={}", c.landlock);
@@ -269,7 +269,7 @@ mod tests {
                 report(
                     "write-outside",
                     std::fs::write(
-                        dir.join(format!("avpn-escape-{}", std::process::id())),
+                        dir.join(format!("cpvpn-escape-{}", std::process::id())),
                         b"x",
                     ),
                 );

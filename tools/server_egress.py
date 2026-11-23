@@ -2,7 +2,7 @@
 
 Two tables, both `inet` (every rule covers IPv4 and IPv6):
 
-- `advanced_vpn_egress` (watched: restored if anyone alters it). Inbound: drop unless it
+- `cypherpunk_vpn_egress` (watched: restored if anyone alters it). Inbound: drop unless it
   is loopback or the tunnels, an established flow, the chain's own ports, SSH, DHCP, or
   the ICMP/ICMPv6 a network needs (errors, packet-too-big, neighbour discovery with
   hop limit 255; no echo, so a server stays silent to scanners). Outbound: drop unless
@@ -10,11 +10,11 @@ Two tables, both `inet` (every rule covers IPv4 and IPv6):
   provider's link-local metadata service (EC2 Instance Connect reads keys from it), or
   the ICMP a network needs. Forwarding: only what comes out of the exit's tunnel, and its
   replies. Nothing else on the host (update timers, agents, a stray process) can send.
-  A maintenance window (`avpn cloud host update`, or the supervisor's daily security
+  A maintenance window (`cypherpunk cloud host update`, or the supervisor's daily security
   update) lets root send too, still counted, and the users root's updates depend on:
   apt's download sandbox (`_apt`) and the system resolver. Without them the window was
   useless: apt's downloads and every name lookup are not root's, so updates hung.
-- `advanced_vpn_quota` (not watched: its counter moves; the supervisor reinstalls it from
+- `cypherpunk_vpn_quota` (not watched: its counter moves; the supervisor reinstalls it from
   the meter if it disappears). It runs after the egress table, so a packet the egress table
   drops never uses up allowance. One kernel quota on everything sent or forwarded past the
   tunnels: when the month's remaining allowance is spent, the kernel drops, with no
@@ -27,9 +27,9 @@ forwarded traffic, and so does its meter (an nftables counter), so the other wor
 neither use up the cap nor get cut off by it.
 """
 
-EGRESS_TABLE = "advanced_vpn_egress"
-QUOTA_TABLE = "advanced_vpn_quota"
-INTERNAL = ("lo", "avpn0", "avwg0")
+EGRESS_TABLE = "cypherpunk_vpn_egress"
+QUOTA_TABLE = "cypherpunk_vpn_quota"
+INTERNAL = ("lo", "cpvpn0", "cpwg0")
 SSH_REPLY_RATE = "1 mbytes/second"  # outside the quota; the cap's 10% margin covers it
 
 ICMP_IN = "destination-unreachable, time-exceeded, parameter-problem"
@@ -58,8 +58,8 @@ def ports(profile, cfg):
 
 
 def egress_rules(profile, cfg, service_uid, extra_uids=(), maintenance=False, lab_transit=False, maintenance_uids=()):
-    """The `advanced_vpn_egress` table for a dedicated server. `lab_transit` (namespace labs
-    only, `avpnctl --lab`): the namespace doubles as the lab's internet router, so plain
+    """The `cypherpunk_vpn_egress` table for a dedicated server. `lab_transit` (namespace labs
+    only, `cypherpunkctl --lab`): the namespace doubles as the lab's internet router, so plain
     transit between its non-tunnel interfaces is forwarded; never on a real server."""
     uids = [int(service_uid)] + [int(u) for u in extra_uids]
     if any(u <= 0 for u in uids[:1]):
@@ -75,7 +75,7 @@ def egress_rules(profile, cfg, service_uid, extra_uids=(), maintenance=False, la
     if lab_transit:
         forward += "  iifname != %s oifname != %s accept\n" % (internal, internal)
     if profile["role"] == "exit":
-        forward += '  iifname "avpn0" accept\n  oifname "avpn0" ct state established,related accept\n'
+        forward += '  iifname "cpvpn0" accept\n  oifname "cpvpn0" ct state established,related accept\n'
     return (
         "table inet %s {\n" % EGRESS_TABLE
         + " chain input { type filter hook input priority -120; policy drop;\n"
@@ -111,7 +111,7 @@ def egress_rules(profile, cfg, service_uid, extra_uids=(), maintenance=False, la
 
 
 def quota_rules(remaining, service_uid=None, shared=False):
-    """The `advanced_vpn_quota` table: everything leaving past the tunnels counts against
+    """The `cypherpunk_vpn_quota` table: everything leaving past the tunnels counts against
     `remaining` bytes (on a shared host: only the data plane's user and forwarded traffic)."""
     remaining = max(0, int(remaining))
     internal = _set('"%s"' % i for i in INTERNAL)

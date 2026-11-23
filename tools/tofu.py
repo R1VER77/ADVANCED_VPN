@@ -1,6 +1,6 @@
 """The pinned OpenTofu binary for cloud provisioning (docs/INSTALL_AND_SETUP_PLAN.md phase 3).
 
-Standard library only: `avpn cloud` runs under the system Python.
+Standard library only: `cypherpunk cloud` runs under the system Python.
 
 The pin was made once, by hand: the release's SHA256SUMS verified against its GPG
 signature by OpenTofu's signing key, whose fingerprint was cross-checked in OpenTofu's own
@@ -44,7 +44,7 @@ def pin(machine=None):
 def home():
     """Where the pinned binary lives (user data, outside ~/.cache, which cleaners empty)."""
     base = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share")
-    return base / "advanced-vpn" / "tofu" / VERSION
+    return base / "cypherpunk-vpn" / "tofu" / VERSION
 
 
 def extract_binary(archive, sha256):

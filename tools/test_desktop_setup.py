@@ -36,7 +36,7 @@ class FakeProcess:
         if code == 0:
             bundles = chain_dir / "bundles"
             bundles.mkdir(parents=True)
-            (bundles / "client.avpn").write_bytes(b"signed-bundle")
+            (bundles / "client.cpvpn").write_bytes(b"signed-bundle")
             (bundles / "operator.pub").write_bytes(b"operator-key")
             inv = json.loads(inventory.read_text())
             inv["chain"].update(bundles=str(bundles), hops=argv[argv.index("--order") + 1].split(","))
@@ -53,10 +53,10 @@ class DesktopSetup(unittest.TestCase):
         self.vault = self.home / "vault"
         self.vault.mkdir()
         (self.vault / "credential.json").write_text("{}")
-        self.inventory = self.home / "advanced-vpn" / "cloud.json"
+        self.inventory = self.home / "cypherpunk-vpn" / "cloud.json"
         self.inventory.parent.mkdir()
         resources = {
-            "avpn-relay": dict(
+            "cpvpn-relay": dict(
                 provider="aws",
                 profile="flashbots",
                 role="relay",
@@ -64,11 +64,11 @@ class DesktopSetup(unittest.TestCase):
                 ssh_key="k",
                 region="eu-north-1",
             ),
-            "avpn-flyexit": dict(provider="fly", catalog="fly", role="exit", public_ip="2001:db8::1"),
-            "avpn-home": dict(provider="ssh", role="exit", public_ip="198.51.100.7", ssh_key="k"),
-            "avpn-unbuilt": dict(provider="oci", catalog="oci", role="exit"),
+            "cpvpn-flyexit": dict(provider="fly", catalog="fly", role="exit", public_ip="2001:db8::1"),
+            "cpvpn-home": dict(provider="ssh", role="exit", public_ip="198.51.100.7", ssh_key="k"),
+            "cpvpn-unbuilt": dict(provider="oci", catalog="oci", role="exit"),
         }
-        chain = dict(hops=["avpn-relay", "avpn-flyexit"], created="x", bundles="", vault=str(self.vault))
+        chain = dict(hops=["cpvpn-relay", "cpvpn-flyexit"], created="x", bundles="", vault=str(self.vault))
         self.inventory.write_text(json.dumps(dict(schema=1, resources=resources, chain=chain)))
         patches = [mock.patch.dict(os.environ, XDG_CONFIG_HOME=str(self.home)),
                    mock.patch.object(cloud, "INVENTORY", self.inventory),
@@ -98,10 +98,10 @@ class DesktopSetup(unittest.TestCase):
         # The name is kept: a second read is the same profile.
         self.assertEqual(desktop_setup.state()["profile"]["name"], s["profile"]["name"])
         names = {x["name"]: x for x in s["servers"]}
-        self.assertEqual(set(names), {"avpn-relay", "avpn-flyexit", "avpn-home"})  # unbuilt is no hop
-        self.assertFalse(names["avpn-flyexit"]["first_hop_ok"])
-        self.assertEqual(names["avpn-home"]["provider"], "own")
-        self.assertEqual(names["avpn-relay"]["sphere"], "US")
+        self.assertEqual(set(names), {"cpvpn-relay", "cpvpn-flyexit", "cpvpn-home"})  # unbuilt is no hop
+        self.assertFalse(names["cpvpn-flyexit"]["first_hop_ok"])
+        self.assertEqual(names["cpvpn-home"]["provider"], "own")
+        self.assertEqual(names["cpvpn-relay"]["sphere"], "US")
         self.assertTrue(s["chain"]["operator_vault"])
 
     def test_providers_are_added_and_removed_only_from_the_fixed_list(self):
@@ -118,19 +118,19 @@ class DesktopSetup(unittest.TestCase):
     def test_build_refuses_out_of_contract_routes_before_running_anything(self):
         run = mock.Mock()
         for order, hours, reason in (
-            ("avpn-flyexit,avpn-relay", 8, "first_hop_needs_ipv4"),
-            ("avpn-relay,avpn-unbuilt", 8, "unknown_server"),
-            ("avpn-relay,--accept-cost", 8, "unknown_server"),
-            ("avpn-relay,avpn-relay", 8, "one_to_three_different_servers"),
-            ("avpn-relay,avpn-home,avpn-flyexit,avpn-x", 8, "one_to_three_different_servers"),
-            ("avpn-relay,avpn-flyexit", 7, "invalid_hours"),
+            ("cpvpn-flyexit,cpvpn-relay", 8, "first_hop_needs_ipv4"),
+            ("cpvpn-relay,cpvpn-unbuilt", 8, "unknown_server"),
+            ("cpvpn-relay,--accept-cost", 8, "unknown_server"),
+            ("cpvpn-relay,cpvpn-relay", 8, "one_to_three_different_servers"),
+            ("cpvpn-relay,cpvpn-home,cpvpn-flyexit,cpvpn-x", 8, "one_to_three_different_servers"),
+            ("cpvpn-relay,cpvpn-flyexit", 7, "invalid_hours"),
         ):
             with self.assertRaises(desktop_setup.Refused) as e:
                 desktop_setup.build(order, hours, Stdin(REQUEST), run)
             self.assertEqual(str(e.exception), reason)
         for raw in (b"", b"not json", json.dumps({"role": "exit"}).encode(), b"x" * (desktop_setup.MAX_REQUEST + 1)):
             with self.assertRaises(desktop_setup.Refused):
-                desktop_setup.build("avpn-relay,avpn-flyexit", 8, Stdin(raw), run)
+                desktop_setup.build("cpvpn-relay,cpvpn-flyexit", 8, Stdin(raw), run)
         run.assert_not_called()
 
     def test_build_runs_the_fixed_chain_command_and_returns_the_bundle(self):
@@ -142,14 +142,14 @@ class DesktopSetup(unittest.TestCase):
 
         out = io.StringIO()
         with mock.patch("sys.stdout", out):
-            code = desktop_setup.build("avpn-relay,avpn-flyexit", 6, Stdin(REQUEST), run)
+            code = desktop_setup.build("cpvpn-relay,cpvpn-flyexit", 6, Stdin(REQUEST), run)
         self.assertEqual(code, 0)
         argv = seen["argv"]
-        self.assertEqual(argv[argv.index("--order") + 1], "avpn-relay,avpn-flyexit")
+        self.assertEqual(argv[argv.index("--order") + 1], "cpvpn-relay,cpvpn-flyexit")
         self.assertEqual(argv[argv.index("--vault") + 1], str(self.vault))
         self.assertEqual(argv[argv.index("--hours-per-day") + 1], "6")
         self.assertNotIn("--accept-cost", argv)
-        self.assertEqual(seen["env"]["AVPN_PROGRESS"], "events")
+        self.assertEqual(seen["env"]["CPVPN_PROGRESS"], "events")
         request = Path(argv[argv.index("--client-request") + 1])
         self.assertEqual(request.read_bytes(), REQUEST)
         self.assertEqual(os.stat(request).st_mode & 0o777, 0o600)
@@ -165,7 +165,7 @@ class DesktopSetup(unittest.TestCase):
         out = io.StringIO()
         with mock.patch("sys.stdout", out):
             code = desktop_setup.build(
-                "avpn-relay,avpn-flyexit", 8, Stdin(REQUEST),
+                "cpvpn-relay,cpvpn-flyexit", 8, Stdin(REQUEST),
                 lambda argv, **kw: FakeProcess(argv, self.home / "chain", self.inventory, code=1),
             )  # fmt: skip
         self.assertEqual(code, 1)
@@ -189,7 +189,7 @@ class DesktopSetup(unittest.TestCase):
     def test_build_needs_the_operator_vault(self):
         (self.vault / "credential.json").unlink()
         with self.assertRaises(desktop_setup.Refused) as e:
-            desktop_setup.build("avpn-relay,avpn-flyexit", 8, Stdin(REQUEST), mock.Mock())
+            desktop_setup.build("cpvpn-relay,cpvpn-flyexit", 8, Stdin(REQUEST), mock.Mock())
         self.assertEqual(str(e.exception), "no_operator_vault")
 
     def test_check_records_the_answer_without_touching_other_providers(self):
@@ -209,16 +209,18 @@ class DesktopSetup(unittest.TestCase):
         run = mock.Mock()
         out = io.StringIO()
         with mock.patch("sys.stdout", out):
-            code = desktop_setup.build("avpn-relay,avpn-flyexit", 8, Stdin(REQUEST), run)
+            code = desktop_setup.build("cpvpn-relay,cpvpn-flyexit", 8, Stdin(REQUEST), run)
         self.assertEqual(code, 1)
         run.assert_not_called()  # no PIN prompt, no server touched
         event = json.loads(out.getvalue().splitlines()[-1])
-        self.assertEqual((event["error"], event["server"], event["profile"]), ("signed_out", "avpn-relay", "flashbots"))
+        self.assertEqual(
+            (event["error"], event["server"], event["profile"]), ("signed_out", "cpvpn-relay", "flashbots")
+        )
         self.assertEqual(self.asked[-1][-4:], ["--output", "json", "--region", "eu-north-1"])
 
     def test_sign_in_runs_the_browser_login_for_that_servers_profile_only(self):
         done = mock.Mock(return_value=mock.Mock(stdout="Updated profile flashbots", stderr=""))
-        r = desktop_setup.sign_in("avpn-relay", run=done)
+        r = desktop_setup.sign_in("cpvpn-relay", run=done)
         argv, kw = done.call_args
         self.assertEqual(argv[0], ["/usr/bin/aws", "login", "--profile", "flashbots", "--region", "eu-north-1"])
         self.assertNotIn("--remote", argv[0])  # the local callback: nothing is pasted
@@ -226,8 +228,8 @@ class DesktopSetup(unittest.TestCase):
         self.assertEqual((r["ready"], r["profile"]), (True, "flashbots"))
         self.signed_out.add("flashbots")
         failed = mock.Mock(return_value=mock.Mock(stdout="", stderr="Login was cancelled"))
-        self.assertEqual(desktop_setup.sign_in("avpn-relay", run=failed)["why"], "Login was cancelled")
-        for name, reason in (("avpn-flyexit", "sign_in_not_needed"), ("avpn-nope", "unknown_server"),
+        self.assertEqual(desktop_setup.sign_in("cpvpn-relay", run=failed)["why"], "Login was cancelled")
+        for name, reason in (("cpvpn-flyexit", "sign_in_not_needed"), ("cpvpn-nope", "unknown_server"),
                              ("--remote", "unknown_server")):  # fmt: skip
             with self.assertRaises(desktop_setup.Refused) as e:
                 desktop_setup.sign_in(name, run=done)

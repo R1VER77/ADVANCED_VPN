@@ -2,7 +2,7 @@
 
 The managed v0.2 interface is documented in the main README. The following is the original standalone QUIC prototype documentation; its missing-feature statements describe v0.1.
 
-# ADVANCED_VPN
+# cypherpunk_vpn
 
 Experimental Linux VPN in Rust: an end-to-end hybrid post-quantum tunnel carried through a separately authenticated cloud relay. The relay never terminates the inner encryption. This is a working local prototype, not an independently audited VPN service or a proof of anonymity.
 
@@ -34,7 +34,7 @@ uv pip install --python .venv/bin/python --require-hashes -r tools/hardware-requ
 
 # New isolated user, mount and network namespaces; new output directory required.
 # iproute2, ping, sysctl, nftables and /dev/net/tun must be available.
-unshare -Urnm python3 tools/namespace_test.py --state /tmp/advanced-vpn-test-01
+unshare -Urnm python3 tools/namespace_test.py --state /tmp/cypherpunk-vpn-test-01
 ```
 
 The lab refuses host-root execution or an inherited external interface. It creates a client underlay, relay, owned exit, destination and application namespace; only loopback and TUN exist in the application namespace. All network changes disappear with the isolated namespace tree. Synthetic credentials, logs and ciphertext captures stay in the private test directory; only sanitized evidence belongs in Git.
@@ -47,7 +47,7 @@ The lab exercises real hybrid handshakes, TUN traffic, an owned-exit NAT, MTU bo
 python3 tools/provision.py --out /private/new-vpn-state \
   --relay 192.0.2.10:4433 --exit 198.51.100.20:4444
 
-target/release/advanced-vpn --config /private/new-vpn-state/relay/config.json --check
+target/release/cypherpunk-vpn --config /private/new-vpn-state/relay/config.json --check
 ```
 
 Replace the documentation IPs with approved real endpoints. This writes separate `client/`, `relay/`, `exit/` and `offline/` directories. Deploy **only the matching peer directory**, with its configuration paths adjusted to the new absolute location. Never deploy the entire state root to a cloud relay. Two independent offline CAs prevent the outer authority from authorizing an inner peer. No CA private key is in a peer directory.
@@ -72,7 +72,7 @@ A relay needs no network-admin privileges. A client/exit requires an operator-pr
 .venv/bin/python tools/keyguard.py run \
   --vault /private/new-hardware-vault \
   --config /private/new-vpn-state/client/config.json \
-  --binary /absolute/path/to/advanced-vpn --check
+  --binary /absolute/path/to/cypherpunk-vpn --check
 ```
 
 Enrollment creates a separate non-discoverable FIDO2 credential, without resetting the token, changing its PIN or replacing other credentials. PIN entry uses local `pinentry`; user verification and presence are required. Hardware-derived material wraps keys using HKDF-SHA256 and AES-256-GCM, bound to the role, certificate and credential. The encrypted recovery copy is decrypted and checked before plaintext removal. Recovery credentials deliberately provide an alternative to the token and must remain offline.

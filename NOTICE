@@ -1,5 +1,5 @@
-ADVANCED_VPN
-Copyright 2026 ADVANCED_VPN contributors
+cypherpunk_vpn
+Copyright 2026 cypherpunk_vpn contributors
 
 Original application code is licensed under Apache-2.0. Dependency license
 obligations remain separate; Cargo.lock pins the dependency graph. Unmodified

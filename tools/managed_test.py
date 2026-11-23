@@ -43,7 +43,7 @@ CAPS = {
 
 def unit_capabilities():
     """The installed supervisor's CapabilityBoundingSet, read from the shipped unit."""
-    for line in (ROOT / "deploy/advanced-vpn.service").read_text().splitlines():
+    for line in (ROOT / "deploy/cypherpunk-vpn.service").read_text().splitlines():
         if line.startswith("CapabilityBoundingSet="):
             return {CAPS[c] for c in line.split("=", 1)[1].split()}
     raise RuntimeError("unit has no capability bounding set")
@@ -189,10 +189,10 @@ def main():
     # Constant-cell padding is always on. The data plane runs as an unprivileged
     # service UID, so its datagram-size audit must land somewhere that UID can write
     # (the state dir is root-owned 0700).
-    audit_dir = Path(tempfile.mkdtemp(prefix="avpn-cellaudit-"))
+    audit_dir = Path(tempfile.mkdtemp(prefix="cpvpn-cellaudit-"))
     audit_dir.chmod(0o777)
-    os.environ["AVPN_CELL_AUDIT"] = str(audit_dir / "cellaudit")
-    from avpnctl import lab_guard, identity_of, runtime_dir
+    os.environ["CPVPN_CELL_AUDIT"] = str(audit_dir / "cellaudit")
+    from cypherpunkctl import lab_guard, identity_of, runtime_dir
 
     lab_guard()
     if {r["ifname"] for r in json.loads(run("ip", "-j", "link").stdout)} != {"lo"}:
@@ -237,7 +237,7 @@ def main():
         vault=a.hardware_vault.resolve() if a.hardware_vault else None,
         operator=HardwareOperator(a.hardware_vault) if a.hardware_vault else None,
     )
-    bundles = [f.name for f in ops.glob("*.avpn")]
+    bundles = [f.name for f in ops.glob("*.cpvpn")]
     import zipfile
 
     for b in bundles:
@@ -291,7 +291,7 @@ def main():
     def manager(role, name=None, whole=False):
         args = [
             sys.executable,
-            ROOT / "tools/avpnctl.py",
+            ROOT / "tools/cypherpunkctl.py",
             "--state",
             state / (name or role),
             "--bin-dir",
@@ -306,7 +306,7 @@ def main():
     def app(code, ok=True, timeout=8):
         args = [
             sys.executable,
-            ROOT / "tools/avpnctl.py",
+            ROOT / "tools/cypherpunkctl.py",
             "--state",
             state / "client",
             "--lab",
@@ -484,7 +484,7 @@ def main():
         # brings the chain back (a lab runs uncapped without a cap file; a real server
         # refuses to start without one, and removing it while running keeps the last cap).
         import fee_guard
-        from avpnctl import runtime_dir as rdir
+        from cypherpunkctl import runtime_dir as rdir
 
         cap_path = fee_guard.paths(state / "relay")[0]
         relay_status = rdir(state / "relay", create=False) / "status.json"
@@ -571,8 +571,8 @@ def main():
         # table each time, within a few seconds.
 
         def app_table():
-            r = run("ip", "netns", "exec", "av-client", "ip", "netns", "exec", "avpn-app", "/usr/sbin/nft", "list",
-                    "table", "inet", "advanced_vpn", check=False)  # fmt: skip
+            r = run("ip", "netns", "exec", "av-client", "ip", "netns", "exec", "cpvpn-app", "/usr/sbin/nft", "list",
+                    "table", "inet", "cypherpunk_vpn", check=False)  # fmt: skip
             return r.stdout if r.returncode == 0 else None
 
         def restored_within(expected, limit=8):
@@ -589,12 +589,12 @@ def main():
 
         expected_table = app_table()
         assert expected_table and "policy drop" in expected_table, expected_table
-        run("ip", "netns", "exec", "av-client", "ip", "netns", "exec", "avpn-app", "/usr/sbin/nft", "delete", "table",
-            "inet", "advanced_vpn")  # fmt: skip
+        run("ip", "netns", "exec", "av-client", "ip", "netns", "exec", "cpvpn-app", "/usr/sbin/nft", "delete", "table",
+            "inet", "cypherpunk_vpn")  # fmt: skip
         assert app_table() is None
         restore_deleted = restored_within(expected_table)
-        run("ip", "netns", "exec", "av-client", "ip", "netns", "exec", "avpn-app", "/usr/sbin/nft", "insert", "rule",
-            "inet", "advanced_vpn", "output", "accept")  # fmt: skip
+        run("ip", "netns", "exec", "av-client", "ip", "netns", "exec", "cpvpn-app", "/usr/sbin/nft", "insert", "rule",
+            "inet", "cypherpunk_vpn", "output", "accept")  # fmt: skip
         assert app_table() != expected_table
         restore_altered = restored_within(expected_table)
         marker = "PRIVATE-MANAGED-" + os.urandom(16).hex()
@@ -685,7 +685,7 @@ def main():
             "exec",
             "av-client",
             sys.executable,
-            str(ROOT / "tools/avpnctl.py"),
+            str(ROOT / "tools/cypherpunkctl.py"),
             "--state",
             str(state / "client"),
             "--lab",
@@ -705,7 +705,7 @@ def main():
             "exec",
             "av-client",
             sys.executable,
-            str(ROOT / "tools/avpnctl.py"),
+            str(ROOT / "tools/cypherpunkctl.py"),
             "--state",
             str(state / "client"),
             "--lab",
@@ -755,7 +755,7 @@ def main():
                 "exec",
                 "av-client",
                 sys.executable,
-                str(ROOT / "tools/avpnctl.py"),
+                str(ROOT / "tools/cypherpunkctl.py"),
                 "--state",
                 str(state / "client"),
                 "--lab",
@@ -841,7 +841,7 @@ def main():
             "exec",
             "av-client",
             sys.executable,
-            str(ROOT / "tools/avpnctl.py"),
+            str(ROOT / "tools/cypherpunkctl.py"),
             "--state",
             str(state / "whole"),
             "--lab",
@@ -948,7 +948,7 @@ def main():
             stop(proc)
         for f in logs:
             f.close()
-        for ns in ["avpn-app", *reversed(namespaces)]:
+        for ns in ["cpvpn-app", *reversed(namespaces)]:
             run("ip", "netns", "del", ns, check=False)
 
 

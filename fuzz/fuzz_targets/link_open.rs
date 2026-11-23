@@ -1,6 +1,6 @@
 //! A paced link's receiving end opens whatever arrives on its UDP socket.
 #![no_main]
-use advanced_vpn::link::{Dir, Opener};
+use cypherpunk_vpn::link::{Dir, Opener};
 use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {

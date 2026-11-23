@@ -5,7 +5,7 @@
 #
 # Discovery (home region, availability domain, image, a free /24, the bastion endpoint)
 # stays in tools/cloud.py's planner; this module owns the resources it creates. It mirrors
-# `avpn cloud oci server` (cloud.py oci_server_apply) resource for resource.
+# `cypherpunk cloud oci server` (cloud.py oci_server_apply) resource for resource.
 
 terraform {
   required_version = ">= 1.13.0"
@@ -20,8 +20,8 @@ terraform {
 variable "name" {
   type = string
   validation {
-    condition     = can(regex("^avpn-[a-z0-9-]{1,35}$", var.name))
-    error_message = "name must start with avpn- and use a-z, 0-9 and -."
+    condition     = can(regex("^cpvpn-[a-z0-9-]{1,35}$", var.name))
+    error_message = "name must start with cpvpn- and use a-z, 0-9 and -."
   }
 }
 variable "compartment_id" { type = string }
@@ -75,7 +75,7 @@ variable "user_data" {
 }
 
 locals {
-  tags     = { "avpn-managed" = "true", "avpn-name" = var.name }
+  tags     = { "cpvpn-managed" = "true", "cpvpn-name" = var.name }
   own_vcn  = var.vcn_id == ""
   vcn_id   = local.own_vcn ? oci_core_vcn.own[0].id : var.vcn_id
   gateway  = local.own_vcn ? oci_core_internet_gateway.own[0].id : var.internet_gateway_id
@@ -128,7 +128,7 @@ resource "oci_core_security_list" "this" {
       source      = ingress_security_rules.value
       source_type = "CIDR_BLOCK"
       stateless   = false
-      description = "ADVANCED_VPN previous hop"
+      description = "cypherpunk_vpn previous hop"
       udp_options {
         min = var.port
         max = var.port
@@ -142,7 +142,7 @@ resource "oci_core_security_list" "this" {
       source      = ingress_security_rules.value
       source_type = "CIDR_BLOCK"
       stateless   = false
-      description = "ADVANCED_VPN camouflage TLS fallback"
+      description = "cypherpunk_vpn camouflage TLS fallback"
       tcp_options {
         min = var.port
         max = var.port

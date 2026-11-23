@@ -250,7 +250,7 @@ def run(a):
         r = subprocess.run(
             [shutil.which("cargo") or "cargo", "test", "--quiet", "--lib", "dcnet::tests::a_recorded_cell_run_matches_the_rust_cell", "--",
              "--ignored", "--exact"],
-            cwd=ROOT, env=dict(os.environ, AVPN_DCNET_TRACE=str(out / "RUST_TRACE.json")), capture_output=True, text=True,
+            cwd=ROOT, env=dict(os.environ, CPVPN_DCNET_TRACE=str(out / "RUST_TRACE.json")), capture_output=True, text=True,
         )  # fmt: skip
         result["rust_replay"] = "pass" if r.returncode == 0 and "1 passed" in r.stdout else (r.stdout + r.stderr)[-600:]
     ok = (

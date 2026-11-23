@@ -71,10 +71,10 @@ class Signatures(unittest.TestCase):
 
 
 class OperatorIdentity(unittest.TestCase):
-    """The mesh identity is the operator key `avpn init --vault` made: no separate plaintext
+    """The mesh identity is the operator key `cypherpunk init --vault` made: no separate plaintext
     key, and a descriptor signed by `keyguard mesh-sign` with it verifies (no stubs)."""
 
-    def test_avpn_init_operator_key_signs_a_verifiable_descriptor(self):
+    def test_cypherpunk_init_operator_key_signs_a_verifiable_descriptor(self):
         import contextlib
         import io
 

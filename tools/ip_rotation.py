@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""`avpn cloud rotate`: a short path to a fresh exit IP (STREAMING_GEO_PARITY section 4.4).
+"""`cypherpunk cloud rotate`: a short path to a fresh exit IP (STREAMING_GEO_PARITY section 4.4).
 
-When `avpn stream-check` shows an exit's address is newly blocked, the
+When `cypherpunk stream-check` shows an exit's address is newly blocked, the
 operator needs one command that trades the address for a fresh one —
 release and re-acquire the provider's ephemeral IP, or reprovision in a
 different region, then re-run the enrollment. That is what this module
-adds to `avpn cloud`. It is the arms race on the user's own terms: each
+adds to `cypherpunk cloud`. It is the arms race on the user's own terms: each
 user rotates their own exit instead of relying on a company's rotation
 team.
 
@@ -20,12 +20,12 @@ Strategies
 `reprovision`: teardown plus re-apply in a (possibly different) region.
   The heavy path, for when the whole provider range is listed. This
   module plans it and prints the two exact existing commands; it does
-  not re-implement the tested apply paths in `avpn cloud aws relay`.
+  not re-implement the tested apply paths in `cypherpunk cloud aws relay`.
 
-Fail-closed rules (the same shape as every other `avpn cloud` command)
+Fail-closed rules (the same shape as every other `cypherpunk cloud` command)
 ----------------------------------------------------------------------------
-- Only resources this tool tagged itself (`avpn:managed=true` plus
-  `avpn:name=<name>`) are touched; anything else is refused.
+- Only resources this tool tagged itself (`cpvpn:managed=true` plus
+  `cpvpn:name=<name>`) are touched; anything else is refused.
 - `--tunnel-down` is required to apply: rotating the address a live
   chain is using would break sessions mid-flight and, on the entry hop,
   drop traffic onto the operator's own address. The tool cannot see the
@@ -47,7 +47,7 @@ What this module deliberately does not do
 -----------------------------------------
 It does not schedule rotation, does not rotate on a timer, and does not
 claim the new address is unlisted. Eligibility is only ever a dated
-measurement (`avpn stream-check` after the re-enrollment), never a
+measurement (`cypherpunk stream-check` after the re-enrollment), never a
 promise.
 """
 
@@ -104,7 +104,7 @@ def _now():
 
 
 def find_instance(aws, name):
-    """The one instance tagged avpn:name=<name>, or a RotationError.
+    """The one instance tagged cpvpn:name=<name>, or a RotationError.
 
     Refuses when there is no instance, when it is not running, and when
     it carries more than one public address association (a state this
@@ -184,14 +184,14 @@ def post_rotation_steps(name):
     return [
         dict(
             label="then 1",
-            value="avpn cloud aws allow --apply --name %s (the previous hop's address is unchanged)" % name,
+            value="cypherpunk cloud aws allow --apply --name %s (the previous hop's address is unchanged)" % name,
         ),
         dict(
             label="then 2",
-            value="avpn cloud host setup --name %s --out <request> (fetch the new public request)" % name,
+            value="cypherpunk cloud host setup --name %s --out <request> (fetch the new public request)" % name,
         ),
-        dict(label="then 3", value="avpn cloud chain --apply (rebuild the chain onto the new address)"),
-        dict(label="then 4", value="avpn run -- stream-check <service> (a dated measurement, never a promise)"),
+        dict(label="then 3", value="cypherpunk cloud chain --apply (rebuild the chain onto the new address)"),
+        dict(label="then 4", value="cypherpunk run -- stream-check <service> (a dated measurement, never a promise)"),
     ]
 
 
@@ -402,7 +402,7 @@ def _verify_one_address(aws, instance):
 def reprovision_plan(aws, name, region=None):
     """The teardown-plus-reapply plan, as the two exact existing commands.
 
-    Reprovisioning is `avpn cloud aws relay --teardown` then `--apply`
+    Reprovisioning is `cypherpunk cloud aws relay --teardown` then `--apply`
     (in the new region, if one is given): both are the tested paths in
     cloud.py, so this module plans and journals the intent but does not
     re-implement their apply logic.
@@ -413,10 +413,12 @@ def reprovision_plan(aws, name, region=None):
         cloud.Aws(aws.profile, region)  # the same one-Region guard relay --apply applies
     rows = [
         dict(label="instance", value="%s %s (%s)" % (i["InstanceId"], name, aws.region)),
-        dict(label="step 1", value="avpn cloud aws relay --teardown --name %s --profile %s" % (name, aws.profile)),
+        dict(
+            label="step 1", value="cypherpunk cloud aws relay --teardown --name %s --profile %s" % (name, aws.profile)
+        ),
         dict(
             label="step 2",
-            value="avpn cloud aws relay --apply --name %s --role %s --region %s --profile %s"
+            value="cypherpunk cloud aws relay --apply --name %s --role %s --region %s --profile %s"
             % (name, _role_of(i, name), target, aws.profile),
         ),
         dict(label="note", value="a new region is a new provider-side footprint; the caller-side logging note applies"),
@@ -425,9 +427,9 @@ def reprovision_plan(aws, name, region=None):
 
 
 def _role_of(i, name):
-    """The role recorded in the instance's avpn:role tag, or the inventory's."""
+    """The role recorded in the instance's cpvpn:role tag, or the inventory's."""
     for t in i.get("Tags", []):
-        if t["Key"] == "avpn:role":
+        if t["Key"] == "cpvpn:role":
             return t["Value"]
     record = load_inventory()["resources"].get(name, {})
     return record.get("role", "relay")
@@ -439,12 +441,12 @@ def _role_of(i, name):
 
 
 def run_rotate(a):
-    """Execute one parsed `avpn cloud rotate` command."""
+    """Execute one parsed `cypherpunk cloud rotate` command."""
     cloud.valid_name(a.name)
     record = load_inventory()["resources"].get(a.name, {})
     if record.get("provider") == "oci":
         # Honest composition: OCI ephemeral IPs trade on stop/start too, but
-        # the OCI plumbing is `avpn cloud oci server`; plan the exact steps.
+        # the OCI plumbing is `cypherpunk cloud oci server`; plan the exact steps.
         rows = [
             dict(label="provider", value="oci"),
             dict(
@@ -455,7 +457,10 @@ def run_rotate(a):
                 label="step 2",
                 value="oci compute instance action --instance-id <ocid> --action START --wait-for-state RUNNING",
             ),
-            dict(label="then", value="avpn cloud host setup --name %s --out <request> and re-run the chain" % a.name),
+            dict(
+                label="then",
+                value="cypherpunk cloud host setup --name %s --out <request> and re-run the chain" % a.name,
+            ),
             dict(label="note", value="an OCI reserved public IP does not change on stop/start; reprovision instead"),
         ] + post_rotation_steps(a.name)
         append_journal(dict(name=a.name, strategy=a.strategy, reason=a.reason, outcome="planned"))

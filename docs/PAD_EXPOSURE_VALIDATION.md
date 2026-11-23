@@ -66,7 +66,7 @@ exact-transcript sender-path coupling. Fixed synthetic bytes check code behaviou
 not physical entropy. The four-device setup trials validate those units' vault/access
 behaviour, not hardware pad independence or forensic erasure.
 
-The baseline [verification run](https://github.com/R1VER77/ADVANCED_VPN/actions/runs/44098710860)
+The baseline [verification run](https://github.com/R1VER77/CYPHERPUNK_VPN/actions/runs/44098710860)
 passed all three jobs. The open qualification gates below remain separate.
 
 ## Reproduce the current checks
@@ -76,7 +76,7 @@ through a trusted channel and configure Git's allowed signers before interpretin
 signature verification. Use synthetic data and temporary vaults.
 
 ```sh
-cd /path/to/ADVANCED_VPN
+cd /path/to/cypherpunk_vpn
 git verify-commit HEAD
 git rev-parse HEAD
 git status --porcelain
@@ -175,7 +175,7 @@ work is later authorized, place it in `tests/pad_exposure.rs` and run
 `cargo test --locked --test pad_exposure`. Fixed arrays are test fixtures only.
 
 ```rust
-use advanced_vpn::dcnet::{BODY_LEN, DcError, PadBook};
+use cypherpunk_vpn::dcnet::{BODY_LEN, DcError, PadBook};
 
 #[test]
 fn exposing_one_fixture_pad_does_not_change_other_entries() {

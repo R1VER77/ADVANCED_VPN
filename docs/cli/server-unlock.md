@@ -1,12 +1,12 @@
-# avpn server-unlock
+# cypherpunk server-unlock
 
 Server only. Accept the operator's data key on stdin and hold it in RAM
-(`/run/advanced-vpn-unlock`, root only) until the next reboot, so the VPN service can open
-the server's keys. `avpn cloud chain` and `avpn cloud unlock` run it over SSH.
+(`/run/cypherpunk-vpn-unlock`, root only) until the next reboot, so the VPN service can open
+the server's keys. `cypherpunk cloud chain` and `cypherpunk cloud unlock` run it over SSH.
 
 ## Usage
 
-    printf '%s\n' HEX | sudo avpn server-unlock [--json]
+    printf '%s\n' HEX | sudo cypherpunk server-unlock [--json]
 
 ## What it changes
 

@@ -104,7 +104,7 @@ class Blockers(unittest.TestCase):
     def test_glibc_need_comes_from_the_packages_binaries(self):
         pkg = self.s.root / "pkg"
         pkg.mkdir()
-        (pkg / "advanced-vpn").write_bytes(b"\x7fELF" + b"\0" * 8 + b"GLIBC_2.34\0GLIBC_2.39\0")
+        (pkg / "cypherpunk-vpn").write_bytes(b"\x7fELF" + b"\0" * 8 + b"GLIBC_2.34\0GLIBC_2.39\0")
         (pkg / "README").write_text("GLIBC_2.99 is mentioned here but this is not a binary")
         self.assertEqual(pf.glibc_need(pkg), (2, 39))
         self.assertEqual(pf.glibc_need(None), pf.RELEASE_GLIBC)

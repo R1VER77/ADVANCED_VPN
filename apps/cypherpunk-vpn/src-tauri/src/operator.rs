@@ -1,4 +1,4 @@
-//! The own-servers side of setup: the installed `avpn-desktop` helper, run as this user.
+//! The own-servers side of setup: the installed `cpvpn-desktop` helper, run as this user.
 //!
 //! The WebView names only a provider key, server names, a number of hours and the
 //! device's public request; each is checked here and again by the helper. The helper
@@ -10,7 +10,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 
-const HELPER: &str = "/opt/advanced-vpn/bin/avpn-desktop";
+const HELPER: &str = "/opt/cypherpunk-vpn/bin/cpvpn-desktop";
 const RESPONSE_LIMIT: usize = 256 * 1024;
 const REQUEST_LIMIT: usize = 64 * 1024;
 const EVENT_LIMIT: usize = 400;
@@ -42,7 +42,7 @@ pub fn agreement_version(value: &str) -> Result<(), String> {
 }
 
 pub fn server_name(value: &str) -> Result<(), String> {
-    let rest = value.strip_prefix("avpn-").unwrap_or("");
+    let rest = value.strip_prefix("cpvpn-").unwrap_or("");
     let ok = (1..=40).contains(&rest.len())
         && rest
             .bytes()
@@ -249,32 +249,32 @@ mod tests {
 
     #[test]
     fn a_build_takes_recorded_style_names_and_fixed_hours_only() {
-        let order = vec!["avpn-relay".to_string(), "avpn-flyexit".to_string()];
+        let order = vec!["cpvpn-relay".to_string(), "cpvpn-flyexit".to_string()];
         assert_eq!(
             build_arguments(&order, 6).unwrap(),
             [
                 "build",
                 "--order",
-                "avpn-relay,avpn-flyexit",
+                "cpvpn-relay,cpvpn-flyexit",
                 "--hours",
                 "6"
             ]
         );
         assert!(build_arguments(&order, 7).is_err());
         assert!(build_arguments(&[], 8).is_err());
-        let dup = vec!["avpn-relay".to_string(), "avpn-relay".to_string()];
+        let dup = vec!["cpvpn-relay".to_string(), "cpvpn-relay".to_string()];
         assert!(build_arguments(&dup, 8).is_err());
         for bad in [
             "--accept-cost",
-            "avpn-",
+            "cpvpn-",
             "relay",
-            "avpn-a,avpn-b",
-            "avpn-A",
-            "avpn-x/../y",
+            "cpvpn-a,cpvpn-b",
+            "cpvpn-A",
+            "cpvpn-x/../y",
         ] {
             assert!(build_arguments(&[bad.to_string()], 8).is_err(), "{bad}");
         }
-        let four: Vec<String> = (0..4).map(|i| format!("avpn-s{i}")).collect();
+        let four: Vec<String> = (0..4).map(|i| format!("cpvpn-s{i}")).collect();
         assert!(build_arguments(&four, 8).is_err());
     }
 

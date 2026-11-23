@@ -32,7 +32,7 @@ def read_generation(path):
 
 def snapshot(runtime, now=None):
     """Read fresh controller evidence with PID-reuse checks, retaining no private profile data."""
-    from avpnctl import identity_of
+    from cypherpunkctl import identity_of
 
     supplied_time = now
     row = dict(

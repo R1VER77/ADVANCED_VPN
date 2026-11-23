@@ -6,12 +6,12 @@ import sys
 import tempfile
 import unittest
 
-AVPNCTL = Path(__file__).resolve().parent / "avpnctl.py"
+CYPHERPUNKCTL = Path(__file__).resolve().parent / "cypherpunkctl.py"
 
 
 def request(state, *extra):
     return subprocess.run(
-        [sys.executable, AVPNCTL, "--state", state / "s", "request", "--role", "client", "--protect", "none",
+        [sys.executable, CYPHERPUNKCTL, "--state", state / "s", "request", "--role", "client", "--protect", "none",
          "--out", state / "r.json", *extra],
         capture_output=True, text=True, timeout=120,
     )  # fmt: skip

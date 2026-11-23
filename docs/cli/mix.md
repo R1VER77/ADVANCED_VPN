@@ -1,4 +1,4 @@
-# avpn mix
+# cypherpunk mix
 
 The mix lane: requests that can wait a few seconds travel through a Katzenpost mixnet,
 started from inside the protected namespace, so the mixnet's gateway sees your chain's
@@ -6,16 +6,16 @@ exit and never this device.
 
 ## Usage
 
-    sudo avpn mix setup --config DIR
-    sudo avpn mix start [--uid UID --gid GID]
-    sudo avpn mix status
-    sudo avpn mix fetch URL [--method GET|HEAD] [--uid UID --gid GID]
-    sudo avpn mix stop
+    sudo cypherpunk mix setup --config DIR
+    sudo cypherpunk mix start [--uid UID --gid GID]
+    sudo cypherpunk mix status
+    sudo cypherpunk mix fetch URL [--method GET|HEAD] [--uid UID --gid GID]
+    sudo cypherpunk mix stop
 
 ## Options
 
 - `setup --config DIR`: install a mixnet's client configuration (`DIR/client.toml`, as its operators publish it). Refused if it turns decoy traffic off or sends through an upstream proxy. Its thin-client address is replaced with this device's fixed one.
-- `start`: run the mixnet client (Katzenpost's `kpclientd`) and its HTTP proxy inside the protected namespace, as the sudo caller (or `--uid`/`--gid`). The proxy listens on `127.0.0.1:41199` there, so any program started with `avpn run` can use it.
+- `start`: run the mixnet client (Katzenpost's `kpclientd`) and its HTTP proxy inside the protected namespace, as the sudo caller (or `--uid`/`--gid`). The proxy listens on `127.0.0.1:41199` there, so any program started with `cypherpunk run` can use it.
 - `status`: whether the client runs and the proxy answers.
 - `fetch URL`: one request through the mix lane; prints a JSON line (status, seconds, bytes, headers) and, for `GET`, the body. `--method HEAD` fetches only the headers.
 - `stop`: stop the client. While it runs it sends cover traffic; stopping it ends that too.
@@ -28,7 +28,7 @@ link and the far end of the path at once can match the timing of what goes in wi
 comes out. A mixnet holds every packet a random time at every hop, and its clients send
 real-or-decoy packets and loops at a constant Poisson rate whether or not they have
 anything to say. Every layer is post-quantum: X-Wing (ML-KEM-768 + X25519) Sphinx and
-links, and hybrid Ed25519 + SPHINCS+ directory signatures; `avpn mix setup` refuses a mixnet
+links, and hybrid Ed25519 + SPHINCS+ directory signatures; `cypherpunk mix setup` refuses a mixnet
 configured with anything classical. The service that fetches websites for you speaks only
 TLS 1.3 with X25519MLKEM768 (`tools/kp_pq_fetch.py`) and refuses sites that cannot (`525`,
 `526`), so no fetch leaves the mixnet under classical key exchange. In the lab
@@ -62,8 +62,8 @@ lane yourself; its latency and its idle cover traffic are a trade you choose.
 - X-Wing's 7,164-byte Sphinx headers cost bandwidth. A smaller design (option E, 1,396 bytes) stays research: its inner hops are classical X25519, so it cannot carry the post-quantum claim (`docs/DESIGN_PACK_ASSESSMENT.md`).
 - Operators: run `tools/kp_pq_fetch.py` as the service node's fetch plugin in place of Katzenpost's `http-proxy-server` (it needs Python with OpenSSL 3.5 or later and `python3-cbor2`, and refuses to start on an older OpenSSL, such as Ubuntu 24.04's 3.0; Debian 13's 3.5 works); clients are unchanged.
 - Cover traffic runs only while the client runs. Keep it started rather than starting it for each request: when it runs says something on its own.
-- The mixnet's programs are Katzenpost's, unmodified and run as separate processes (AGPL-3.0); build them with `third_party/katzenpost/build.sh` and place `kpclientd` and `http-proxy-client` in `/usr/lib/advanced-vpn/katzenpost`. Katzenpost describes itself as pre-alpha.
+- The mixnet's programs are Katzenpost's, unmodified and run as separate processes (AGPL-3.0); build them with `third_party/katzenpost/build.sh` and place `kpclientd` and `http-proxy-client` in `/usr/lib/cypherpunk-vpn/katzenpost`. Katzenpost describes itself as pre-alpha.
 
 ## See also
 
-`avpn help run`, `avpn help threat-model`, `avpn help front`.
+`cypherpunk help run`, `cypherpunk help threat-model`, `cypherpunk help front`.

@@ -13,8 +13,8 @@ DEPLOY = Path(__file__).resolve().parents[1] / "deploy"
 
 # Unit file -> highest exposure allowed (systemd's 0-10 scale, lower is safer).
 CEILINGS = {
-    "advanced-vpn-guard.service": 2.5,
-    "advanced-vpn.service": 6.0,
+    "cypherpunk-vpn-guard.service": 2.5,
+    "cypherpunk-vpn.service": 6.0,
 }
 
 
@@ -68,13 +68,13 @@ class UnitSandboxTests(unittest.TestCase):
             self.assertLessEqual(score, ceiling, "%s exposure %.1f > %.1f" % (name, score, ceiling))
 
     def test_the_guard_keeps_only_the_capability_it_needs(self):
-        text = (DEPLOY / "advanced-vpn-guard.service").read_text()
+        text = (DEPLOY / "cypherpunk-vpn-guard.service").read_text()
         self.assertIn("CapabilityBoundingSet=CAP_NET_ADMIN\n", text)
         for line in GUARD_SANDBOX:
             self.assertIn(line + "\n", text)
 
     def test_the_supervisor_keeps_every_limit_it_can_have(self):
-        text = (DEPLOY / "advanced-vpn.service").read_text()
+        text = (DEPLOY / "cypherpunk-vpn.service").read_text()
         for line in SUPERVISOR_SANDBOX:
             self.assertIn(line + "\n", text)
 

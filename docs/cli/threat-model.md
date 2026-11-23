@@ -11,7 +11,7 @@ the reply has to find its way back. No software makes your address invisible to 
 machine you send packets to directly. The first hop always sees the address its
 packets come from. Encryption does not change this, and neither do zero-knowledge
 proofs (they prove statements about data; they do not rewrite IP headers). See
-`avpn help privacy`.
+`cypherpunk help privacy`.
 
 So the goal is not to hide your address from everyone. It is to make sure that **no
 single party sees both who you are and what you do.** That holds only among parties that do
@@ -33,7 +33,7 @@ third-party egress). This design is the same shape, built for one owner:
 
 - **Multi-party relays.** The entry relay sees your address but only ciphertext; the
   exit sees your destinations but only the relay's address. A middle hop (3 hops) sees
-  neither end. `avpn cloud chain` places the entry and the exit on **different
+  neither end. `cypherpunk cloud chain` places the entry and the exit on **different
   providers**, so no one provider holds both halves.
 - **The MASQUE transport mechanism.** Inner IP packets travel as unreliable QUIC
   datagrams, never as a stream, so there is no TCP-over-TCP collapse and no
@@ -56,7 +56,7 @@ real packet or an indistinguishable decoy packet. Whether your applications are 
 downloading at full speed, the outer packet rate and packet size stay flat (0–3.7% wire
 rate change between idle and busy in every measured class, `docs/evidence/RATE_CLASSES.json`). Four rate classes (`metered`, `standard`, `fast`,
 `line`) trade cover bandwidth for application throughput without weakening the
-constant-rate invariant (`avpn help init`). On top of that,
+constant-rate invariant (`cypherpunk help init`). On top of that,
 every chain pads **every** hop's datagrams to one size per layer (constant cells), so
 inner packet sizes do not leak on the outer path at all — not just on the first link.
 Padding is always on and cannot be turned off; a chain signed without it is refused.
@@ -87,7 +87,7 @@ so a transfer survives the move (measured with `tools/daita_lab.py`, `ROBUST=roa
 
 ## Self-healing chains
 
-A chain can carry standby exits (`avpn init --standby-exit`). Because every link between
+A chain can carry standby exits (`cypherpunk init --standby-exit`). Because every link between
 servers is paced and never silent, the server before the exit notices within 3 s when
 the exit stops answering, ends the session, and your client's automatic reconnect goes
 through the first standby exit that answers. Your client trusts exactly the signed set
@@ -146,7 +146,7 @@ random guess is right **3.3%** of the time (`1/30`).
 
 A relay sends the stream on two links (back to you, and on to its next hop), so in a 2-
 or 3-hop chain its outbound cost is about twice the per-direction figure above;
-`avpn init --rate auto` counts both.
+`cypherpunk init --rate auto` counts both.
 
 Details are in `docs/evidence/DAITA_LAB.json` and `docs/evidence/RATE_CLASSES.json`.
 
@@ -168,14 +168,14 @@ Chance is 5%.
 plane, as on most laptops, k-FP recognises **81%** of sites (same 20 sites, 10 loads; 9.9%
 without that contention). The shaper skips ticks it misses, and under load the missed ticks
 follow the page's own work. Running the data plane at high priority barely helps (75%); a
-bounded catch-up (`AVPN_CATCH_UP_MS`, off by default) halves it (about 50%), still ten
+bounded catch-up (`CPVPN_CATCH_UP_MS`, off by default) halves it (about 50%), still ten
 times chance. Until a fix removes the signal and passes this same run, do not count on
 `fast` against website fingerprinting while the device is busy.
 
 ## What it does show
 
 The link to the first hop no longer looks like WireGuard. The carrier (WireGuard + DAITA)
-rides inside `advanced-vpn-cloak` on port 443:
+rides inside `cypherpunk-vpn-cloak` on port 443:
 
 - **Primary transport (UDP 443, HTTP/3 / QUIC).** Deep packet inspection (nDPI in the lab)
   labels the outer flow `QUIC, category Web`, as it would an HTTP/3 website — not a VPN.
@@ -213,7 +213,7 @@ What a capable observer can still tell:
 
 ## With an I2P front
 
-With `avpn init --front i2p` (`avpn help front`) the link to the entry is I2P instead:
+With `cypherpunk init --front i2p` (`cypherpunk help front`) the link to the entry is I2P instead:
 your network sees I2P (NTCP2, obfuscated but recognisable), and the entry and its cloud
 provider see I2P routers, never your address. Measured in a private I2P network
 (`docs/evidence/I2P_FRONT.json`), with the client in whole-device mode:
@@ -242,7 +242,7 @@ Two adversaries are named here, because they are resisted by different means.
   measured settings and size.
 - **A colluding majority of operators** sees inside the nodes it runs. That cannot be
   prevented, only made **slow, visible and partial**.
-  - What exists today: a chain refuses the same provider at both ends (`avpn cloud
+  - What exists today: a chain refuses the same provider at both ends (`cypherpunk cloud
     chain`, unless `--allow-same-provider`), and the mesh's concentration report flags
     any provider or legal sphere above one third (`tools/mesh.py`).
   - What is planned, not built (`docs/COMPARISON.md` §4, item 12): stable entry guards
@@ -257,7 +257,7 @@ Two adversaries are named here, because they are resisted by different means.
   the constant-rate stream on every link raise the cost, but a stream that keeps packet
   order is still a circuit: only per-packet mixing with random delays and cover traffic
   (Loopix-style mixnets) defeats it, at a latency of seconds. If that is your
-  adversary, carry that traffic over the mix lane (`avpn help mix`). Measured with live
+  adversary, carry that traffic over the mix lane (`cypherpunk help mix`). Measured with live
   websites (`docs/evidence/MIX_LANE.json`, 10 clients, post-quantum Sphinx): such an
   adversary named the sender of 88.2% of requests through a low-latency proxy and 10.7%
   through the mix lane (chance 10%).
@@ -265,10 +265,10 @@ Two adversaries are named here, because they are resisted by different means.
   entry and the exit on different providers and in different legal spheres, so
   collusion needs two companies and two legal orders to agree. Every free tier is a
   US company, and the US CLOUD Act reaches US providers wherever their servers stand,
-  so OCI and AWS ends are one sphere: `avpn cloud chain` warns about that (and refuses one provider at both ends), and mesh
+  so OCI and AWS ends are one sphere: `cypherpunk cloud chain` warns about that (and refuses one provider at both ends), and mesh
   chains refuse it unless told otherwise. A non-US middle between two US ends does not
   help — the legal attack goes to the ends. The servers keep
-  nothing to hand over (`avpn help retention`), but a provider can still watch its own
+  nothing to hand over (`cypherpunk help retention`), but a provider can still watch its own
   hop in real time.
 - **Your hosting providers as observers.** A cloud provider sees the traffic of the
   servers it hosts, through flow logs, hypervisor counters and its own network:
@@ -278,12 +278,12 @@ Two adversaries are named here, because they are resisted by different means.
   sees an even stream in and an even stream out. The danger is one provider holding
   several hops of your path, because it then watches both sides of what it holds:
   - the entry and the exit on one provider would let it see your address and your
-    destinations together. `avpn cloud chain` refuses that unless you pass
+    destinations together. `cypherpunk cloud chain` refuses that unless you pass
     `--allow-same-provider`;
   - two other hops on one provider shorten the path against it by one hop; the chain
     plan names it;
   - mesh chains put every hop with a different operator, provider and country
-    (`avpn mesh chain`), and `avpn mesh nodes` reports the largest provider's and legal
+    (`cypherpunk mesh chain`), and `cypherpunk mesh nodes` reports the largest provider's and legal
     sphere's share of the whole mesh, marked above a third.
 
   Providers are compared by name. Two small hosts reselling one network would look
@@ -292,8 +292,8 @@ Two adversaries are named here, because they are resisted by different means.
   your address and your destinations on one server by design, so its host holds both
   sides of the only hop there is.
 - **Who calls the cloud API.** Creating or changing a server records your address in
-  the provider's audit log. Run `avpn cloud` while connected through the chain so the
-  exit is the caller instead (`avpn help cloud`).
+  the provider's audit log. Run `cypherpunk cloud` while connected through the chain so the
+  exit is the caller instead (`cypherpunk help cloud`).
 
 ## Why self-hosted, and not a big provider
 
@@ -334,7 +334,7 @@ sizes, English) to every site. Changing the values on every request does not hel
 fingerprint that never matches anyone else's is a mark of its own.
 
 - **One identity, one browser profile.** For separate identities, use separate
-  profiles, each started through `avpn run`, and never sign in to the same account
+  profiles, each started through `cypherpunk run`, and never sign in to the same account
   from two of them.
 - **The mix lane's fetches all look alike.** The fetch service sends the same short
   headers for everyone (one User-Agent, `Accept: */*`, gzip only), whatever your browser
@@ -348,6 +348,6 @@ fingerprint that never matches anyone else's is a mark of its own.
   chain already hides your address for *all* traffic, not just discrete web requests.
 - **Privacy Pass / blind tokens (RFC 9474/9578)** let a crowd of users prove they are
   allowed through a shared egress without being identified. With one owner there is no
-  crowd to blend into and no shared egress to rate-limit; see `avpn help privacy`.
+  crowd to blend into and no shared egress to rate-limit; see `cypherpunk help privacy`.
 - **Geohashing an egress address** keeps coarse location while pooling many users onto
   a CDN. It is meaningless for a single self-hosted exit.

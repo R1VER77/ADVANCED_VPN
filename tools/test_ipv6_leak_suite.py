@@ -496,8 +496,8 @@ class Stage2GuardRules(unittest.TestCase):
 
     def test_both_families_are_dropped_outside_the_tunnel(self):
         rules = suite.stage2_forwarding_rules()
-        self.assertIn('oifname "avpn0" ip daddr != 10.77.0.2 drop', rules)
-        self.assertIn('oifname "avpn0" ip6 daddr != 2001:db8:1:2::/64 drop', rules)
+        self.assertIn('oifname "cpvpn0" ip daddr != 10.77.0.2 drop', rules)
+        self.assertIn('oifname "cpvpn0" ip6 daddr != 2001:db8:1:2::/64 drop', rules)
 
     def test_v6_inside_the_tunnel_is_accepted_exactly_when_v4_is(self):
         rules = suite.stage2_forwarding_rules().splitlines()
@@ -522,9 +522,9 @@ class Stage2GuardRules(unittest.TestCase):
         """The honest pin: until the Rust dual-stack data plane lands, the
         shipping supervisor keeps v6 dropped from the tunnel interface; the
         flip to stage 2 is a visible change to this test, never a drift."""
-        avpnctl = (Path(__file__).resolve().parent / "avpnctl.py").read_text()
-        self.assertIn(suite.stage0_forwarding_line(), avpnctl)
-        self.assertNotIn("meta nfproto ipv6 accept", avpnctl)
+        cypherpunkctl = (Path(__file__).resolve().parent / "cypherpunkctl.py").read_text()
+        self.assertIn(suite.stage0_forwarding_line(), cypherpunkctl)
+        self.assertNotIn("meta nfproto ipv6 accept", cypherpunkctl)
 
 
 if __name__ == "__main__":

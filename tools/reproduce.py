@@ -33,7 +33,7 @@ def main():
         env.pop("RUSTFLAGS", None)
         env["CARGO_ENCODED_RUSTFLAGS"] = "\x1f".join(
             [
-                "--remap-path-prefix=" + str(dest.resolve()) + "=/src/advanced-vpn",
+                "--remap-path-prefix=" + str(dest.resolve()) + "=/src/cypherpunk-vpn",
                 "--remap-path-prefix=" + str(cargo_home) + "=/cargo",
             ]
         )
@@ -43,7 +43,12 @@ def main():
         hashes.append(
             {
                 binary: hashlib.sha256((dest / "target/release" / binary).read_bytes()).hexdigest()
-                for binary in ["advanced-vpn", "advanced-vpn-wireguard", "advanced-vpn-dns", "advanced-vpn-cloak"]
+                for binary in [
+                    "cypherpunk-vpn",
+                    "cypherpunk-vpn-wireguard",
+                    "cypherpunk-vpn-dns",
+                    "cypherpunk-vpn-cloak",
+                ]
             }
         )
     result = dict(

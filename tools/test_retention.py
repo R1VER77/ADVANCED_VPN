@@ -24,7 +24,7 @@ class Host:
         d.mkdir(parents=True)
         (self.root / "etc/systemd/journald.conf").write_text("[Journal]\n#Storage=auto\n")
         if journal:
-            (d / "50-advanced-vpn.conf").write_text("[Journal]\nStorage=%s\n" % journal)
+            (d / "50-cypherpunk-vpn.conf").write_text("[Journal]\nStorage=%s\n" % journal)
         if journal_dir:
             (self.root / "var/log/journal").mkdir(parents=True)
         for db in dbs:

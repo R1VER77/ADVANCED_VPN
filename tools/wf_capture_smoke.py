@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def run(out):
     """Flood loopback during startup; retain only a synthetic frame on the selected veth."""
-    from avpnctl import lab_guard
+    from cypherpunkctl import lab_guard
 
     lab_guard()
     links = json.loads(subprocess.check_output(["/usr/sbin/ip", "-j", "link"], text=True))

@@ -27,5 +27,5 @@ separate from installing it on a live VPN, spending money or changing hardware s
 Maintain [principles](PRINCIPLES.md), [conduct](../CODE_OF_CONDUCT.md),
 [voluntary funding disclosures](FUNDING.md), [roadmap gates](ROADMAP.md), release notes
 and incident evidence in public, with personal and operational secrets removed.
-Policies govern participation and project decisions; the software remains under
-Apache-2.0. They do not authorize monitoring VPN users.
+Policies govern participation and project decisions; the software is licensed under
+AGPL-3.0-or-later (see [LICENSE](../LICENSE)). They do not authorize monitoring VPN users.

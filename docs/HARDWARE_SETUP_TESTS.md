@@ -52,7 +52,7 @@ Run these scenarios in a recoverable local session, with backed-up rules and ACL
 3. With a temporary, device-specific test rule, remove access for that device. Confirm
    setup reports a permission blocker and offers the reviewed rule repair. A device
    already tagged for desktop access but still denied needs session/ACL diagnosis.
-4. Review `avpn setup --repair install_udev_rule --device hidrawN`. Apply the exact
+4. Review `cypherpunk setup --repair install_udev_rule --device hidrawN`. Apply the exact
    current plan with `--apply --confirm TOKEN`; use the local sudo prompt when needed.
 5. Require a fresh ordinary-user CTAP probe to succeed. A command returning zero is
    insufficient, and a reconnect may be needed.

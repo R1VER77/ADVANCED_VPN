@@ -1,4 +1,4 @@
-"""`avpn cloud rotate` against a recorded EC2 state machine: order, recovery, refusals.
+"""`cypherpunk cloud rotate` against a recorded EC2 state machine: order, recovery, refusals.
 
 The tests run the real module over a real subprocess boundary (the same
 pattern test_cloud.py uses): a stub `aws` executable implements the EC2
@@ -166,7 +166,7 @@ def instance(
     ip="16.0.0.9",
     alloc="eipalloc-1",
     iid="i-1",
-    name="avpn-exit",
+    name="cpvpn-exit",
     role="exit",
     state="running",
     managed=True,
@@ -174,9 +174,9 @@ def instance(
 ):
     tags = [dict(Key="Name", Value=name)]
     if managed:
-        tags.append(dict(Key="avpn:managed", Value="true"))
-    tags.append(dict(Key="avpn:name", Value=name))
-    tags.append(dict(Key="avpn:role", Value=role))
+        tags.append(dict(Key="cpvpn:managed", Value="true"))
+    tags.append(dict(Key="cpvpn:name", Value=name))
+    tags.append(dict(Key="cpvpn:role", Value=role))
     i = dict(InstanceId=iid, State=dict(Name=state), Tags=tags, SubnetId="subnet-1", VpcId="vpc-1")
     ni = (
         dict(Association=dict(AssociationId="eipassoc-1", AllocationId=alloc, IpOwnerId="amazon"))
@@ -192,11 +192,11 @@ def instance(
     return i
 
 
-def address(ip="16.0.0.9", alloc="eipalloc-1", iid="i-1", name="avpn-exit", managed=True):
+def address(ip="16.0.0.9", alloc="eipalloc-1", iid="i-1", name="cpvpn-exit", managed=True):
     tags = []
     if managed:
-        tags.append(dict(Key="avpn:managed", Value="true"))
-    tags.append(dict(Key="avpn:name", Value=name))
+        tags.append(dict(Key="cpvpn:managed", Value="true"))
+    tags.append(dict(Key="cpvpn:name", Value=name))
     return dict(
         AllocationId=alloc,
         PublicIp=ip,
@@ -218,7 +218,7 @@ class Stubbed(unittest.TestCase):
         exe.chmod(0o755)
         self.log, self.state = d / "log", d / "state.json"
         self.env = mock.patch.dict(
-            os.environ, dict(AVPN_AWS=str(exe), STUB_LOG=str(self.log), STUB_STATE=str(self.state))
+            os.environ, dict(CPVPN_AWS=str(exe), STUB_LOG=str(self.log), STUB_STATE=str(self.state))
         )
         self.env.start()
         cfg = d / "config"
@@ -273,12 +273,12 @@ class Stubbed(unittest.TestCase):
         return ip_rotation.load_journal()[-1]
 
     def apply(self, *extra, **kw):
-        return self.run_cli("--name", "avpn-exit", "--tunnel-down", "--yes", *extra, **kw)
+        return self.run_cli("--name", "cpvpn-exit", "--tunnel-down", "--yes", *extra, **kw)
 
 
 class Plans(Stubbed):
     def test_dry_run_changes_nothing_and_journals_the_plan(self):
-        result = self.run_cli("--name", "avpn-exit", "--dry-run", "--reason", "netflix-blocked")
+        result = self.run_cli("--name", "cpvpn-exit", "--dry-run", "--reason", "netflix-blocked")
         rows = {r["label"]: r["value"] for r in result["rows"]}
         self.assertTrue(result["dry_run"])
         self.assertIn("Elastic IP", rows["step 1"])
@@ -290,7 +290,7 @@ class Plans(Stubbed):
         self.assertEqual(self.last_journal()["reason"], "netflix-blocked")
 
     def test_post_rotation_steps_name_the_re_enrollment(self):
-        steps = {r["label"]: r["value"] for r in ip_rotation.post_rotation_steps("avpn-exit")}
+        steps = {r["label"]: r["value"] for r in ip_rotation.post_rotation_steps("cpvpn-exit")}
         self.assertEqual(sorted(steps), ["then 1", "then 2", "then 3", "then 4"])
         self.assertIn("allow", steps["then 1"])
         self.assertIn("host setup", steps["then 2"])
@@ -299,7 +299,7 @@ class Plans(Stubbed):
 
 class Refusals(Stubbed):
     def test_apply_without_tunnel_down_attestation_is_refused(self):
-        err = self.run_cli("--name", "avpn-exit", "--yes", fails=True)
+        err = self.run_cli("--name", "cpvpn-exit", "--yes", fails=True)
         self.assertIn("tunnel", str(err))
         self.assertEqual(self.eip_ops(), [], "the refusal must come before any address call")
         self.assertEqual(self.last_journal()["outcome"], "refused")
@@ -307,26 +307,26 @@ class Refusals(Stubbed):
 
     def test_instance_this_tool_did_not_tag_is_refused(self):
         self.set_state(dict(instances=[instance(managed=False)], addresses=[], next_ips=[]))
-        err = self.run_cli("--name", "avpn-exit", "--tunnel-down", "--yes", fails=True)
+        err = self.run_cli("--name", "cpvpn-exit", "--tunnel-down", "--yes", fails=True)
         # Either refusal is correct: the provider-side tag filter, or the module's own
         # managed check on what came back; both are fail-closed and neither moves an IP.
-        self.assertTrue("no instance tagged" in str(err) or "avpn:managed=true" in str(err), str(err))
+        self.assertTrue("no instance tagged" in str(err) or "cpvpn:managed=true" in str(err), str(err))
         self.assertEqual(self.eip_ops(), [])
 
     def test_instance_with_another_name_is_not_found(self):
-        self.set_state(dict(instances=[instance(name="avpn-relay", role="relay")], addresses=[], next_ips=[]))
-        err = self.run_cli("--name", "avpn-exit", "--tunnel-down", "--yes", fails=True)
+        self.set_state(dict(instances=[instance(name="cpvpn-relay", role="relay")], addresses=[], next_ips=[]))
+        err = self.run_cli("--name", "cpvpn-exit", "--tunnel-down", "--yes", fails=True)
         self.assertIn("no instance tagged", str(err))
 
     def test_two_instances_under_one_name_is_refused(self):
         two = [instance(), instance(iid="i-2", alloc="eipalloc-2", ip="16.0.0.8")]
         self.set_state(dict(instances=two, addresses=[address()], next_ips=[]))
-        err = self.run_cli("--name", "avpn-exit", "--tunnel-down", "--yes", fails=True)
+        err = self.run_cli("--name", "cpvpn-exit", "--tunnel-down", "--yes", fails=True)
         self.assertIn("2 instances", str(err))
 
     def test_stopped_instance_is_refused(self):
         self.set_state(dict(instances=[instance(state="stopped")], addresses=[address()], next_ips=[]))
-        err = self.run_cli("--name", "avpn-exit", "--tunnel-down", "--yes", fails=True)
+        err = self.run_cli("--name", "cpvpn-exit", "--tunnel-down", "--yes", fails=True)
         self.assertIn("not running", str(err))
 
 
@@ -341,7 +341,7 @@ class EipRotate(Stubbed):
         a = st["addresses"][0]
         self.assertEqual(a["PublicIp"], "16.0.0.10")
         self.assertEqual(a["InstanceId"], "i-1")
-        self.assertIn(dict(Key="avpn:managed", Value="true"), a["Tags"], "the new allocation is tagged like the rest")
+        self.assertIn(dict(Key="cpvpn:managed", Value="true"), a["Tags"], "the new allocation is tagged like the rest")
         entry = self.last_journal()
         self.assertEqual(entry["outcome"], "rotated")
         self.assertEqual(entry["old_ip"], "16.0.0.9")
@@ -451,7 +451,7 @@ class AutoRotate(Stubbed):
 
 class Reprovision(Stubbed):
     def test_reprovision_plans_the_two_existing_commands(self):
-        result = self.run_cli("--name", "avpn-exit", "--strategy", "reprovision")
+        result = self.run_cli("--name", "cpvpn-exit", "--strategy", "reprovision")
         rows = {r["label"]: r["value"] for r in result["rows"]}
         self.assertIn("--teardown", rows["step 1"])
         self.assertIn("--apply", rows["step 2"])
@@ -461,16 +461,16 @@ class Reprovision(Stubbed):
         self.assertEqual(self.last_journal()["strategy"], "reprovision")
 
     def test_a_new_region_hits_the_one_region_guard(self):
-        err = self.run_cli("--name", "avpn-exit", "--strategy", "reprovision", "--region", "us-east-1", fails=True)
+        err = self.run_cli("--name", "cpvpn-exit", "--strategy", "reprovision", "--region", "us-east-1", fails=True)
         self.assertIn("resources cannot be created in us-east-1", str(err))
 
 
 class OciAndJournal(Stubbed):
     def test_oci_gets_the_manual_stop_start_plan(self):
         inv = cloud.load_inventory()
-        inv["resources"]["avpn-exit"] = dict(provider="oci", role="exit", port=4444)
+        inv["resources"]["cpvpn-exit"] = dict(provider="oci", role="exit", port=4444)
         cloud.save_inventory(inv)
-        result = self.run_cli("--name", "avpn-exit", "--reason", "netflix-blocked")
+        result = self.run_cli("--name", "cpvpn-exit", "--reason", "netflix-blocked")
         rows = {r["label"]: r["value"] for r in result["rows"]}
         self.assertEqual(rows["provider"], "oci")
         self.assertIn("--action STOP", rows["step 1"])
@@ -479,9 +479,9 @@ class OciAndJournal(Stubbed):
         self.assertEqual(self.last_journal()["outcome"], "planned")
 
     def test_the_journal_is_append_only_across_runs(self):
-        self.run_cli("--name", "avpn-exit", "--dry-run")
+        self.run_cli("--name", "cpvpn-exit", "--dry-run")
         self.apply()
-        self.run_cli("--name", "avpn-exit", "--yes", fails=True)  # refused: no attestation
+        self.run_cli("--name", "cpvpn-exit", "--yes", fails=True)  # refused: no attestation
         entries = ip_rotation.load_journal()
         self.assertEqual([e["outcome"] for e in entries], ["planned", "rotated", "refused"])
         self.assertTrue(all(e["schema"] == 1 for e in entries))

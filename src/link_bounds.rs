@@ -1,5 +1,5 @@
 //! The link's arithmetic state, kept free of dependencies so that
-//! `crates/avpn-kani` model-checks this very file (docs/VERIFICATION_PLAN.md item 1):
+//! `crates/cpvpn-kani` model-checks this very file (docs/VERIFICATION_PLAN.md item 1):
 //! the replay window, and the reply credit that keeps a link from amplifying.
 
 /// Sliding 128-cell replay window over one sender session's counters.

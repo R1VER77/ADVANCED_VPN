@@ -23,7 +23,7 @@ from release_slots import inventory
 from sysexec import trusted_exe
 
 PAYLOAD = "/usr/lib/cypherpunk-vpn/payload"
-COMMANDS = {"cypherpunk": "avpn", "avpn": "avpn", "avpnctl": "avpnctl"}
+COMMANDS = {"cypherpunk": "cypherpunk", "cypherpunkctl": "cypherpunkctl"}
 ROOT = Path(__file__).resolve().parents[1]
 # The desktop app ships beside the payload, owned by the package manager rather than by
 # the application slots: it runs as the ordinary desktop user and holds no privilege. It
@@ -145,7 +145,8 @@ def preinstall(number, debian=True):
     return (
         "#!/bin/sh\nset -eu\n"
         + guard
-        + """if [ -e /opt/advanced-vpn ] || [ -L /opt/advanced-vpn ]; then
+        + legacy_running_guard()
+        + """if [ -e /opt/cypherpunk-vpn ] || [ -L /opt/cypherpunk-vpn ] || [ -e /opt/advanced-vpn ] || [ -L /opt/advanced-vpn ]; then
     marker=/var/lib/cypherpunk-vpn/package-owner
     if [ ! -f "$marker" ] || [ -L "$marker" ] ||
        [ "$(/usr/bin/stat -c '%u:%a' /var/lib/cypherpunk-vpn)" != 0:700 ] ||
@@ -155,12 +156,13 @@ def preinstall(number, debian=True):
         exit 1
     fi
 fi
-for name in avpn avpnctl cypherpunk; do
+for name in cypherpunk cypherpunkctl; do
     command=/usr/bin/$name
-    target=/opt/advanced-vpn/bin/$name
-    [ "$name" != cypherpunk ] || target=/opt/advanced-vpn/bin/avpn
+    target=/opt/cypherpunk-vpn/bin/$name
+    legacy=/opt/advanced-vpn/bin/$name
+    [ "$name" != cypherpunk ] || legacy=/opt/advanced-vpn/bin/avpn
     if [ -e "$command" ] || [ -L "$command" ]; then
-        if [ ! -L "$command" ] || [ "$(/usr/bin/readlink "$command")" != "$target" ]; then
+        if [ ! -L "$command" ] || { [ "$(/usr/bin/readlink "$command")" != "$target" ] && [ "$(/usr/bin/readlink "$command")" != "$legacy" ]; }; then
             printf '%s\\n' "Foreign command retained: $command" >&2
             exit 1
         fi
@@ -172,6 +174,58 @@ done
 
 SYSTEMCTL = "/usr/bin/systemctl"
 CONTROLLER_UNIT = "cypherpunk-vpn-controller.service"
+NFT = "/usr/sbin/nft"
+SYSTEMD_UNITS = "/etc/systemd/system"
+# The install from before the clean-break rename (D019).
+LEGACY_ROOT = "/opt/advanced-vpn"
+LEGACY_UNITS = ("advanced-vpn.service", "advanced-vpn-guard.service")
+LEGACY_TABLE = "inet advanced_vpn"
+
+
+def legacy_running_guard():
+    """Refuse to install over the previous version while its VPN or kill switch is on.
+
+    The upgrade removes the old install. Doing that under a running tunnel or a loaded
+    kill switch would leave either running with nothing installed that can stop it, so the
+    owner stops them first, knowingly (22 Nov 2026).
+    """
+    units = " ".join(LEGACY_UNITS)
+    return (
+        "if [ -x " + SYSTEMCTL + " ]; then\n"
+        "    for unit in " + units + "; do\n"
+        "        if " + SYSTEMCTL + ' is-active --quiet "$unit"; then\n'
+        "            printf '%s\\n' \"Refusing upgrade: the previous version's $unit is running.\" "
+        "'Stop it first: sudo systemctl stop " + units + "' "
+        "'Traffic is not protected by a VPN until you connect again after the upgrade.' >&2\n"
+        "            exit 1\n"
+        "        fi\n"
+        "    done\n"
+        "fi\n"
+        "if [ -x " + NFT + " ] && " + NFT + " list table " + LEGACY_TABLE + " >/dev/null 2>&1; then\n"
+        "    printf '%s\\n' 'Refusing upgrade: the previous version'\\''s kill switch is still loaded.' "
+        "'Lift it first: sudo nft delete table " + LEGACY_TABLE + "' >&2\n"
+        "    exit 1\n"
+        "fi\n"
+    )
+
+
+def legacy_cleanup():
+    """Remove the stopped previous install (the pre-install refused a running one), and say so."""
+    units = " ".join(LEGACY_UNITS)
+    return (
+        "if [ -e " + LEGACY_ROOT + " ] || [ -L " + LEGACY_ROOT + " ]; then\n"
+        "    if [ -x " + SYSTEMCTL + " ]; then " + SYSTEMCTL + " disable " + units + " >/dev/null 2>&1 || true; fi\n"
+        "    rm -f /usr/bin/avpn /usr/bin/avpnctl "
+        + SYSTEMD_UNITS
+        + "/advanced-vpn*.service "
+        + SYSTEMD_UNITS
+        + "/.advanced-vpn*.service.json\n"
+        "    rm -rf " + LEGACY_ROOT + "\n"
+        "    if [ -x " + SYSTEMCTL + " ]; then " + SYSTEMCTL + " daemon-reload || true; fi\n"
+        "    printf '%s\\n' 'Removed the previous version (" + LEGACY_ROOT + ") and its stopped services.' "
+        "'Set this device up again in the app; nothing is connected until you do.' >&2\n"
+        "fi\n"
+    )
 
 
 def configure(debian=True):
@@ -183,8 +237,16 @@ def configure(debian=True):
     their own units and are untouched. Without this the user had to stop it by hand.
     """
     action = (
-        PAYLOAD + "/install.sh --apply --package-managed\n"
-        "if [ -x " + SYSTEMCTL + " ] && " + SYSTEMCTL + " is-active --quiet " + CONTROLLER_UNIT + "; then\n"
+        PAYLOAD
+        + "/install.sh --apply --package-managed\n"
+        + legacy_cleanup()
+        + "if [ -x "
+        + SYSTEMCTL
+        + " ] && "
+        + SYSTEMCTL
+        + " is-active --quiet "
+        + CONTROLLER_UNIT
+        + "; then\n"
         "    " + SYSTEMCTL + " stop " + CONTROLLER_UNIT + "\n"
         "fi\n"
     )
@@ -289,7 +351,7 @@ def stage(root, runtime, destination, gui=None):
     bindir = destination / "usr/bin"
     bindir.mkdir(mode=0o755, parents=True)
     for name, target in COMMANDS.items():
-        (bindir / name).symlink_to("/opt/advanced-vpn/bin/" + target)
+        (bindir / name).symlink_to("/opt/cypherpunk-vpn/bin/" + target)
     if gui is not None:
         stage_gui(root, gui, destination)
     return payload
@@ -313,7 +375,7 @@ def debian(root, runtime, output, epoch, gui=None):
             + ".".join(map(str, preflight.RELEASE_GLIBC))
             + "), libgcc-s1, systemd, nftables, iproute2, mount, passwd, dbus, polkitd | policykit-1"
             + (", " + GUI_DEB_DEPENDS if gui is not None else "")
-            + "\nHomepage: https://github.com/R1VER77/ADVANCED_VPN\n"
+            + "\nHomepage: https://github.com/R1VER77/CYPHERPUNK_VPN\n"
             "Description: cypherpunk_vpn private network controller"
             + (" and desktop app" if gui is not None else "")
             + "\n"
@@ -345,7 +407,7 @@ Version: {number}
 Release: 1
 Summary: cypherpunk_vpn private network controller
 License: AGPL-3.0-or-later
-URL: https://github.com/R1VER77/ADVANCED_VPN
+URL: https://github.com/R1VER77/CYPHERPUNK_VPN
 Source0: payload.tar
 BuildArch: x86_64
 Requires: glibc >= {".".join(map(str, preflight.RELEASE_GLIBC))}, libgcc, systemd, nftables, iproute, util-linux, shadow-utils, dbus, polkit, policycoreutils{", " + GUI_RPM_REQUIRES if gui else ""}
@@ -367,9 +429,8 @@ tar -xf %{{SOURCE0}} -C %{{buildroot}}
 %files
 %defattr(-,root,root,-)
 /usr/lib/cypherpunk-vpn
-/usr/bin/avpn
-/usr/bin/avpnctl
 /usr/bin/cypherpunk
+/usr/bin/cypherpunkctl
 {GUI_FILES if gui else ""}"""
 
 

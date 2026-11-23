@@ -1,4 +1,4 @@
-# AVPN/Mesh — Path selection design
+# CPVPN/Mesh — Path selection design
 
 **Proposed, not landed.** This document extends the community mesh
 ([MESH_DESIGN.md](MESH_DESIGN.md)) with the client-side path-selection
@@ -36,7 +36,7 @@ Two prior decisions constrain this design (*landed*):
 
 Selection needs each signed descriptor to carry machine-checkable facts.
 Proposed additions to the descriptor schema (signed by the operator key
-at `avpn mesh publish`, so they are attestations, not self-reported
+at `cypherpunk mesh publish`, so they are attestations, not self-reported
 marketing):
 
 | Field | Type | Used for |
@@ -114,7 +114,7 @@ Properties kept deliberately:
 ## 5. Path counting and the anonymity-set metric
 
 Routing diversity is measurable; publish it as a tool output
-(`avpn mesh diversity`), not as a marketing number. With per-role
+(`cypherpunk mesh diversity`), not as a marketing number. With per-role
 eligible sets E (entry), M (relay), X (exit) over the *currently
 published* pool:
 
@@ -224,7 +224,7 @@ to curate the cargo.
    posture — or keep strong-only.
 3. Exit port admission for P2P (§6.2): opt-in per exit, or refused
    project-wide.
-4. Diversity metric publication (§5): ship `avpn mesh diversity` as a
+4. Diversity metric publication (§5): ship `cypherpunk mesh diversity` as a
    tool output bound to real descriptor sets.
 
 ## 8. Gates before any of this is claimed

@@ -106,7 +106,7 @@ def write_json(path, value):
 
 def record(interface, output, peer, port):
     """Record one isolated interface until SIGTERM; publish heartbeat and final drop audit."""
-    from avpnctl import lab_guard
+    from cypherpunkctl import lab_guard
 
     lab_guard()
     peer = str(ipaddress.ip_address(peer))

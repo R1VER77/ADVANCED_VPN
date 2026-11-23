@@ -4,8 +4,8 @@ The design and the decision are in `docs/ZK_MEMBERSHIP_DESIGN.md`; the measured 
 `docs/evidence/ZK_MEMBERSHIP.json`. Not part of the shipping build or of CI.
 
 - `methods/guest/src/main.rs`: the statement proved in the RISC Zero zkVM (Merkle
-  membership of `SHA-256("avpn/member/v1" || s)` and the nullifier
-  `SHA-256("avpn/nullifier/v1" || s || epoch || scope)`).
+  membership of `SHA-256("cpvpn/member/v1" || s)` and the nullifier
+  `SHA-256("cpvpn/nullifier/v1" || s || epoch || scope)`).
 - `host/src/main.rs`: builds a tree of 2^DEPTH members, proves one membership with a
   succinct STARK receipt (never in dev mode), verifies it, checks the properties, prints
   JSON.

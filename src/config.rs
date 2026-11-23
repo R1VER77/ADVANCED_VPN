@@ -98,7 +98,7 @@ pub struct Config {
     #[serde(default = "two_layers")]
     pub layers: usize,
     /// Constant-cell padding, which is always on: every datagram on every hop is padded
-    /// to one size so inner packet sizes do not leak (`avpn help threat-model`). There
+    /// to one size so inner packet sizes do not leak (`cypherpunk help threat-model`). There
     /// is no way to turn it off. The field is required and must be `true`, so a profile
     /// signed before padding existed is refused instead of running unpadded, and an
     /// older build that does not pad refuses a new profile instead of mismatching.
@@ -208,7 +208,7 @@ impl Config {
         );
         ensure!(
             self.cells,
-            "constant-cell padding is required; re-sign this chain with a current avpn init"
+            "constant-cell padding is required; re-sign this chain with a current cypherpunk init"
         );
         let layers = self.layers;
         ensure!(
@@ -443,7 +443,7 @@ impl Config {
     /// Per-hop shaping is not optional: every link between two servers is paced and
     /// encrypted, so a multi-hop chain signed before it existed is refused (re-sign it).
     fn validate_links(&self) -> Result<()> {
-        const RESIGN: &str = "every link between servers is paced (per-hop shaping); re-sign this chain with a current avpn init";
+        const RESIGN: &str = "every link between servers is paced (per-hop shaping); re-sign this chain with a current cypherpunk init";
         // The legacy standalone QUIC interface (docs/LEGACY_QUIC.md, MTU 1280) has no
         // carrier and no shaping at all; per-hop pacing is part of every managed chain.
         ensure!(
@@ -637,7 +637,7 @@ mod tests {
             cert: PathBuf::from("/tmp/cert.der"),
             key: PathBuf::from("/tmp/key.der"),
             peer_sha256: peer.into(),
-            server_name: "x.advanced-vpn.internal".into(),
+            server_name: "x.cypherpunk-vpn.internal".into(),
             pin_kind: PinKind::Spki,
             peer_members: members,
             peer_device: None,
@@ -727,7 +727,7 @@ mod tests {
         client.outer = Some(identity(&pin(9), vec![]));
         client.inner = Some(identity(&pin(8), vec![]));
         client.exit = None;
-        client.tun = Some("avpn0".into());
+        client.tun = Some("cpvpn0".into());
         client.local_ip = Some("10.77.0.2".into());
         client.peer_ip = Some("10.77.0.1".into());
         client.link_rate = None;
@@ -776,7 +776,7 @@ mod tests {
         c.outer = None;
         c.inner = Some(identity("", vec![pin(1)]));
         c.exit = None;
-        c.tun = Some("avpn0".into());
+        c.tun = Some("cpvpn0".into());
         c.local_ip = Some("10.77.0.1".into());
         c.peer_ip = Some("10.77.0.2".into());
         c.destinations = vec!["0.0.0.0/0".into()];
@@ -805,7 +805,7 @@ mod tests {
         c.outer = Some(identity(&pin(9), vec![pin(1)]));
         c.inner = Some(identity(&pin(8), vec![]));
         c.exit = None;
-        c.tun = Some("avpn0".into());
+        c.tun = Some("cpvpn0".into());
         c.local_ip = Some("10.77.0.2".into());
         c.peer_ip = Some("10.77.0.1".into());
         assert!(c.validate().is_err());

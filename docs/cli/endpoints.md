@@ -1,7 +1,7 @@
 # Free endpoints
 
 Where the chain's servers can run for free, as checked on 2026-11-09. Terms change:
-each entry names the page it was checked against. `avpn cloud suggest` shows the same
+each entry names the page it was checked against. `cypherpunk cloud suggest` shows the same
 list, with whether you are signed in to each provider and the exact next command.
 
 A forwarding hop sends every byte out again (downloads towards you, uploads towards
@@ -13,7 +13,7 @@ smallest outbound allowance.
 - No expiry; 10 TiB/month out.
 - Servers: 2 x VM.Standard.E2.1.Micro (1 GB, 50 Mbps), or Ampere A1 with 2 OCPU / 12 GB in total.
 - Caveats: home region only; idle instances (CPU, network and memory all under 20% for 7 days) may be reclaimed, and Oracle does not say how network use is measured, so a VPN's steady trickle cannot be counted on to look busy; a payment card is needed to sign up; free servers can vanish (reclaimed or the account closed): keep standby exits.
-- Next: `avpn cloud oci server --apply --name avpn-exit --role exit` (created by this tool).
+- Next: `cypherpunk cloud oci server --apply --name cpvpn-exit --role exit` (created by this tool).
 - Source: https://docs.oracle.com/en-us/iaas/Content/FreeTier/freetier_topic-Always_Free_Resources.htm
 
 ## AWS free plan (recommended entry relay)
@@ -21,7 +21,7 @@ smallest outbound allowance.
 - 6 months, or until the $100-200 of credits run out; 100 GiB/month out.
 - Servers: one t3.micro relay costs about $12/month of credits.
 - Caveats: new accounts only; one Region per project; the plan closes when it ends unless upgraded.
-- Next: `avpn cloud aws relay --apply --name avpn-relay --profile PROFILE` (created by this tool).
+- Next: `cypherpunk cloud aws relay --apply --name cpvpn-relay --profile PROFILE` (created by this tool).
 - Source: https://aws.amazon.com/about-aws/whats-new/2025/07/aws-free-tier-credits-month-free-plan/
 
 ## Azure free account
@@ -29,7 +29,7 @@ smallest outbound allowance.
 - 12 months of 750 hours/month of B1s, B2ats v2 or B2pts v2; outbound allowance unconfirmed.
 - Servers: one small Ubuntu VM you create in the Azure portal.
 - Caveats: the free outbound allowance is not confirmed; B1s is unavailable in some regions.
-- Next: `avpn cloud host add --name avpn-azure --ssh azureuser@IP --key KEY --provider azure` (recorded with `avpn cloud host add`).
+- Next: `cypherpunk cloud host add --name cpvpn-azure --ssh azureuser@IP --key KEY --provider azure` (recorded with `cypherpunk cloud host add`).
 - Source: https://learn.microsoft.com/azure/cost-management-billing/manage/create-free-services
 
 ## Your own server, VPS or home machine
@@ -37,7 +37,7 @@ smallest outbound allowance.
 - Free if you already have it; your own bandwidth.
 - Servers: any Debian 12+/Ubuntu 22.04+ host you can SSH into as a sudo user.
 - Caveats: a home connection's address is tied to you: use it as a middle hop, not an exit you want unlinked.
-- Next: `avpn cloud host add --name avpn-home --ssh USER@HOST --key KEY` (recorded with `avpn cloud host add`).
+- Next: `cypherpunk cloud host add --name cpvpn-home --ssh USER@HOST --key KEY` (recorded with `cypherpunk cloud host add`).
 
 ## Google Cloud free tier (not usable as a hop)
 
@@ -49,7 +49,7 @@ smallest outbound allowance.
 
 ## Low-cost paid hosts
 
-Cheapest first, as listed on 2026-11-13 (prices change: check the order page). One of these carries far more than one person uses; at 300 GB a member each month, the covered counts below halve on a 2-hop chain. Running your own VPN is fine on all of them; letting other people's traffic exit makes their abuse complaints yours, so read the host's rules first. Record one with `avpn cloud host add --provider KEY`.
+Cheapest first, as listed on 2026-11-13 (prices change: check the order page). One of these carries far more than one person uses; at 300 GB a member each month, the covered counts below halve on a 2-hop chain. Running your own VPN is fine on all of them; letting other people's traffic exit makes their abuse complaints yours, so read the host's rules first. Record one with `cypherpunk cloud host add --provider KEY`.
 
 - **RackNerd** (`racknerd`, US): $21.99/year (annual promotions; stock varies); 3 TB/month out, about $0.61 per TB; covers about 10 members at 300 GB each (half on a 2-hop chain); mostly US locations. Source: https://www.racknerd.com/kvm-vps
 - **IONOS VPS XS** (`ionos`, DE): about $2/month (the lowest EU price needs a 24-month term); unmetered at 1000 Mbit/s; covers members until its fair-use limit; no traffic cap. Source: https://www.ionos.com/servers/vps
@@ -64,5 +64,5 @@ Cheapest first, as listed on 2026-11-13 (prices change: check the order page). O
 ## Choosing
 
 - Two providers beat two servers on one provider: the entry sees your address, the exit sees your destinations, and only a provider holding both could link them.
-- Put the largest allowance at the exit. `avpn cloud chain` does this automatically.
-- Every provider knows who owns the account and sees its own hop's traffic volume and timing. See `avpn help privacy` for what each can still see.
+- Put the largest allowance at the exit. `cypherpunk cloud chain` does this automatically.
+- Every provider knows who owns the account and sees its own hop's traffic volume and timing. See `cypherpunk help privacy` for what each can still see.

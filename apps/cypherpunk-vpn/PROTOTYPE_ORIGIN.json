@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "source": "Owner-provided advanced-vpn-gui-prototype",
+  "source": "Owner-provided cypherpunk-vpn-gui-prototype",
   "archive_sha256": "d55cbfa9023f881b4a03846b5053812e4a03dba0edbc0498ffb426ef688d165b",
   "original_files": {
     ".gitignore": "fe718e7babb14f3cbad2d97f08889b9ce5215ed3fe0e43b2b8cfbfb3b9b844e8",

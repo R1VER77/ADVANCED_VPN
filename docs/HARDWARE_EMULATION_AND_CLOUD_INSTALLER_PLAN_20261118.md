@@ -24,7 +24,7 @@ certification are not prerequisites for the ordinary VPN authenticator verdict.
 ## 1. Starting state and publication
 
 GitHub `main` was checked at hardware-signed `5d69623697524796b105dd5f24f0644339a05652`.
-Its latest verification, [run 44273400186](https://github.com/R1VER77/ADVANCED_VPN/actions/runs/44273400186),
+Its latest verification, [run 44273400186](https://github.com/R1VER77/CYPHERPUNK_VPN/actions/runs/44273400186),
 failed. Local fixes address desktop Rust formatting and a status-mtime fixture;
 the new revision must pass its own CI. No open pull requests were present.
 

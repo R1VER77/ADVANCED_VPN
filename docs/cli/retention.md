@@ -7,7 +7,7 @@ recover it. So a server must never write a log line to disk in the first place.
 
 ## What a server keeps, and where
 
-- **Runtime state** (status, PIDs, leaves, resolver files) lives only in RAM, under `/run/advanced-vpn`.
+- **Runtime state** (status, PIDs, leaves, resolver files) lives only in RAM, under `/run/cypherpunk-vpn`.
 - **The VPN's own units** run with `LogLevelMax=emerg`, so they write no connection logs at all.
 - **Byte counters:** none. The optional daily cap lives on the client only.
 - **On disk:** only the enrollment, meaning public certificates and the server's own sealed keys.
@@ -26,13 +26,13 @@ hardening:
 - swap is turned off, because RAM, keys and addresses included, could otherwise be written out to disk.
 
 When it runs:
-- **Servers created by `avpn cloud aws relay` or `avpn cloud oci server`:** at first boot, as cloud-init user data, before `sshd` accepts its first login. Not even the setup session reaches the disk.
-- **Servers recorded with `avpn cloud host add`:** at the start of `avpn cloud host setup`. Anything written before that, including the login that runs setup, may still be on the disk. To be sure, use a server created fresh by `avpn cloud`.
+- **Servers created by `cypherpunk cloud aws relay` or `cypherpunk cloud oci server`:** at first boot, as cloud-init user data, before `sshd` accepts its first login. Not even the setup session reaches the disk.
+- **Servers recorded with `cypherpunk cloud host add`:** at the start of `cypherpunk cloud host setup`. Anything written before that, including the login that runs setup, may still be on the disk. To be sure, use a server created fresh by `cypherpunk cloud`.
 
 ## Enforced, not assumed
 
 A server's VPN refuses to start while any of these fail, before it changes anything on
-the host. `avpn doctor` shows each one:
+the host. `cypherpunk doctor` shows each one:
 - journal in RAM only;
 - `/var/log` in RAM;
 - no disk logger running;
@@ -54,5 +54,5 @@ are in `docs/evidence/RETENTION_PROOF.json`.
 
 The providers under the servers keep records of their own: who calls their API, and
 what their network carries. No setting on the server changes those.
-- `avpn cloud audit` checks the providers' opt-in logging, and lists the always-on logs it cannot turn off.
-- `avpn help privacy` explains what each provider can still see.
+- `cypherpunk cloud audit` checks the providers' opt-in logging, and lists the always-on logs it cannot turn off.
+- `cypherpunk help privacy` explains what each provider can still see.

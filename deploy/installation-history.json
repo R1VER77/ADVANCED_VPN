@@ -2,10 +2,10 @@
   "schema": 1,
   "source_commit": "d26c35570595676fccf9339337606cb66062a1f6",
   "owned_unit_sha256": {
-    "advanced-vpn.service": [
+    "cypherpunk-vpn.service": [
       "96c5bed0c51994af719bdf71e3cc933c5b14c4ac8addf999bf30a8f26fe3d647"
     ],
-    "advanced-vpn-guard.service": [
+    "cypherpunk-vpn-guard.service": [
       "f096377f948b27fcecbb12460bee36a68d8f4ed3b8e1737d32c82e79a73cb56a"
     ]
   }

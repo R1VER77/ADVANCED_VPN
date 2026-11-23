@@ -64,7 +64,7 @@ def spki(key):
 
 def leaf(identity, not_before, not_after, value=None):
     """A self-signed leaf for `identity`, with the extension when `value` is given."""
-    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "client-inner.advanced-vpn.internal")])
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "client-inner.cypherpunk-vpn.internal")])
     b = (
         x509.CertificateBuilder()
         .subject_name(name)
@@ -198,7 +198,7 @@ def main():
 
 def handshake_leaf(cert_path, key_path, out_path, mode):
     """For src/crypto_tests.rs: turn a provisioned client identity into a managed one (its
-    own self-signed certificate as the hop's root, pinned by public key, as `avpn init`
+    own self-signed certificate as the hop's root, pinned by public key, as `cypherpunk init`
     does) and rotate its leaf. Modes, by what the leaf carries:
 
     - `authorized`: the identity key, re-signed, with a statement by the pinned device key;

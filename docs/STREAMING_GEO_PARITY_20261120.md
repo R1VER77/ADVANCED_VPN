@@ -155,13 +155,13 @@ Five concrete pieces, none of which fakes anything. **Status 21
 November 2026: all five are implemented in-sandbox** — the probe
 (`tools/stream_check.py`, transport profile included), the table
 (`tools/streaming_table.py`), the recipe (§4.3 below), the rotation
-tooling (`tools/ip_rotation.py`, `avpn cloud rotate`) and the claim
+tooling (`tools/ip_rotation.py`, `cypherpunk cloud rotate`) and the claim
 format (§4.5, carried into the comparison doc). What remains live-only:
 running the probe against real services from a real exit
-(`AVPN_STREAM_CHECK_LIVE=1`), and rotating a real provider's IP —
+(`CPVPN_STREAM_CHECK_LIVE=1`), and rotating a real provider's IP —
 both need the owner's credentials.
 
-### 4.1 A per-exit, per-service eligibility probe (`avpn stream-check`)
+### 4.1 A per-exit, per-service eligibility probe (`cypherpunk stream-check`)
 
 A CLI command that tests a given exit against a given service, from
 the client, through the tunnel, and prints the result with a
@@ -206,7 +206,7 @@ services, with the check date and the exit's region:
 | AWS | any | blocked (class) | blocked (class) | blocked | 2026-11-20 |
 | small/regional provider A | UK | TBD | TBD | TBD | — |
 
-This is user-maintainable: anyone running `avpn stream-check`
+This is user-maintainable: anyone running `cypherpunk stream-check`
 contributes a row. The table is version-pinned per release, like
 every other evidence file, and dated entries expire visibly. The
 `tools/providers.py` catalog already tracks provider metadata; this
@@ -230,7 +230,7 @@ can mark recipes that satisfy this shape.
 When a probe shows the exit's IP is newly blocked, the operator needs
 a short path to a fresh IP: release and re-acquire the provider's
 ephemeral IP, or reprovision in a different region, then re-run the
-enrollment. Most providers allow this; the existing `avpn cloud`
+enrollment. Most providers allow this; the existing `cypherpunk cloud`
 surface is the right place. This is the arms race on the user's own
 terms — each user rotates their own exit, rather than relying on a
 VPN company's team.
@@ -240,7 +240,7 @@ VPN company's team.
 The claim, wherever made (README, comparison doc, GUI), is never
 "works with Netflix". It is: *"Streaming eligibility is measured per
 exit, per service, dated in the exit's descriptor; run
-`avpn stream-check` to test yours."* This is stronger than a
+`cypherpunk stream-check` to test yours."* This is stronger than a
 commercial claim because it is falsifiable and reproducible, and it
 is what the project's evidence rules already require everywhere else.
 
@@ -301,7 +301,7 @@ user decides.
   parallel to `tools/providers.py`.
 - §4.3 (the recipe) is documentation plus possibly an OpenTofu
   recipe flag in the registry search.
-- §4.4 (IP rotation) extends `avpn cloud` with a provider-agnostic
+- §4.4 (IP rotation) extends `cypherpunk cloud` with a provider-agnostic
   release/acquire path; provider-specific quirks live where the other
   cloud quirks do.
 - §4.5 (the claim format) is a one-paragraph addition to README and
@@ -309,7 +309,7 @@ user decides.
 
 ## 8. Decisions requested
 
-1. **Approve the `avpn stream-check` tool** (§4.1) as the next
+1. **Approve the `cypherpunk stream-check` tool** (§4.1) as the next
    concrete step: probe, dated descriptor field, evidence file. This
    is the piece that converts the gap from "documented limitation" to
    "measured capability".

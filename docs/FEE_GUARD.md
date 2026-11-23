@@ -11,7 +11,7 @@ serves.
 | Outbound traffic | a monthly cap per server, enforced by a kernel quota (below) |
 | Traffic the VPN does not send (updates, agents, a stray process) | the egress lock: only VPN traffic may leave |
 | Machine hours, disk, public IPv4 | the account type: free shapes only; Fly.io's are paid from its $5 waiver before any traffic |
-| A paid or upgraded account | `avpn cloud health` names it a problem: the cap covers traffic only |
+| A paid or upgraded account | `cypherpunk cloud health` names it a problem: the cap covers traffic only |
 | Fly.io volume snapshots, dedicated IPv4 | never enabled: snapshots off, IPv6 only |
 
 ## The monthly cap
@@ -34,7 +34,7 @@ names them). On Fly.io two 256 MB machines already cost more than the waiver lea
 only one Fly server per organization can stay free, and the guard refuses a second one.
 An unknown Fly region is priced at the dearest rate.
 
-`avpn cloud chain --apply` plans every cap before it changes anything. It stops if a hop's
+`cypherpunk cloud chain --apply` plans every cap before it changes anything. It stops if a hop's
 account has no allowance on record, and writes each cap before that server starts. A
 production server without a cap refuses to start. Removing the cap file while a server
 runs keeps the last cap.
@@ -47,19 +47,19 @@ runs keeps the last cap.
   re-enrollment or a reboot never resets the month. It keeps no per-member,
   per-session, per-destination or time record. A clock set back never reopens an earlier
   month.
-- **The kernel quota** (`advanced_vpn_quota`) covers everything sent or forwarded past
+- **The kernel quota** (`cypherpunk_vpn_quota`) covers everything sent or forwarded past
   the tunnels, set to what is left of the month. When it is spent the kernel drops, with
   no polling gap. It runs after the egress lock, so a packet the lock refuses never uses
   up allowance.
 - **At the cap** the supervisor stops the data plane, and status reads `capped` with the
   day service resumes (the 1st, UTC). Every hop's member sees the chain stop answering,
-  and the operator's `avpn cloud health` says why.
+  and the operator's `cypherpunk cloud health` says why.
 - **SSH replies** stay outside the quota, at up to 1 MB/s, so a capped server can still
   be reached to raise its cap.
 
 ## The egress lock
 
-`advanced_vpn_egress` is a watched table: the supervisor restores it if anything alters
+`cypherpunk_vpn_egress` is a watched table: the supervisor restores it if anything alters
 it. Its rules are `inet`, so they cover IPv4 and IPv6 alike.
 
 **Inbound** is dropped unless it is:
@@ -89,7 +89,7 @@ and telemetry are disabled on dedicated hosts. Instead the supervisor runs
 `unattended-upgrade` (on Debian and Ubuntu, the security origins only) once a day, in a
 maintenance window that lets root reach the package mirrors while it runs. The window is
 counted against the cap, and a capped server waits for the month to turn.
-`avpn cloud host update` runs the same on demand. `health` calls updates overdue after 3
+`cypherpunk cloud host update` runs the same on demand. `health` calls updates overdue after 3
 days. A Fly.io Machine's root resets on every restart, so it is patched by rebuilding its
 image instead, and `health` calls an image older than 14 days overdue.
 

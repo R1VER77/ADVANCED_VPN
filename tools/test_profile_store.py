@@ -79,8 +79,8 @@ class StoreTestCase(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
-        self.where = ps.paths(self.root / "avpn")
-        (self.root / "avpn").mkdir(mode=0o700)
+        self.where = ps.paths(self.root / "cypherpunk")
+        (self.root / "cypherpunk").mkdir(mode=0o700)
 
     def chain(self, name, **kwargs):
         return ChainFixture(self.root, name, **kwargs)
@@ -441,7 +441,7 @@ class SelectionFileTests(StoreTestCase):
 class ProductionVerifierTests(StoreTestCase):
     def test_the_production_verifier_reads_a_real_enrollment(self):
         # A real enrollment needs the full signing pipeline; here we only pin
-        # that production_verifier is the controller's own loader (avpnctl
+        # that production_verifier is the controller's own loader (cypherpunkctl
         # load_profile + managed_profile require_current + chain_of) and that
         # it refuses an empty state directory.
         import inspect

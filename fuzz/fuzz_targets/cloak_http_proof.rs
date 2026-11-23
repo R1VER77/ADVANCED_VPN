@@ -3,5 +3,5 @@
 use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {
-    advanced_vpn::fuzzing::cloak_http_proof(data);
+    cypherpunk_vpn::fuzzing::cloak_http_proof(data);
 });

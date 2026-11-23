@@ -5,13 +5,13 @@ volume (the cloud provider, or whoever gets a snapshot) can recover it. So a cha
 server must never write a log line to disk in the first place.
 
 `HARDEN` makes a host keep every log in RAM. It runs:
-- as cloud-init `bootcmd` when `avpn cloud` creates a server, which is before `sshd`
+- as cloud-init `bootcmd` when `cypherpunk cloud` creates a server, which is before `sshd`
   accepts its first login, so not even the setup session reaches the disk;
-- in `avpn cloud host setup` for servers recorded with `host add` (their history before
+- in `cypherpunk cloud host setup` for servers recorded with `host add` (their history before
   setup is outside this tool's reach: rebuild them if it matters).
 
-`checks()` reads the live host. `avpn doctor` shows the result, and a server's VPN
-refuses to start while any check fails (`avpnctl supervise`), unless the host is
+`checks()` reads the live host. `cypherpunk doctor` shows the result, and a server's VPN
+refuses to start while any check fails (`cypherpunkctl supervise`), unless the host is
 recorded as shared, where its logging belongs to whatever else runs on it.
 """
 
@@ -23,8 +23,8 @@ import subprocess
 LOGGERS = ["rsyslog.service", "syslog.socket", "syslog-ng.service", "auditd.service", "systemd-journal-upload.service"]
 # Login records some distributions keep outside /var/log.
 LOGIN_DATABASES = ["/var/lib/lastlog/lastlog2.db", "/var/lib/wtmpdb/wtmp.db"]
-SHARED_MARKER = Path("/etc/advanced-vpn/shared-host")
-JOURNALD_DROPIN = "/etc/systemd/journald.conf.d/50-advanced-vpn.conf"
+SHARED_MARKER = Path("/etc/cypherpunk-vpn/shared-host")
+JOURNALD_DROPIN = "/etc/systemd/journald.conf.d/50-cypherpunk-vpn.conf"
 
 HARDEN = r"""set -u
 # 1. The system journal lives in RAM (/run/log/journal) only.
@@ -50,7 +50,7 @@ for db in {databases}; do
 done
 # 5. RAM must never be paged out to disk.
 swapoff -a 2>/dev/null || true
-sed -i -E '/^[^#].*[[:space:]]swap[[:space:]]/s/^/#avpn-no-swap# /' /etc/fstab
+sed -i -E '/^[^#].*[[:space:]]swap[[:space:]]/s/^/#cpvpn-no-swap# /' /etc/fstab
 """.format(dropin=JOURNALD_DROPIN, loggers=" ".join(LOGGERS), databases=" ".join(LOGIN_DATABASES))
 
 

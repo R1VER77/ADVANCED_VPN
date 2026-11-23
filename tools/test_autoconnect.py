@@ -115,9 +115,9 @@ class ClassificationTests(unittest.TestCase):
 
 
 class HandlerTests(unittest.TestCase):
-    def test_action_is_exactly_avpn_connect(self):
+    def test_action_is_exactly_cypherpunk_connect(self):
         record = ac.handle({"action": "up", "medium": "wifi", "ssid": "x"}, policy_on())
-        self.assertEqual(record["action"], ["/opt/advanced-vpn/bin/avpn", "connect"])
+        self.assertEqual(record["action"], ["/opt/cypherpunk-vpn/bin/cypherpunk", "connect"])
 
     def test_run_injection_records_exit_code(self):
         ran = []
@@ -127,7 +127,7 @@ class HandlerTests(unittest.TestCase):
             return subprocess.CompletedProcess(cmd, 0)
 
         record = ac.handle({"action": "up", "medium": "wifi", "ssid": "x"}, policy_on(), run=fake_run)
-        self.assertEqual(ran, [["/opt/advanced-vpn/bin/avpn", "connect"]])
+        self.assertEqual(ran, [["/opt/cypherpunk-vpn/bin/cypherpunk", "connect"]])
         self.assertEqual(record["rc"], 0)
 
     def test_trusted_event_runs_nothing(self):
@@ -167,7 +167,7 @@ class HandlerTests(unittest.TestCase):
 class DispatcherTranslationTests(unittest.TestCase):
     def test_wifi_event_from_nm_env(self):
         event = ac.event_from_env(
-            ["/etc/NetworkManager/dispatcher.d/avpn-autoconnect", "wlan0", "up"],
+            ["/etc/NetworkManager/dispatcher.d/cpvpn-autoconnect", "wlan0", "up"],
             {"CONNECTION_ID": "Starbucks-Guest", "DEVICE_TYPE": "wifi"},
         )
         self.assertEqual(event["medium"], "wifi")
@@ -176,7 +176,7 @@ class DispatcherTranslationTests(unittest.TestCase):
 
     def test_ethernet_event_from_nm_env(self):
         event = ac.event_from_env(
-            ["/etc/NetworkManager/dispatcher.d/avpn-autoconnect", "enp3s0", "up"],
+            ["/etc/NetworkManager/dispatcher.d/cpvpn-autoconnect", "enp3s0", "up"],
             {"DEVICE_TYPE": "ethernet"},
         )
         self.assertEqual(event["medium"], "wired")

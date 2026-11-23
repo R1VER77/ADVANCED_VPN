@@ -39,7 +39,7 @@ FETCH_TIMEOUT = 20
 # compressed page fits about 3.7 times as much into one mixnet reply (measured on the
 # lab's 30 sites, 12 Nov 2026). Only gzip, which every client takes: every fetch leaves
 # the one service node with the same headers, so a site cannot sort mix-lane users by
-# what their browser accepts (a browser would add br and zstd, `avpn mix fetch` would not).
+# what their browser accepts (a browser would add br and zstd, `cypherpunk mix fetch` would not).
 # Nothing else from the client's headers reaches the site.
 ENCODINGS = ("gzip",)
 
@@ -68,11 +68,11 @@ def require_pq_openssl(version=ssl.OPENSSL_VERSION_INFO, name=ssl.OPENSSL_VERSIO
 
 def policy_env():
     """Re-exec under the post-quantum OpenSSL policy unless already running under it."""
-    if os.environ.get("AVPN_PQ_FETCH_POLICY") == "1":
+    if os.environ.get("CPVPN_PQ_FETCH_POLICY") == "1":
         return
-    conf = Path(tempfile.mkdtemp(prefix="avpn-pqfetch-")) / "openssl.cnf"
+    conf = Path(tempfile.mkdtemp(prefix="cpvpn-pqfetch-")) / "openssl.cnf"
     conf.write_text(OPENSSL_POLICY)
-    env = dict(os.environ, OPENSSL_CONF=str(conf), AVPN_PQ_FETCH_POLICY="1")
+    env = dict(os.environ, OPENSSL_CONF=str(conf), CPVPN_PQ_FETCH_POLICY="1")
     # orig_argv keeps the interpreter's own options (a script path, -m or -c) intact.
     os.execve(sys.executable, [sys.executable, *sys.orig_argv[1:]], env)
 

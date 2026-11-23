@@ -159,16 +159,16 @@ def main():
     result["ssh_reply_survives_spent_quota_v6"] = tcp_reply_after(22, SRV6) == 65536
 
     # Forwarding (an exit): what arrives on its tunnel is forwarded, the same traffic
-    # arriving on any other interface is not. "tun" stands in for avpn0 (a veth named so).
+    # arriving on any other interface is not. "tun" stands in for cpvpn0 (a veth named so).
     ns("srv", "/usr/sbin/nft", "-f", "-", input="add table inet %s\ndelete table inet %s\n" % (se.QUOTA_TABLE,
        se.QUOTA_TABLE) + se.quota_rules(10**9))  # fmt: skip
     run("ip", "netns", "add", "inner")
     ns("inner", "ip", "link", "set", "lo", "up")
-    run("ip", "link", "add", "avpn0", "type", "veth", "peer", "name", "i0")
-    run("ip", "link", "set", "avpn0", "netns", "srv")
+    run("ip", "link", "add", "cpvpn0", "type", "veth", "peer", "name", "i0")
+    run("ip", "link", "set", "cpvpn0", "netns", "srv")
     run("ip", "link", "set", "i0", "netns", "inner")
-    ns("srv", "ip", "address", "add", "10.77.0.1/30", "dev", "avpn0")
-    ns("srv", "ip", "link", "set", "avpn0", "up")
+    ns("srv", "ip", "address", "add", "10.77.0.1/30", "dev", "cpvpn0")
+    ns("srv", "ip", "link", "set", "cpvpn0", "up")
     ns("inner", "ip", "address", "add", "10.77.0.2/30", "dev", "i0")
     ns("inner", "ip", "link", "set", "i0", "up")
     ns("inner", "ip", "route", "add", "default", "via", "10.77.0.1")

@@ -24,9 +24,9 @@ roadmap items for provisioning, hardware setup, the GUI and the assistant
 
 A **viable profile** is an enrolled chain whose signed bundle verifies and is current
 (`require_current`), whose protection is intact (hardware or TPM sealing as required), and
-whose servers answered the last health check (`avpn cloud health`), or which the person
+whose servers answered the last health check (`cypherpunk cloud health`), or which the person
 chooses to check now. A profile with a problem is listed with its problem and fix (the
-same findings as `avpn cloud health`: stopped, locked, out of credits), not hidden.
+same findings as `cypherpunk cloud health`: stopped, locked, out of credits), not hidden.
 
 ## What Gemma does, and does not
 
@@ -46,7 +46,7 @@ Unchanged from [D002](DECISIONS.md): setup stays deterministic underneath.
 ## What Gemma knows
 
 The catalog is already narrowed to providers qualified for this VPN
-(`tools/providers.py`, `avpn cloud suggest`), not the thousands in the OpenTofu registry:
+(`tools/providers.py`, `cypherpunk cloud suggest`), not the thousands in the OpenTofu registry:
 
 - tested free tiers: Oracle (OCI), AWS and Azure; Google Cloud as a beacon only;
 - paid hosts, including non-US legal spheres: Hetzner, netcup, OVHcloud, 1984 Hosting,
@@ -69,4 +69,4 @@ retraining.
 - Usability with new participants, and an evaluation of the model's guidance against the
   deterministic engine on every catalog provider, before it is the default.
 - Multiple profiles need the client to hold more than one enrolled chain (today one,
-  `/etc/advanced-vpn/enrolled`): a profile store with an active selection.
+  `/etc/cypherpunk-vpn/enrolled`): a profile store with an active selection.

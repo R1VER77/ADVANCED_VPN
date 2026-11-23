@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""mesh_wf_sim: website-fingerprinting simulation for the AVPN/Mesh defense design.
+"""mesh_wf_sim: website-fingerprinting simulation for the CPVPN/Mesh defense design.
 
 Reproduces the mechanism comparison behind docs/MESH_DESIGN.md, measured on the
 exit-side link (the vantage first-link-only defenses such as Mullvad's DAITA do

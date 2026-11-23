@@ -15,7 +15,7 @@ import managed_profile as mp  # noqa: E402
 
 RELAY = "198.51.100.1:443"
 EXIT6 = "[2001:db8:1::4]:4444"
-BINARY = Path(__file__).resolve().parents[1] / "target" / "release" / "advanced-vpn"
+BINARY = Path(__file__).resolve().parents[1] / "target" / "release" / "cypherpunk-vpn"
 
 
 class Profiles(unittest.TestCase):

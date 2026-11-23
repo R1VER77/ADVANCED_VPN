@@ -1,6 +1,6 @@
 //! DC-net: a group sum and a member's frame, both built from network bytes.
 #![no_main]
-use advanced_vpn::dcnet::{BODY_LEN, DcEvent, FRAME_LEN, Frame};
+use cypherpunk_vpn::dcnet::{BODY_LEN, DcEvent, FRAME_LEN, Frame};
 use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {

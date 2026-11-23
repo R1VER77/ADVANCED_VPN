@@ -15,7 +15,7 @@ import subprocess
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from managed_profile import create, enroll, runtime, refresh_leaves, canonical
-from avpnctl import Allowance
+from cypherpunkctl import Allowance
 from keyguard import memory_fd
 
 
@@ -45,7 +45,7 @@ class EnrollmentTests(unittest.TestCase):
         return self.root / "dev" / role
 
     def test_role_separation_and_relocation(self):
-        p = enroll(self.ops / "relay.avpn", self.ops / "operator.pub", self.dev("relay"))
+        p = enroll(self.ops / "relay.cpvpn", self.ops / "operator.pub", self.dev("relay"))
         self.assertIsNone(p["core"]["inner"])
         self.assertIsNone(p["dns"])
         self.assertFalse(any("inner" in f.name for f in self.dev("relay").iterdir()))
@@ -56,29 +56,29 @@ class EnrollmentTests(unittest.TestCase):
         from keyguard import kem_open
 
         for role in ["client", "relay", "exit"]:
-            names = zipfile.ZipFile(self.ops / (role + ".avpn")).namelist()
+            names = zipfile.ZipFile(self.ops / (role + ".cpvpn")).namelist()
             self.assertFalse([n for n in names if n.endswith(("-key.der", "-key.bin", ".key"))], names)
         relay_kem = (self.dev("relay") / "kem-key.bin").read_bytes()
-        client_psk = json.loads(zipfile.ZipFile(self.ops / "client.avpn").read("psk.kem.json"))
+        client_psk = json.loads(zipfile.ZipFile(self.ops / "client.cpvpn").read("psk.kem.json"))
         with self.assertRaises(Exception):
-            kem_open(relay_kem, client_psk, b"advanced-vpn/wireguard-psk/client")
+            kem_open(relay_kem, client_psk, b"cypherpunk-vpn/wireguard-psk/client")
 
     def test_bundle_for_another_device_is_rejected(self):
         from managed_profile import request
 
         request("client", self.root / "other-client", "none")
         with self.assertRaises(ValueError):
-            enroll(self.ops / "client.avpn", self.ops / "operator.pub", self.root / "other-client")
+            enroll(self.ops / "client.cpvpn", self.ops / "operator.pub", self.root / "other-client")
         self.assertFalse((self.root / "other-client" / "profile.json").exists())
         # The exit has no WireGuard key: its certificate binding is the only guard.
         request("exit", self.root / "other-exit", "none")
         with self.assertRaises(ValueError):
-            enroll(self.ops / "exit.avpn", self.ops / "operator.pub", self.root / "other-exit")
+            enroll(self.ops / "exit.cpvpn", self.ops / "operator.pub", self.root / "other-exit")
         self.assertFalse((self.root / "other-exit" / "profile.json").exists())
 
     def test_enrollment_derives_wireguard_key_and_keeps_kem_protected(self):
-        enroll(self.ops / "client.avpn", self.ops / "operator.pub", self.dev("client"))
-        enroll(self.ops / "relay.avpn", self.ops / "operator.pub", self.dev("relay"))
+        enroll(self.ops / "client.cpvpn", self.ops / "operator.pub", self.dev("client"))
+        enroll(self.ops / "relay.cpvpn", self.ops / "operator.pub", self.dev("relay"))
         c = (self.dev("client") / "wireguard-key.bin").read_bytes()
         r = (self.dev("relay") / "wireguard-key.bin").read_bytes()
         self.assertEqual(len(c), 64)
@@ -87,7 +87,7 @@ class EnrollmentTests(unittest.TestCase):
         # The KEM key stays (protected like every other key) so a later chain can deliver a new PSK.
         self.assertTrue((self.dev("client") / "kem-key.bin").exists())
         with self.assertRaises(ValueError):
-            enroll(self.ops / "client.avpn", self.ops / "operator.pub", self.dev("client"))  # no silent re-enroll
+            enroll(self.ops / "client.cpvpn", self.ops / "operator.pub", self.dev("client"))  # no silent re-enroll
 
     def test_constant_cell_padding_is_always_on_and_required(self):
         from managed_profile import PADDING_REQUIRED, profile_validate, require_padding
@@ -95,7 +95,7 @@ class EnrollmentTests(unittest.TestCase):
         reqs = {r: (self.dev(r) / "request.json").read_bytes() for r in ["client", "relay", "exit"]}
         out = self.root / "cells"
         create(out, reqs, "192.0.2.1:41194", "198.51.100.2:4444", self.signer)
-        profiles = {r: json.loads(zipfile.ZipFile(out / (r + ".avpn")).read("profile.json")) for r in reqs}
+        profiles = {r: json.loads(zipfile.ZipFile(out / (r + ".cpvpn")).read("profile.json")) for r in reqs}
         # Every hop pads; there is no option that produces an unpadded chain.
         self.assertEqual({pr["core"]["cells"] for pr in profiles.values()}, {True})
         for pr in profiles.values():
@@ -124,7 +124,7 @@ class EnrollmentTests(unittest.TestCase):
         reqs = {r: (self.dev(r) / "request.json").read_bytes() for r in ["client", "relay", "exit"]}
         out = self.root / "cloak"
         create(out, reqs, "192.0.2.1:443", "198.51.100.2:4444", self.signer, cover_name="ec2-192-0-2-1.example.com")
-        profiles = {r: json.loads(zipfile.ZipFile(out / (r + ".avpn")).read("profile.json")) for r in reqs}
+        profiles = {r: json.loads(zipfile.ZipFile(out / (r + ".cpvpn")).read("profile.json")) for r in reqs}
         for pr in profiles.values():
             require_current(profile_validate(pr))
         client, relay = profiles["client"], profiles["relay"]
@@ -188,21 +188,21 @@ class EnrollmentTests(unittest.TestCase):
         self.assertNotIn("cloak", inspect.signature(create).parameters, "the cloak must not be optional")
 
     def test_cloak_proof_key_comes_from_the_psk_only(self):
-        import avpnctl
+        import cypherpunkctl
 
-        a = avpnctl.cloak_token(b"\x01" * 32 + b"\x02" * 32)
+        a = cypherpunkctl.cloak_token(b"\x01" * 32 + b"\x02" * 32)
         self.assertEqual(len(a), 32)
-        self.assertEqual(a, avpnctl.cloak_token(b"\x09" * 32 + b"\x02" * 32))  # the private half plays no part
-        self.assertNotEqual(a, avpnctl.cloak_token(b"\x01" * 32 + b"\x03" * 32))
+        self.assertEqual(a, cypherpunkctl.cloak_token(b"\x09" * 32 + b"\x02" * 32))  # the private half plays no part
+        self.assertNotEqual(a, cypherpunkctl.cloak_token(b"\x01" * 32 + b"\x03" * 32))
         with self.assertRaises(ValueError):
-            avpnctl.cloak_token(b"\x01" * 32)
+            cypherpunkctl.cloak_token(b"\x01" * 32)
 
     def test_a_carrier_that_receives_nothing_is_restarted(self):
-        import avpnctl
+        import cypherpunkctl
 
         # Jitter disabled here so the thresholds are exact; the jitter itself has its
         # own test below (roadmap 13.6: restart moments must not be correlatable).
-        w = avpnctl.CarrierWatch(limit=20, jitter=0, rng=lambda a, b: 0)
+        w = cypherpunkctl.CarrierWatch(limit=20, jitter=0, rng=lambda a, b: 0)
         self.assertFalse(w.stalled(10, 500, 0))
         self.assertFalse(w.stalled(10, 500, 19.9))
         self.assertTrue(w.stalled(10, 500, 20))
@@ -212,20 +212,20 @@ class EnrollmentTests(unittest.TestCase):
         self.assertFalse(w.stalled(11, 501, 46))
         self.assertTrue(w.stalled(11, 501, 66))
         # Received decoys are not data: a carrier receiving only decoys is stuck.
-        with tempfile.TemporaryDirectory() as d, mock.patch.object(avpnctl, "runtime_dir", lambda state: Path(d)):
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(cypherpunkctl, "runtime_dir", lambda state: Path(d)):
             (Path(d) / "carrier-status.json").write_text(json.dumps(dict(rx_bytes=5000, rx_decoy_bytes=4000)))
-            self.assertEqual(avpnctl.carrier_rx(Path(d)), 1000)
+            self.assertEqual(cypherpunkctl.carrier_rx(Path(d)), 1000)
             (Path(d) / "carrier-status.json").write_text("{")
-            self.assertIsNone(avpnctl.carrier_rx(Path(d)))
+            self.assertIsNone(cypherpunkctl.carrier_rx(Path(d)))
         # An unreadable status is never a reason to restart.
         self.assertFalse(w.stalled(11, None, 100))
         self.assertFalse(w.stalled(11, None, 200))
 
     def test_the_stall_window_is_jittered_so_restarts_cannot_be_correlated(self):
-        import avpnctl
+        import cypherpunkctl
 
         drawn = iter([3, -3])
-        w = avpnctl.CarrierWatch(limit=20, jitter=3, rng=lambda a, b: next(drawn))
+        w = cypherpunkctl.CarrierWatch(limit=20, jitter=3, rng=lambda a, b: next(drawn))
         # Episode 1 draws +3: the restart would happen at t=23, not a fixed t=20.
         self.assertFalse(w.stalled(10, 500, 0))
         self.assertEqual(w.window, 23)
@@ -238,19 +238,19 @@ class EnrollmentTests(unittest.TestCase):
         self.assertTrue(w.stalled(10, 501, 47))
         # The defaults keep every drawn window inside [limit-jitter, limit+jitter].
         for _ in range(200):
-            w = avpnctl.CarrierWatch()
+            w = cypherpunkctl.CarrierWatch()
             w.stalled(1, 1, 0)
-            self.assertGreaterEqual(w.window, avpnctl.CARRIER_STALL_SECONDS - avpnctl.CARRIER_STALL_JITTER)
-            self.assertLessEqual(w.window, avpnctl.CARRIER_STALL_SECONDS + avpnctl.CARRIER_STALL_JITTER)
+            self.assertGreaterEqual(w.window, cypherpunkctl.CARRIER_STALL_SECONDS - cypherpunkctl.CARRIER_STALL_JITTER)
+            self.assertLessEqual(w.window, cypherpunkctl.CARRIER_STALL_SECONDS + cypherpunkctl.CARRIER_STALL_JITTER)
         # The default source is the OS CSPRNG, not a seedable Mersenne Twister.
         import random
 
-        self.assertIsInstance(avpnctl.CarrierWatch().rng.__self__, random.SystemRandom)
+        self.assertIsInstance(cypherpunkctl.CarrierWatch().rng.__self__, random.SystemRandom)
 
     def test_underlay_mtu_floor_matches_the_cloak_packet_size(self):
         import re
 
-        import avpnctl
+        import cypherpunkctl
 
         # A full WireGuard datagram becomes a cloak::OUTER_MTU-byte QUIC UDP payload, so the
         # underlay link must carry OUTER_MTU + 8 (UDP) + 20 (IPv4) bytes. Keep the Python floor
@@ -258,19 +258,19 @@ class EnrollmentTests(unittest.TestCase):
         outer = int(
             re.search(
                 r"pub const OUTER_MTU: u16 = (\d+);",
-                (Path(avpnctl.__file__).resolve().parents[1] / "src/cloak.rs").read_text(),
+                (Path(cypherpunkctl.__file__).resolve().parents[1] / "src/cloak.rs").read_text(),
             ).group(1)
         )
-        self.assertEqual(avpnctl.UNDERLAY_MIN_MTU, outer + 28)
+        self.assertEqual(cypherpunkctl.UNDERLAY_MIN_MTU, outer + 28)
 
     def test_first_hop_firewall_keeps_wireguard_on_loopback(self):
-        import avpnctl
+        import cypherpunkctl
 
-        text = avpnctl.first_hop_rules({"network": {"relay_endpoint": "192.0.2.1:443"}})
+        text = cypherpunkctl.first_hop_rules({"network": {"relay_endpoint": "192.0.2.1:443"}})
         self.assertIn('udp dport 41194 iifname != "lo" drop', text)
         self.assertIn("fib daddr type local udp dport 443 redirect to :8443", text)
         self.assertIn("fib daddr type local tcp dport 443 redirect to :8443", text)
-        self.assertIn('udp dport 4433 iifname != "avwg0" drop', text)
+        self.assertIn('udp dport 4433 iifname != "cpwg0" drop', text)
 
     def test_profiles_for_one_two_and_three_hops(self):
         from managed_profile import request
@@ -287,7 +287,7 @@ class EnrollmentTests(unittest.TestCase):
             roles = ["client"] + {1: ["exit"], 2: ["relay", "exit"], 3: ["relay", "middle", "exit"]}[hops]
             out = self.root / ("chain%d" % hops)
             create(out, {r: reqs[r] for r in roles}, relay, "198.51.100.2:4444", self.signer, hops=hops, middle=middle)
-            profiles = {r: json.loads(zipfile.ZipFile(out / (r + ".avpn")).read("profile.json")) for r in roles}
+            profiles = {r: json.loads(zipfile.ZipFile(out / (r + ".cpvpn")).read("profile.json")) for r in roles}
             client = profiles["client"]["core"]
             with self.subTest(hops=hops):
                 self.assertEqual([l for l in ["outer", "middle", "inner"] if client.get(l)], lanes)
@@ -329,7 +329,7 @@ class EnrollmentTests(unittest.TestCase):
             )
 
     def test_replace_switches_chain_and_keeps_device_keys(self):
-        enroll(self.ops / "client.avpn", self.ops / "operator.pub", self.dev("client"))
+        enroll(self.ops / "client.cpvpn", self.ops / "operator.pub", self.dev("client"))
         before = (self.dev("client") / "wireguard-key.bin").read_bytes()
         single = self.root / "single"
         create(
@@ -340,7 +340,7 @@ class EnrollmentTests(unittest.TestCase):
             self.signer,
             hops=1,
         )
-        p = enroll(single / "client.avpn", single / "operator.pub", self.dev("client"), replace=True)
+        p = enroll(single / "client.cpvpn", single / "operator.pub", self.dev("client"), replace=True)
         after = (self.dev("client") / "wireguard-key.bin").read_bytes()
         self.assertEqual(p["hops"], 1)
         self.assertEqual(after[:32], before[:32])
@@ -349,7 +349,7 @@ class EnrollmentTests(unittest.TestCase):
 
     def _rewritten(self, name, replace=None, drop=None, add=None):
         bad = self.root / name
-        with zipfile.ZipFile(self.ops / "client.avpn") as src, zipfile.ZipFile(bad, "x") as out:
+        with zipfile.ZipFile(self.ops / "client.cpvpn") as src, zipfile.ZipFile(bad, "x") as out:
             for member in src.namelist():
                 if member == drop:
                     continue
@@ -359,7 +359,7 @@ class EnrollmentTests(unittest.TestCase):
         return bad
 
     def test_bundle_tampering_is_rejected(self):
-        bad = self._rewritten("t.avpn", lambda m, b: b + b"x" if m == "profile.json" else b)
+        bad = self._rewritten("t.cpvpn", lambda m, b: b + b"x" if m == "profile.json" else b)
         with self.assertRaises(ValueError):
             enroll(bad, self.ops / "operator.pub", self.dev("client"))
 
@@ -392,23 +392,23 @@ class EnrollmentTests(unittest.TestCase):
                 allowlist=b"needed.ads.example.com\n",
             ),
         )
-        directory = mesh_verify_directory(out / "directory.avpnd", out / "operator.pub")
+        directory = mesh_verify_directory(out / "directory.cpvpnd", out / "operator.pub")
         self.assertEqual(directory["hops_len"], 2)
-        p_relay = enroll(out / "r1.avpn", out / "operator.pub", self.dev("relay"))
+        p_relay = enroll(out / "r1.cpvpn", out / "operator.pub", self.dev("relay"))
         self.assertEqual(len(p_relay["carrier"]["members"]), 2)
         self.assertEqual(len((self.dev("relay") / "wireguard-key.bin").read_bytes()), 32 + 32 * 2)
-        p_exit = enroll(out / "e1.avpn", out / "operator.pub", self.dev("exit"))
+        p_exit = enroll(out / "e1.cpvpn", out / "operator.pub", self.dev("exit"))
         self.assertEqual(p_exit["dns"]["blocklist"], "dns-blocklist.txt")
         self.assertEqual((self.dev("exit") / "dns-blocklist.txt").read_bytes(), b"ads.example.com\n")
         self.assertEqual(p_exit["dns"]["allowlist"], "dns-allowlist.txt")
         self.assertEqual((self.dev("exit") / "dns-allowlist.txt").read_bytes(), b"needed.ads.example.com\n")
-        p_alice = enroll(out / "alice.avpn", out / "operator.pub", self.dev("alice"))
+        p_alice = enroll(out / "alice.cpvpn", out / "operator.pub", self.dev("alice"))
         self.assertEqual(p_alice["core"]["local_ip"], "10.77.0.2")
-        p_bob = enroll(out / "bob.avpn", out / "operator.pub", self.dev("bob"))
+        p_bob = enroll(out / "bob.cpvpn", out / "operator.pub", self.dev("bob"))
         self.assertEqual(p_bob["core"]["local_ip"], "10.77.0.3")
 
     def test_zip_traversal_and_unsigned_extras_rejected(self):
-        bad = self._rewritten("z.avpn", add=("../escape", b"bad"))
+        bad = self._rewritten("z.cpvpn", add=("../escape", b"bad"))
         with self.assertRaises(ValueError):
             enroll(bad, self.ops / "operator.pub", self.dev("client"))
 
@@ -419,14 +419,14 @@ class EnrollmentTests(unittest.TestCase):
         other.write_bytes(canonical(SoftwareOperator(self.root / "other-op").public()))
         other.chmod(0o600)
         with self.assertRaises(Exception):
-            enroll(self.ops / "client.avpn", other, self.dev("client"))
+            enroll(self.ops / "client.cpvpn", other, self.dev("client"))
         self.assertFalse((self.dev("client") / "profile.json").exists())
 
     def test_hybrid_signature_requires_both_halves(self):
         import base64
         from cryptography.hazmat.primitives.asymmetric import ed25519, mldsa
 
-        with zipfile.ZipFile(self.ops / "client.avpn") as z:
+        with zipfile.ZipFile(self.ops / "client.cpvpn") as z:
             raw = z.read("set.json")
         forged_pq = lambda m, b: mldsa.MLDSA65PrivateKey.generate().sign(raw) if m == "set.mldsa65.sig" else b
         forged_classical = lambda m, b: (
@@ -439,9 +439,9 @@ class EnrollmentTests(unittest.TestCase):
             else b
         )
         for case, bundle in [
-            ("pq-forged", self._rewritten("a.avpn", forged_pq)),
-            ("classical-forged", self._rewritten("b.avpn", forged_classical)),
-            ("pq-missing", self._rewritten("c.avpn", drop="set.mldsa65.sig")),
+            ("pq-forged", self._rewritten("a.cpvpn", forged_pq)),
+            ("classical-forged", self._rewritten("b.cpvpn", forged_classical)),
+            ("pq-missing", self._rewritten("c.cpvpn", drop="set.mldsa65.sig")),
         ]:
             with self.subTest(case), self.assertRaises(Exception):
                 enroll(bundle, self.ops / "operator.pub", self.dev("client"))
@@ -452,7 +452,7 @@ class EnrollmentTests(unittest.TestCase):
         be rejected by validation before any rule is generated (injection)."""
         from managed_profile import profile_validate
 
-        base = json.loads(zipfile.ZipFile(self.ops / "client.avpn").read("profile.json"))
+        base = json.loads(zipfile.ZipFile(self.ops / "client.cpvpn").read("profile.json"))
         hostile = {
             ("network", "relay_endpoint"): [
                 "1.1.1.1 } ; flush ruleset ; table x {:41194",
@@ -481,7 +481,7 @@ class EnrollmentTests(unittest.TestCase):
     def test_device_identities_are_ml_dsa_65(self):
         from cryptography.hazmat.primitives.asymmetric import mldsa
 
-        p = enroll(self.ops / "client.avpn", self.ops / "operator.pub", self.dev("client"))
+        p = enroll(self.ops / "client.cpvpn", self.ops / "operator.pub", self.dev("client"))
         c = runtime(p, self.dev("client"))["core"]
         for lane in ["outer", "inner"]:
             cert = x509.load_der_x509_certificate(Path(c[lane]["cert"]).read_bytes())
@@ -492,7 +492,7 @@ class EnrollmentTests(unittest.TestCase):
         self.assertEqual(fresh.signature_algorithm_oid.dotted_string, "2.16.840.1.101.3.4.3.18")
 
     def test_rotated_certificate_keeps_identity_without_authority_key(self):
-        p = enroll(self.ops / "client.avpn", self.ops / "operator.pub", self.dev("client"))
+        p = enroll(self.ops / "client.cpvpn", self.ops / "operator.pub", self.dev("client"))
         c = runtime(p, self.dev("client"))["core"]
         old = x509.load_der_x509_certificate(Path(c["inner"]["cert"]).read_bytes())
         refresh_leaves(c, self.dev("client"))
@@ -506,7 +506,7 @@ class EnrollmentTests(unittest.TestCase):
         self.assertLess(new.not_valid_after_utc - new.not_valid_before_utc, dt.timedelta(hours=13))
 
     def test_wireguard_psk_key_accepts_only_sealed_handoff_and_daita(self):
-        p = enroll(self.ops / "client.avpn", self.ops / "operator.pub", self.dev("client"))
+        p = enroll(self.ops / "client.cpvpn", self.ops / "operator.pub", self.dev("client"))
         w = runtime(p, self.dev("client"))["carrier"]
         path = Path(w["identity"]["key"])
         fd = memory_fd(path.read_bytes())
@@ -514,10 +514,10 @@ class EnrollmentTests(unittest.TestCase):
         cfg = self.root / "carrier.json"
         cfg.write_text(json.dumps(w))
         cfg.chmod(0o600)
-        binary = Path(__file__).resolve().parents[1] / "target/release/advanced-vpn-wireguard"
+        binary = Path(__file__).resolve().parents[1] / "target/release/cypherpunk-vpn-wireguard"
         try:
             args = [binary, "--config", cfg, "--check", "--key-fd", "wireguard=" + str(fd)]
-            # The default chain (what `avpn init` signs) is what the carrier accepts.
+            # The default chain (what `cypherpunk init` signs) is what the carrier accepts.
             self.assertEqual((w["defense"], w["rate"]), ("strong", "metered"))
             r = subprocess.run(args, pass_fds=[fd], capture_output=True, timeout=5)
             self.assertEqual(r.returncode, 0, r.stderr)
@@ -550,7 +550,7 @@ class PerHopShapingTests(unittest.TestCase):
             require_current,
         )
 
-        binary = Path(__file__).resolve().parents[1] / "target/release/advanced-vpn"
+        binary = Path(__file__).resolve().parents[1] / "target/release/cypherpunk-vpn"
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
             roles = ["client", "relay", "middle", "exit"]
@@ -572,7 +572,7 @@ class PerHopShapingTests(unittest.TestCase):
             expected = {"relay": (1, 0), "middle": (1, 1), "exit": (0, 1)}
             seen = {}
             for role in roles:
-                p = enroll(out / (role + ".avpn"), out / "operator.pub", root / "dev" / role)
+                p = enroll(out / (role + ".cpvpn"), out / "operator.pub", root / "dev" / role)
                 core = p["core"]
                 if role == "client":
                     self.assertNotIn("link_rate", core)
@@ -607,7 +607,7 @@ class PerHopShapingTests(unittest.TestCase):
             self.assertEqual(seen["middle"][:32], seen["exit"])
             self.assertNotEqual(seen["relay"][:32], seen["exit"])
             # A multi-hop server profile signed before per-hop shaping is refused.
-            old = json.loads(zipfile.ZipFile(out / "exit.avpn").read("profile.json"))
+            old = json.loads(zipfile.ZipFile(out / "exit.cpvpn").read("profile.json"))
             for k in ["link_rate", "link_out", "link_in"]:
                 old["core"].pop(k)
             profile_validate(old)
@@ -660,7 +660,7 @@ class RateClassTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 create(root / "b", reqs, "192.0.2.1:41194", "198.51.100.2:4444", signer, rate="turbo")
             create(root / "c", reqs, "192.0.2.1:41194", "198.51.100.2:4444", signer, rate="fast")
-            client = json.loads(zipfile.ZipFile(root / "c" / "client.avpn").read("profile.json"))
+            client = json.loads(zipfile.ZipFile(root / "c" / "client.cpvpn").read("profile.json"))
             self.assertEqual(client["carrier"]["rate"], "fast")
             require_current(profile_validate(client))
             # A profile signed by an older release with balanced still loads (reset,
@@ -677,7 +677,7 @@ class HardwareVerificationTests(unittest.TestCase):
     for the Nitrokey so every rejection path is exercised without a device."""
 
     def assertion(
-        self, message, flags=0x05, rp="advanced-vpn.local", origin="https://advanced-vpn.local", sign_with=None
+        self, message, flags=0x05, rp="cypherpunk-vpn.local", origin="https://cypherpunk-vpn.local", sign_with=None
     ):
         import base64
         from cryptography.hazmat.primitives.asymmetric import ed25519
@@ -764,7 +764,7 @@ class RootFileHandoffTests(unittest.TestCase):
 
     def test_symlink_swap_after_rename_cannot_redirect_mode_or_owner(self):
         from unittest import mock
-        import avpnctl
+        import cypherpunkctl
 
         with tempfile.TemporaryDirectory() as d:
             d = Path(d)
@@ -781,9 +781,9 @@ class RootFileHandoffTests(unittest.TestCase):
                     target.unlink()
                     target.symlink_to(victim)
 
-            with mock.patch.object(avpnctl.os, "replace", racing_replace):
+            with mock.patch.object(cypherpunkctl.os, "replace", racing_replace):
                 try:
-                    avpnctl.owned_public(target, b"public data", os.getuid(), os.getgid())
+                    cypherpunkctl.owned_public(target, b"public data", os.getuid(), os.getgid())
                 except OSError:
                     pass
             self.assertEqual(victim.stat().st_mode & 0o777, 0o644, "root chmod followed an attacker symlink")
@@ -793,7 +793,7 @@ class RootFileHandoffTests(unittest.TestCase):
 class HardeningTests(unittest.TestCase):
     def test_controller_hardening_makes_process_non_dumpable(self):
         code = (
-            "import ctypes,resource,sys;sys.path.insert(0,sys.argv[1]);import avpnctl;avpnctl.harden_process();"
+            "import ctypes,resource,sys;sys.path.insert(0,sys.argv[1]);import cypherpunkctl;cypherpunkctl.harden_process();"
             "print(ctypes.CDLL(None).prctl(3,0,0,0,0),resource.getrlimit(resource.RLIMIT_CORE)[0])"
         )
         r = subprocess.run(
@@ -804,7 +804,7 @@ class HardeningTests(unittest.TestCase):
     def test_main_applies_hardening_first(self):
         import ast
 
-        tree = ast.parse((Path(__file__).parent / "avpnctl.py").read_text())
+        tree = ast.parse((Path(__file__).parent / "cypherpunkctl.py").read_text())
         main = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main")
         body = main.body[1:] if ast.get_docstring(main) else main.body
         first = body[0]
@@ -841,7 +841,7 @@ class BudgetTests(unittest.TestCase):
             self.assertEqual(json.loads(path.read_text()), dict(day="2026-11-08", reserved=1 << 16))
 
     def test_cap_is_opt_in(self):
-        from avpnctl import daily_limit
+        from cypherpunkctl import daily_limit
 
         self.assertIsNone(daily_limit({}, dict(daily_budget_bytes=None)))
         self.assertEqual(daily_limit({"daily_limit_mib": 2}, dict(daily_budget_bytes=None)), 2 << 20)

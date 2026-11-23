@@ -97,13 +97,13 @@ class Refused(Exception):
 
 def paths(root: Path | None = None) -> dict:
     """The wizard's production layout (root overridable for tests)."""
-    base = Path(root) if root else Path("/etc/advanced-vpn")
+    base = Path(root) if root else Path("/etc/cypherpunk-vpn")
     return {
         "state": base / "enrolled",  # this desktop's client state (the existing STATE)
-        "vault": base / "vault",  # the device vault (avpnctl.DEVICE_VAULT in production)
+        "vault": base / "vault",  # the device vault (cypherpunkctl.DEVICE_VAULT in production)
         "exit": base / "wizard-exit",  # the exit identity this wizard requests
         "requests": base / "wizard-requests",  # relay/middle requests the operator collected
-        "signed": base / "wizard-signed",  # avpn init's output directory
+        "signed": base / "wizard-signed",  # cypherpunk init's output directory
         "journal": base / JOURNAL_NAME,
     }
 
@@ -275,7 +275,7 @@ def validate(branch: str, name: str, request) -> dict:
                 raise Refused("single_hop_has_no_relay_or_middle")
             if not isinstance(value, str) or not ENDPOINT_CHARS.fullmatch(value):
                 raise Refused(f"invalid_{field}_endpoint")
-            # A concrete endpoint, as `avpn init` itself parses it: never a flag (a value
+            # A concrete endpoint, as `cypherpunk init` itself parses it: never a flag (a value
             # like `--accept-cost` must not depend on the parser to fail), IPv4 on the
             # first hop, IPv6 allowed on a later one (reached over a TCP link).
             first = field == "relay" or (field == "exit" and hops == 1)
@@ -379,7 +379,7 @@ def prepare(branch: str, name: str, request, where: dict | None = None) -> dict 
 
 
 def _route_requests(fields: dict, where: dict):
-    """The (role, path) pairs sign_route passes to avpn init: always the
+    """The (role, path) pairs sign_route passes to cypherpunk init: always the
     wizard's own files, never caller-supplied paths."""
     out = [("client", Path(where["state"]) / "device.req")]
     for role, name in fields.get("extra_requests", []):

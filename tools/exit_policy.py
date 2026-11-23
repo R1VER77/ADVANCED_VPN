@@ -203,7 +203,7 @@ def default_outbound() -> dict:
     """A sensible outbound-only policy: everything out except the
     hygiene set, nothing in. Rules are ordered; first match wins, so
     the specific rejects come BEFORE the broad accepts (Tor exit
-    policy convention). The template `avpn mesh publish` offers; the
+    policy convention). The template `cypherpunk mesh publish` offers; the
     operator edits from here."""
     rules = []
     for spec in DEFAULT_REFUSED_OUTBOUND:

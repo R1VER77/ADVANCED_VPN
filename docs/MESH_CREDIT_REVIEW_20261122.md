@@ -51,7 +51,7 @@ keep them that way.
    states its quantum status in the docstring and in a `QUANTUM_STATUS` constant,
    in the same terms the RSA modules use for themselves: a quantum adversary
    forges credits, and unlinkability survives, because the blinding is perfectly
-   hiding. `quota_view`/`avpn mesh quota` now carries both pools' labels in its
+   hiding. `quota_view`/`cypherpunk mesh quota` now carries both pools' labels in its
    output rows, wherever the balance is stated.
 2. **Consolidated the voucher label** into the canonical exceptions list
    (PQ_INVENTORY exception 7), so the inventory's "stated wherever the claim is

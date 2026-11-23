@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Built-in cloud setup for ADVANCED_VPN chains (`avpn cloud`).
+"""Built-in cloud setup for cypherpunk_vpn chains (`cypherpunk cloud`).
 
 Runs as you, never as root, because it uses your own signed-in provider CLIs (`aws`,
-`oci`). It only ever touches resources it tagged itself (`avpn:managed=true` plus
-`avpn:name=<name>`), so a teardown cannot reach anything else in the account.
+`oci`). It only ever touches resources it tagged itself (`cpvpn:managed=true` plus
+`cpvpn:name=<name>`), so a teardown cannot reach anything else in the account.
 
 Commands:
 - `status`: the local inventory, plus the tagged resources that still exist.
@@ -14,7 +14,7 @@ Commands:
   previous hop only.
 
 Every apply and teardown prints its plan first. `--dry-run` stops after the plan, and
-`--yes` confirms without a prompt. `--json` prints one object for the `avpn` CLI.
+`--yes` confirms without a prompt. `--json` prints one object for the `cypherpunk` CLI.
 """
 
 import argparse
@@ -38,10 +38,10 @@ import fee_guard
 import providers
 import retention
 
-MANAGED = "avpn:managed"
-NAME = "avpn:name"
+MANAGED = "cpvpn:managed"
+NAME = "cpvpn:name"
 DEBIAN_OWNER = "136693071363"  # Debian's official AWS account
-INVENTORY = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "advanced-vpn" / "cloud.json"
+INVENTORY = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "cypherpunk-vpn" / "cloud.json"
 # On-demand list prices in eu-north-1 (USD, checked 2026-11). These are estimates only:
 # the free plan's credits pay for them, and AWS Billing shows the real cost.
 MONTHLY_USD = {"t3.micro": 7.88, "t3.small": 15.77, "gp3_gib": 0.0836, "public_ipv4": 3.65}
@@ -55,8 +55,8 @@ class CloudError(RuntimeError):
 
 
 def tool(name):
-    """The provider CLI: `AVPN_AWS` / `AVPN_OCI` override it (tests), else PATH."""
-    override = os.environ.get("AVPN_" + name.upper())
+    """The provider CLI: `CPVPN_AWS` / `CPVPN_OCI` override it (tests), else PATH."""
+    override = os.environ.get("CPVPN_" + name.upper())
     found = override or shutil.which(name)
     if not found:
         raise CloudError("the %s CLI is not installed or not on PATH" % name)
@@ -100,11 +100,11 @@ def call(argv, parse=True, stdin=None, sleep=time.sleep):
 
 
 def valid_name(name):
-    """Resource names: lowercase letters, digits and dashes, starting `avpn-`."""
+    """Resource names: lowercase letters, digits and dashes, starting `cpvpn-`."""
     if not (
-        name.startswith("avpn-") and 6 <= len(name) <= 40 and all(c.islower() or c.isdigit() or c == "-" for c in name)
+        name.startswith("cpvpn-") and 7 <= len(name) <= 41 and all(c.islower() or c.isdigit() or c == "-" for c in name)
     ):
-        raise CloudError("name must start with avpn- and use only a-z, 0-9 and -")
+        raise CloudError("name must start with cpvpn- and use only a-z, 0-9 and -")
     return name
 
 
@@ -357,7 +357,7 @@ def aws_relay_apply(a, aws, plan):
         "--name",
         "%s-nitrotpm-%s" % (a.name, stamp),
         "--description",
-        "ADVANCED_VPN: Debian 13 amd64, UEFI, NitroTPM 2.0",
+        "cypherpunk_vpn: Debian 13 amd64, UEFI, NitroTPM 2.0",
         "--architecture",
         "x86_64",
         "--virtualization-type",
@@ -416,7 +416,7 @@ def aws_relay_apply(a, aws, plan):
         "--group-name",
         a.name,
         "--description",
-        "ADVANCED_VPN %s: tunnel from the previous hop, SSH from the admin address" % a.role,
+        "cypherpunk_vpn %s: tunnel from the previous hop, SSH from the admin address" % a.role,
         "--vpc-id",
         vpc[0]["VpcId"],
         "--tag-specifications",
@@ -429,7 +429,7 @@ def aws_relay_apply(a, aws, plan):
             IpProtocol=PROTO[a.role],
             FromPort=plan["port"],
             ToPort=plan["port"],
-            IpRanges=[dict(CidrIp=c, Description="ADVANCED_VPN previous hop") for c in a.allow_from],
+            IpRanges=[dict(CidrIp=c, Description="cypherpunk_vpn previous hop") for c in a.allow_from],
         ),
         dict(IpProtocol="tcp", FromPort=22, ToPort=22, IpRanges=[dict(CidrIp=a.admin_ip, Description="admin SSH")]),
     ]
@@ -440,7 +440,7 @@ def aws_relay_apply(a, aws, plan):
                 IpProtocol="tcp",
                 FromPort=plan["port"],
                 ToPort=plan["port"],
-                IpRanges=[dict(CidrIp=c, Description="ADVANCED_VPN camouflage TLS fallback") for c in a.allow_from],
+                IpRanges=[dict(CidrIp=c, Description="cypherpunk_vpn camouflage TLS fallback") for c in a.allow_from],
             )
         )
     aws.ec2("authorize-security-group-ingress", "--group-id", sg, "--ip-permissions", json.dumps(perms))
@@ -451,7 +451,7 @@ def aws_relay_apply(a, aws, plan):
             DeviceName=root, Ebs=dict(VolumeSize=a.disk_gib, VolumeType="gp3", Encrypted=True, DeleteOnTermination=True)
         )
     ]
-    instance_tags = json.loads(aws.tags("instance", a.name, {"avpn:role": a.role})) + json.loads(
+    instance_tags = json.loads(aws.tags("instance", a.name, {"cpvpn:role": a.role})) + json.loads(
         aws.tags("volume", a.name)
     )
     try:
@@ -500,7 +500,7 @@ def aws_relay_apply(a, aws, plan):
         dict(label="ssh", value="ssh -i %s admin@%s" % (key, inst["PublicIpAddress"])),
         dict(
             label="next",
-            value="install the package on it, then avpn request --role %s --protect systemd-creds" % a.role,
+            value="install the package on it, then cypherpunk request --role %s --protect systemd-creds" % a.role,
         ),
     ]
 
@@ -511,8 +511,8 @@ def aws_teardown_plan(a, aws):
     rows = []
     for i in owned["instances"]:
         name = {t["Key"]: t["Value"] for t in i.get("Tags", [])}.get("Name", "")
-        if not name.startswith("avpn-"):
-            raise CloudError("refusing: %s is tagged but not named avpn-*" % i["InstanceId"])
+        if not name.startswith("cpvpn-"):
+            raise CloudError("refusing: %s is tagged but not named cpvpn-*" % i["InstanceId"])
         rows.append(dict(label="instance", value="%s %s %s" % (i["InstanceId"], name, i.get("PublicIpAddress", ""))))
     for g in owned["security_groups"]:
         rows.append(dict(label="firewall", value=g["GroupId"] + " " + g["GroupName"]))
@@ -589,7 +589,7 @@ def aws_allow_plan(a, aws):
     """
     owned = aws.owned(a.name)
     groups = owned["security_groups"]
-    roles = {t["Value"] for i in owned["instances"] for t in i.get("Tags", []) if t["Key"] == "avpn:role"}
+    roles = {t["Value"] for i in owned["instances"] for t in i.get("Tags", []) if t["Key"] == "cpvpn:role"}
     record = load_inventory()["resources"].get(a.name, {})
     if a.admin_ip and eice_admin(record):
         raise CloudError(
@@ -609,7 +609,7 @@ def aws_allow_plan(a, aws):
         )
     wanted = []
     if a.allow_from:
-        wanted.append(("tunnel", tunnel[0], "udp", tunnel[0]["FromPort"], a.allow_from, "ADVANCED_VPN previous hop"))
+        wanted.append(("tunnel", tunnel[0], "udp", tunnel[0]["FromPort"], a.allow_from, "cypherpunk_vpn previous hop"))
     if a.admin_ip:
         wanted.append(("ssh", ssh[0] if ssh else {}, "tcp", 22, [a.admin_ip], "admin SSH"))
     add, remove, rows = [], [], [dict(label="firewall", value="%s %s" % (g["GroupId"], g.get("GroupName", "")))]
@@ -777,7 +777,7 @@ def oci_rule(a):
         source=a.allow_from[0],
         sourceType="CIDR_BLOCK",
         isStateless=False,
-        description="advanced-vpn:" + a.name,
+        description="cypherpunk-vpn:" + a.name,
     )
     rule["udpOptions" if a.protocol == "udp" else "tcpOptions"] = opts
     return rule
@@ -788,7 +788,7 @@ def oci_allow(a, apply):
     if len(a.allow_from) != 1:
         raise CloudError("oci allow takes exactly one --allow-from address")
     sl = oci("network", "security-list", "get", "--security-list-id", a.security_list)["data"]
-    tag = "advanced-vpn:" + a.name
+    tag = "cypherpunk-vpn:" + a.name
     ingress = [r for r in sl["ingress-security-rules"] if r.get("description") != tag]
     mine = [r for r in sl["ingress-security-rules"] if r.get("description") == tag]
     rows = [dict(label="security list", value="%s (%s)" % (sl["display-name"], a.security_list))]
@@ -872,7 +872,7 @@ class Oci:
 
     def tags(self, name):
         """Freeform tags marking a resource as this tool's."""
-        return json.dumps({"avpn-managed": "true", "avpn-name": name})
+        return json.dumps({"cpvpn-managed": "true", "cpvpn-name": name})
 
 
 def oci_ingress(port, sources, admin, tcp=False):
@@ -884,7 +884,7 @@ def oci_ingress(port, sources, admin, tcp=False):
             source=c,
             sourceType="CIDR_BLOCK",
             isStateless=False,
-            description="ADVANCED_VPN previous hop",
+            description="cypherpunk_vpn previous hop",
             udpOptions=dict(destinationPortRange=dict(min=port, max=port)),
         )
         for c in sources
@@ -896,7 +896,7 @@ def oci_ingress(port, sources, admin, tcp=False):
                 source=c,
                 sourceType="CIDR_BLOCK",
                 isStateless=False,
-                description="ADVANCED_VPN camouflage TLS fallback",
+                description="cypherpunk_vpn camouflage TLS fallback",
                 tcpOptions=dict(destinationPortRange=dict(min=port, max=port)),
             )
             for c in sources
@@ -1145,14 +1145,17 @@ def oci_server_apply(a, oc, plan):
             bastion=dict(id=bastion["id"], instance=inst["id"], user="ubuntu", host=a.name + "-bastion",
                          public_key=str(key) + ".pub", oci_profile=a.oci_profile),
         )  # fmt: skip
-        how = "through the OCI bastion: avpn cloud renews its session (ssh -F %s %s)" % (config, a.name)
+        how = "through the OCI bastion: cypherpunk cloud renews its session (ssh -F %s %s)" % (config, a.name)
     else:
         how = "ssh -i %s ubuntu@%s" % (key, ip)
     return [
         dict(label="instance", value="%s %s" % (inst["id"][-16:], plan["shape"])),
         dict(label="public address", value="%s (udp %d)" % (ip, plan["port"])),
         dict(label="ssh", value=how),
-        dict(label="next", value="avpn cloud chain --apply (or: avpn cloud host setup --name %s --out FILE)" % a.name),
+        dict(
+            label="next",
+            value="cypherpunk cloud chain --apply (or: cypherpunk cloud host setup --name %s --out FILE)" % a.name,
+        ),
     ]
 
 
@@ -1178,8 +1181,8 @@ def oci_teardown_plan(a, oc):
             continue
         got = oc(*noun, "get", flag, rec[field])["data"]
         tags = got.get("freeform-tags", {})
-        if tags.get("avpn-managed") != "true" or tags.get("avpn-name") != a.name:
-            raise CloudError("refusing: %s %s is not tagged avpn-name=%s" % (field, rec[field][-16:], a.name))
+        if tags.get("cpvpn-managed") != "true" or tags.get("cpvpn-name") != a.name:
+            raise CloudError("refusing: %s %s is not tagged cpvpn-name=%s" % (field, rec[field][-16:], a.name))
         if got.get("lifecycle-state") in ("TERMINATED", "TERMINATING"):
             continue
         rows.append(dict(label=field.replace("_", " "), value=rec[field][-24:]))
@@ -1216,22 +1219,22 @@ APT_WINDOW = r"""# Updates and installs need the network the egress lock closes 
 # with root, apt's download sandbox and the resolver allowed; with none running, the
 # retained lock is removed and the next start rebuilds it. Traffic still counts against
 # the monthly cap; a capped server stays shut.
-M=/etc/advanced-vpn/metering/enrolled
+M=/etc/cypherpunk-vpn/metering/enrolled
 STOPPED=no
-sudo -n install -d -m 0700 /etc/advanced-vpn/metering $M
+sudo -n install -d -m 0700 /etc/cypherpunk-vpn/metering $M
 echo $(( $(date +%s) + 1800 )) | sudo -n tee $M/maintenance-until >/dev/null
-trap 'rc=$?; sudo -n rm -f /etc/advanced-vpn/metering/enrolled/maintenance-until
-if [ "$STOPPED" = yes ] && { [ "$RESTART" = always ] || [ $rc -ne 0 ]; }; then sudo -n systemctl start advanced-vpn.service || true; fi' EXIT
-if systemctl is-active -q advanced-vpn.service 2>/dev/null; then sleep 7
-else sudo -n nft delete table inet advanced_vpn_egress 2>/dev/null || true; fi
+trap 'rc=$?; sudo -n rm -f /etc/cypherpunk-vpn/metering/enrolled/maintenance-until
+if [ "$STOPPED" = yes ] && { [ "$RESTART" = always ] || [ $rc -ne 0 ]; }; then sudo -n systemctl start cypherpunk-vpn.service || true; fi' EXIT
+if systemctl is-active -q cypherpunk-vpn.service 2>/dev/null; then sleep 7
+else sudo -n nft delete table inet cypherpunk_vpn_egress 2>/dev/null || true; fi
 # The supervisor's own daily update gives way to this window.
-sudo -n systemctl stop advanced-vpn-security-update.service 2>/dev/null || true
+sudo -n systemctl stop cypherpunk-vpn-security-update.service 2>/dev/null || true
 # A supervisor from before 23 November opened its window to root alone, so apt's downloads
 # and every name lookup (other users) stayed shut and updates hung, holding apt's lock.
 # If names still do not resolve, stop it and lift its lock: whoever ran this restarts it.
 if ! timeout 15 getent hosts deb.debian.org >/dev/null 2>&1 && ! timeout 15 getent hosts archive.ubuntu.com >/dev/null 2>&1; then
-  if systemctl is-active -q advanced-vpn.service 2>/dev/null; then sudo -n systemctl stop advanced-vpn.service; STOPPED=yes; fi
-  sudo -n nft delete table inet advanced_vpn_egress 2>/dev/null || true
+  if systemctl is-active -q cypherpunk-vpn.service 2>/dev/null; then sudo -n systemctl stop cypherpunk-vpn.service; STOPPED=yes; fi
+  sudo -n nft delete table inet cypherpunk_vpn_egress 2>/dev/null || true
 fi
 """
 
@@ -1245,32 +1248,32 @@ HOST_SETUP = (
     r"""set -e
 ROLE=$1 PORT=$2 REPLACE=$3 SHARED=$4 UNLOCK=${5:-no}
 RESTART=on-failure
-E=/etc/advanced-vpn/enrolled
+E=/etc/cypherpunk-vpn/enrolled
 @@APT_WINDOW@@
 # An image host (a Fly.io Machine) was built with the package, its logs in RAM and no
 # timers: only its keys are made here.
-IMAGE=no; [ -f /opt/advanced-vpn/IMAGE ] && IMAGE=yes
+IMAGE=no; [ -f /opt/cypherpunk-vpn/IMAGE ] && IMAGE=yes
 # No retained data, first: a dedicated server keeps every log in RAM before anything
 # else runs (tools/retention.py). A shared host's logging belongs to its other
 # workloads, so it is only marked, and doctor reports it.
 if [ "$IMAGE" = yes ]; then
   :
 elif [ "$SHARED" != yes ]; then
-  sudo -n sh -s <<'AVPN_HARDEN'
+  sudo -n sh -s <<'CPVPN_HARDEN'
 @@HARDEN@@
-AVPN_HARDEN
-  sudo -n rm -f /etc/advanced-vpn/shared-host
+CPVPN_HARDEN
+  sudo -n rm -f /etc/cypherpunk-vpn/shared-host
   # Nothing sends on its own (the egress lock would drop it anyway, and every byte counts
   # against the cap): no update timers, snaps, news or telemetry. Updates run in a counted
-  # window instead: avpn cloud host update NAME.
+  # window instead: cypherpunk cloud host update NAME.
   # Their own timers are off; security updates still come daily, from the supervisor.
   for u in apt-daily.timer apt-daily-upgrade.timer snapd.service snapd.socket \
            motd-news.timer ua-timer.timer esm-cache.service update-notifier-download.timer fwupd-refresh.timer; do
     sudo -n systemctl disable --now "$u" >/dev/null 2>&1 || true
   done
 else
-  sudo -n mkdir -p /etc/advanced-vpn
-  sudo -n touch /etc/advanced-vpn/shared-host
+  sudo -n mkdir -p /etc/cypherpunk-vpn
+  sudo -n touch /etc/cypherpunk-vpn/shared-host
 fi
 if [ "$IMAGE" = no ]; then
 export DEBIAN_FRONTEND=noninteractive
@@ -1290,16 +1293,28 @@ if sudo -n iptables -S INPUT 2>/dev/null | grep -q -- '-j REJECT'; then
   # Persisting would also save a shared host's other runtime rules, so only a dedicated one does.
   if [ "$SHARED" != yes ] && command -v netfilter-persistent >/dev/null; then sudo -n netfilter-persistent save >/dev/null 2>&1 || true; fi
 fi
-sudo -n rm -rf /tmp/avpn-src && mkdir -p /tmp/avpn-src && tar -C /tmp/avpn-src -xzf /tmp/avpn-src.tgz
+sudo -n rm -rf /tmp/cpvpn-src && mkdir -p /tmp/cpvpn-src && tar -C /tmp/cpvpn-src -xzf /tmp/cpvpn-src.tgz
+if [ -e /opt/advanced-vpn ] || [ -e /etc/systemd/system/advanced-vpn.service ]; then
+  for unit in advanced-vpn.service advanced-vpn-guard.service advanced-vpn-security-update.service; do
+    sudo -n systemctl disable --now "$unit" 2>/dev/null || true
+  done
+  sudo -n rm -f /etc/systemd/system/advanced-vpn*.service /etc/systemd/system/.advanced-vpn*.service.json \
+                /usr/local/bin/avpn /usr/local/bin/avpnctl
+  sudo -n rm -rf /opt/advanced-vpn /etc/advanced-vpn
+  for tbl in "inet advanced_vpn" "inet advanced_vpn_egress" "ip advanced_vpn_egress"; do
+    sudo -n nft delete table $tbl 2>/dev/null || true
+  done
+  sudo -n systemctl daemon-reload 2>/dev/null || true
+fi
 # A flat installation from before release slots cannot be moved while it runs: stop what
 # runs from it and adopt it, kept as the previous slot for a rollback. `chain` enrolls and
 # restarts the service afterwards, and the guard comes back with it (Requires=).
 ADOPT=
-if [ -d /opt/advanced-vpn/bin ] && [ ! -L /opt/advanced-vpn/bin ]; then
-  for unit in advanced-vpn.service advanced-vpn-guard.service; do sudo -n systemctl stop "$unit" 2>/dev/null || true; done
+if [ -d /opt/cypherpunk-vpn/bin ] && [ ! -L /opt/cypherpunk-vpn/bin ]; then
+  for unit in cypherpunk-vpn.service cypherpunk-vpn-guard.service; do sudo -n systemctl stop "$unit" 2>/dev/null || true; done
   ADOPT=--adopt-legacy
 fi
-sudo -n python3 -B /tmp/avpn-src/tools/install.py --apply $ADOPT >/dev/null
+sudo -n python3 -B /tmp/cpvpn-src/tools/install.py --apply $ADOPT >/dev/null
 fi
 HAVE=$(sudo -n python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["role"])' $E/request.json 2>/dev/null || true)
 # Same-role keys are kept only if they carry every key this release makes for the role
@@ -1322,14 +1337,14 @@ import hashlib, json, sys
 p = json.load(open(sys.argv[1]))
 ok = p.get("mode") == "systemd-creds" and p.get("creds_key") == "host+tpm2"
 if p.get("mode") == "operator" and sys.argv[2] == "yes":
-    ok = p["unlock"]["operator_unlock_sha256"] == hashlib.sha256(open("/tmp/avpn-unlock.pub", "rb").read()).hexdigest()
+    ok = p["unlock"]["operator_unlock_sha256"] == hashlib.sha256(open("/tmp/cpvpn-unlock.pub", "rb").read()).hexdigest()
 print("yes" if ok else "no")' $E/protection.json "$UNLOCK" 2>/dev/null || echo no)
 if [ -n "$HAVE" ] && [ "$HAVE" = "$ROLE" ] && [ "$CURRENT" = yes ] && [ "$STRONG" = yes ]; then
   echo "keys=kept"
 elif [ -n "$HAVE" ] && [ "$HAVE" != "$ROLE" ] && [ "$REPLACE" != yes ]; then
   echo "this server has keys for role $HAVE; replace them to make it a $ROLE" >&2; exit 3
 else
-  sudo -n systemctl stop advanced-vpn.service 2>/dev/null || true
+  sudo -n systemctl stop cypherpunk-vpn.service 2>/dev/null || true
   sudo -n rm -rf $E
   # The host is tested first (docs/HARDWARE_BOUND_SESSIONS.md, servers without a TPM):
   # keys are sealed to its TPM2 when systemd-creds can really use one (systemd 250+, a
@@ -1344,24 +1359,24 @@ else
   PROTECT=
   PROBE_ARGS=
   if command -v systemd-creds >/dev/null 2>&1 \
-     && [ "$(printf avpn | sudo -n systemd-creds encrypt --with-key=host+tpm2 --name=avpn-probe - - 2>/dev/null \
-            | sudo -n systemd-creds decrypt --name=avpn-probe - - 2>/dev/null)" = avpn ]; then
+     && [ "$(printf cypherpunk | sudo -n systemd-creds encrypt --with-key=host+tpm2 --name=cpvpn-probe - - 2>/dev/null \
+            | sudo -n systemd-creds decrypt --name=cpvpn-probe - - 2>/dev/null)" = cypherpunk ]; then
     PROTECT=systemd-creds
   elif [ "$UNLOCK" = yes ]; then
     PROTECT=operator
-    PROBE_ARGS="--unlock-key /tmp/avpn-unlock.pub"
-    echo "NOTE: no usable TPM2 here (systemd $(systemctl --version 2>/dev/null | head -1 | awk '{print $2}')): the keys are locked to the operator's Nitrokey; unlock after each reboot with avpn cloud unlock." >&2
+    PROBE_ARGS="--unlock-key /tmp/cpvpn-unlock.pub"
+    echo "NOTE: no usable TPM2 here (systemd $(systemctl --version 2>/dev/null | head -1 | awk '{print $2}')): the keys are locked to the operator's Nitrokey; unlock after each reboot with cypherpunk cloud unlock." >&2
   else
     echo "this host cannot seal keys to a TPM2 (systemd $(systemctl --version 2>/dev/null | head -1 | awk '{print $2}')); give the operator's vault (--vault) to lock them to its Nitrokey instead" >&2
     exit 4
   fi
-  sudo -n /opt/advanced-vpn/bin/avpnctl request --role "$ROLE" --protect "$PROTECT" $PROBE_ARGS --out /root/request.json >/dev/null
+  sudo -n /opt/cypherpunk-vpn/bin/cypherpunkctl request --role "$ROLE" --protect "$PROTECT" $PROBE_ARGS --out /root/request.json >/dev/null
   if [ "$HAVE" = "$ROLE" ]; then echo "keys=renewed"; else echo "keys=new"; fi
 fi
-sudo -n cat $E/request.json > /tmp/avpn-request.json
-sudo -n rm -f /tmp/avpn-unlock.pub
-echo "protection=$(sudo -n python3 -c 'import json;print(json.load(open("/etc/advanced-vpn/enrolled/protection.json")).get("mode"))' 2>/dev/null || echo unknown) tpm2=$(systemd-analyze has-tpm2 >/dev/null 2>&1 && echo yes || echo no) creds_key=$(sudo -n python3 -c 'import json;print(json.load(open("/etc/advanced-vpn/enrolled/protection.json")).get("creds_key"))')"
-sudo -n rm -rf /tmp/avpn-src /tmp/avpn-src.tgz
+sudo -n cat $E/request.json > /tmp/cpvpn-request.json
+sudo -n rm -f /tmp/cpvpn-unlock.pub
+echo "protection=$(sudo -n python3 -c 'import json;print(json.load(open("/etc/cypherpunk-vpn/enrolled/protection.json")).get("mode"))' 2>/dev/null || echo unknown) tpm2=$(systemd-analyze has-tpm2 >/dev/null 2>&1 && echo yes || echo no) creds_key=$(sudo -n python3 -c 'import json;print(json.load(open("/etc/cypherpunk-vpn/enrolled/protection.json")).get("creds_key"))')"
+sudo -n rm -rf /tmp/cpvpn-src /tmp/cpvpn-src.tgz
 """.replace("@@HARDEN@@", retention.HARDEN.rstrip("\n"))
     .replace("@@APT_WINDOW@@", APT_WINDOW.rstrip("\n"))
     .replace("@@APT_UPDATE@@", APT_UPDATE.rstrip("\n"))
@@ -1380,22 +1395,22 @@ echo "updated $(cat /var/run/reboot-required 2>/dev/null && echo '(reboot requir
 
 # Restart an unlocked server's service and report whether it runs.
 HOST_RESTART = r"""set -e
-sudo -n systemctl reset-failed advanced-vpn.service 2>/dev/null || true
-sudo -n systemctl restart advanced-vpn.service
+sudo -n systemctl reset-failed cypherpunk-vpn.service 2>/dev/null || true
+sudo -n systemctl restart cypherpunk-vpn.service
 sleep 3
-systemctl is-active advanced-vpn.service
+systemctl is-active cypherpunk-vpn.service
 """
 
 # Install a signed bundle on a server and (re)start it: bash -s -- (bundle on stdin is not used).
 HOST_ENROLL = r"""set -e
-sudo -n systemctl stop advanced-vpn.service 2>/dev/null || true
-sudo -n /opt/advanced-vpn/bin/avpnctl enroll /tmp/avpn-bundle.avpn --operator-key /tmp/avpn-operator.pub --replace >/dev/null
-rm -f /tmp/avpn-bundle.avpn /tmp/avpn-operator.pub
+sudo -n systemctl stop cypherpunk-vpn.service 2>/dev/null || true
+sudo -n /opt/cypherpunk-vpn/bin/cypherpunkctl enroll /tmp/cpvpn-bundle.cpvpn --operator-key /tmp/cpvpn-operator.pub --replace >/dev/null
+rm -f /tmp/cpvpn-bundle.cpvpn /tmp/cpvpn-operator.pub
 # A locked server may have hit the unit's start limit while it waited for its unlock.
-sudo -n systemctl reset-failed advanced-vpn.service 2>/dev/null || true
-sudo -n systemctl restart advanced-vpn.service
+sudo -n systemctl reset-failed cypherpunk-vpn.service 2>/dev/null || true
+sudo -n systemctl restart cypherpunk-vpn.service
 sleep 3
-systemctl is-active advanced-vpn.service
+systemctl is-active cypherpunk-vpn.service
 """
 
 
@@ -1645,17 +1660,17 @@ def setup_server(name, record, role, port, out, source, replace=False, source_ar
     check_glibc(name, call([ssh, *base, host, "getconf GNU_LIBC_VERSION"], parse=False), need)
     if not image:
         with tempfile.TemporaryDirectory() as d:
-            tgz = source_tarball(Path(source).resolve(), Path(d) / "avpn-src.tgz")
-            call([scp, "-q", *base, str(tgz), host + ":/tmp/avpn-src.tgz"], parse=False)
+            tgz = source_tarball(Path(source).resolve(), Path(d) / "cpvpn-src.tgz")
+            call([scp, "-q", *base, str(tgz), host + ":/tmp/cpvpn-src.tgz"], parse=False)
     args = [role, str(port), "yes" if replace else "no"]
     args.append("yes" if record.get("shared") else "no")
     # The operator's unlock key: a host without a usable TPM2 locks its keys to it.
     if unlock_pub is not None:
-        call([scp, "-q", *base, str(unlock_pub), host + ":/tmp/avpn-unlock.pub"], parse=False)
+        call([scp, "-q", *base, str(unlock_pub), host + ":/tmp/cpvpn-unlock.pub"], parse=False)
     args.append("yes" if unlock_pub is not None else "no")
     report = call([ssh, *base, host, "bash", "-s", "--", *args], parse=False, stdin=HOST_SETUP)
     out.parent.mkdir(parents=True, exist_ok=True)
-    call([scp, "-q", *base, host + ":/tmp/avpn-request.json", str(out)], parse=False)
+    call([scp, "-q", *base, host + ":/tmp/cpvpn-request.json", str(out)], parse=False)
     if json.loads(out.read_text()).get("role") != role:
         raise CloudError("the request from %s is not for role %s" % (name, role))
     lines = report.strip().splitlines()
@@ -1696,7 +1711,7 @@ def host_setup(a):
     save_inventory(inv)
     return [
         dict(label="host", value="%s %s (%s)" % (a.name, record["public_ip"], role)),
-        dict(label="installed", value="/opt/advanced-vpn (service not enabled)"),
+        dict(label="installed", value="/opt/cypherpunk-vpn (service not enabled)"),
         dict(
             label="keys",
             value="%s; %s; %s"
@@ -1708,7 +1723,7 @@ def host_setup(a):
                 tpm,
             ),
         ),
-        dict(label="request", value="%s (public; give it to avpn init)" % a.out),
+        dict(label="request", value="%s (public; give it to cypherpunk init)" % a.out),
     ]
 
 
@@ -1806,7 +1821,7 @@ def chain_order(recorded, order=None):
             raise CloudError("--order takes one to three different servers")
         return names
     if not recorded:
-        raise CloudError("no servers recorded yet: see avpn cloud suggest")
+        raise CloudError("no servers recorded yet: see cypherpunk cloud suggest")
 
     def allowance(n):
         if recorded[n] not in providers.ALL_KEYS:
@@ -1888,7 +1903,7 @@ def egress6_diff(perms, wanted):
         if port is not None:
             out.update(FromPort=port, ToPort=port)
         if describe:
-            out["Ipv6Ranges"][0]["Description"] = "avpn: the next hop (paced TCP link)"
+            out["Ipv6Ranges"][0]["Description"] = "cpvpn: the next hop (paced TCP link)"
         return out
 
     add = [perm(*w, True) for w in sorted(wanted - have, key=str)]
@@ -1961,24 +1976,24 @@ def set_firewall(name, record, port, sources, ssh, next_hop=None):
 
 
 def controller():
-    """The controller used to sign the chain (`AVPN_CTL` overrides it in tests).
+    """The controller used to sign the chain (`CPVPN_CTL` overrides it in tests).
 
-    `avpn-cloud` runs under the bare system Python, whose cryptography may lack
+    `cpvpn-cloud` runs under the bare system Python, whose cryptography may lack
     ML-DSA; signing needs the hash-locked environment. An installed copy (user or
-    system) has its `bin/avpnctl` launcher beside `tools/`, which runs in that
+    system) has its `bin/cypherpunkctl` launcher beside `tools/`, which runs in that
     environment: use it. A source checkout has no `bin/`, so the interpreter
     running this file (its venv) signs."""
-    override = os.environ.get("AVPN_CTL")
+    override = os.environ.get("CPVPN_CTL")
     if override:
         return [override]
-    launcher = Path(__file__).resolve().parents[1] / "bin" / "avpnctl"
+    launcher = Path(__file__).resolve().parents[1] / "bin" / "cypherpunkctl"
     if launcher.is_file() and os.access(launcher, os.X_OK):
         return [str(launcher)]
-    return [sys.executable, str(Path(__file__).with_name("avpnctl.py"))]
+    return [sys.executable, str(Path(__file__).with_name("cypherpunkctl.py"))]
 
 
 def rate_row(cap, hours_per_day, accept_cost, links):
-    """The chain plan's rate row: the class `avpn init --rate auto` will sign, or why none fits."""
+    """The chain plan's rate row: the class `cypherpunk init --rate auto` will sign, or why none fits."""
     from rates import choose_rate  # standard library only: cloud runs under the system Python
 
     try:
@@ -2042,7 +2057,7 @@ def chain_plan(a):
                     named[0],
                     named[1],
                     "; WARNING: both ends answer to %s law, so one legal order reaches both. Put one end on a "
-                    "non-%s host (avpn cloud suggest lists some)" % (ends[0], ends[0])
+                    "non-%s host (cypherpunk cloud suggest lists some)" % (ends[0], ends[0])
                     if same
                     else "",
                 ),
@@ -2089,13 +2104,13 @@ def chain_plan(a):
 # Structured progress for the front end's checklist: one line per event on stderr,
 # behind a record-separator byte so ordinary stderr text still passes through. Readers
 # split on "\n" only (Python's str.splitlines() also breaks at \x1e).
-PROGRESS_MARK = "\x1eAVPN "
+PROGRESS_MARK = "\x1eCPVPN "
 
 
 class Progress:
-    """The steps of a long operation, reported as they run. With AVPN_PROGRESS=events
-    (the `avpn` front end) each change is a structured event that it draws as a
-    checklist; on a terminal, or with AVPN_PROGRESS=1, a plain line per step with the
+    """The steps of a long operation, reported as they run. With CPVPN_PROGRESS=events
+    (the `cypherpunk` front end) each change is a structured event that it draws as a
+    checklist; on a terminal, or with CPVPN_PROGRESS=1, a plain line per step with the
     seconds since the start; otherwise nothing (scripts, tests). stdout keeps its
     single JSON object either way."""
 
@@ -2103,7 +2118,7 @@ class Progress:
         self.steps = list(steps)
         self.start = time.monotonic()
         self.current = None
-        mode = os.environ.get("AVPN_PROGRESS")
+        mode = os.environ.get("CPVPN_PROGRESS")
         self.mode = "events" if mode == "events" else "lines" if mode == "1" or sys.stderr.isatty() else None
         self.send(plan=self.steps)
 
@@ -2215,7 +2230,7 @@ def chain_steps(a, hops, progress, n):
                     keys,
                     "PLAINTEXT KEYS; " + tpm
                     if protection == "none"
-                    else "keys locked to the operator's Nitrokey (unlock after each reboot: avpn cloud unlock %s)"
+                    else "keys locked to the operator's Nitrokey (unlock after each reboot: cypherpunk cloud unlock %s)"
                     % h["name"]
                     if protection == "operator"
                     else tpm,
@@ -2256,8 +2271,8 @@ def chain_steps(a, hops, progress, n):
         ssh, scp, base, host = remote(h["name"], h["record"])
         if h["role"] in data_keys:
             send_data_key(h["name"], h["record"], data_keys[h["role"]])
-        call([scp, "-q", *base, str(bundles / (h["role"] + ".avpn")), host + ":/tmp/avpn-bundle.avpn"], parse=False)
-        call([scp, "-q", *base, str(bundles / "operator.pub"), host + ":/tmp/avpn-operator.pub"], parse=False)
+        call([scp, "-q", *base, str(bundles / (h["role"] + ".cpvpn")), host + ":/tmp/cpvpn-bundle.cpvpn"], parse=False)
+        call([scp, "-q", *base, str(bundles / "operator.pub"), host + ":/tmp/cpvpn-operator.pub"], parse=False)
         push_cap(h["name"], h["record"], *caps[h["name"]])
         state = call([ssh, *base, host, "bash", "-s"], parse=False, stdin=HOST_ENROLL).strip().splitlines()
         if not state or state[-1] != "active":
@@ -2275,7 +2290,7 @@ def chain_steps(a, hops, progress, n):
         hops=[h["name"] for h in hops], created=stamp, bundles=str(bundles), vault=str(Path(a.vault).resolve())
     )
     save_inventory(inv)
-    client = bundles / "client.avpn"
+    client = bundles / "client.cpvpn"
     return (
         done
         + [
@@ -2283,9 +2298,9 @@ def chain_steps(a, hops, progress, n):
             dict(label="client", value="%s and %s" % (client, bundles / "operator.pub")),
             dict(
                 label="next",
-                value="sudo avpn enroll %s --operator-key %s --replace" % (client, bundles / "operator.pub"),
+                value="sudo cypherpunk enroll %s --operator-key %s --replace" % (client, bundles / "operator.pub"),
             ),
-            dict(label="", value="then: sudo avpn connect"),
+            dict(label="", value="then: sudo cypherpunk connect"),
         ]
         + [
             dict(label="admin" if k == 0 else "", value="ssh %s (while connected)" % admin_target(h, h is hops[-1]))
@@ -2311,7 +2326,7 @@ def ensure_unlock_key(vault, progress=None, step=None):
 def send_data_key(name, record, data_key_hex):
     """Hand a server its data key over SSH (stdin, never argv or a file); it holds it in RAM."""
     ssh, scp, base, host = remote(name, record)
-    out = call([ssh, *base, host, "sudo -n /opt/advanced-vpn/bin/avpnctl --json server-unlock"], parse=False,
+    out = call([ssh, *base, host, "sudo -n /opt/cypherpunk-vpn/bin/cypherpunkctl --json server-unlock"], parse=False,
                stdin=data_key_hex + "\n")  # fmt: skip
     if not json.loads(out.strip().splitlines()[-1]).get("ok"):
         raise CloudError("%s did not accept its data key" % name)
@@ -2334,7 +2349,7 @@ def unlock(a):
     if not vault:
         raise CloudError("give --vault (the operator's Nitrokey vault)")
     ssh, scp, base, host = remote(a.name, record)
-    current = call([ssh, *base, host, "sudo -n cat /etc/advanced-vpn/enrolled/protection.json"], parse=False)
+    current = call([ssh, *base, host, "sudo -n cat /etc/cypherpunk-vpn/enrolled/protection.json"], parse=False)
     with tempfile.TemporaryDirectory() as d:
         wrapped = Path(d) / "protection.json"
         wrapped.write_text(current)
@@ -2350,15 +2365,15 @@ def unlock(a):
 
 
 # What `health` asks a running server over SSH (no secrets: states and counts only).
-HOST_HEALTH = r"""A=$(systemctl is-active advanced-vpn.service 2>/dev/null || true)
-M=$(sudo -n python3 -c 'import json;print(json.load(open("/etc/advanced-vpn/enrolled/protection.json"))["mode"])' 2>/dev/null || echo unknown)
-K=$(sudo -n sh -c 'ls /run/advanced-vpn-unlock 2>/dev/null | wc -l')
+HOST_HEALTH = r"""A=$(systemctl is-active cypherpunk-vpn.service 2>/dev/null || true)
+M=$(sudo -n python3 -c 'import json;print(json.load(open("/etc/cypherpunk-vpn/enrolled/protection.json"))["mode"])' 2>/dev/null || echo unknown)
+K=$(sudo -n sh -c 'ls /run/cypherpunk-vpn-unlock 2>/dev/null | wc -l')
 echo "active=$A mode=$M unlocked=$K"
-echo "updates=$(sudo -n stat -c %Y /etc/advanced-vpn/metering/enrolled/last-update 2>/dev/null || echo 0) image=$([ -f /opt/advanced-vpn/IMAGE ] && echo yes || echo no) shared=$([ -f /etc/advanced-vpn/shared-host ] && echo yes || echo no)"
-echo "status=$(sudo -n /opt/advanced-vpn/bin/avpnctl --state /etc/advanced-vpn/enrolled status 2>/dev/null | tail -1)"
+echo "updates=$(sudo -n stat -c %Y /etc/cypherpunk-vpn/metering/enrolled/last-update 2>/dev/null || echo 0) image=$([ -f /opt/cypherpunk-vpn/IMAGE ] && echo yes || echo no) shared=$([ -f /etc/cypherpunk-vpn/shared-host ] && echo yes || echo no)"
+echo "status=$(sudo -n /opt/cypherpunk-vpn/bin/cypherpunkctl --state /etc/cypherpunk-vpn/enrolled status 2>/dev/null | tail -1)"
 echo "metering=$(sudo -n python3 -c '
 import json, pathlib
-b = pathlib.Path("/etc/advanced-vpn/metering/enrolled")
+b = pathlib.Path("/etc/cypherpunk-vpn/metering/enrolled")
 def load(n):
     try:
         return json.loads((b / n).read_text())
@@ -2399,10 +2414,10 @@ def server_health(name, rec, now=None):
             if rec.get("provider") == "aws"
             else "oci compute instance action --action START --instance-id %s" % instance
         )
-        then = ", then: avpn cloud unlock %s" % name if rec.get("key_protection") == "operator" else ""
+        then = ", then: cypherpunk cloud unlock %s" % name if rec.get("key_protection") == "operator" else ""
         return state, "stopped by its provider (free tiers stop idle servers)", start + then
     if state in ("terminated", "terminating", "shutting-down", "gone"):
-        return state, "no longer exists", "create a new server and run avpn cloud chain --apply"
+        return state, "no longer exists", "create a new server and run cypherpunk cloud chain --apply"
     try:
         ssh, scp, base, host = remote(name, rec)
         lines = call([ssh, *base, host, "bash", "-s"], parse=False, stdin=HOST_HEALTH).strip().splitlines()
@@ -2414,16 +2429,20 @@ def server_health(name, rec, now=None):
     updates_row(name, rec, lines)
     if seen.get("active") == "active" and LAST_MONTHLY.get(name, {}).get("capped"):
         return "running, CAPPED for the month", "reached its monthly cap: stopped so its account is never billed", (
-            "wait for %s, or raise its cap (avpn cloud cap %s --gb N --apply)" % (
+            "wait for %s, or raise its cap (cypherpunk cloud cap %s --gb N --apply)" % (
                 LAST_MONTHLY[name].get("resumes", "the 1st")[:10], name))  # fmt: skip
     if seen.get("active") == "active":
         return "running, VPN service active", None, None
     if seen.get("mode") == "operator" and seen.get("unlocked") == "0":
-        return "running, keys LOCKED since a reboot", "locked: it cannot open its keys", "avpn cloud unlock " + name
+        return (
+            "running, keys LOCKED since a reboot",
+            "locked: it cannot open its keys",
+            "cypherpunk cloud unlock " + name,
+        )
     return (
         "running, VPN service %s" % (seen.get("active") or "unknown"),
         "the VPN service is not running",
-        ("avpn cloud chain --apply (or check the server)"),
+        ("cypherpunk cloud chain --apply (or check the server)"),
     )
 
 
@@ -2493,7 +2512,7 @@ def updates_row(name, rec, lines, now=None):
     text = "security updates %s" % ("never applied" if not last else "%.1f days ago" % days)
     LAST_UPDATES[name] = (text, None if last and days <= UPDATES_OVERDUE_DAYS else (
         "%s: security updates overdue (%s; capped servers wait for the month to turn): "
-        "avpn cloud host update --name %s" % (name, text, name)))  # fmt: skip
+        "cypherpunk cloud host update --name %s" % (name, text, name)))  # fmt: skip
 
 
 def usage_rows(names):
@@ -2510,7 +2529,7 @@ def usage_rows(names):
                     value="%.1f GB sent this month, NO CAP SET" % (m["used_bytes"] / fee_guard.GB),
                 )
             )
-            problems.append("%s has no monthly cap: its account could be billed (avpn cloud cap --apply)" % name)
+            problems.append("%s has no monthly cap: its account could be billed (cypherpunk cloud cap --apply)" % name)
             continue
         rows.append(dict(label=name + " usage", value=fee_guard.describe(m)))
         if name in LAST_UPDATES:
@@ -2661,7 +2680,7 @@ def fly_server(a):
         return rows
     image = a.image or fly_push_image(a.app)
     vol = fly_api.api("POST", "/apps/%s/volumes" % a.app, dict(
-        name="avpn_" + a.name.removeprefix("avpn-").replace("-", "_"), region=a.region, size_gb=FLY_VOLUME_GB,
+        name="cpvpn_" + a.name.removeprefix("cpvpn-").replace("-", "_"), region=a.region, size_gb=FLY_VOLUME_GB,
         encrypted=True, auto_backup_enabled=False, snapshot_retention=1))  # fmt: skip
     record["volume"] = vol["id"]
     save_inventory(dict(inv, resources=dict(inv["resources"], **{a.name: record})))
@@ -2682,7 +2701,7 @@ def fly_server(a):
     save_inventory(inv)
     fly_api.api("GET", "/apps/%s/machines/%s/wait?state=started&timeout=60" % (a.app, machine["id"]), timeout=90)
     return rows + [dict(label="machine", value="%s, %s port %d (TCP, IPv6 only)" % (machine["id"], v6, FLY_PORT)),
-                   dict(label="next", value="avpn cloud host setup --name %s --role %s --out FILE --vault DIR" % (
+                   dict(label="next", value="cypherpunk cloud host setup --name %s --role %s --out FILE --vault DIR" % (
                        a.name, a.role))]  # fmt: skip
 
 
@@ -2712,7 +2731,7 @@ def fly_push_image(app):
 
 
 def per_link_allowance_gib(hops, caps):
-    """The rate-class allowance for `avpn init --allowance-gib` (which counts two links when
+    """The rate-class allowance for `cypherpunk init --allowance-gib` (which counts two links when
     the chain has more than one hop): each hop's cap divided by the streams it sends (a
     relay or middle two, the exit one), the tightest of them, as GiB for two links."""
     shares = []
@@ -2764,9 +2783,9 @@ def push_cap(name, rec, cap_bytes, why):
     ssh, _scp, base, host = remote(name, rec)
     body = dict(schema=1, why=why, checked=fee_guard.CHECKED)
     body.update(unlimited=True) if cap_bytes is None else body.update(cap_bytes=int(cap_bytes))
-    d = "/etc/advanced-vpn/metering/enrolled"
+    d = "/etc/cypherpunk-vpn/metering/enrolled"
     script = (
-        "set -e; sudo -n install -d -m 0700 /etc/advanced-vpn/metering %s; "
+        "set -e; sudo -n install -d -m 0700 /etc/cypherpunk-vpn/metering %s; "
         "sudo -n sh -c 'umask 077; cat > %s/cap.json.tmp && mv %s/cap.json.tmp %s/cap.json'" % (d, d, d, d)
     )
     call([ssh, *base, host, script], parse=False, stdin=json.dumps(body))
@@ -2795,7 +2814,7 @@ def cap(a):
             save_inventory(inv)
         names = [a.name]
     if not names:
-        raise CloudError("no chain recorded yet: avpn cloud chain --apply")
+        raise CloudError("no chain recorded yet: cypherpunk cloud chain --apply")
     caps = plan_caps(inv, names)
     rows = []
     for n in names:
@@ -2919,7 +2938,7 @@ def azure_server(a):
     save_inventory(inv)
     return rows + [dict(label="public address", value="%s (udp %d)" % (out["public_ip"], port)),
                    dict(label="ssh", value="through the relay: ssh -F %s %s" % (config, a.name)),
-                   dict(label="next", value="avpn cloud chain --apply")]  # fmt: skip
+                   dict(label="next", value="cypherpunk cloud chain --apply")]  # fmt: skip
 
 
 def admin_target(hop, is_exit):
@@ -2949,7 +2968,7 @@ def suggest(a):
             label="non-US",
             value="for ends in different legal spheres (every free tier above is a US company): "
             + ", ".join("%s (%s) %s" % (p["name"], p["parent"], p["source"]) for p in providers.NON_US)
-            + "; paid, check terms; record one with avpn cloud host add --provider KEY",
+            + "; paid, check terms; record one with cypherpunk cloud host add --provider KEY",
         )
     )
     for p in providers.low_cost_rows():
@@ -3089,7 +3108,7 @@ def audit_oci(profile, servers):
         ingress = rules.get("ingress-security-rules", [])
         if not r.get("managed_list"):
             # A list this tool does not own (oci allow): only its own tagged rule is ours to judge.
-            ingress = [x for x in ingress if x.get("description") == r.get("rule", "advanced-vpn:" + name)]
+            ingress = [x for x in ingress if x.get("description") == r.get("rule", "cypherpunk-vpn:" + name)]
         bad = _foreign([x.get("source", "") for x in ingress], servers)
         row("oci firewall " + name, bool(bad), ("names %s, which is not one of your servers" % ", ".join(bad))
             if bad else "only any-address and your servers")  # fmt: skip
@@ -3125,7 +3144,7 @@ def audit(a):
     rows.append(
         dict(
             label="on the servers",
-            value="avpn doctor on each server checks that no log reaches its disk (avpn help retention)",
+            value="cypherpunk doctor on each server checks that no log reaches its disk (cypherpunk help retention)",
         )
     )
     return rows, findings
@@ -3157,9 +3176,9 @@ def status(a):
 
 
 def build_parser():
-    """The `avpn cloud` command line; also walked by the documentation gate."""
-    p = argparse.ArgumentParser(prog="avpn cloud", description=__doc__)
-    p.add_argument("--json", action="store_true", help="print one JSON object (used by the avpn CLI)")
+    """The `cypherpunk cloud` command line; also walked by the documentation gate."""
+    p = argparse.ArgumentParser(prog="cypherpunk cloud", description=__doc__)
+    p.add_argument("--json", action="store_true", help="print one JSON object (used by the cypherpunk CLI)")
     s = p.add_subparsers(dest="provider", required=True)
     sg = s.add_parser("suggest", help="free places to run servers, ranked, and which you can use from here")
     sg.add_argument(
@@ -3171,7 +3190,7 @@ def build_parser():
     st = s.add_parser("status", help="recorded resources and whether they still exist")
     st.add_argument("--live", action="store_true", help="ask the provider whether each instance still exists")
     rot = s.add_parser("rotate", help="trade an exit's public IP for a fresh one (STREAMING_GEO_PARITY section 4.4)")
-    rot.add_argument("--name", required=True, help="the server's name and tag (avpn-*)")
+    rot.add_argument("--name", required=True, help="the server's name and tag (cpvpn-*)")
     rot.add_argument(
         "--strategy",
         choices=["reallocate", "reprovision"],
@@ -3194,7 +3213,7 @@ def build_parser():
     mode = relay.add_mutually_exclusive_group(required=True)
     mode.add_argument("--apply", action="store_true", help="create the server")
     mode.add_argument("--teardown", action="store_true", help="delete everything tagged with --name")
-    relay.add_argument("--name", default="avpn-relay", help="resource name and tag (avpn-*)")
+    relay.add_argument("--name", default="cpvpn-relay", help="resource name and tag (cpvpn-*)")
     relay.add_argument("--role", choices=sorted(ROLES), default="relay", help="what the server is in the chain")
     relay.add_argument("--profile", default=os.environ.get("AWS_PROFILE", "default"), help="AWS CLI profile")
     relay.add_argument("--region", help="must equal the profile's Region (the project has one Region)")
@@ -3212,7 +3231,7 @@ def build_parser():
     relay.add_argument("--yes", action="store_true", help="do not ask for confirmation")
     allow = aws_s.add_parser("allow", help="replace who may reach a server this tool created")
     allow.add_argument("--apply", action="store_true", required=True, help="change the security group")
-    allow.add_argument("--name", default="avpn-relay", help="the server's name and tag (avpn-*)")
+    allow.add_argument("--name", default="cpvpn-relay", help="the server's name and tag (cpvpn-*)")
     allow.add_argument("--profile", default=os.environ.get("AWS_PROFILE", "default"), help="AWS CLI profile")
     allow.add_argument("--region", help="must equal the profile's Region (the project has one Region)")
     allow.add_argument(
@@ -3230,7 +3249,7 @@ def build_parser():
     endpoint.add_argument(
         "--apply", action="store_true", required=True, help="create the endpoint and switch SSH to it"
     )
-    endpoint.add_argument("--name", default="avpn-relay", help="the server's name and tag (avpn-*)")
+    endpoint.add_argument("--name", default="cpvpn-relay", help="the server's name and tag (cpvpn-*)")
     endpoint.add_argument("--profile", default=os.environ.get("AWS_PROFILE", "default"), help="AWS CLI profile")
     endpoint.add_argument("--region", help="must equal the profile's Region (the project has one Region)")
     endpoint.add_argument("--dry-run", action="store_true", help="show the plan and stop")
@@ -3238,7 +3257,7 @@ def build_parser():
     h = s.add_parser("host", help="servers this tool created")
     h_s = h.add_subparsers(dest="kind", required=True)
     setup = h_s.add_parser("setup", help="install the package over SSH and fetch the public request")
-    setup.add_argument("--name", required=True, help="the recorded server (avpn-*)")
+    setup.add_argument("--name", required=True, help="the recorded server (cpvpn-*)")
     setup.add_argument(
         "--source", default=str(Path(__file__).resolve().parents[1]), help="built checkout to install from"
     )
@@ -3251,7 +3270,7 @@ def build_parser():
         help="the operator's Nitrokey vault: a host without a usable TPM2 locks its keys to its unlock key",
     )  # fmt: skip
     add = h_s.add_parser("add", help="record a server you already have (any provider, or your own machine)")
-    add.add_argument("--name", required=True, help="a name for it (avpn-*)")
+    add.add_argument("--name", required=True, help="a name for it (cpvpn-*)")
     add.add_argument("--ssh", required=True, help="USER@HOST (a sudo user), or a host alias with --ssh-config")
     add.add_argument("--key", help="SSH private key for it (mode 600)")
     add.add_argument("--ssh-config", help="SSH config file, for bastions, jump hosts or other ports")
@@ -3260,7 +3279,7 @@ def build_parser():
         "--provider",
         dest="catalog",
         default="own",
-        help="where it runs: a free tier (oci, aws, azure, gcp), own, or a paid host key from avpn cloud suggest",
+        help="where it runs: a free tier (oci, aws, azure, gcp), own, or a paid host key from cypherpunk cloud suggest",
     )
     add.add_argument("--shared", action="store_true", help="it also runs other things: leave its journal alone")
     hu = h_s.add_parser("update", help="apply security updates in a counted maintenance window")
@@ -3283,8 +3302,8 @@ def build_parser():
     fmode = fls.add_mutually_exclusive_group(required=True)
     fmode.add_argument("--apply", action="store_true", help="create the server")
     fmode.add_argument("--teardown", action="store_true", help="delete its machine and volume")
-    fls.add_argument("--name", default="avpn-flyexit")
-    fls.add_argument("--app", default="advanced-vpn", help="the Fly.io app the deploy token is for")
+    fls.add_argument("--name", default="cpvpn-flyexit")
+    fls.add_argument("--app", default="cypherpunk-vpn", help="the Fly.io app the deploy token is for")
     fls.add_argument("--region", default="fra", help="a Fly.io region (default fra; iad/ewr are cheapest)")
     fls.add_argument("--role", choices=["exit", "middle"], default="exit")
     fls.add_argument("--image", help="an image already pushed (default: build and push this tree's)")
@@ -3303,18 +3322,18 @@ def build_parser():
     mode = azs.add_mutually_exclusive_group(required=True)
     mode.add_argument("--apply", action="store_true", help="create the server")
     mode.add_argument("--teardown", action="store_true", help="delete it and its resource group")
-    azs.add_argument("--name", default="avpn-exit-az", help="resource name and tag (avpn-*)")
+    azs.add_argument("--name", default="cpvpn-exit-az", help="resource name and tag (cpvpn-*)")
     azs.add_argument("--role", choices=sorted(ROLES), default="exit", help="what the server is in the chain")
     azs.add_argument("--location", default="swedencentral", help="Azure region (default swedencentral)")
     azs.add_argument("--size", default=AZURE_SIZE, help="VM size (default %s, a free-services size)" % AZURE_SIZE)
     azs.add_argument("--port", type=int, help="tunnel port (default by role)")
     azs.add_argument("--allow-from", action="append", default=[], help="previous hop's public IPv4")
-    azs.add_argument("--admin-via", default="avpn-relay", help="the relay SSH goes through (default avpn-relay)")
+    azs.add_argument("--admin-via", default="cpvpn-relay", help="the relay SSH goes through (default cpvpn-relay)")
     azs.add_argument("--vault", type=Path, required=True, help="the operator's Nitrokey vault (the state key)")
     azs.add_argument("--dry-run", action="store_true", help="show the plan and stop")
     azs.add_argument("--yes", action="store_true", help="do not ask for confirmation")
     ul = s.add_parser("unlock", help="unlock a server without a TPM after it restarts (Nitrokey PIN + touch)")
-    ul.add_argument("name", help="the recorded server (avpn-*)")
+    ul.add_argument("name", help="the recorded server (cpvpn-*)")
     ul.add_argument("--vault", type=Path, help="the operator's Nitrokey vault (default: the chain's)")
     ch = s.add_parser("chain", help="join the recorded servers into one multi-hop chain")
     ch.add_argument("--apply", action="store_true", required=True, help="build (or rebuild) the chain")
@@ -3344,7 +3363,7 @@ def build_parser():
     mode = srv.add_mutually_exclusive_group(required=True)
     mode.add_argument("--apply", action="store_true", help="create the server")
     mode.add_argument("--teardown", action="store_true", help="delete everything recorded for --name")
-    srv.add_argument("--name", default="avpn-exit", help="resource name and tag (avpn-*)")
+    srv.add_argument("--name", default="cpvpn-exit", help="resource name and tag (cpvpn-*)")
     srv.add_argument("--role", choices=sorted(ROLES), default="exit", help="what the server is in the chain")
     srv.add_argument("--shape", choices=sorted(OCI_SHAPES), default="micro", help="micro (AMD, 1 GB) or arm (A1)")
     srv.add_argument("--ocpus", type=int, default=1, help="A1 only: OCPUs (Always Free: 2 in total)")
@@ -3382,14 +3401,83 @@ def build_parser():
     mode = allow.add_mutually_exclusive_group(required=True)
     mode.add_argument("--apply", action="store_true", help="add (or replace) the rule")
     mode.add_argument("--teardown", action="store_true", help="remove the rule")
-    allow.add_argument("--name", required=True, help="rule name (avpn-*), stored in its description")
+    allow.add_argument("--name", required=True, help="rule name (cpvpn-*), stored in its description")
     allow.add_argument("--security-list", required=True, help="security list OCID")
     allow.add_argument("--allow-from", action="append", default=[], help="previous hop's public IPv4, or auto")
     allow.add_argument("--port", type=int, default=4444, help="destination port")
     allow.add_argument("--protocol", choices=["udp", "tcp"], default="udp", help="transport")
     allow.add_argument("--dry-run", action="store_true", help="show the plan and stop")
     allow.add_argument("--yes", action="store_true", help="do not ask for confirmation")
+    s.add_parser(
+        "adopt-legacy",
+        help="one-time move of ~/.config/advanced-vpn to ~/.config/cypherpunk-vpn and avpn-* records to cpvpn-*",
+    )
     return p
+
+
+def adopt_legacy():
+    """One-time move of `~/.config/advanced-vpn` to `~/.config/cypherpunk-vpn` and `avpn-*` to `cpvpn-*`."""
+    new_dir = INVENTORY.parent
+    old_dir = new_dir.parent / "advanced-vpn"
+    rows = []
+    if old_dir.exists() and not new_dir.exists():
+        shutil.move(str(old_dir), str(new_dir))
+        rows.append(dict(label="moved", value="%s -> %s" % (old_dir, new_dir)))
+    elif old_dir.exists() and new_dir.exists():
+        for item in sorted(old_dir.iterdir()):
+            dst = new_dir / item.name
+            if not dst.exists():
+                shutil.move(str(item), str(dst))
+                rows.append(dict(label="moved", value="%s -> %s" % (item, dst)))
+    ssh_dir = new_dir / "ssh"
+    if ssh_dir.is_dir():
+        for p in sorted(ssh_dir.iterdir()):
+            if p.name.startswith("avpn-"):
+                target = ssh_dir / ("cpvpn-" + p.name.removeprefix("avpn-"))
+                p.rename(target)
+                rows.append(dict(label="ssh key", value="%s -> %s" % (p.name, target.name)))
+        for p in sorted(ssh_dir.glob("*.conf*")):
+            if p.is_file():
+                text = p.read_text()
+                updated = (
+                    text.replace(str(old_dir), str(new_dir))
+                    .replace("/ssh/avpn-", "/ssh/cpvpn-")
+                    .replace("cm-avpn-", "cm-cpvpn-")
+                    .replace("Host avpn-", "Host cpvpn-")
+                    .replace("ProxyJump avpn-", "ProxyJump cpvpn-")
+                )
+                if updated != text:
+                    p.write_text(updated)
+                    rows.append(dict(label="ssh config", value=p.name))
+    inv_path = new_dir / "cloud.json"
+    if inv_path.is_file():
+        inv = json.loads(inv_path.read_text())
+        old_res = inv.get("resources") or {}
+        new_res = {}
+        for name, rec in old_res.items():
+            new_name = "cpvpn-" + name.removeprefix("avpn-") if name.startswith("avpn-") else name
+            rec = json.loads(json.dumps(rec).replace(str(old_dir), str(new_dir)).replace("/ssh/avpn-", "/ssh/cpvpn-"))
+            if isinstance(rec.get("ssh"), str) and "@avpn-" in rec["ssh"]:
+                rec["ssh"] = rec["ssh"].replace("@avpn-", "@cpvpn-")
+            if isinstance(rec.get("bastion"), dict) and str(rec["bastion"].get("host", "")).startswith("avpn-"):
+                rec["bastion"]["host"] = "cpvpn-" + rec["bastion"]["host"].removeprefix("avpn-")
+            new_res[new_name] = rec
+            if new_name != name:
+                rows.append(dict(label="record", value="%s -> %s" % (name, new_name)))
+        inv["resources"] = new_res
+        if isinstance(inv.get("chain"), dict):
+            chain = inv["chain"]
+            if isinstance(chain.get("bundles"), str):
+                chain["bundles"] = chain["bundles"].replace(str(old_dir), str(new_dir))
+            if isinstance(chain.get("hops"), list):
+                chain["hops"] = [
+                    "cpvpn-" + h.removeprefix("avpn-") if isinstance(h, str) and h.startswith("avpn-") else h
+                    for h in chain["hops"]
+                ]
+        save_inventory(inv, inv_path)
+    if not rows:
+        rows.append(dict(label="nothing", value="no legacy operator state found"))
+    return rows
 
 
 def confirm(a, title):
@@ -3403,6 +3491,8 @@ def confirm(a, title):
 
 def run(a):
     """Execute one parsed command; return the result object."""
+    if a.provider == "adopt-legacy":
+        return dict(title="Adopt legacy operator state", summary="adopted", rows=adopt_legacy())
     if a.provider == "rotate":
         import ip_rotation  # lazy: ip_rotation imports this module
 
@@ -3536,7 +3626,11 @@ def main(argv=None):
     """Entry point: refuses root, prints JSON or text, returns the exit status."""
     a = build_parser().parse_args(argv)
     if os.geteuid() == 0:
-        print(json.dumps(dict(ok=False, error="RunAsYourself")) if a.json else "run avpn cloud as yourself, not root")
+        print(
+            json.dumps(dict(ok=False, error="RunAsYourself"))
+            if a.json
+            else "run cypherpunk cloud as yourself, not root"
+        )
         return 1
     try:
         result = run(a)
@@ -3544,7 +3638,7 @@ def main(argv=None):
         msg = str(e) if isinstance(e, CloudError) else "%s: %s" % (type(e).__name__, e)
         if a.json:
             print(json.dumps(dict(ok=False, action="cloud", error=type(e).__name__, message=msg)))
-        print("avpn cloud: " + msg, file=sys.stderr)
+        print("cypherpunk cloud: " + msg, file=sys.stderr)
         return 1
     result.update(ok=True, action="cloud")
     if a.json:

@@ -42,14 +42,14 @@ class ExperimentBoundaries(unittest.TestCase):
         self.assertEqual(len(set(seeds)), 6)
 
     def test_arms_do_not_inherit_another_experiments_clock_settings(self):
-        parent = dict(AVPN_WIRE_CLOCK_PPS="999", AVPN_RUNTIME_ROOT="wrong", AVPN_OTHER="wrong", KEEP="yes")
+        parent = dict(CPVPN_WIRE_CLOCK_PPS="999", CPVPN_RUNTIME_ROOT="wrong", CPVPN_OTHER="wrong", KEEP="yes")
         control = experiment.arm_environment(parent, "undefended")
-        self.assertFalse(any(k.startswith("AVPN_") for k in control))
+        self.assertFalse(any(k.startswith("CPVPN_") for k in control))
         self.assertEqual(control["KEEP"], "yes")
         defended = experiment.arm_environment(parent, "relay5")
-        self.assertEqual(defended["AVPN_WIRE_CLOCK_PPS"], "4000")
-        self.assertEqual(defended["AVPN_WIRE_CLOCK_RELAY_MS"], "5")
-        self.assertNotIn("AVPN_RUNTIME_ROOT", defended)
+        self.assertEqual(defended["CPVPN_WIRE_CLOCK_PPS"], "4000")
+        self.assertEqual(defended["CPVPN_WIRE_CLOCK_RELAY_MS"], "5")
+        self.assertNotIn("CPVPN_RUNTIME_ROOT", defended)
 
     def test_changed_frozen_source_is_refused_before_an_arm_starts(self):
         with tempfile.TemporaryDirectory() as temporary:

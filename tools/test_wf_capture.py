@@ -82,7 +82,7 @@ class PacketMetadata(unittest.TestCase):
 
 class ProtectionSamples(unittest.TestCase):
     def test_stale_or_reused_controller_identity_never_reports_protected(self):
-        import avpnctl
+        import cypherpunkctl
 
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -102,12 +102,14 @@ class ProtectionSamples(unittest.TestCase):
             for name in ("status.json", "controller.json"):
                 os.utime(root / name, (now, now))
             with (
-                mock.patch.object(avpnctl, "read_json_private", side_effect=lambda path: json.loads(path.read_text())),
-                mock.patch.object(avpnctl, "identity_of", side_effect=lambda pid: {1: "one", 2: "two"}[pid]),
+                mock.patch.object(
+                    cypherpunkctl, "read_json_private", side_effect=lambda path: json.loads(path.read_text())
+                ),
+                mock.patch.object(cypherpunkctl, "identity_of", side_effect=lambda pid: {1: "one", 2: "two"}[pid]),
             ):
                 self.assertEqual(wf_observer.snapshot(root, now)["protection"], "protected")
                 self.assertEqual(wf_observer.snapshot(root, now + 20)["protection"], "unknown")
-                with mock.patch.object(avpnctl, "identity_of", return_value="reused"):
+                with mock.patch.object(cypherpunkctl, "identity_of", return_value="reused"):
                     self.assertEqual(wf_observer.snapshot(root, now)["protection"], "unknown")
                 os.utime(root / "status.json", (now + 1, now + 1))
                 self.assertEqual(wf_observer.snapshot(root, now)["protection"], "unknown")

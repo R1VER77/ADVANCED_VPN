@@ -22,7 +22,7 @@ def main():
     if a.role == "launch":
         # Called in the app netns. Only the pre-opened TUN crosses into the underlay netns.
         fd = os.open("/dev/net/tun", os.O_RDWR | os.O_NONBLOCK)
-        fcntl.ioctl(fd, 0x400454CA, struct.pack("16sH", b"avpn0", 0x1001))
+        fcntl.ioctl(fd, 0x400454CA, struct.pack("16sH", b"cpvpn0", 0x1001))
         os.set_inheritable(fd, True)
         ns = os.open("/run/netns/av-client", os.O_RDONLY)
         os.setns(ns, os.CLONE_NEWNET)
@@ -63,7 +63,7 @@ def main():
             seen.add(b)
             s.sendto(b, addr)
             (a.state / "echo.json").write_text(
-                json.dumps(dict(unique=len(seen), duplicates=duplicates, marker_seen=b.startswith(b"AVPN-PRIVATE-")))
+                json.dumps(dict(unique=len(seen), duplicates=duplicates, marker_seen=b.startswith(b"CPVPN-PRIVATE-")))
             )
     else:
         # Deliberately hostile relay-side forwarder. Captures inner QUIC ciphertext only.

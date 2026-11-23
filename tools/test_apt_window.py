@@ -2,7 +2,7 @@
 """The maintenance window `chain --apply` and `host update` open on a server before apt
 runs (cloud.APT_WINDOW), executed by the shell against stand-ins for the host's tools.
 
-On 22 November a rebuild failed at "Install avpn-relay": the relay's supervisor held
+On 22 November a rebuild failed at "Install cpvpn-relay": the relay's supervisor held
 apt's lock with an update that could never finish, because its window let out root but
 not apt's download user or the resolver. The window now gives way, waits and recovers.
 """
@@ -29,7 +29,7 @@ TOOLS = {
     "nft": 'echo "nft $*" >> "$LOG"',
     "systemctl": 'echo "systemctl $*" >> "$LOG"\n'
     'if [ "$1" = is-active ]; then [ -f "$STATE/active" ]; exit $?; fi\n'
-    'if [ "$1" = stop ] && [ "$2" = advanced-vpn.service ]; then /bin/rm -f "$STATE/active"; fi\n'
+    'if [ "$1" = stop ] && [ "$2" = cypherpunk-vpn.service ]; then /bin/rm -f "$STATE/active"; fi\n'
     'if [ "$1" = start ]; then : > "$STATE/active"; fi\n'
     "exit 0",
     "getent": '[ -f "$STATE/resolves" ] || [ ! -f "$STATE/active" ]',
@@ -64,8 +64,8 @@ class AptWindow(unittest.TestCase):
     def test_a_working_window_stops_the_daily_update_and_keeps_the_supervisor(self):
         code, log, active = self.run_window("on-failure")
         self.assertEqual(code, 0)
-        self.assertIn("systemctl stop advanced-vpn-security-update.service", log)
-        self.assertNotIn("systemctl stop advanced-vpn.service", log)
+        self.assertIn("systemctl stop cypherpunk-vpn-security-update.service", log)
+        self.assertNotIn("systemctl stop cypherpunk-vpn.service", log)
         self.assertTrue(active)
         update = [x for x in log if x.startswith("apt-get")]
         self.assertEqual(len(update), 1)
@@ -86,14 +86,14 @@ class AptWindow(unittest.TestCase):
     def test_an_old_supervisor_that_blocks_names_is_stopped_and_its_lock_lifted(self):
         code, log, active = self.run_window("on-failure", resolves=False)
         self.assertEqual(code, 0)
-        self.assertIn("systemctl stop advanced-vpn.service", log)
-        self.assertIn("nft delete table inet advanced_vpn_egress", log)
+        self.assertIn("systemctl stop cypherpunk-vpn.service", log)
+        self.assertIn("nft delete table inet cypherpunk_vpn_egress", log)
         self.assertFalse(active)  # setup succeeded: the chain starts the new supervisor
 
     def test_a_failed_setup_brings_the_old_supervisor_back(self):
         code, log, active = self.run_window("on-failure", resolves=False, then=3)
         self.assertEqual(code, 3)
-        self.assertIn("systemctl start advanced-vpn.service", log)
+        self.assertIn("systemctl start cypherpunk-vpn.service", log)
         self.assertTrue(active)
 
     def test_a_host_update_always_restarts_what_it_stopped(self):
@@ -102,14 +102,14 @@ class AptWindow(unittest.TestCase):
         self.assertTrue(active)
         # and never starts a supervisor it did not stop
         code, log, active = self.run_window("always", active=False, resolves=True)
-        self.assertNotIn("systemctl start advanced-vpn.service", log)
+        self.assertNotIn("systemctl start cypherpunk-vpn.service", log)
         self.assertFalse(active)
 
     def test_the_window_is_closed_on_every_exit(self):
         for then in (0, 1):
             with self.subTest(then=then):
                 _, log, _ = self.run_window("on-failure", then=then)
-                self.assertIn("rm -f /etc/advanced-vpn/metering/enrolled/maintenance-until", log)
+                self.assertIn("rm -f /etc/cypherpunk-vpn/metering/enrolled/maintenance-until", log)
 
     def test_both_server_scripts_open_the_same_window(self):
         for script in (cloud.HOST_SETUP, cloud.HOST_UPDATE):

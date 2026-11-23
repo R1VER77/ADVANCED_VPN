@@ -4,10 +4,10 @@
 //! mesh. A member *is* a key that lives on a hardware device:
 //!
 //! - preferred: a Nitrokey (open source) FIDO2 hmac-secret credential, the
-//!   same credential class ADVANCED_VPN already seals client keys with;
+//!   same credential class cypherpunk_vpn already seals client keys with;
 //! - accepted: any hardware token able to generate and hold the required keys
 //!   (FIDO2 hmac-secret for the Ed25519 membership credential; the operator
-//!   ML-DSA-65 key sealed under it, as in `avpn init`).
+//!   ML-DSA-65 key sealed under it, as in `cypherpunk init`).
 //!
 //! The device private key never leaves the token. Everything the mesh knows
 //! about a member is derived from public material: [`MemberId`] is the

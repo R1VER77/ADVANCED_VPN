@@ -29,7 +29,7 @@ The commit history is public and signed with hardware-backed SSH keys
 
 - **No record of your browsing on the servers.**
   - The relay and exit services send their output to nowhere (`StandardOutput=null`,
-    `LogLevelMax=emerg` in `deploy/advanced-vpn*.service`).
+    `LogLevelMax=emerg` in `deploy/cypherpunk-vpn*.service`).
   - Their working state lives in RAM.
   - The exit's DNS resolver runs with query logging off (`tools/exit_resolver.py`).
   - On a Fly.io exit, `deploy/fly/init.sh` prints nothing, because a Machine's output goes
@@ -55,19 +55,19 @@ The commit history is public and signed with hardware-backed SSH keys
 
 - **Settings and enrollment.**
   - On the client, the signed chain profile you enrolled lives in
-    `/etc/advanced-vpn/enrolled`.
+    `/etc/cypherpunk-vpn/enrolled`.
   - On the operator's machine, the chains and the cloud server records live in
-    `~/.config/advanced-vpn/`.
+    `~/.config/cypherpunk-vpn/`.
   - They name your servers and providers, not you.
 - **Keys.**
-  - Keys are made on the device that uses them, in a vault at `/etc/advanced-vpn/vault`.
+  - Keys are made on the device that uses them, in a vault at `/etc/cypherpunk-vpn/vault`.
   - The vault is sealed to a security key (FIDO2 hmac-secret) or a TPM where available
     ([HARDWARE_BOUND_SESSIONS.md](HARDWARE_BOUND_SESSIONS.md)).
   - Private keys stay on the device. The device request you hand to the operator carries
     only public keys.
 - **Running state.** Status files and PIDs are kept in RAM (tmpfs) and disappear when the
   service stops or the machine restarts.
-- **Diagnostics.** `avpn status`, `avpn doctor` and the desktop app show connection details
+- **Diagnostics.** `cypherpunk status`, `cypherpunk doctor` and the desktop app show connection details
   to you. Running them sends nothing anywhere.
 
 ## 5. What other parties can see
@@ -125,6 +125,6 @@ This notice changes only by signed commit, and material changes are noted in the
 
 ## 11. Contact
 
-Open an issue on the [repository](https://github.com/R1VER77/ADVANCED_VPN/issues). There is
+Open an issue on the [repository](https://github.com/R1VER77/CYPHERPUNK_VPN/issues). There is
 no email address, support desk or chat channel. Report security problems privately, as
 described in [SECURITY.md](../SECURITY.md).

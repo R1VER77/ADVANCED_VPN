@@ -1,5 +1,5 @@
-"""The server key-protection rule shared by the installer, `avpnctl request` and
-`avpn cloud host setup` (tools/sealing.py): TPM2-sealed, or locked to the operator's
+"""The server key-protection rule shared by the installer, `cypherpunkctl request` and
+`cypherpunk cloud host setup` (tools/sealing.py): TPM2-sealed, or locked to the operator's
 Nitrokey; never the host key alone."""
 
 import contextlib
@@ -78,20 +78,20 @@ class Installer(unittest.TestCase):
 
 
 class Request(unittest.TestCase):
-    def test_avpnctl_request_refuses_a_tpm_less_server_with_systemd_creds(self):
-        import avpnctl
+    def test_cypherpunkctl_request_refuses_a_tpm_less_server_with_systemd_creds(self):
+        import cypherpunkctl
 
         with tempfile.TemporaryDirectory() as d:
-            argv = ["avpnctl", "--state", d + "/s", "request", "--role", "exit", "--protect", "systemd-creds",
+            argv = ["cypherpunkctl", "--state", d + "/s", "request", "--role", "exit", "--protect", "systemd-creds",
                     "--out", d + "/r.req"]  # fmt: skip
             with (
                 mock.patch.object(sys, "argv", argv),
-                mock.patch.object(avpnctl, "harden_process", lambda: None),
+                mock.patch.object(cypherpunkctl, "harden_process", lambda: None),
                 mock.patch.object(sealing, "tpm2_sealing_works", no_tpm),
                 contextlib.redirect_stdout(io.StringIO()),
             ):
                 with self.assertRaises(SystemExit) as caught:
-                    avpnctl.main()
+                    cypherpunkctl.main()
             self.assertIn("TPM2", str(caught.exception))
             self.assertFalse(Path(d, "s").exists())
 

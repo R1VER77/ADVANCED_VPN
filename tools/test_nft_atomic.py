@@ -18,9 +18,9 @@ TOOLS = Path(__file__).resolve().parent
 RACE = r"""
 import multiprocessing as mp, subprocess, sys
 sys.path.insert(0, sys.argv[1])
-import avpnctl
+import cypherpunkctl
 
-BODY = '''table inet advanced_vpn {
+BODY = '''table inet cypherpunk_vpn {
  chain output { type filter hook output priority -100; policy drop;
   oifname "lo" accept
  }
@@ -29,17 +29,17 @@ BODY = '''table inet advanced_vpn {
 
 def writer(barrier):
     barrier.wait()
-    avpnctl.replace_table(BODY)
+    cypherpunkctl.replace_table(BODY)
 
 doubled = 0
 for _ in range(int(sys.argv[2])):
-    subprocess.run(["/usr/sbin/nft", "delete", "table", "inet", "advanced_vpn"], capture_output=True)
+    subprocess.run(["/usr/sbin/nft", "delete", "table", "inet", "cypherpunk_vpn"], capture_output=True)
     b = mp.Barrier(2)
     ps = [mp.Process(target=writer, args=(b,)) for _ in range(2)]
     [p.start() for p in ps]
     [p.join() for p in ps]
     assert all(p.exitcode == 0 for p in ps)
-    out = subprocess.run(["/usr/sbin/nft", "list", "table", "inet", "advanced_vpn"],
+    out = subprocess.run(["/usr/sbin/nft", "list", "table", "inet", "cypherpunk_vpn"],
                          capture_output=True, text=True, check=True).stdout
     doubled += out.count('oifname "lo" accept') != 1
 print(doubled)

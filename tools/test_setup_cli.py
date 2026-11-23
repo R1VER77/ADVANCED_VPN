@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-import avpnctl
+import cypherpunkctl
 import hwkey
 import setup_cli as cli
 import setup_flow as sf
@@ -34,7 +34,7 @@ class ConfirmedRepair(unittest.TestCase):
         self.tmp.cleanup()
 
     def args(self, *extra):
-        return avpnctl.build_parser().parse_args(
+        return cypherpunkctl.build_parser().parse_args(
             ["--state", str(self.root), "setup", "--repair", "yubikey_enable_fido2", *extra]
         )
 
@@ -193,7 +193,7 @@ class MachineInterface(unittest.TestCase):
     def test_preflight_is_one_json_object_and_does_not_create_runtime_state(self):
         with tempfile.TemporaryDirectory() as tmp:
             state = Path(tmp) / "not-enrolled"
-            controller = Path(avpnctl.__file__)
+            controller = Path(cypherpunkctl.__file__)
             proc = subprocess.run(
                 [sys.executable, str(controller), "--state", str(state), "--json", "preflight"],
                 capture_output=True,
@@ -215,14 +215,14 @@ class MachineInterface(unittest.TestCase):
             now = path.stat().st_mtime
             good = dict(state="supervising", kill_switch=True, protection="protected")
             with (
-                patch.object(avpnctl, "runtime_dir", return_value=rt),
-                patch.object(avpnctl, "read_status", return_value=good),
-                patch.object(avpnctl, "read_json_private", return_value=dict(pid=123, identity="start")),
-                patch.object(avpnctl, "identity_of", return_value="start"),
+                patch.object(cypherpunkctl, "runtime_dir", return_value=rt),
+                patch.object(cypherpunkctl, "read_status", return_value=good),
+                patch.object(cypherpunkctl, "read_json_private", return_value=dict(pid=123, identity="start")),
+                patch.object(cypherpunkctl, "identity_of", return_value="start"),
             ):
                 self.assertTrue(sf.status(dict(state=rt, now=lambda: now))["_fresh"])
                 self.assertFalse(sf.status(dict(state=rt, now=lambda: now + 6))["_fresh"])
-                with patch.object(avpnctl, "identity_of", return_value="reused-pid"):
+                with patch.object(cypherpunkctl, "identity_of", return_value="reused-pid"):
                     self.assertFalse(sf.status(dict(state=rt, now=lambda: now))["_fresh"])
 
 

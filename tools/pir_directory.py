@@ -48,7 +48,7 @@ import secrets
 import time
 
 SCHEMA = 1
-PRG_DOMAIN = b"avpn-pir/prg/v1|"
+PRG_DOMAIN = b"cpvpn-pir/prg/v1|"
 SEED_BYTES = 16
 
 

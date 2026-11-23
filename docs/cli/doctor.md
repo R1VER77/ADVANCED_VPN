@@ -1,11 +1,11 @@
-# avpn doctor
+# cypherpunk doctor
 
 Self-checks for the installation, keys, firewall, resolver isolation and services.
 Each check prints `✓` or `✗` with a detail.
 
 ## Usage
 
-    sudo avpn doctor [--check-egress]
+    sudo cypherpunk doctor [--check-egress]
 
 ## Options
 
@@ -18,10 +18,10 @@ Each check prints `✓` or `✗` with a detail.
 - post-quantum crypto library: ML-DSA and ML-KEM are available
 - device keys generated, enrolled in a chain
 - constant-cell padding: the enrolled chain pads every hop; a chain signed before padding existed fails here, with the command to re-sign it
-- on servers, no retained data: journal in RAM only, `/var/log` in RAM, no disk logger running, no login database on disk, no swap. A server's VPN will not start while any of these fail (`avpn help retention`); a shared host reports that its logging is outside this tool's control
+- on servers, no retained data: journal in RAM only, `/var/log` in RAM, no disk logger running, no login database on disk, no swap. A server's VPN will not start while any of these fail (`cypherpunk help retention`); a shared host reports that its logging is outside this tool's control
 - keys bound to TPM2 (systemd-creds protection), or the key protection mode
 - whole-device kill switch table (whole-device clients)
-- `advanced-vpn.service` and `advanced-vpn-guard.service` installed
+- `cypherpunk-vpn.service` and `cypherpunk-vpn-guard.service` installed
 - resolver isolation: which host resolver sockets are hidden from protected programs
 
 ## What it changes
@@ -32,5 +32,5 @@ Nothing. `--check-egress` makes one HTTPS request outside the tunnel.
 
 0 when the controller ran. Use `--json` and the `healthy` field in scripts.
 
-Host requirements use the same checks as `avpn preflight`; warnings remain informational,
-while blockers fail their host check. See `avpn help setup` for resumable setup and repairs.
+Host requirements use the same checks as `cypherpunk preflight`; warnings remain informational,
+while blockers fail their host check. See `cypherpunk help setup` for resumable setup and repairs.

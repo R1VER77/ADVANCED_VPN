@@ -29,11 +29,11 @@ const routeNames = computed(() => status.value?.chain.map((hop) => hop.city).joi
 const theme = ref<'light' | 'dark'>('light')
 const dialog = ref<HTMLElement | null>(null)
 try {
-  theme.value = localStorage.getItem('avpn-prototype-theme') === 'dark' || (!localStorage.getItem('avpn-prototype-theme') && matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light'
+  theme.value = localStorage.getItem('cpvpn-prototype-theme') === 'dark' || (!localStorage.getItem('cpvpn-prototype-theme') && matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light'
 } catch { /* Private browsing can disable storage; the local default remains usable. */ }
 watch(theme, (value) => {
   document.documentElement.dataset.theme = value
-  try { localStorage.setItem('avpn-prototype-theme', value) } catch { /* Optional preference. */ }
+  try { localStorage.setItem('cpvpn-prototype-theme', value) } catch { /* Optional preference. */ }
 }, { immediate: true })
 let sheetOpener: HTMLElement | null = null
 watch(sheet, async (value) => {
@@ -177,16 +177,16 @@ function reset(to: 'fresh' | 'disconnected' | 'connected') {
           <button class="icon-button sheet-close" aria-label="Close dialog" @click="sheet = ''"><AppIcon name="close" :size="18" /></button>
           <span class="sheet-icon"><AppIcon :name="sheet === 'fix' ? 'shield' : 'settings'" :size="24" /></span>
           <template v-if="sheet === 'fix'">
-            <h2>Why AVPN stopped</h2>
+            <h2>Why CYPHERPUNK stopped</h2>
             <p>
               Before sending anything, the first server must prove it holds your device's key. It didn't.
               Either someone is pretending to be your server, or your device file was made for an older
-              version of AVPN.
+              version of CYPHERPUNK.
             </p>
             <p><strong>Your traffic stayed blocked. Nothing was sent.</strong></p>
             <h3>What to do</h3>
             <ol>
-              <li>If you recently updated AVPN, ask your operator for a new device file and add it in Settings.</li>
+              <li>If you recently updated CYPHERPUNK, ask your operator for a new device file and add it in Settings.</li>
               <li>If you didn't, tell your operator: this can mean an attack on your connection.</li>
             </ol>
 

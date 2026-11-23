@@ -23,7 +23,7 @@ not what this recipe builds.
 What the namespace already enforces, and why Tor Browser on top of it
 is a clean composition:
 
-1. **Tor Browser binds inside the namespace** (`avpn run -- tor-browser`
+1. **Tor Browser binds inside the namespace** (`cypherpunk run -- tor-browser`
    or the browser launched in the namespace's mount/pid view). The
    namespace's firewall already drops everything that is not the
    tunnel — a Tor client misconfiguration that would otherwise dial
@@ -74,7 +74,7 @@ real guard) is owner-side.
 
 ## 4. The `--front tor` variant — declined for now
 
-The I2P front (`avpn init --front i2p`) exists because I2P's threat
+The I2P front (`cypherpunk init --front i2p`) exists because I2P's threat
 model matches the project's: hidden NTCP2 router, no guard-based
 client distinguishability, and a *packet-transport* front (the I2P
 router's traffic is itself cover-friendly). Cloning it for Tor means:

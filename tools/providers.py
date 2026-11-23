@@ -1,7 +1,7 @@
-"""Where an ADVANCED_VPN chain can run for free: the endpoint catalog.
+"""Where an cypherpunk_vpn chain can run for free: the endpoint catalog.
 
-One table drives `avpn cloud suggest`, the "Get started" cell `avpn` shows on a device
-that is not enrolled yet (`src/bin/avpn/get_started.txt`, checked against this table by
+One table drives `cypherpunk cloud suggest`, the "Get started" cell `cypherpunk` shows on a device
+that is not enrolled yet (`src/bin/cypherpunk/get_started.txt`, checked against this table by
 the test suite), and `docs/cli/endpoints.md`. Terms change; every entry names the page
 it was checked against and when.
 
@@ -32,7 +32,7 @@ PROVIDERS = [
         "the account closed): keep standby exits",
         automation="create",
         cli="oci",
-        next="avpn cloud oci server --apply --name avpn-exit --role exit",
+        next="cypherpunk cloud oci server --apply --name cpvpn-exit --role exit",
         heading="recommended exit",
         source="https://docs.oracle.com/en-us/iaas/Content/FreeTier/freetier_topic-Always_Free_Resources.htm",
     ),
@@ -46,7 +46,7 @@ PROVIDERS = [
         caveats="new accounts only; one Region per project; the plan closes when it ends unless upgraded",
         automation="create",
         cli="aws",
-        next="avpn cloud aws relay --apply --name avpn-relay --profile PROFILE",
+        next="cypherpunk cloud aws relay --apply --name cpvpn-relay --profile PROFILE",
         heading="recommended entry relay",
         source="https://aws.amazon.com/about-aws/whats-new/2025/07/aws-free-tier-credits-month-free-plan/",
     ),
@@ -60,7 +60,7 @@ PROVIDERS = [
         caveats="the free outbound allowance is not confirmed; B1s is unavailable in some regions",
         automation="ssh",
         cli="az",
-        next="avpn cloud host add --name avpn-azure --ssh azureuser@IP --key KEY --provider azure",
+        next="cypherpunk cloud host add --name cpvpn-azure --ssh azureuser@IP --key KEY --provider azure",
         source="https://learn.microsoft.com/azure/cost-management-billing/manage/create-free-services",
     ),
     dict(
@@ -87,7 +87,7 @@ PROVIDERS = [
         caveats="a home connection's address is tied to you: use it as a middle hop, not an exit you want unlinked",
         automation="ssh",
         cli="ssh",
-        next="avpn cloud host add --name avpn-home --ssh USER@HOST --key KEY",
+        next="cypherpunk cloud host add --name cpvpn-home --ssh USER@HOST --key KEY",
         source="",
     ),
 ]
@@ -198,7 +198,7 @@ LEGAL_PARENT = {
 LEGAL_PARENT.update({p["key"]: p["parent"] for p in LOW_COST})
 
 # Fly.io: no free tier, a $5 monthly waiver (tools/fee_guard.py), one exit per organization
-# over IPv6 TCP (docs/FLY_EXIT.md). Created with `avpn cloud fly server`, so it is not in
+# over IPv6 TCP (docs/FLY_EXIT.md). Created with `cypherpunk cloud fly server`, so it is not in
 # the "where to start" table above.
 FLY = dict(key="fly", name="Fly.io (within the $5 waiver)", short="Fly.io", terms="pay as you go; bills under $5 waived",
            egress_gib=51, servers="one 256 MB Machine per organization", automation="create", cli="docker",
@@ -383,8 +383,8 @@ def quick(argv, timeout=20):
 
 
 def cli_path(name):
-    """The provider CLI, honouring the `AVPN_<NAME>` override the cloud tool uses."""
-    return os.environ.get("AVPN_" + name.upper()) or shutil.which(name)
+    """The provider CLI, honouring the `CPVPN_<NAME>` override the cloud tool uses."""
+    return os.environ.get("CPVPN_" + name.upper()) or shutil.which(name)
 
 
 def readiness(p, profile=None):
@@ -425,7 +425,7 @@ def recommendation(recorded):
         return "one server recorded (%s): add one more on another provider for 2 hops" % ", ".join(sorted(recorded))
     hops = min(n, 3)
     cap = capacity_gib(recorded.values())
-    return "%d servers recorded: avpn cloud chain --apply joins them into %d hops%s" % (
+    return "%d servers recorded: cypherpunk cloud chain --apply joins them into %d hops%s" % (
         n,
         hops,
         " (about %d GiB/month)" % cap if cap else "",
@@ -433,7 +433,7 @@ def recommendation(recorded):
 
 
 def get_started_text():
-    """The "Get started" cell `avpn` shows on a device that is not enrolled yet.
+    """The "Get started" cell `cypherpunk` shows on a device that is not enrolled yet.
 
     Line 1 is the title, line 2 the summary, then `label<TAB>value` rows.
     """
@@ -442,16 +442,16 @@ def get_started_text():
         if not usable(p):
             continue
         rows.append("%s\t%s" % (p["short"], outbound(p)))
-    rows.append("details\tavpn help endpoints")
-    rows.append("next\tavpn cloud suggest  (checks your sign-ins)")
-    rows.append("then\tavpn cloud chain --apply  (one multi-hop chain)")
+    rows.append("details\tcypherpunk help endpoints")
+    rows.append("next\tcypherpunk cloud suggest  (checks your sign-ins)")
+    rows.append("then\tcypherpunk cloud chain --apply  (one multi-hop chain)")
     return "\n".join(rows) + "\n"
 
 
 PAGE_HEAD = """# Free endpoints
 
 Where the chain's servers can run for free, as checked on %s. Terms change:
-each entry names the page it was checked against. `avpn cloud suggest` shows the same
+each entry names the page it was checked against. `cypherpunk cloud suggest` shows the same
 list, with whether you are signed in to each provider and the exact next command.
 
 A forwarding hop sends every byte out again (downloads towards you, uploads towards
@@ -463,8 +463,8 @@ PAGE_TAIL = """
 ## Choosing
 
 - Two providers beat two servers on one provider: the entry sees your address, the exit sees your destinations, and only a provider holding both could link them.
-- Put the largest allowance at the exit. `avpn cloud chain` does this automatically.
-- Every provider knows who owns the account and sees its own hop's traffic volume and timing. See `avpn help privacy` for what each can still see.
+- Put the largest allowance at the exit. `cypherpunk cloud chain` does this automatically.
+- Every provider knows who owns the account and sees its own hop's traffic volume and timing. See `cypherpunk help privacy` for what each can still see.
 """
 
 
@@ -476,7 +476,7 @@ def endpoints_page():
         out.append("- %s; %s.\n" % (p["terms"][0].upper() + p["terms"][1:], outbound(p)))
         out.append("- Servers: %s.\n" % p["servers"])
         out.append("- Caveats: %s.\n" % p["caveats"])
-        how = "created by this tool" if p["automation"] == "create" else "recorded with `avpn cloud host add`"
+        how = "created by this tool" if p["automation"] == "create" else "recorded with `cypherpunk cloud host add`"
         out.append("- Next: `%s` (%s).\n" % (p["next"], how) if usable(p) else "- Not recommended as a hop.\n")
         if p["source"]:
             out.append("- Source: %s\n" % p["source"])
@@ -485,7 +485,7 @@ def endpoints_page():
         "One of these carries far more than one person uses; at %d GB a member each month, the covered "
         "counts below halve on a 2-hop chain. Running your own VPN is fine on all of them; letting other "
         "people's traffic exit makes their abuse complaints yours, so read the host's rules first. Record "
-        "one with `avpn cloud host add --provider KEY`.\n\n" % (LOW_COST_CHECKED, MEMBER_GB)
+        "one with `cypherpunk cloud host add --provider KEY`.\n\n" % (LOW_COST_CHECKED, MEMBER_GB)
     )
     for p in low_cost_rows():
         out.append(
@@ -512,9 +512,9 @@ if __name__ == "__main__":
 
     if sys.argv[1:] == ["--generate"]:
         root = Path(__file__).resolve().parents[1]
-        (root / "src/bin/avpn/get_started.txt").write_text(get_started_text())
+        (root / "src/bin/cypherpunk/get_started.txt").write_text(get_started_text())
         (root / "docs/cli/endpoints.md").write_text(endpoints_page())
         (root / APP_CATALOG_PATH).write_text(app_catalog_text())
-        print("wrote src/bin/avpn/get_started.txt, docs/cli/endpoints.md and " + APP_CATALOG_PATH)
+        print("wrote src/bin/cypherpunk/get_started.txt, docs/cli/endpoints.md and " + APP_CATALOG_PATH)
     else:
         print(json.dumps(ranked(), indent=2))

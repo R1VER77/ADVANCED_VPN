@@ -1,9 +1,9 @@
 //! A constant fallback policy, independent of enrolled profiles, Python and slots.
 //! It only removes connectivity after whole-device opt-in; it never opens a VPN.
 
-pub const POLICY: &str = r#"add table inet advanced_vpn
-delete table inet advanced_vpn
-table inet advanced_vpn {
+pub const POLICY: &str = r#"add table inet cypherpunk_vpn
+delete table inet cypherpunk_vpn
+table inet cypherpunk_vpn {
  chain output { type filter hook output priority -100; policy drop;
   oifname "lo" accept
   meta skuid 0 ip daddr 255.255.255.255 udp sport 68 udp dport 67 accept
@@ -78,6 +78,6 @@ mod tests {
         assert_eq!(POLICY.matches("policy drop").count(), 2);
         assert!(!POLICY.contains("established"));
         assert!(!POLICY.contains("dport 53"));
-        assert!(!POLICY.contains("avpn0"));
+        assert!(!POLICY.contains("cpvpn0"));
     }
 }

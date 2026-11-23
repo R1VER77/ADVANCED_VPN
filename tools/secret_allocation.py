@@ -96,10 +96,10 @@ def allocate(master: bytes, domain: str, window: int, generation: int = 1) -> by
     if not isinstance(master, (bytes, bytearray)) or len(master) < WINDOW_BYTES:
         raise Refused("master_material_too_short")
     info = (
-        b"avpn/secret-allocation/v1|" + domain.encode() + b"|" + str(generation).encode() + b"|" + str(window).encode()
+        b"cpvpn/secret-allocation/v1|" + domain.encode() + b"|" + str(generation).encode() + b"|" + str(window).encode()
     )
     # extract once (the master is the IKM), expand exactly one window
-    prk = hmac.new(b"avpn/secret-allocation/v1|extract", bytes(master), hashlib.sha256).digest()
+    prk = hmac.new(b"cpvpn/secret-allocation/v1|extract", bytes(master), hashlib.sha256).digest()
     return hmac.new(prk, info + b"\x01", hashlib.sha256).digest()[:WINDOW_BYTES]
 
 
@@ -107,7 +107,7 @@ def window_digest(domain: str, window: int, generation: int, material: bytes) ->
     """The ledger's key for one consumed window: what was consumed, never the
     material itself."""
     return hashlib.sha256(
-        b"avpn/secret-allocation/v1|ledger|"
+        b"cpvpn/secret-allocation/v1|ledger|"
         + domain.encode()
         + b"|"
         + str(generation).encode()

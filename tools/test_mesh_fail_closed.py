@@ -22,7 +22,7 @@ REPO = TOOLS.parent
 RUST_TOKENS = (REPO / "src/mesh/tokens.rs").read_text()
 MESH_PY = (TOOLS / "mesh.py").read_text()
 INVENTORY = (REPO / "docs/PQ_INVENTORY.md").read_text()
-AVPNCTL = (TOOLS / "avpnctl.py").read_text()
+CYPHERPUNKCTL = (TOOLS / "cypherpunkctl.py").read_text()
 ZK_DESIGN = (REPO / "docs/ZK_MEMBERSHIP_DESIGN.md").read_text()
 
 
@@ -58,10 +58,12 @@ class FailClosedPins(unittest.TestCase):
 
     def test_the_zk_membership_prototype_is_wired_into_no_shipping_command(self):
         """ZK membership is research (its design says so); nothing in the CLI
-        may depend on it until it is reviewed. avpnctl is the command surface."""
+        may depend on it until it is reviewed. cypherpunkctl is the command surface."""
         self.assertIn("research track, not wired into any command", ZK_DESIGN)
         for token in ("zk", "ZK_MEMBERSHIP", "zkid", "nullifier"):
-            self.assertNotIn(token, AVPNCTL, f"avpnctl must not reference the unreviewed ZK mechanism ({token})")
+            self.assertNotIn(
+                token, CYPHERPUNKCTL, f"cypherpunkctl must not reference the unreviewed ZK mechanism ({token})"
+            )
 
     def test_the_membership_proof_artifact_is_consumed_by_nothing(self):
         """publish() writes the FIDO2 assertion beside the descriptor as an

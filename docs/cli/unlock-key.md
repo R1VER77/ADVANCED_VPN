@@ -1,13 +1,13 @@
-# avpn unlock-key
+# cypherpunk unlock-key
 
 Operator only. Create the operator's unlock key, once. A server whose keys cannot be
-sealed to a TPM2 locks them to this key instead (protection `operator`, `avpn help request`), so only your
-Nitrokey can let it start after a reboot (`avpn help cloud`, `avpn cloud unlock`).
-`avpn cloud chain` runs this for you the first time.
+sealed to a TPM2 locks them to this key instead (protection `operator`, `cypherpunk help request`), so only your
+Nitrokey can let it start after a reboot (`cypherpunk help cloud`, `cypherpunk cloud unlock`).
+`cypherpunk cloud chain` runs this for you the first time.
 
 ## Usage
 
-    avpn unlock-key (--vault DIR | --software-operator DIR) [--json]
+    cypherpunk unlock-key (--vault DIR | --software-operator DIR) [--json]
 
 ## Options
 

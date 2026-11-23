@@ -76,7 +76,7 @@ MODELS = {
         "pad_known_only_if_leaked",
         "executable",
     ],
-    "crates/avpn-mix-lane/tamarin/pq_sphinx_reblind.spthy": [
+    "crates/cpvpn-mix-lane/tamarin/pq_sphinx_reblind.spthy": [
         "element_hidden",
         "pad_hidden",
         "executable",
@@ -175,12 +175,12 @@ MUTANTS = [
         "formal/cloak/cloak.spthy",
         [
             (
-                "mac(ck, <'advanced-vpn/cloak/v2/client', exporter>)",
-                "mac(ck, 'advanced-vpn/cloak/v2/client')",
+                "mac(ck, <'cypherpunk-vpn/cloak/v2/client', exporter>)",
+                "mac(ck, 'cypherpunk-vpn/cloak/v2/client')",
             ),
             (
-                "mac(ck, <'advanced-vpn/cloak/v2/server', exporter>)",
-                "mac(ck, 'advanced-vpn/cloak/v2/server')",
+                "mac(ck, <'cypherpunk-vpn/cloak/v2/server', exporter>)",
+                "mac(ck, 'cypherpunk-vpn/cloak/v2/server')",
             ),
         ],
         "channel_binding",
@@ -192,7 +192,7 @@ MUTANTS = [
     ),
     (
         "formal/cloak/cloak.spthy",
-        [("'advanced-vpn/cloak/v2/server'", "'advanced-vpn/cloak/v2/client'")],
+        [("'cypherpunk-vpn/cloak/v2/server'", "'cypherpunk-vpn/cloak/v2/client'")],
         "no_reflection",
     ),
     (
@@ -266,7 +266,7 @@ MUTANTS = [
         "pad_known_only_if_leaked",
     ),
     (
-        "crates/avpn-mix-lane/tamarin/pq_sphinx_reblind.spthy",
+        "crates/cpvpn-mix-lane/tamarin/pq_sphinx_reblind.spthy",
         [("[ Out(<aenc(~k1, pk1), ~e2 XOR h(<~k1, 'pad2'>)>) ]", "[ Out(<aenc(~k1, pk1), ~e2>) ]")],
         "element_hidden",
     ),

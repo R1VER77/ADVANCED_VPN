@@ -1,6 +1,6 @@
 # The I2P front
 
-With `avpn init --front i2p`, the client reaches the chain's entry only through I2P.
+With `cypherpunk init --front i2p`, the client reaches the chain's entry only through I2P.
 
     you -> I2P (your router, hidden) -> I2P routers -> the entry's I2P router -> the entry -> ... -> the exit
 
@@ -11,15 +11,15 @@ With `avpn init --front i2p`, the client reaches the chain's entry only through 
 
 ## How it works
 
-- At `avpn request`, the entry (any first hop) also generates an I2P destination (X25519 + Ed25519); its private keys are protected with the entry's other keys. `avpn init --front i2p` signs the destination's b32 address into your profile, so your device reaches exactly that entry.
-- Your device runs i2pd, unmodified, as its own user (`advanced-vpn-i2p`), configured in RAM: a client tunnel with `--front-hops` hops each way to the entry, every proxy, console and control port off, no transit, signed reseeds only. Your router is hidden: it publishes no address, and it speaks only NTCP2, because SSU2's peer test asks a third router to probe the tester's address directly and that router could be the entry.
+- At `cypherpunk request`, the entry (any first hop) also generates an I2P destination (X25519 + Ed25519); its private keys are protected with the entry's other keys. `cypherpunk init --front i2p` signs the destination's b32 address into your profile, so your device reaches exactly that entry.
+- Your device runs i2pd, unmodified, as its own user (`cypherpunk-vpn-i2p`), configured in RAM: a client tunnel with `--front-hops` hops each way to the entry, every proxy, console and control port off, no transit, signed reseeds only. Your router is hidden: it publishes no address, and it speaks only NTCP2, because SSU2's peer test asks a third router to probe the tester's address directly and that router could be the entry.
 - The entry's i2pd serves its destination with zero hops (the entry is already known to you; hiding it would cost latency and gain nothing) and hands each stream to the cloak's TLS listener, which gives streams from I2P 30 s to authenticate instead of 3.
 - The cloak on your device speaks only TLS 1.3 over the I2P stream (I2P carries streams, not datagrams), never QUIC.
 
 ## Setting it up
 
-- On your device and on the entry: i2pd **2.56 or newer** (`sudo apt install i2pd` on Debian 13; Ubuntu 24.04 ships 2.49, which never bootstrapped in the lab, so use the i2pd project's own packages there), then `sudo systemctl disable --now i2pd`. The VPN service refuses an older i2pd. The package's own service is a public, general-purpose router; the VPN service runs its own instance with the configuration above. The installer creates the `advanced-vpn-i2p` user.
-- Request the entry's keys with this release, then sign with `avpn init --front i2p` and enroll as usual.
+- On your device and on the entry: i2pd **2.56 or newer** (`sudo apt install i2pd` on Debian 13; Ubuntu 24.04 ships 2.49, which never bootstrapped in the lab, so use the i2pd project's own packages there), then `sudo systemctl disable --now i2pd`. The VPN service refuses an older i2pd. The package's own service is a public, general-purpose router; the VPN service runs its own instance with the configuration above. The installer creates the `cypherpunk-vpn-i2p` user.
+- Request the entry's keys with this release, then sign with `cypherpunk init --front i2p` and enroll as usual.
 
 ## The kill switch
 
@@ -37,8 +37,8 @@ With `avpn init --front i2p`, the client reaches the chain's entry only through 
 
 - You depend on the I2P network's health, and anyone watching your link can tell you use I2P (NTCP2 is obfuscated, not invisible).
 - The entry runs an I2P router reachable on its `router_port` (signed into its profile, random by default): open that TCP port to the entry in your cloud firewall.
-- An I2P front and an upstream entry (`avpn preferences --upstream-interface`) are exclusive.
+- An I2P front and an upstream entry (`cypherpunk preferences --upstream-interface`) are exclusive.
 
 ## See also
 
-`avpn help init`, `avpn help threat-model`, `avpn help mix`.
+`cypherpunk help init`, `cypherpunk help threat-model`, `cypherpunk help mix`.

@@ -1,0 +1,90 @@
+// pq_sphinx_reblind.spthy — PQ-Sphinx option E, §2.3 XOR re-blinding (see REBLINDING_PLAN.md).
+//
+//   pad_2  = HKDF(K_1, "cpvpn/pq-sphinx/pad/v1", 2)     modelled as h(<K_1, 'pad2'>)
+//   elem2' = elem2 XOR pad_2                          the client blinds hop 2's element
+//   hop 1:  elem2 = elem2' XOR pad_2                   the entry removes the pad
+//
+// K_1 is the entry hop's ML-KEM-768 shared secret, modelled as a fresh value encrypted to
+// the entry's public key (the KEM's job: only the entry key opens it). hop 2's X25519
+// element is a fresh value (uniform on the wire). The R1 shift streams, MACs and payload
+// masks are standard composition, covered by the test suite and outside this model.
+//
+// Two observers:
+//  - an ENTRY-LINK observer (the client's ISP, the entry's provider) sees the ciphertext
+//    and the blinded element but not the link from hop 1 to hop 2: EntryPeel hands the
+//    peeled element to hop 2 on a private channel;
+//  - a GLOBAL observer sees that link too: EntryPeelObserved publishes the peeled element.
+//
+// LEMMAS (proved with Tamarin 1.12.0 / Maude 3.5.1):
+//  - element_hidden    an entry-link observer never learns hop 2's element...
+//  - pad_hidden        ...nor the pad, unless the entry key is compromised.
+//  - executable        a cell is blinded and peeled with the entry key uncompromised.
+//  - global_xor_reveals_pad (exists-trace) a global observer who XORs the right pair of
+//    values (the blinded element in, the peeled element out) holds the pad symbolically.
+//
+// Not proved: secrecy of K_1 itself. With adversary-chosen ciphertexts fed to the entry
+// (whose XOR output acts as an oracle), Tamarin does not terminate on it (default, s, S
+// and --auto-sources, 5 minutes each). Its observable consequence, the pad and hop 2's
+// element staying hidden from the entry-link observer, is what pad_hidden and
+// element_hidden prove.
+//
+// What that last lemma means for the claim under review (REBLINDING_PLAN.md): the
+// intended "pad secrecy" is FALSE as a trace property against a global observer, so the
+// design's real claim, that such an observer cannot tell WHICH output element belongs to
+// which input among many cells, is an indistinguishability (equivalence) property.
+// Tamarin's --diff mode with XOR did not terminate on equivalences of this shape (see
+// formal/dcnet/), so that claim stays review-pending, as CUTOVER_KATZENPOST.md requires.
+// The malleability question (REBLINDING_PLAN item 2) is a manual analysis, not a Tamarin
+// one.
+
+theory pq_sphinx_reblind
+begin
+
+builtins: xor, hashing, asymmetric-encryption
+
+rule EntryKey:
+  [ Fr(~sk1) ]
+  --[ EntryKey(pk(~sk1)) ]->
+  [ !Entry(~sk1), !EntryPk(pk(~sk1)), Out(pk(~sk1)) ]
+
+rule CompromiseEntry:
+  [ !Entry(sk1) ]
+  --[ Compromised(pk(sk1)) ]->
+  [ Out(sk1) ]
+
+// The client encapsulates K_1 to the entry and blinds hop 2's element with the pad.
+rule ClientBlind:
+  [ !EntryPk(pk1), Fr(~k1), Fr(~e2) ]
+  --[ Blind(pk1, ~k1, ~e2, h(<~k1, 'pad2'>)) ]->
+  [ Out(<aenc(~k1, pk1), ~e2 XOR h(<~k1, 'pad2'>)>) ]
+
+// The entry peels: it opens K_1, removes the pad, and hands the element to hop 2 on the
+// link the entry-link observer does not see.
+rule EntryPeel:
+  [ !Entry(sk1), In(<aenc(k1, pk(sk1)), b>) ]
+  --[ Peeled(pk(sk1), b XOR h(<k1, 'pad2'>)) ]->
+  [ ToHop2(b XOR h(<k1, 'pad2'>)) ]
+
+// The same, when the observer also watches the hop-1 -> hop-2 link.
+rule EntryPeelObserved:
+  [ !Entry(sk1), In(<aenc(k1, pk(sk1)), b>) ]
+  --[ Peeled(pk(sk1), b XOR h(<k1, 'pad2'>)), Global() ]->
+  [ Out(b XOR h(<k1, 'pad2'>)) ]
+
+lemma element_hidden:
+  "All pk k e p #i #j. Blind(pk, k, e, p) @i & K(e) @j
+     ==> (Ex #c. Compromised(pk) @c) | (Ex #g. Global() @g)"
+
+lemma pad_hidden:
+  "All pk k e p #i #j. Blind(pk, k, e, p) @i & K(p) @j
+     ==> (Ex #c. Compromised(pk) @c) | (Ex #g. Global() @g)"
+
+lemma executable:
+  exists-trace
+  "Ex pk k e p x #i #j. Blind(pk, k, e, p) @i & Peeled(pk, x) @j & not (Ex #c. Compromised(pk) @c)"
+
+lemma global_xor_reveals_pad:
+  exists-trace
+  "Ex pk k e p #i #j. Blind(pk, k, e, p) @i & K(p) @j & not (Ex #c. Compromised(pk) @c)"
+
+end

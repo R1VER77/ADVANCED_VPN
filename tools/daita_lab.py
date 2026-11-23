@@ -32,7 +32,7 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 import throughput_bench as tb  # noqa: E402
-from avpnctl import identity_of, lab_guard, runtime_dir  # noqa: E402
+from cypherpunkctl import identity_of, lab_guard, runtime_dir  # noqa: E402
 from managed_profile import lab_setup, RATE_CLASSES  # noqa: E402
 
 # Raw capture with kernel timestamps, written as nanosecond pcap (both directions).
@@ -161,11 +161,11 @@ def main():
         return x
 
     def manager(role):
-        return spawn("av-" + role, [sys.executable, ROOT / "tools/avpnctl.py", "--state", state / role,
+        return spawn("av-" + role, [sys.executable, ROOT / "tools/cypherpunkctl.py", "--state", state / role,
                                     "--bin-dir", a.bin_dir, "--lab", "connect"], role)  # fmt: skip
 
     def app(argv, check=True):
-        return tb.run("ip", "netns", "exec", "av-client", sys.executable, ROOT / "tools/avpnctl.py", "--state",
+        return tb.run("ip", "netns", "exec", "av-client", sys.executable, ROOT / "tools/cypherpunkctl.py", "--state",
                       state / "client", "--lab", "run", "--", *argv, check=check, timeout=900)  # fmt: skip
 
     def counters():

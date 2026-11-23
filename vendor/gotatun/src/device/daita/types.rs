@@ -216,18 +216,18 @@ impl DelayWatcher {
 // INVARIANT: Only one internal and one action timer per machine can exist at a time.
 pub(crate) struct MachineTimers(
     VecDeque<(Instant, MachineId, MachineTimer)>,
-    /// ADVANCED_VPN strict shaping: each machine's last decoy deadline. A decoy re-armed
+    /// cypherpunk_vpn strict shaping: each machine's last decoy deadline. A decoy re-armed
     /// after its predecessor fired is scheduled from that deadline, not from when the
     /// late timer was serviced, so a slot clock stays on a fixed grid whatever the load.
     Option<Vec<Option<Instant>>>,
-    /// ADVANCED_VPN: how far behind the grid a machine may fall and still send every
+    /// cypherpunk_vpn: how far behind the grid a machine may fall and still send every
     /// missed decoy (late, one per tick) instead of skipping it. Zero: skip, never burst.
     std::time::Duration,
 );
 
-/// The catch-up window for grid machines, from `AVPN_CATCH_UP_MS` (milliseconds, default 0).
+/// The catch-up window for grid machines, from `CPVPN_CATCH_UP_MS` (milliseconds, default 0).
 fn catch_up_window() -> std::time::Duration {
-    std::env::var("AVPN_CATCH_UP_MS")
+    std::env::var("CPVPN_CATCH_UP_MS")
         .ok()
         .and_then(|v| v.parse::<u64>().ok())
         .map(std::time::Duration::from_millis)

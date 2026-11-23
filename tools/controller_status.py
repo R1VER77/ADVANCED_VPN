@@ -31,7 +31,7 @@ def read_generation(path):
 
 def verified(runtime, now=None, identity=None):
     """Unknown on contradictions; a negative protection verdict is not proof of a guard."""
-    from avpnctl import identity_of
+    from cypherpunkctl import identity_of
 
     identity = identity or identity_of
     supplied = now
@@ -104,7 +104,7 @@ def verified(runtime, now=None, identity=None):
 
 def snapshot(state):
     """Only public, validated configuration; no private key paths or raw diagnostics."""
-    import avpnctl
+    import cypherpunkctl
     from managed_profile import require_current
 
     result = dict(
@@ -128,24 +128,26 @@ def snapshot(state):
         if not (state / "profile.json").exists():
             result.update(state="not_enrolled", scope="none")
             return result
-        profile = require_current(avpnctl.load_profile(state))
+        profile = require_current(cypherpunkctl.load_profile(state))
         if profile["role"] != "client":
             return result
-        pref = avpnctl.read_json_private(state / "preferences.json", {})
+        pref = cypherpunkctl.read_json_private(state / "preferences.json", {})
         scope = pref.get("mode", "applications")
         if scope not in ("applications", "whole-device"):
             return result
         result.update(enrolled=True, scope=scope, rate=(profile.get("carrier") or {}).get("rate"))
-        result.update(verified(avpnctl.runtime_dir(state, create=False)))
-        if avpnctl.pin_pending() and result["state"] != "connected":
+        result.update(verified(cypherpunkctl.runtime_dir(state, create=False)))
+        if cypherpunkctl.pin_pending() and result["state"] != "connected":
             result.update(state="locked", next="unlock")
-        protection = avpnctl.read_json_private(state / "protection.json", {})
+        protection = cypherpunkctl.read_json_private(state / "protection.json", {})
         result["unlock"] = {"nitrokey": "hardware", "systemd-creds": "systemd-creds"}.get(
             protection.get("mode"), "none"
         )
         # Endpoint strings are public, but a profile does not currently sign
         # geographic coordinates/provider labels. Do not invent map locations.
-        result["route_endpoints"] = [dict(hop=name, endpoint=endpoint) for name, endpoint in avpnctl.chain_of(profile)]
+        result["route_endpoints"] = [
+            dict(hop=name, endpoint=endpoint) for name, endpoint in cypherpunkctl.chain_of(profile)
+        ]
     except (OSError, ValueError, KeyError, TypeError, RuntimeError):
         result.update(protection="unknown", kill_switch="unknown", state="unknown")
     return result

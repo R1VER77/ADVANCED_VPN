@@ -25,9 +25,9 @@ const OID_DER: [u8; 20] = [
     0x8c, 0xeb, 0x9c, 0x71,
 ];
 /// The statement's version tag.
-pub const VERSION: &str = "advanced-vpn/session/v1";
-const RP: &str = "advanced-vpn.local";
-const ORIGIN: &str = "https://advanced-vpn.local";
+pub const VERSION: &str = "cypherpunk-vpn/session/v1";
+const RP: &str = "cypherpunk-vpn.local";
+const ORIGIN: &str = "https://cypherpunk-vpn.local";
 /// The longest a statement may authorize: the client's leaf lifetime.
 pub const MAX_SECONDS: i64 = 43200;
 const UP_UV: u8 = 0x05;
@@ -70,6 +70,17 @@ fn b64url(raw: &[u8]) -> String {
 /// touch and the PIN, over a statement that names this leaf's public key, with `now` and
 /// the leaf's whole validity inside the statement's window of at most 12 hours.
 pub fn verify(device: &PeerDevice, leaf: &[u8], now: i64) -> Result<()> {
+    verify_with_domain(device, leaf, now, VERSION, RP, ORIGIN)
+}
+
+fn verify_with_domain(
+    device: &PeerDevice,
+    leaf: &[u8],
+    now: i64,
+    version: &str,
+    rp: &str,
+    origin: &str,
+) -> Result<()> {
     let (_, cert) =
         parse_x509_certificate(leaf).map_err(|_| anyhow::anyhow!("invalid peer certificate"))?;
     let raw = cert
@@ -86,17 +97,17 @@ pub fn verify(device: &PeerDevice, leaf: &[u8], now: i64) -> Result<()> {
     let s: Statement =
         serde_json::from_slice(&statement).context("malformed session authorization")?;
     ensure!(
-        s.v == VERSION && serde_json::to_vec(&s)? == statement,
+        s.v == version && serde_json::to_vec(&s)? == statement,
         "malformed session authorization"
     );
     ensure!(
-        auth.len() >= 37 && auth[..32] == Sha256::digest(RP.as_bytes())[..],
+        auth.len() >= 37 && auth[..32] == Sha256::digest(rp.as_bytes())[..],
         "wrong relying party"
     );
     ensure!(auth[32] & UP_UV == UP_UV, "touch and PIN required");
     let c: serde_json::Value = serde_json::from_slice(&client_data).context("wrong client data")?;
     ensure!(
-        c["type"] == "webauthn.get" && c["origin"] == ORIGIN,
+        c["type"] == "webauthn.get" && c["origin"] == origin,
         "wrong client data"
     );
     ensure!(
@@ -186,8 +197,26 @@ mod tests {
             let device: PeerDevice = serde_json::from_value(v["device"].clone()).unwrap();
             let leaf = hex::decode(v["leaf"].as_str().unwrap()).unwrap();
             let now = v["now"].as_i64().unwrap();
-            verify(&device, &leaf, now).unwrap_or_else(|e| panic!("{name}: {e}"));
-            assert!(verify(&device, &leaf, now + MAX_SECONDS).is_err(), "{name}");
+            let (_, cert) = parse_x509_certificate(&leaf).unwrap();
+            let raw = cert
+                .extensions()
+                .iter()
+                .find(|e| e.oid.as_bytes() == OID_DER)
+                .unwrap()
+                .value;
+            let ext: Extension = serde_json::from_slice(raw).unwrap();
+            let s: Statement =
+                serde_json::from_slice(&hex::decode(&ext.authorization).unwrap()).unwrap();
+            let c: serde_json::Value =
+                serde_json::from_slice(&hex::decode(&ext.client_data).unwrap()).unwrap();
+            let origin = c["origin"].as_str().unwrap();
+            let rp = origin.strip_prefix("https://").unwrap();
+            verify_with_domain(&device, &leaf, now, &s.v, rp, origin)
+                .unwrap_or_else(|e| panic!("{name}: {e}"));
+            assert!(
+                verify_with_domain(&device, &leaf, now + MAX_SECONDS, &s.v, rp, origin).is_err(),
+                "{name}"
+            );
         }
     }
 

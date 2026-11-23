@@ -1,4 +1,4 @@
-"""`avpn cloud cap` and the usage rows of `avpn cloud health` (tools/cloud.py): caps planned
+"""`cypherpunk cloud cap` and the usage rows of `cypherpunk cloud health` (tools/cloud.py): caps planned
 per account before any change, written where the server reads them, and every server's
 month shown against its cap."""
 
@@ -20,31 +20,31 @@ NOW = fee_guard.datetime.datetime(2026, 11, 11, tzinfo=fee_guard.datetime.timezo
 
 def inventory(**extra):
     resources = {
-        "avpn-relay": dict(provider="aws", profile="p1", region="eu-north-1", role="relay"),
-        "avpn-exit": dict(provider="ssh", catalog="oci", bastion=dict(oci_profile="DEFAULT"), role="exit"),
-        "avpn-old": dict(provider="aws", profile="p1", role="exit"),  # recorded, not in the chain
+        "cpvpn-relay": dict(provider="aws", profile="p1", region="eu-north-1", role="relay"),
+        "cpvpn-exit": dict(provider="ssh", catalog="oci", bastion=dict(oci_profile="DEFAULT"), role="exit"),
+        "cpvpn-old": dict(provider="aws", profile="p1", role="exit"),  # recorded, not in the chain
     }
     resources.update(extra)
-    return dict(schema=1, chain=dict(hops=["avpn-relay", "avpn-exit"]), resources=resources)
+    return dict(schema=1, chain=dict(hops=["cpvpn-relay", "cpvpn-exit"]), resources=resources)
 
 
 class Planning(unittest.TestCase):
     def test_caps_come_from_the_catalog_provider_and_ignore_idle_records(self):
-        caps = cloud.plan_caps(inventory(), ["avpn-relay", "avpn-exit"])
-        self.assertEqual(caps["avpn-relay"][0], 90 * GB)  # avpn-old is not in the chain
-        self.assertEqual(caps["avpn-exit"][0], 9000 * GB)
+        caps = cloud.plan_caps(inventory(), ["cpvpn-relay", "cpvpn-exit"])
+        self.assertEqual(caps["cpvpn-relay"][0], 90 * GB)  # cpvpn-old is not in the chain
+        self.assertEqual(caps["cpvpn-exit"][0], 9000 * GB)
 
     def test_a_standby_in_the_same_account_shares_the_allowance(self):
-        inv = inventory(**{"avpn-standby": dict(provider="aws", profile="p1", role="exit", standby=True)})
-        self.assertEqual(cloud.plan_caps(inv, ["avpn-relay"])["avpn-relay"][0], 45 * GB)
+        inv = inventory(**{"cpvpn-standby": dict(provider="aws", profile="p1", role="exit", standby=True)})
+        self.assertEqual(cloud.plan_caps(inv, ["cpvpn-relay"])["cpvpn-relay"][0], 45 * GB)
 
     def test_a_server_with_no_allowance_on_record_stops_the_build(self):
-        inv = inventory(**{"avpn-home": dict(provider="own", role="middle")})
-        inv["chain"]["hops"].append("avpn-home")
-        with self.assertRaisesRegex(cloud.CloudError, "no monthly cap for avpn-home"):
+        inv = inventory(**{"cpvpn-home": dict(provider="own", role="middle")})
+        inv["chain"]["hops"].append("cpvpn-home")
+        with self.assertRaisesRegex(cloud.CloudError, "no monthly cap for cpvpn-home"):
             cloud.require_caps(inv, inv["chain"]["hops"])
-        inv["resources"]["avpn-home"]["unlimited"] = True
-        self.assertIsNone(cloud.require_caps(inv, inv["chain"]["hops"])["avpn-home"][0])
+        inv["resources"]["cpvpn-home"]["unlimited"] = True
+        self.assertIsNone(cloud.require_caps(inv, inv["chain"]["hops"])["cpvpn-home"][0])
 
     def test_two_fly_machines_in_one_organization_are_refused(self):
         inv = inventory(**{n: dict(provider="fly", account="me", region="fra", role="exit") for n in ("f1", "f2")})
@@ -70,15 +70,15 @@ class FlyInTheChain(unittest.TestCase):
 
     def test_a_fly_server_is_a_hop_and_ipv6_sources_are_slash_128(self):
         inv = dict(schema=1, resources={
-            "avpn-relay": dict(provider="aws", public_ip="198.51.100.1", ssh_key="k"),
-            "avpn-fly": dict(provider="fly", catalog="fly", public_ip="2001:db8::4", app="a", machine="m"),
+            "cpvpn-relay": dict(provider="aws", public_ip="198.51.100.1", ssh_key="k"),
+            "cpvpn-fly": dict(provider="fly", catalog="fly", public_ip="2001:db8::4", app="a", machine="m"),
         })  # fmt: skip
         with mock.patch.object(cloud, "load_inventory", lambda: inv):
-            self.assertIn("avpn-fly", cloud.servers())
-        hops = cloud.chain_layout(["avpn-fly", "avpn-relay"], inv["resources"])
+            self.assertIn("cpvpn-fly", cloud.servers())
+        hops = cloud.chain_layout(["cpvpn-fly", "cpvpn-relay"], inv["resources"])
         self.assertEqual(hops[1]["sources"], ["2001:db8::4/128"])
         self.assertEqual(cloud.hostport("2001:db8::4", 4444), "[2001:db8::4]:4444")
-        self.assertEqual(cloud.remote("avpn-fly", inv["resources"]["avpn-fly"])[2:], (["--app", "a"], "m"))
+        self.assertEqual(cloud.remote("cpvpn-fly", inv["resources"]["cpvpn-fly"])[2:], (["--app", "a"], "m"))
 
 
 class RelayIpv6Egress(unittest.TestCase):
@@ -128,13 +128,13 @@ class RelayIpv6Egress(unittest.TestCase):
         rec = dict(provider="aws", profile="p", region="eu-north-1", instance="i-1")
         fake, calls = self.fake([{"Ipv6Address": "2001:db8:1::1"}])
         with mock.patch.object(cloud, "Aws", fake), mock.patch.object(cloud, "sg_diff", lambda *a, **k: ([], [])):
-            cloud.set_firewall("avpn-relay", rec, 443, ["0.0.0.0/0"], [], "[2001:db8::4]:4444")
+            cloud.set_firewall("cpvpn-relay", rec, 443, ["0.0.0.0/0"], [], "[2001:db8::4]:4444")
         ops = {c[0]: json.loads(c[-1]) for c in calls if "security-group-egress" in c[0]}
         self.assertEqual(ops["authorize-security-group-egress"][0]["Ipv6Ranges"][0]["CidrIpv6"], "2001:db8::4/128")
         self.assertEqual(ops["revoke-security-group-egress"][0]["Ipv6Ranges"][0]["CidrIpv6"], "::/0")
         fake, calls = self.fake([])
         with mock.patch.object(cloud, "Aws", fake), self.assertRaisesRegex(cloud.CloudError, "no IPv6 address"):
-            cloud.set_firewall("avpn-relay", rec, 443, ["0.0.0.0/0"], [], "[2001:db8::4]:4444")
+            cloud.set_firewall("cpvpn-relay", rec, 443, ["0.0.0.0/0"], [], "[2001:db8::4]:4444")
 
     def test_each_hop_knows_its_next_hop_and_both_firewall_passes_use_it(self):
         inv = {"r": dict(provider="aws", public_ip="198.51.100.1"), "f": dict(provider="fly", public_ip="2001:db8::4")}
@@ -216,14 +216,14 @@ class Command(unittest.TestCase):
         cloud.cap(self.args())
         self.assertEqual(self.pushed, [])
         cloud.cap(self.args(apply=True))
-        self.assertEqual(dict(self.pushed), {"avpn-relay": 90 * GB, "avpn-exit": 9000 * GB})
+        self.assertEqual(dict(self.pushed), {"cpvpn-relay": 90 * GB, "cpvpn-exit": 9000 * GB})
 
     def test_an_owner_cap_is_recorded_and_auto_restores_the_allowance(self):
-        cloud.cap(self.args(name="avpn-relay", gb=20, apply=True))
-        self.assertEqual(self.pushed[-1], ("avpn-relay", 20 * GB))
-        self.assertEqual(json.loads(cloud.INVENTORY.read_text())["resources"]["avpn-relay"]["cap_gb"], 20)
-        cloud.cap(self.args(name="avpn-relay", auto=True, apply=True))
-        self.assertEqual(self.pushed[-1], ("avpn-relay", 90 * GB))
+        cloud.cap(self.args(name="cpvpn-relay", gb=20, apply=True))
+        self.assertEqual(self.pushed[-1], ("cpvpn-relay", 20 * GB))
+        self.assertEqual(json.loads(cloud.INVENTORY.read_text())["resources"]["cpvpn-relay"]["cap_gb"], 20)
+        cloud.cap(self.args(name="cpvpn-relay", auto=True, apply=True))
+        self.assertEqual(self.pushed[-1], ("cpvpn-relay", 90 * GB))
 
     def test_push_writes_root_only_beside_the_enrolled_state(self):
         mock.patch.stopall()  # this test calls the real push_cap
@@ -236,8 +236,8 @@ class Command(unittest.TestCase):
             mock.patch.object(cloud, "remote", lambda n, r: ("ssh", "scp", [], "host")),
             mock.patch.object(cloud, "call", fake_call),
         ):
-            cloud.push_cap("avpn-relay", {}, 5 * GB, "why")
-        self.assertIn("/etc/advanced-vpn/metering/enrolled/cap.json", sent["argv"][-1])
+            cloud.push_cap("cpvpn-relay", {}, 5 * GB, "why")
+        self.assertIn("/etc/cypherpunk-vpn/metering/enrolled/cap.json", sent["argv"][-1])
         self.assertIn("umask 077", sent["argv"][-1])
         self.assertEqual(json.loads(sent["stdin"])["cap_bytes"], 5 * GB)
 

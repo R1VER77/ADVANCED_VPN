@@ -15,10 +15,10 @@ _registry = {}
 @contextlib.contextmanager
 def locked(state):
     """Reentrant within one thread, exclusive across processes; never locks status reads."""
-    import avpnctl
+    import cypherpunkctl
 
     if os.geteuid() == 0:
-        root = avpnctl.runtime_dir(state)
+        root = cypherpunkctl.runtime_dir(state)
     else:
         # Ordinary-user operator key generation also cooperates, without asking
         # that user to create or access root's /run controller directory.

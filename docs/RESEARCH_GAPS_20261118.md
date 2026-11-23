@@ -1,6 +1,6 @@
 # Additional research and remaining validation gaps
 
-Reviewed 18 November 2026 (America/Chicago). This supplements
+Reviewed 18 November 2026. This supplements
 [the original review](RESEARCH_REVIEW_20261118.md), preserves the supplied files,
 and follows the owner's latest instruction: use the already commissioned four
 physical units as the baseline and determine VPN usability for additional devices.
@@ -15,7 +15,7 @@ records each addition and its relationship to existing repository evidence.
 
 | Addition | What it adds | Treatment |
 |---|---|---|
-| `ADVANCED_VPN_FIDO2_Compatibility_Matrix.pdf` and `.xlsx` | Eighteen candidate groups, reported firmware-source findings, MDS extracts and synthetic capability profiles. | Reuse the research leads; separate source, profile and firmware execution evidence. |
+| `cypherpunk_vpn_FIDO2_Compatibility_Matrix.pdf` and `.xlsx` | Eighteen candidate groups, reported firmware-source findings, MDS extracts and synthetic capability profiles. | Reuse the research leads; separate source, profile and firmware execution evidence. |
 | `fido_mds_full.json` | A selected metadata extract reporting blob 302, 538 entries and nextUpdate 1 December. | Retain as supplied metadata. The original signed JWT and verified chain receipt were not included. |
 | `IMPLEMENTATION_PROGRESS_20261119.md` | A candid report of skipped emulation, claimed mutation controls and fuzz scaffolding. | Reuse its requirements; do not import missing scripts or count skipped scenarios as executed. |
 | `WAN_2HOP_CLI.bin` | Existing two-hop WAN report. | Parsed JSON equals `docs/evidence/WAN_2HOP_CLI.json`; no new run. |
@@ -83,7 +83,7 @@ progress document also explicitly reports that it did not execute traffic,
 distribution, GUI or provisioning tasks. Do not turn those descriptions into passes.
 
 All four jobs in
-[GitHub verification run 44421603036](https://github.com/R1VER77/ADVANCED_VPN/actions/runs/44421603036)
+[GitHub verification run 44421603036](https://github.com/R1VER77/CYPHERPUNK_VPN/actions/runs/44421603036)
 passed on the published signed checkpoint. That is existing checkpoint evidence,
 not CI coverage for later uncommitted laboratory changes. A separate open desktop
 dependency alert, GHSA-wrw7-89jp-8q8g in glib 0.18.5, still needs a verified fix;

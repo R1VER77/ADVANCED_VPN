@@ -18,17 +18,17 @@ BUILT = all((install.ROOT / "target/release" / b).is_file() for b in install.BIN
 
 class Launchers(unittest.TestCase):
     def test_a_launcher_called_through_a_symlink_elsewhere_finds_its_own_slot(self):
-        # /usr/local/bin/avpnctl is a symlink to /opt/advanced-vpn/bin/avpnctl: the launcher
+        # /usr/local/bin/cypherpunkctl is a symlink to /opt/cypherpunk-vpn/bin/cypherpunkctl: the launcher
         # must resolve itself, or it looks for /usr/local/venv (found on 20 November 2026).
         with tempfile.TemporaryDirectory() as d:
             slot, elsewhere = Path(d) / "releases" / "slot", Path(d) / "usr-local-bin"
             (slot / "bin").mkdir(parents=True)
             (slot / "tools").mkdir()
             elsewhere.mkdir()
-            (slot / "tools/avpnctl.py").write_text("import sys; print('SLOT', sys.argv[1:])\n")
+            (slot / "tools/cypherpunkctl.py").write_text("import sys; print('SLOT', sys.argv[1:])\n")
             install.write_tool_launchers(slot, python=sys.executable)
-            (elsewhere / "avpnctl").symlink_to(slot / "bin/avpnctl")
-            r = subprocess.run([str(elsewhere / "avpnctl"), "status"], capture_output=True, text=True, timeout=30)
+            (elsewhere / "cypherpunkctl").symlink_to(slot / "bin/cypherpunkctl")
+            r = subprocess.run([str(elsewhere / "cypherpunkctl"), "status"], capture_output=True, text=True, timeout=30)
             self.assertEqual(r.returncode, 0, r.stderr)
             self.assertEqual(r.stdout.strip(), "SLOT ['--bin-dir', '%s', 'status']" % (slot.resolve() / "bin"))
 
@@ -44,7 +44,7 @@ class UserInstallTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         # A space in every path proves the launchers quote what they exec.
         self.home = Path(self.tmp.name) / "home dir"
-        self.data, self.bin = self.home / "data dir" / "advanced-vpn", self.home / ".local" / "bin"
+        self.data, self.bin = self.home / "data dir" / "cypherpunk-vpn", self.home / ".local" / "bin"
         self.data.parent.mkdir(parents=True)
 
     def tearDown(self):
@@ -54,29 +54,29 @@ class UserInstallTests(unittest.TestCase):
         # The test interpreter already holds the hash-locked dependencies, so no venv is built.
         return install.install_user(self.data, self.bin, python=sys.executable)
 
-    def avpn(self, *args):
+    def cpvpn(self, *args):
         env = dict(os.environ, HOME=str(self.home))
-        env.pop("AVPN_CONTROLLER", None)
-        return subprocess.run([str(self.bin / "avpn"), *args], capture_output=True, text=True, env=env, timeout=60)
+        env.pop("CPVPN_CONTROLLER", None)
+        return subprocess.run(
+            [str(self.bin / "cypherpunk"), *args], capture_output=True, text=True, env=env, timeout=60
+        )
 
     def test_installs_a_working_command_line(self):
         app = self.install()
-        for b in install.BINARIES + ["avpnctl", "avpn-cloud", "avpn-mesh", "avpn-desktop"]:
+        for b in install.BINARIES + ["cypherpunkctl", "cpvpn-cloud", "cpvpn-mesh", "cpvpn-desktop"]:
             self.assertTrue(os.access(app / "bin" / b, os.X_OK), b)
         self.assertTrue((app / "docs/cli/overview.md").exists())
         self.assertFalse(list(app.rglob("__pycache__")))
-        r = self.avpn("--version")
+        r = self.cpvpn("--version")
         version = re.search(r'^version = "([^"]+)"', (install.ROOT / "Cargo.toml").read_text(), re.M).group(1)
-        self.assertEqual((r.returncode, r.stdout.strip()), (0, "avpn " + version))
-        alias = subprocess.run([str(self.bin / "cypherpunk"), "--version"], capture_output=True, text=True, check=True)
-        self.assertEqual(alias.stdout, r.stdout)
+        self.assertEqual((r.returncode, r.stdout.strip()), (0, "cypherpunk " + version))
         # End to end through the installed controller: JSON from a real (empty) state.
-        r = self.avpn("--json", "--state", str(self.home / "no-state"), "hops")
+        r = self.cpvpn("--json", "--state", str(self.home / "no-state"), "hops")
         self.assertEqual(json.loads(r.stdout)["chain"], [], r.stderr)
-        self.assertIn("• Chain  not enrolled", self.avpn("--state", str(self.home / "no-state"), "hops").stdout)
+        self.assertIn("• Chain  not enrolled", self.cpvpn("--state", str(self.home / "no-state"), "hops").stdout)
         # docs/NAME_MIGRATION.md: the new name drives the same controller, with the same JSON.
         env = dict(os.environ, HOME=str(self.home))
-        env.pop("AVPN_CONTROLLER", None)
+        env.pop("CPVPN_CONTROLLER", None)
         for args in (
             ["--json", "--state", str(self.home / "no-state"), "hops"],
             ["--state", str(self.home / "no-state"), "hops"],
@@ -84,7 +84,7 @@ class UserInstallTests(unittest.TestCase):
             new = subprocess.run(
                 [str(self.bin / "cypherpunk"), *args], capture_output=True, text=True, env=env, timeout=60
             )
-            self.assertEqual((new.returncode, new.stdout), (0, self.avpn(*args).stdout), new.stderr)
+            self.assertEqual((new.returncode, new.stdout), (0, self.cpvpn(*args).stdout), new.stderr)
 
     def assert_no_preparation_leftovers(self):
         self.assertFalse(list((self.data / "releases").glob(".prepare-*")))
@@ -112,11 +112,11 @@ class UserInstallTests(unittest.TestCase):
         self.assertNotEqual(previous, (self.data / "app").resolve())
         self.assertEqual(len(list((self.data / "releases").iterdir())), 2)
         self.assert_no_preparation_leftovers()
-        self.assertEqual(self.avpn("--version").returncode, 0)
+        self.assertEqual(self.cpvpn("--version").returncode, 0)
 
     def test_swap_failure_restores_the_previous_application(self):
         app = self.install()
-        before = (app / "bin/avpnctl").read_bytes()
+        before = (app / "bin/cypherpunkctl").read_bytes()
         replace = os.replace
 
         def refuse_stage(path, destination):
@@ -127,15 +127,15 @@ class UserInstallTests(unittest.TestCase):
         with mock.patch.object(os, "replace", refuse_stage):
             with self.assertRaisesRegex(OSError, "final rename"):
                 self.install()
-        self.assertEqual((app / "bin/avpnctl").read_bytes(), before)
+        self.assertEqual((app / "bin/cypherpunkctl").read_bytes(), before)
         self.assert_no_preparation_leftovers()
-        self.assertEqual(self.avpn("--version").returncode, 0)
+        self.assertEqual(self.cpvpn("--version").returncode, 0)
 
     def test_failed_dependency_upgrade_preserves_the_old_runtime(self):
         app = self.install()
         venv = app / "venv"
         venv.mkdir()
-        (venv / ".advanced-vpn-requirements.sha256").write_text("previous lock")
+        (venv / ".cypherpunk-vpn-requirements.sha256").write_text("previous lock")
         (venv / "preserve").write_text("previous working runtime")
         with mock.patch.object(install.subprocess, "run", side_effect=subprocess.CalledProcessError(1, "pip")):
             with self.assertRaises(subprocess.CalledProcessError):
@@ -167,14 +167,14 @@ class UserInstallTests(unittest.TestCase):
             p.send_signal(signal.SIGKILL)
             p.wait()
             with self.subTest(killed_at="%d/13" % k):
-                self.assertEqual(self.avpn("--version").returncode, 0)
+                self.assertEqual(self.cpvpn("--version").returncode, 0)
         self.install()
         self.assert_no_preparation_leftovers()
-        self.assertEqual(self.avpn("--version").returncode, 0)
+        self.assertEqual(self.cpvpn("--version").returncode, 0)
 
     def test_failed_install_leaves_the_old_one_and_no_leftovers(self):
         self.install()
-        before = (self.data / "app" / "bin" / "avpnctl").read_text()
+        before = (self.data / "app" / "bin" / "cypherpunkctl").read_text()
 
         def network_down(*args, **kwargs):
             raise subprocess.CalledProcessError(1, args[0])
@@ -183,16 +183,16 @@ class UserInstallTests(unittest.TestCase):
             with self.assertRaises(subprocess.CalledProcessError):
                 install.install_user(self.data, self.bin)  # needs a venv build, which fails
         self.assert_no_preparation_leftovers()
-        self.assertEqual((self.data / "app" / "bin" / "avpnctl").read_text(), before)
-        self.assertEqual(self.avpn("--version").returncode, 0)
+        self.assertEqual((self.data / "app" / "bin" / "cypherpunkctl").read_text(), before)
+        self.assertEqual(self.cpvpn("--version").returncode, 0)
 
     def test_user_wrapper_exports_the_mesh_tool(self):
         app = self.install()
-        wrapper = (self.bin / "avpn").read_text()
-        self.assertIn("AVPN_MESH=", wrapper)
-        self.assertIn('AVPN_MESH="$slot/bin/avpn-mesh"', wrapper)
+        wrapper = (self.bin / "cypherpunk").read_text()
+        self.assertIn("CPVPN_MESH=", wrapper)
+        self.assertIn('CPVPN_MESH="$slot/bin/cpvpn-mesh"', wrapper)
         self.assertIn(str(app), wrapper)
-        mesh_launcher = (app / "bin" / "avpn-mesh").read_text()
+        mesh_launcher = (app / "bin" / "cpvpn-mesh").read_text()
         self.assertIn("tools/mesh.py", mesh_launcher)
 
     def test_root_is_refused(self):
@@ -202,27 +202,27 @@ class UserInstallTests(unittest.TestCase):
 
     def test_uninstall_removes_only_the_installation(self):
         self.install()
-        config = self.home / ".config" / "advanced-vpn"
+        config = self.home / ".config" / "cypherpunk-vpn"
         config.mkdir(parents=True)
         (config / "cloud.json").write_text("{}")
         install.uninstall_user(self.data, self.bin)
-        self.assertFalse((self.bin / "avpn").exists())
+        self.assertFalse((self.bin / "cypherpunk").exists())
         self.assertFalse((self.data / "app").exists())
         self.assertTrue((config / "cloud.json").exists())
 
-    def test_uninstall_leaves_a_foreign_avpn_alone(self):
+    def test_uninstall_leaves_a_foreign_cypherpunk_alone(self):
         self.bin.mkdir(parents=True)
-        (self.bin / "avpn").write_text("#!/bin/sh\necho someone else's avpn\n")
+        (self.bin / "cypherpunk").write_text("#!/bin/sh\necho someone else's cypherpunk\n")
         install.uninstall_user(self.data, self.bin)
-        self.assertTrue((self.bin / "avpn").exists())
+        self.assertTrue((self.bin / "cypherpunk").exists())
 
-    def test_install_refuses_a_foreign_avpn_without_staging_or_overwriting(self):
+    def test_install_refuses_a_foreign_cypherpunk_without_staging_or_overwriting(self):
         self.bin.mkdir(parents=True)
         foreign = b"#!/bin/sh\nprintf unrelated\\n\n"
-        (self.bin / "avpn").write_bytes(foreign)
-        with self.assertRaisesRegex(ValueError, "foreign avpn"):
+        (self.bin / "cypherpunk").write_bytes(foreign)
+        with self.assertRaisesRegex(ValueError, "foreign cypherpunk"):
             self.install()
-        self.assertEqual((self.bin / "avpn").read_bytes(), foreign)
+        self.assertEqual((self.bin / "cypherpunk").read_bytes(), foreign)
         self.assertFalse(self.data.exists())
 
     def test_pack_holds_exactly_the_package(self):
@@ -244,10 +244,10 @@ class NextStepTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.home = Path(self.tmp.name) / "home"
-        (self.home / ".config" / "advanced-vpn").mkdir(parents=True)
+        (self.home / ".config" / "cypherpunk-vpn").mkdir(parents=True)
         # An explicit home wins over the caller's own XDG variable.
         self.xdg = Path(self.tmp.name) / "xdg"
-        (self.xdg / "advanced-vpn").mkdir(parents=True)
+        (self.xdg / "cypherpunk-vpn").mkdir(parents=True)
         self.env = mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": str(self.xdg)})
         self.env.start()
 
@@ -256,7 +256,7 @@ class NextStepTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def inventory(self, resources):
-        (self.home / ".config" / "advanced-vpn" / "cloud.json").write_text(
+        (self.home / ".config" / "cypherpunk-vpn" / "cloud.json").write_text(
             json.dumps(dict(schema=1, resources=resources))
         )
 
@@ -266,13 +266,13 @@ class NextStepTests(unittest.TestCase):
         self.assertEqual(install.next_servers_step(home=self.home), install.SUGGEST)
 
     def test_servers_on_record_are_acknowledged_instead(self):
-        self.inventory({"avpn-relay": dict(provider="aws")})
+        self.inventory({"cpvpn-relay": dict(provider="aws")})
         line = install.next_servers_step(home=self.home)
         self.assertNotIn("No servers yet", line)
-        self.assertIn("avpn cloud status", line)
+        self.assertIn("cypherpunk cloud status", line)
 
     def test_a_broken_inventory_file_is_treated_as_empty(self):
-        (self.home / ".config" / "advanced-vpn" / "cloud.json").write_text("{not json")
+        (self.home / ".config" / "cypherpunk-vpn" / "cloud.json").write_text("{not json")
         self.assertEqual(install.next_servers_step(home=self.home), install.SUGGEST)
 
     def test_the_install_paths_print_the_checked_line_not_a_fixed_one(self):

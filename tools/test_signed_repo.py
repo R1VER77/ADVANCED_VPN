@@ -81,15 +81,15 @@ class SignedRepository(unittest.TestCase):
         (root / "tools/install-offline.sh").write_text("#!/bin/sh\nexit 99\n")
         (root / "tools/install-offline.sh").chmod(0o755)
         (root / "target/release").mkdir(parents=True)
-        (root / "target/release/avpn").write_bytes(b"\x7fELF test ABI marker, never run GLIBC_2.35\x00")
-        (root / "target/release/avpn").chmod(0o755)
+        (root / "target/release/cypherpunk").write_bytes(b"\x7fELF test ABI marker, never run GLIBC_2.35\x00")
+        (root / "target/release/cypherpunk").chmod(0o755)
         (root / "Cargo.toml").write_text('[package]\nversion = "1.2.3"\n')
         (root / "LICENSE").write_text("fixture license")
         output = fixture.root / "candidate-output"
         output.mkdir(mode=0o755)
         with (
             mock.patch.object(package.install, "SOURCES", ["tools", "LICENSE"]),
-            mock.patch.object(package.install, "BINARIES", ["avpn"]),
+            mock.patch.object(package.install, "BINARIES", ["cypherpunk"]),
         ):
             cls.package = package.debian(root, fixture.bundle, output, epoch=1_700_000_000)
         cls.addClassCleanup(os.chdir, os.getcwd())

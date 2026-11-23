@@ -173,22 +173,22 @@ class ProfileTests(unittest.TestCase):
                 )
 
     def test_runtime_and_identities(self):
-        import avpnctl
+        import cypherpunkctl
 
         cfg = mp.runtime(self.profiles["relay"], self.root / "relay")
-        self.assertIn("i2p", avpnctl.managed_identities(cfg))
-        self.assertNotIn("front", avpnctl.BINARIES)
+        self.assertIn("i2p", cypherpunkctl.managed_identities(cfg))
+        self.assertNotIn("front", cypherpunkctl.BINARIES)
         cfg = mp.runtime(self.profiles["client"], self.root / "client")
-        self.assertNotIn("i2p", avpnctl.managed_identities(cfg))
+        self.assertNotIn("i2p", cypherpunkctl.managed_identities(cfg))
         self.assertEqual(cfg["front"]["hops"], 1)
 
 
 class KillSwitchTests(unittest.TestCase):
     def rules(self, profile, service_uid, front_uid):
-        import avpnctl
+        import cypherpunkctl
 
-        with mock.patch.object(avpnctl, "replace_table") as table:
-            avpnctl.whole_firewall(profile, service_uid, front_uid)
+        with mock.patch.object(cypherpunkctl, "replace_table") as table:
+            cypherpunkctl.whole_firewall(profile, service_uid, front_uid)
         return table.call_args[0][0]
 
     def test_only_the_i2p_router_leaves_and_never_to_the_entry_directly(self):
@@ -216,7 +216,7 @@ class RouterVersionTests(unittest.TestCase):
         return path
 
     def test_only_proven_i2pd_versions_run_the_front(self):
-        import avpnctl
+        import cypherpunkctl
 
         with tempfile.TemporaryDirectory() as d:
             for text, ok in [
@@ -225,12 +225,12 @@ class RouterVersionTests(unittest.TestCase):
                 ("i2pd version 2.49.0 (0.9.60)", False),
                 ("something else", False),
             ]:
-                with mock.patch.dict("os.environ", {"AVPN_I2PD": str(self.fake(d, text))}):
+                with mock.patch.dict("os.environ", {"CPVPN_I2PD": str(self.fake(d, text))}):
                     if ok:
-                        self.assertEqual(avpnctl.front_binary(True).name, "i2pd")
+                        self.assertEqual(cypherpunkctl.front_binary(True).name, "i2pd")
                     else:
                         with self.assertRaisesRegex(RuntimeError, "2.56.0 or newer"):
-                            avpnctl.front_binary(True)
+                            cypherpunkctl.front_binary(True)
 
 
 class HardwareSealingTests(unittest.TestCase):
@@ -257,10 +257,10 @@ if __name__ == "__main__":
 
 
 class TableWatchTests(unittest.TestCase):
-    """The kill-switch drift watchdog (avpnctl.TableWatch), against a fake nft."""
+    """The kill-switch drift watchdog (cypherpunkctl.TableWatch), against a fake nft."""
 
     def fake(self, tables):
-        import avpnctl
+        import cypherpunkctl
 
         loaded = []
 
@@ -274,41 +274,41 @@ class TableWatchTests(unittest.TestCase):
             name = text.split("table inet ")[-1].split(" ")[0]
             # Every load must first reset the table in the same transaction (add, delete),
             # never append to whatever is there.
-            reset = avpnctl.reset_table(name)
+            reset = cypherpunkctl.reset_table(name)
             assert text.startswith(reset), text
             tables[name] = text[len(reset) :]
 
-        return mock.patch.multiple(avpnctl, cmd=cmd, nft=nft), loaded
+        return mock.patch.multiple(cypherpunkctl, cmd=cmd, nft=nft), loaded
 
     def test_deleted_and_altered_tables_are_restored_exactly(self):
-        import avpnctl
+        import cypherpunkctl
 
-        tables = {"advanced_vpn": "table inet advanced_vpn { policy drop }\n"}
+        tables = {"cypherpunk_vpn": "table inet cypherpunk_vpn { policy drop }\n"}
         patch, loaded = self.fake(tables)
         with patch:
-            watch = avpnctl.TableWatch([("advanced_vpn", None), ("advanced_vpn_front", None)])
+            watch = cypherpunkctl.TableWatch([("cypherpunk_vpn", None), ("cypherpunk_vpn_front", None)])
             self.assertEqual(watch.check(), [])  # untouched, and an absent table is not watched
-            del tables["advanced_vpn"]
-            self.assertEqual(watch.check(), [("advanced_vpn", None)])
-            self.assertTrue(watch.reasons[("advanced_vpn", None)].startswith("absent"))
-            self.assertEqual(tables["advanced_vpn"], "table inet advanced_vpn { policy drop }\n")
-            tables["advanced_vpn"] = "table inet advanced_vpn { policy accept }\n"
+            del tables["cypherpunk_vpn"]
+            self.assertEqual(watch.check(), [("cypherpunk_vpn", None)])
+            self.assertTrue(watch.reasons[("cypherpunk_vpn", None)].startswith("absent"))
+            self.assertEqual(tables["cypherpunk_vpn"], "table inet cypherpunk_vpn { policy drop }\n")
+            tables["cypherpunk_vpn"] = "table inet cypherpunk_vpn { policy accept }\n"
             watch.check()
-            self.assertTrue(watch.reasons[("advanced_vpn", None)].startswith("altered (1 lines differ"))
-            self.assertTrue(loaded[-1][0].startswith(avpnctl.reset_table("advanced_vpn")))
-            self.assertEqual(tables["advanced_vpn"], "table inet advanced_vpn { policy drop }\n")
+            self.assertTrue(watch.reasons[("cypherpunk_vpn", None)].startswith("altered (1 lines differ"))
+            self.assertTrue(loaded[-1][0].startswith(cypherpunkctl.reset_table("cypherpunk_vpn")))
+            self.assertEqual(tables["cypherpunk_vpn"], "table inet cypherpunk_vpn { policy drop }\n")
 
     def test_a_restore_storm_fails_closed(self):
-        import avpnctl
+        import cypherpunkctl
 
-        tables = {"advanced_vpn": "table inet advanced_vpn { policy drop }\n"}
+        tables = {"cypherpunk_vpn": "table inet cypherpunk_vpn { policy drop }\n"}
         patch, _ = self.fake(tables)
         with patch:
-            watch = avpnctl.TableWatch([("advanced_vpn", None)], limit=3, window=60)
+            watch = cypherpunkctl.TableWatch([("cypherpunk_vpn", None)], limit=3, window=60)
             for k in range(3):
-                del tables["advanced_vpn"]
+                del tables["cypherpunk_vpn"]
                 watch.check(now=k)
-            del tables["advanced_vpn"]
+            del tables["cypherpunk_vpn"]
             with self.assertRaisesRegex(RuntimeError, "kill switch keeps being altered"):
                 watch.check(now=10)
 
@@ -316,12 +316,12 @@ class TableWatchTests(unittest.TestCase):
         # Real nft (checked with 1.1.3 in a network namespace) answers a missing table
         # with the error, the echoed command and a caret marker under it:
         #   Error: No such file or directory
-        #   list table inet advanced_vpn
+        #   list table inet cypherpunk_vpn
         #                   ^^^^
         # The restore reason must quote the Error line, never the marker or the echo.
-        import avpnctl
+        import cypherpunkctl
 
-        tables = {"advanced_vpn": "table inet advanced_vpn { policy drop }\n"}
+        tables = {"cypherpunk_vpn": "table inet cypherpunk_vpn { policy drop }\n"}
 
         def cmd(*args, check=True, input=None):
             name = args[-1]
@@ -333,11 +333,11 @@ class TableWatchTests(unittest.TestCase):
             )
             return mock.Mock(returncode=0 if out is not None else 1, stdout=out or "", stderr=stderr)
 
-        with mock.patch.multiple(avpnctl, cmd=cmd, nft=lambda text, ns=None: None):
-            watch = avpnctl.TableWatch([("advanced_vpn", None)])
-            del tables["advanced_vpn"]
+        with mock.patch.multiple(cypherpunkctl, cmd=cmd, nft=lambda text, ns=None: None):
+            watch = cypherpunkctl.TableWatch([("cypherpunk_vpn", None)])
+            del tables["cypherpunk_vpn"]
             watch.check()
-            reason = watch.reasons[("advanced_vpn", None)]
+            reason = watch.reasons[("cypherpunk_vpn", None)]
             self.assertIn("absent (Error: No such file or directory)", reason)
             self.assertNotIn("^^^", reason)
             self.assertNotIn("list table", reason)

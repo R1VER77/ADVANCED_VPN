@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for `avpn stream-check` (tools/stream_check.py).
+"""Tests for `cypherpunk stream-check` (tools/stream_check.py).
 
 Every classification is exercised against a real local HTTP server that
 serves the services' actual marker copy (the Netflix proxy notice, the
@@ -319,12 +319,12 @@ class CLITests(unittest.TestCase):
 
 class LiveInternetTests(unittest.TestCase):
     """Opt-in live probe (network egress from this machine). Skipped in
-    the sandbox unless AVPN_STREAM_CHECK_LIVE=1: a live run from a data
+    the sandbox unless CPVPN_STREAM_CHECK_LIVE=1: a live run from a data
     center address is evidence about THIS vantage point only."""
 
     def test_live_netflix_probe(self):
-        if os.environ.get("AVPN_STREAM_CHECK_LIVE") != "1":
-            self.skipTest("live probe is opt-in (AVPN_STREAM_CHECK_LIVE=1)")
+        if os.environ.get("CPVPN_STREAM_CHECK_LIVE") != "1":
+            self.skipTest("live probe is opt-in (CPVPN_STREAM_CHECK_LIVE=1)")
         record = sc.run_probe("netflix")
         self.assertIn(record["result"], ("eligible", "blocked", "unknown"))
         self.assertTrue(record["pages"] >= 1)

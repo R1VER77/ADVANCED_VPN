@@ -1,4 +1,4 @@
-"""The interactive `avpn` view in a real pseudo-terminal, driven by key presses."""
+"""The interactive `cypherpunk` view in a real pseudo-terminal, driven by key presses."""
 
 import fcntl
 import os
@@ -13,7 +13,7 @@ import time
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
-AVPN = ROOT / "target/release/avpn"
+CYPHERPUNK = ROOT / "target/release/cypherpunk"
 CTL = """#!/bin/sh
 case "$*" in
   *info*) echo '{"ok": true, "info": {"enrolled": true, "role": "client", "hops": 2, "protection": "nitrokey", "mode": "applications", "defense": "balanced", "chain": [{"hop": "relay", "endpoint": "16.0.0.8:41194"}, {"hop": "exit", "endpoint": "16.0.0.9:4444"}], "status": {"state": "supervising"}}}' ;;
@@ -57,34 +57,37 @@ def screen(stream, rows=30, cols=100):
 class InteractiveView(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        if not AVPN.exists():
+        if not CYPHERPUNK.exists():
             raise RuntimeError("build the release binary before TUI tests")
 
     def setUp(self):
         if os.geteuid() == 0 and self._testMethodName != "test_root_ignores_the_controller_override":
-            self.skipTest("as root, avpn ignores AVPN_CONTROLLER by design (see the root test)")
+            self.skipTest("as root, cypherpunk ignores CPVPN_CONTROLLER by design (see the root test)")
 
     def test_root_ignores_the_controller_override(self):
         if os.geteuid() != 0:
             self.skipTest("needs root")
         r = subprocess.run(
-            [str(AVPN), "hops"], env=dict(os.environ, AVPN_CONTROLLER="/bin/true"), capture_output=True, text=True
+            [str(CYPHERPUNK), "hops"],
+            env=dict(os.environ, CPVPN_CONTROLLER="/bin/true"),
+            capture_output=True,
+            text=True,
         )
         self.assertNotEqual(r.returncode, 0)
-        self.assertIn("/opt/advanced-vpn/bin/avpnctl", r.stderr)
+        self.assertIn("/opt/cypherpunk-vpn/bin/cypherpunkctl", r.stderr)
 
     def drive(self, keys, colour=True, controller=CTL):
         with tempfile.TemporaryDirectory() as d:
-            ctl = Path(d) / "avpnctl"
+            ctl = Path(d) / "cypherpunkctl"
             ctl.write_text(controller)
             ctl.chmod(0o755)
-            env = dict(os.environ, AVPN_CONTROLLER=str(ctl), TERM="xterm-256color", COLUMNS="100", LINES="30")
+            env = dict(os.environ, CPVPN_CONTROLLER=str(ctl), TERM="xterm-256color", COLUMNS="100", LINES="30")
             env.pop("NO_COLOR", None)
             if not colour:
                 env["NO_COLOR"] = "1"
             pid, fd = pty.fork()
             if pid == 0:
-                os.execve(str(AVPN), [str(AVPN), "--reduced-motion"], env)
+                os.execve(str(CYPHERPUNK), [str(CYPHERPUNK), "--reduced-motion"], env)
             fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 30, 100, 0, 0))
             out = b""
 
@@ -116,10 +119,10 @@ class InteractiveView(unittest.TestCase):
         self.assertIn("│ chain:      client → relay → exit", s[3])
         self.assertIn("│ protection: nitrokey · service supervising", s[5])
         for expected in [
-            "$ avpn hops",
+            "$ cypherpunk hops",
             "• Chain  2-hop",
             "  └ client → relay 16.0.0.8:41194 → exit 16.0.0.9:4444",
-            "$ avpn doctor",
+            "$ cypherpunk doctor",
             "• Doctor  1 passed · 0 failed",
             "  ✓ trusted nft  /usr/sbin/nft",
         ]:
@@ -136,8 +139,8 @@ class InteractiveView(unittest.TestCase):
             "chain:      not enrolled",
             "• Get started  this device is not enrolled yet",
             "Oracle Cloud: no expiry   10 TiB/month out",
-            "avpn cloud suggest",
-            "avpn cloud chain --apply",
+            "cypherpunk cloud suggest",
+            "cypherpunk cloud chain --apply",
         ]:
             self.assertIn(expected, text)
         # Google's free tier cannot carry a hop, so it is not suggested here.

@@ -57,7 +57,7 @@ class AtRest(Base):
     def test_a_locked_server_refuses_to_load_its_keys(self):
         state, _ = self.server()
         self.assertTrue(mp.server_locked(state))
-        with self.assertRaisesRegex(mp.Locked, "avpn cloud unlock"):
+        with self.assertRaisesRegex(mp.Locked, "cypherpunk cloud unlock"):
             mp.load_keys(state, ["inner"])
 
     def test_a_client_cannot_be_operator_protected_and_the_unlock_key_is_required(self):
@@ -148,25 +148,25 @@ class Unlock(Base):
 
 
 class ServerUnlockCommand(Base):
-    """`avpnctl server-unlock` as the chain runs it over SSH: the data key on stdin, as hex.
+    """`cypherpunkctl server-unlock` as the chain runs it over SSH: the data key on stdin, as hex.
     (Root is required on a real server; the check is bypassed here, the rest is real.)"""
 
     def run_ctl(self, state, stdin, *args):
         import contextlib
         import io
 
-        import avpnctl
+        import cypherpunkctl
 
         out = io.StringIO()
-        argv = ["avpnctl", "--json", "--state", str(state), "server-unlock", *args]
+        argv = ["cypherpunkctl", "--json", "--state", str(state), "server-unlock", *args]
         with (
             mock.patch.object(sys, "argv", argv),
             mock.patch.object(sys, "stdin", io.StringIO(stdin)),
-            mock.patch.object(avpnctl, "root_guard", lambda lab: None),
-            mock.patch.object(avpnctl, "harden_process", lambda: None),
+            mock.patch.object(cypherpunkctl, "root_guard", lambda lab: None),
+            mock.patch.object(cypherpunkctl, "harden_process", lambda: None),
             contextlib.redirect_stdout(out),
         ):
-            avpnctl.main()
+            cypherpunkctl.main()
         return json.loads(out.getvalue().strip().splitlines()[-1])
 
     def test_the_command_accepts_the_right_key_and_refuses_others(self):
@@ -185,13 +185,13 @@ class ServerUnlockCommand(Base):
 class LockedMessage(Base):
     def test_a_locked_server_says_how_to_unlock_it_and_library_errors_stay_terse(self):
         # Live exit, 20 Nov 2026: the refusal said only "Locked".
-        import avpnctl
+        import cypherpunkctl
 
         state, _ = self.server()
         with self.assertRaises(mp.Locked) as caught:
             mp.load_keys(state, ["inner"])
-        self.assertIn("avpn cloud unlock", avpnctl.refusal_detail(caught.exception))
-        self.assertEqual(avpnctl.refusal_detail(OSError("/secret/path")), "")
+        self.assertIn("cypherpunk cloud unlock", cypherpunkctl.refusal_detail(caught.exception))
+        self.assertEqual(cypherpunkctl.refusal_detail(OSError("/secret/path")), "")
 
 
 class LabChain(unittest.TestCase):
@@ -306,7 +306,7 @@ class StateKey(HardwareOperatorTouches):
         import subprocess
 
         here = Path(__file__).resolve().parent
-        argv = [sys.executable, "-B", str(here / "avpnctl.py"), "--json", "state-key", "--software-operator",
+        argv = [sys.executable, "-B", str(here / "cypherpunkctl.py"), "--json", "state-key", "--software-operator",
                 str(self.root / "op")]  # fmt: skip
         r = subprocess.run(argv, capture_output=True, text=True, timeout=120, check=False)
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -318,7 +318,7 @@ class StateKey(HardwareOperatorTouches):
 
         fake = Path(self.root / "ctl")
         fake.write_text("#!/bin/sh\nshift 3\nexec %s -B %s --json state-key --software-operator %s\n"
-                        % (sys.executable, here / "avpnctl.py", self.root / "op"))  # fmt: skip
+                        % (sys.executable, here / "cypherpunkctl.py", self.root / "op"))  # fmt: skip
         fake.chmod(0o700)
         self.assertEqual(tofu_run.operator_key(self.vault, [str(fake)]).hex(), first)
 

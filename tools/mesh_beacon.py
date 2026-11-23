@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""avpn-mesh-beacon: store-and-forward directory gossip for AVPN/Mesh.
+"""cpvpn-mesh-beacon: store-and-forward directory gossip for CPVPN/Mesh.
 
 Beacons are the mesh's always-on meeting points (the role MQTT plays for
 Meshtastic): members POST signed node descriptors; the beacon validates,
@@ -287,8 +287,8 @@ def serve(
 
 def main() -> int:
     """Command-line entry point."""
-    p = argparse.ArgumentParser(prog="avpn-mesh-beacon", description=__doc__.splitlines()[0])
-    p.add_argument("--dir", type=Path, default=Path("/var/lib/avpn-mesh-beacon"))
+    p = argparse.ArgumentParser(prog="cpvpn-mesh-beacon", description=__doc__.splitlines()[0])
+    p.add_argument("--dir", type=Path, default=Path("/var/lib/cpvpn-mesh-beacon"))
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=8787)
     p.add_argument("--peers", default="", help="comma-separated beacon base URLs to forward fresh descriptors to")
@@ -298,7 +298,7 @@ def main() -> int:
     a = p.parse_args()
     peers = [u.strip() for u in a.peers.split(",") if u.strip()]
     server = serve(a.dir, a.host, a.port, peers, a.gateway_key)
-    print(f"avpn-mesh-beacon on {a.host}:{a.port}, {len(peers)} peers", flush=True)
+    print(f"cpvpn-mesh-beacon on {a.host}:{a.port}, {len(peers)} peers", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

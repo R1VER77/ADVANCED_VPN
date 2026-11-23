@@ -12,7 +12,7 @@ enrolled directory it always read:
     <root>/profiles/<name>/          stored, INACTIVE chains
     <root>/profiles/selection.json   {"schema": 1, "active": "<name>"}
 
-with <root> = /etc/advanced-vpn. Rules the store holds itself to:
+with <root> = /etc/cypherpunk-vpn. Rules the store holds itself to:
 
 - names are bounded and lowercase ([a-z][a-z0-9-]{0,15}); no traversal, no
   collisions, no adopting over an existing slot;
@@ -40,7 +40,7 @@ with <root> = /etc/advanced-vpn. Rules the store holds itself to:
 
 The verifier is a parameter so the store is testable without the hash-locked
 cryptography environment; production uses production_verifier(), which lazily
-imports the controller's own loader (avpnctl.load_profile and
+imports the controller's own loader (cypherpunkctl.load_profile and
 managed_profile.require_current).
 """
 
@@ -70,7 +70,7 @@ class Refused(Exception):
 
 def paths(root: Path | None = None) -> dict:
     """The store's production layout (root overridable for tests)."""
-    base = Path(root) if root else Path("/etc/advanced-vpn")
+    base = Path(root) if root else Path("/etc/cypherpunk-vpn")
     return {
         "root": base,
         "active": base / "enrolled",
@@ -83,11 +83,11 @@ def production_verifier(state: Path) -> dict:
     """The controller's own verdict on one enrolled state directory: the
     profile must load through the strict validator and be current (padded,
     cloaked when a carrier runs). Returns the facts the launch view states."""
-    import avpnctl
+    import cypherpunkctl
     from managed_profile import require_current
 
-    profile = require_current(avpnctl.load_profile(Path(state)))
-    chain = avpnctl.chain_of(profile)
+    profile = require_current(cypherpunkctl.load_profile(Path(state)))
+    chain = cypherpunkctl.chain_of(profile)
     return {
         "role": profile["role"],
         "hops": len(chain),

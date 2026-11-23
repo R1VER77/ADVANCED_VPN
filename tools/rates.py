@@ -21,7 +21,7 @@ def rate_cost_gib(rate, hours_per_day, links=1):
 
 
 def choose_rate(requested, allowance_gib, hours_per_day, accept_cost=False, links=1):
-    """(class, reason) for `avpn init --rate`. `auto` picks the fastest class whose
+    """(class, reason) for `cypherpunk init --rate`. `auto` picks the fastest class whose
     stream fits the chain's smallest monthly outbound allowance at `hours_per_day`
     connected (a relay pays for `links` streams); an explicit class that does not fit is refused unless `accept_cost`."""
     if not 0 < hours_per_day <= 24:

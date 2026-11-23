@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Byte budgets, latency and queue math for the AVPN mix lane + PQ-Sphinx graft.
+"""Byte budgets, latency and queue math for the CYPHERPUNK mix lane + PQ-Sphinx graft.
 All numbers printed here are the single source of truth for MIX_LANE_DESIGN.md."""
 
 M = 1 << 20

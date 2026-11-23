@@ -25,9 +25,9 @@ succeeded.
 Runs inside a disposable privileged container (it builds namespaces, NAT and raw
 captures, and reaches the internet through Docker's bridge):
 
-    docker build -t avpn-mixlab:2 -f tools/mix_lab.Dockerfile tools
+    docker build -t cpvpn-mixlab:2 -f tools/mix_lab.Dockerfile tools
     docker run --rm --privileged -v KATZENPOST_BIN:/kp/bin:ro -v $PWD/tools:/lab/tools:ro \\
-        -v OUT:/out avpn-mixlab:2 python3 /lab/tools/mix_lab.py --bin /kp/bin --out /out
+        -v OUT:/out cpvpn-mixlab:2 python3 /lab/tools/mix_lab.py --bin /kp/bin --out /out
 
 KATZENPOST_BIN holds unmodified Katzenpost binaries (dirauth, server, genconfig,
 kpclientd, http-proxy-client, http-proxy-server; see third_party/katzenpost/build.sh).
@@ -212,7 +212,7 @@ def main():
     p.add_argument(
         "--lane", choices=["katzenpost", "option_e"], default="katzenpost", help="which mixnet carries phase 1"
     )
-    p.add_argument("--mixnode", type=Path, help="option_e: the advanced-vpn-mixnode binary")
+    p.add_argument("--mixnode", type=Path, help="option_e: the cypherpunk-vpn-mixnode binary")
     # X-Wing (Katzenpost) tuning: the speed/bandwidth/anonymity frontier.
     p.add_argument("--cover-clients", type=int, default=0, help="extra unscored clients (cover generators)")
     p.add_argument("--pki-scheme", default="Ed25519 Sphincs+", help="katzenpost: directory signature scheme")

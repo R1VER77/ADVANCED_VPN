@@ -6,7 +6,7 @@ namespaces, while a capture on the client's own link records what its ISP would 
 the time, direction and size of every packet (never contents). Configurations:
 
   undefended   kernel WireGuard client -> exit, no shaping (the attacks must win here)
-  metered|standard|fast|line   the real ADVANCED_VPN 2-hop chain at that rate class
+  metered|standard|fast|line   the real cypherpunk_vpn 2-hop chain at that rate class
                                (request -> init -> enroll, constant-rate carrier, cloak)
 
 Each worker is its own user, network and mount namespace with its own chain; pasta gives
@@ -19,7 +19,7 @@ usage: python3 tools/wf_real.py collect --config fast --sites SITES.json --out D
            [--client-cpus 0,1 --server-cpus 2,3]
 --client-cpus pins the browser and the client's data plane to the same cores (the busy-
 CPU case: a laptop's browser competing with its VPN), --server-cpus the relay, exit and
-capture. With AVPN_WIRE_CLOCK_PPS set (the cloak's wire clock), the client's link gets
+capture. With CPVPN_WIRE_CLOCK_PPS set (the cloak's wire clock), the client's link gets
 the fq qdisc the clock's departure times need, and each worker records the clock's
 counters (clock.json) beside its settings (settings.json).
 SITES.json: {"monitored": [...], "loads": 30, "open_world": [...]} (domains). Not CI.
@@ -85,7 +85,7 @@ def nsexec(ns, *args, **k):
 
 def in_netns(ns, args, **k):
     """Start `args` in network namespace `ns` only, keeping this worker's mount namespace
-    (so a namespace the child creates, such as the client's avpn-app, stays visible)."""
+    (so a namespace the child creates, such as the client's cpvpn-app, stays visible)."""
     # The observer makes this process multithreaded. nsenter performs the namespace
     # transition after exec; Python preexec_fn is unsafe in a multithreaded parent.
     return subprocess.Popen(["/usr/bin/nsenter", "--net=/run/netns/" + ns, "--", *map(str, args)], **k)
@@ -125,7 +125,7 @@ def host_power():
 
 def worker(a):
     """Inside the worker's namespaces: build the tunnel, then load every assigned page."""
-    from avpnctl import lab_guard
+    from cypherpunkctl import lab_guard
     from lab_resolver import private_resolver
 
     lab_guard()
@@ -149,7 +149,7 @@ def worker(a):
     sh("/usr/sbin/sysctl", "-qw", "net.ipv4.ip_forward=1")
     procs = []
     loads = json.loads(a.loads.read_text())
-    clock = os.environ.get("AVPN_WIRE_CLOCK_PPS")
+    clock = os.environ.get("CPVPN_WIRE_CLOCK_PPS")
     (out / "settings.json").write_text(
         json.dumps(
             dict(
@@ -158,11 +158,11 @@ def worker(a):
                 server_cpus=a.server_cpus,
                 capture_cpus=a.capture_cpus or a.server_cpus,
                 wire_clock_pps=clock,
-                wire_clock_ms=os.environ.get("AVPN_WIRE_CLOCK_MS", "30") if clock else None,
-                wire_clock_downstream=os.environ.get("AVPN_WIRE_CLOCK_DOWNSTREAM", "1") != "0" if clock else None,
-                wire_clock_relay_ms=os.environ.get("AVPN_WIRE_CLOCK_RELAY_MS"),
+                wire_clock_ms=os.environ.get("CPVPN_WIRE_CLOCK_MS", "30") if clock else None,
+                wire_clock_downstream=os.environ.get("CPVPN_WIRE_CLOCK_DOWNSTREAM", "1") != "0" if clock else None,
+                wire_clock_relay_ms=os.environ.get("CPVPN_WIRE_CLOCK_RELAY_MS"),
                 load_order_seed=a.seed,
-                catch_up_ms=os.environ.get("AVPN_CATCH_UP_MS"),
+                catch_up_ms=os.environ.get("CPVPN_CATCH_UP_MS"),
                 **host_power(),
             )
         )
@@ -239,12 +239,12 @@ def worker(a):
                 f = (out / (role + ".log")).open("a")
                 cpus = a.client_cpus if role == "client" else a.server_cpus
                 procs.append(
-                    in_netns(ns, pinned(cpus, [sys.executable, ROOT / "tools/avpnctl.py", "--state", state / role,
+                    in_netns(ns, pinned(cpus, [sys.executable, ROOT / "tools/cypherpunkctl.py", "--state", state / role,
                                                "--bin-dir", a.bin_dir, "--lab", "connect"]),
                              stdout=f, stderr=subprocess.STDOUT)
                 )  # fmt: skip
                 time.sleep(2)
-            browse_ns, capture_ns, capture_dev = "avpn-app", "cli", "ca"
+            browse_ns, capture_ns, capture_dev = "cpvpn-app", "cli", "ca"
             resolver = "nameserver 10.77.0.1\n"
         # Live internet for the exit: masquerade it behind pasta.
         nat = (
@@ -257,9 +257,9 @@ def worker(a):
 
         def in_browser_ns(*argv, timeout=60):
             """Run argv where the browser runs: the client namespace, or (chain) its
-            protected application namespace through `avpnctl run`, as a user would."""
+            protected application namespace through `cypherpunkctl run`, as a user would."""
             run = [] if a.config == "undefended" else [
-                sys.executable, ROOT / "tools/avpnctl.py", "--state", out / "chain/client", "--lab", "run", "--"]  # fmt: skip
+                sys.executable, ROOT / "tools/cypherpunkctl.py", "--state", out / "chain/client", "--lab", "run", "--"]  # fmt: skip
             # Its own process group, so a hung browser is killed with every child it started.
             p = in_netns("cli", pinned(a.client_cpus, run + list(argv)), stdout=subprocess.PIPE,
                          stderr=subprocess.PIPE, text=True, start_new_session=True)  # fmt: skip
@@ -283,7 +283,7 @@ def worker(a):
                 break
             time.sleep(1)
         else:
-            from avpnctl import runtime_dir
+            from cypherpunkctl import runtime_dir
 
             print("namespaces:", sh("/usr/sbin/ip", "netns", "list", check=False).stdout.split(), file=sys.stderr)
             for ns, cmd in [
@@ -345,7 +345,7 @@ def worker(a):
         else:
             raise RuntimeError("metadata recorder did not become ready")
         from wf_observer import Observer
-        from avpnctl import runtime_dir
+        from cypherpunkctl import runtime_dir
 
         observed_runtime = None if a.config == "undefended" else runtime_dir(out / "chain/client", create=False)
         with Observer(out / "protection.jsonl", observed_runtime), (out / "loads.jsonl").open("x") as log:
@@ -366,7 +366,7 @@ def worker(a):
                               mem_available_mb=int(mem["MemAvailable"].split()[0]) // 1024)  # fmt: skip
                 if a.config != "undefended":
                     # The controller's verdict right after the load (what the GUI would show).
-                    from avpnctl import runtime_dir
+                    from cypherpunkctl import runtime_dir
 
                     try:
                         st = json.loads((runtime_dir(out / "chain/client", create=False) / "status.json").read_text())
@@ -387,7 +387,7 @@ def worker(a):
             raise RuntimeError("underlay metadata escape audit found unexpected outgoing traffic")
     finally:
         if clock and a.config != "undefended":
-            from avpnctl import runtime_dir
+            from cypherpunkctl import runtime_dir
 
             status = runtime_dir(out / "chain/client", create=False) / "cloak-status.json"
             try:
@@ -398,7 +398,7 @@ def worker(a):
         if a.config != "undefended":
             # The chain's logs and status live in RAM (the runtime directory) and vanish
             # with the run's namespaces: keep a copy next to the capture.
-            from avpnctl import runtime_dir
+            from cypherpunkctl import runtime_dir
 
             for role in ["client", "relay", "exit"]:
                 try:

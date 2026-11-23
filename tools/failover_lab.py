@@ -33,7 +33,7 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 import throughput_bench as tb  # noqa: E402
-from avpnctl import identity_of, lab_guard, runtime_dir  # noqa: E402
+from cypherpunkctl import identity_of, lab_guard, runtime_dir  # noqa: E402
 from managed_profile import RATE_CLASSES, lab_setup  # noqa: E402
 
 CLIENT_IP = "192.0.2.2"
@@ -133,7 +133,7 @@ def main():
     def manager(role):
         return spawn(
             "av-" + role,
-            [sys.executable, ROOT / "tools/avpnctl.py", "--state", state / role, "--bin-dir",
+            [sys.executable, ROOT / "tools/cypherpunkctl.py", "--state", state / role, "--bin-dir",
              ROOT / "target/release", "--lab", "connect"],
             role,
         )  # fmt: skip
@@ -143,7 +143,7 @@ def main():
         fd = os.open("/run/netns/av-client", os.O_RDONLY)
         try:
             x = subprocess.Popen(
-                [sys.executable, str(ROOT / "tools/avpnctl.py"), "--state", str(state / "client"), "--lab", "run",
+                [sys.executable, str(ROOT / "tools/cypherpunkctl.py"), "--state", str(state / "client"), "--lab", "run",
                  "--", *argv],
                 preexec_fn=lambda: os.setns(fd, os.CLONE_NEWNET), stdout=f, stderr=subprocess.DEVNULL,
             )  # fmt: skip
@@ -186,7 +186,7 @@ def main():
         while time.monotonic() < end:
             if client.poll() is not None:
                 raise RuntimeError("client supervisor exited")
-            ok = tb.run("ip", "netns", "exec", "av-client", sys.executable, ROOT / "tools/avpnctl.py", "--state",
+            ok = tb.run("ip", "netns", "exec", "av-client", sys.executable, ROOT / "tools/cypherpunkctl.py", "--state",
                         state / "client", "--lab", "run", "--", "ping", "-n", "-c", "1", "-W", "1", "10.77.0.1",
                         check=False, timeout=20).returncode == 0  # fmt: skip
             if ok:

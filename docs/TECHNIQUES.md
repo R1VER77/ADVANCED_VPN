@@ -1,6 +1,6 @@
 # Named techniques
 
-ADVANCED_VPN combines known primitives in ways we have not seen documented together. This file
+cypherpunk_vpn combines known primitives in ways we have not seen documented together. This file
 gives each one a name, says what it does, what it builds on, and where the code and evidence
 are. "Novel" here means *as a combination, for this purpose*: each entry lists its prior art,
 and none claims a new cryptographic primitive.

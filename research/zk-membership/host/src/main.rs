@@ -27,7 +27,7 @@ fn h(parts: &[&[u8]]) -> [u8; 32] {
 }
 
 fn step(x: &[u8; 32]) -> [u8; 32] {
-    h(&[b"avpn/fp-step/v1", x])
+    h(&[b"cpvpn/fp-step/v1", x])
 }
 
 fn walk(x: &[u8; 32], n: u64) -> [u8; 32] {
@@ -44,7 +44,7 @@ fn epoch_secret(s0: &[u8; 32], epoch: u64) -> [u8; 32] {
 }
 
 fn leaf(s0: &[u8; 32]) -> [u8; 32] {
-    h(&[b"avpn/member/v2", &walk(s0, LIFETIME)])
+    h(&[b"cpvpn/member/v2", &walk(s0, LIFETIME)])
 }
 
 /// The tree's levels, leaves first.
@@ -55,7 +55,7 @@ fn build(leaves: Vec<[u8; 32]>) -> Vec<Vec<[u8; 32]>> {
             .last()
             .unwrap()
             .chunks(2)
-            .map(|p| h(&[b"avpn/node/v1", &p[0], &p[1]]))
+            .map(|p| h(&[b"cpvpn/node/v1", &p[0], &p[1]]))
             .collect();
         levels.push(up);
     }
@@ -114,7 +114,7 @@ fn main() {
     let levels = build(secrets.iter().map(leaf).collect());
     let tree_s = t.elapsed().as_secs_f64();
     let root = levels.last().unwrap()[0];
-    let scope = h(&[b"avpn/scope/mesh-credit"]);
+    let scope = h(&[b"cpvpn/scope/mesh-credit"]);
     let (epoch, next) = (20405u64, 20406u64);
 
     // 1. A member proves; the verifier checks the receipt and the public values.

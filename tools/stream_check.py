@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""`avpn stream-check`: measure a streaming service's eligibility of an exit.
+"""`cypherpunk stream-check`: measure a streaming service's eligibility of an exit.
 
 The honest answer to "does this VPN unblock Netflix?" is a dated,
 reproducible measurement per exit, per service — never a blanket claim
 (STREAMING_GEO_PARITY_20261120.md section 4.1). This tool is that
 measurement:
 
-  avpn run -- stream-check netflix            # inside the namespace, so
+  cypherpunk run -- stream-check netflix            # inside the namespace, so
                                               # the requests egress through
                                               # the exit under test
-  avpn run -- stream-check bbc-iplayer --json
+  cypherpunk run -- stream-check bbc-iplayer --json
   stream-check netflix --base-url http://127.0.0.1:8123   # tests use a
                                               # local mock of the marker
                                               # responses, never a fake pass
@@ -367,7 +367,7 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
         prog="stream-check",
         description="Measure a streaming service's eligibility of this exit "
-        "(run it inside the namespace: avpn run -- stream-check ...)",
+        "(run it inside the namespace: cypherpunk run -- stream-check ...)",
     )
     parser.add_argument("service", choices=sorted(ADAPTERS))
     parser.add_argument("--exit", default="this-exit", help="the exit's id for the record (descriptor name or IP)")

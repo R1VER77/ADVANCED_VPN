@@ -1,19 +1,19 @@
-# avpn setup
+# cypherpunk setup
 
 Recheck client setup and show the next action. Only current checks complete steps. This
 command does not create servers, generate keys, sign routes or activate networking by itself.
 
 ## Usage
 
-    sudo avpn setup
-    sudo avpn --json setup --vault /etc/advanced-vpn/vault
-    avpn setup --repair install_udev_rule
-    avpn setup --repair yubikey_enable_fido2 --device SERIAL
+    sudo cypherpunk setup
+    sudo cypherpunk --json setup --vault /etc/cypherpunk-vpn/vault
+    cypherpunk setup --repair install_udev_rule
+    cypherpunk setup --repair yubikey_enable_fido2 --device SERIAL
 
 ## Options
 
 - `--vault DIR`: saved FIDO2 credential directory. Default: the device protection record,
-  or `/etc/advanced-vpn/vault`. Inspection never creates a credential.
+  or `/etc/cypherpunk-vpn/vault`. Inspection never creates a credential.
 - `--checkpoint-dir DIR`: private directory for non-secret `setup.json`. Default: per-route
   local user state, or the enrollment's `setup` directory as root. It must belong to the caller.
 - `--repair ID`: show an available `install_udev_rule` or `yubikey_enable_fido2` plan.
@@ -28,7 +28,7 @@ command does not create servers, generate keys, sign routes or activate networki
 
 Checks cover host requirements, key capabilities, the public credential record, installed
 route, configured endpoints, the traffic guard and fresh end-to-end connection evidence.
-Use `avpn request`, `avpn init`, `avpn enroll` and `avpn cloud` to perform setup actions.
+Use `cypherpunk request`, `cypherpunk init`, `cypherpunk enroll` and `cypherpunk cloud` to perform setup actions.
 An operator can provide a signed device file; an owner can configure their own servers.
 Endpoint configuration does not prove reachability; the final check verifies the path.
 
@@ -72,7 +72,7 @@ Exit status alone never proves a repair worked. No repair resets FIDO, deletes c
 guesses PINs or updates firmware. A blocked PIN requires a separate recovery decision:
 resetting would remove existing FIDO credentials.
 
-See `avpn help keys`, `avpn help preflight` and `avpn help doctor`.
+See `cypherpunk help keys`, `cypherpunk help preflight` and `cypherpunk help doctor`.
 Physical capability, disposable vault and missing-access checks are documented in
 [`docs/HARDWARE_SETUP_TESTS.md`](../HARDWARE_SETUP_TESTS.md).
 

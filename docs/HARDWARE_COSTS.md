@@ -24,13 +24,13 @@ exist for when allowances run out. Monthly USD, list prices checked
 | AWS free plan | 6 months or $100–200 of credits | ~$12 of credits (t3.micro 7.88 + 8 GiB gp3 0.67 + public IPv4 3.65) | the credit clock runs whether or not the chain is up |
 | Azure free account | 12 months, 750 h/mo B1s-class | $0 while it lasts | free outbound allowance unconfirmed |
 | Google Cloud free tier | e2-micro + 1 GB/mo egress | $0 | 1 GB/mo ≈ 30 MB/day: too little for any hop (catalog says so) |
-| Low-cost paid hosts | annual promotions | from ~$1.83/mo (RackNerd-class) | the "own machine / own host" path (`avpn cloud host add`) |
+| Low-cost paid hosts | annual promotions | from ~$1.83/mo (RackNerd-class) | the "own machine / own host" path (`cypherpunk cloud host add`) |
 
 The honest planning number for a 3-hop chain after free tiers: **$0
 while the allowances hold** (Oracle-to-Oracle across regions is
 constrained by the CLOUD-Act legal-sphere rule — the catalog marks the
 legal-sphere cost), then ~**$6–40/mo total** for three budget paid
-hops. `avpn cloud chain --apply` computes each hop's exact allowance
+hops. `cypherpunk cloud chain --apply` computes each hop's exact allowance
 fit (`--hours-per-day`, default 8) and refuses cost overruns unless
 `--accept-cost` is passed — the CLI is the cost guard, not this
 document.
@@ -41,7 +41,7 @@ The constant-rate stream is the privacy mechanism and the bandwidth
 bill. Two honest framings, both from the measured rate classes
 (2-hop, `RATE_CLASSES.json`):
 
-**Planning model — what `avpn cloud chain` charges against a hop's
+**Planning model — what `cypherpunk cloud chain` charges against a hop's
 allowance** (`tools/rates.py`, 8 h/day connected, one link):
 
 | Class | Wire rate | Cover volume (8 h/day, 1 link) |
@@ -111,10 +111,10 @@ this project's costs; nothing in the zero-budget path requires them.
 ## 5. Accessibility costs
 
 - **Competence cost:** today the honest cost is terminal fluency: the
-  `avpn` CLI, descriptors, and enrollment. The GUI (gap #2) is the
+  `cypherpunk` CLI, descriptors, and enrollment. The GUI (gap #2) is the
   accessibility item in flight; the five usability sessions (§7) are
   its gate.
-- **Time cost:** a zero-budget 3-hop bring-up with `avpn cloud` is a
+- **Time cost:** a zero-budget 3-hop bring-up with `cypherpunk cloud` is a
   focused afternoon the first time (cloud accounts, regions, chain
   apply) and minutes afterwards (status, allow, rotate). The offline
   installer trades that for a pinned package on the owner's hardware.
@@ -122,7 +122,7 @@ this project's costs; nothing in the zero-budget path requires them.
 
 ## 6. Cost governance (what guards these numbers)
 
-- `avpn cloud chain --apply` refuses a chain whose rate class exceeds a
+- `cypherpunk cloud chain --apply` refuses a chain whose rate class exceeds a
   hop's free allowance without an explicit `--accept-cost`.
 - The rate-class figures above are versioned evidence
   (`RATE_CLASSES.json` / `RATE_CLASSES_v0_10_1.json`), not marketing

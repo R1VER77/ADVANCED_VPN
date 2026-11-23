@@ -37,8 +37,8 @@ from cryptography.hazmat.primitives.asymmetric import mlkem, x25519
 # RFC 9180 / draft-ietf-hpke-pq identifiers, for the header only.
 KEM_ID, KDF_ID, AEAD_ID = 0x647A, 0x0001, 0x0002
 SUITE = hpke.Suite(hpke.KEM.MLKEM768_X25519, hpke.KDF.HKDF_SHA256, hpke.AEAD.AES_256_GCM)
-REQUEST_INFO = b"advanced-vpn/ohttp/v1 request"
-RESPONSE_INFO = b"advanced-vpn/ohttp/v1 response"
+REQUEST_INFO = b"cypherpunk-vpn/ohttp/v1 request"
+RESPONSE_INFO = b"cypherpunk-vpn/ohttp/v1 response"
 MLKEM_PUBLIC = 1184
 PUBLIC = MLKEM_PUBLIC + 32
 FRESH_SECONDS = 60

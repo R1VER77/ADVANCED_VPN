@@ -1,11 +1,11 @@
-# avpn request
+# cypherpunk request
 
 Generate this device's keys on the device itself and write a public request for the
 operator. Private keys never leave the device.
 
 ## Usage
 
-    sudo avpn request --role ROLE --protect MODE [--vault DIR] [--unlock-key FILE] [--insecure-plaintext-keys] --out FILE
+    sudo cypherpunk request --role ROLE --protect MODE [--vault DIR] [--unlock-key FILE] [--insecure-plaintext-keys] --out FILE
 
 ## Options
 
@@ -13,11 +13,11 @@ operator. Private keys never leave the device.
 - `--protect`: how the private keys are sealed at rest.
   - `nitrokey`: FIDO2 hmac-secret envelope. Needs the key present (PIN + touch) to start.
   - `systemd-creds`: sealed with the host key, and with the TPM2 when one is usable (`host+tpm2`). On a server it is accepted only when the host can seal and open a test credential with its TPM2; otherwise it is refused (the host key alone would leave the keys' secret on the same disk) and the message says to use `operator`.
-  - `operator`: servers without a usable TPM2. The keys are encrypted under a random data key, which is wrapped to the operator's unlock key and travels in the request; the server never stores it. After every reboot the server stays locked until the operator unwraps it with the Nitrokey (`avpn cloud unlock`). Needs `--unlock-key`.
+  - `operator`: servers without a usable TPM2. The keys are encrypted under a random data key, which is wrapped to the operator's unlock key and travels in the request; the server never stores it. After every reboot the server stays locked until the operator unwraps it with the Nitrokey (`cypherpunk cloud unlock`). Needs `--unlock-key`.
   - `none`: plaintext, root-only. Lab use only.
 - `--insecure-plaintext-keys`: required for `--protect none`, which stores the private keys as plain root-only files that anyone with root or the disk can read. Without it, `none` is refused before any key is made. Tests and throwaway devices only.
-- `--vault DIR`: the Nitrokey vault (with `--protect nitrokey`). The default is `/etc/advanced-vpn/vault`, created on first use (PIN + touch). The VPN service reads it as root, so a vault must be a private directory owned by root. One in your home directory is refused before anything is created.
-- `--unlock-key FILE`: the operator's unlock public key (`avpn unlock-key`), with `--protect operator` only.
+- `--vault DIR`: the Nitrokey vault (with `--protect nitrokey`). The default is `/etc/cypherpunk-vpn/vault`, created on first use (PIN + touch). The VPN service reads it as root, so a vault must be a private directory owned by root. One in your home directory is refused before anything is created.
+- `--unlock-key FILE`: the operator's unlock public key (`cypherpunk unlock-key`), with `--protect operator` only.
 - `--out FILE`: the public request. Copy only this file to the operator.
 
 `sudo python3 tools/install.py --apply --role ROLE --protect MODE` runs this for you

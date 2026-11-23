@@ -8,7 +8,7 @@ use std::{sync::Arc, time::Duration};
 
 #[tokio::test]
 async fn classical_only_and_anonymous_clients_cannot_negotiate() {
-    let tmp = std::env::temp_dir().join(format!("avpn-crypto-{}", std::process::id()));
+    let tmp = std::env::temp_dir().join(format!("cpvpn-crypto-{}", std::process::id()));
     let status = std::process::Command::new("python3")
         .args([
             "tools/provision.py",
@@ -110,7 +110,7 @@ async fn outer_handshake(algorithm: &str) -> bool {
 /// authorization by that key (`authorized`), by another key (`other`), or with none (`plain`).
 async fn session_handshake(algorithm: &str, session: Option<&str>) -> bool {
     let tmp = std::env::temp_dir().join(format!(
-        "avpn-auth-{}-{}-{}",
+        "cpvpn-auth-{}-{}-{}",
         algorithm,
         session.unwrap_or("none"),
         std::process::id()
@@ -151,7 +151,7 @@ async fn session_handshake(algorithm: &str, session: Option<&str>) -> bool {
             "{}",
             String::from_utf8_lossy(&out.stderr)
         );
-        // As `avpn init` pins a managed client: its own identity certificate as the root,
+        // As `cypherpunk init` pins a managed client: its own identity certificate as the root,
         // its public key as the pin, and its device key.
         let pins: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
         si.peer_device = Some(serde_json::from_value(pins["device"].clone()).unwrap());
@@ -288,7 +288,7 @@ impl rustls::server::ResolvesServerCert for HelloRecorder {
 
 #[tokio::test]
 async fn client_hello_names_neither_the_server_nor_this_tool() {
-    let tmp = std::env::temp_dir().join(format!("avpn-hello-{}", std::process::id()));
+    let tmp = std::env::temp_dir().join(format!("cpvpn-hello-{}", std::process::id()));
     let status = std::process::Command::new("python3")
         .args([
             "tools/provision.py",
@@ -340,7 +340,7 @@ async fn client_hello_names_neither_the_server_nor_this_tool() {
     endpoint.close(0u32.into(), b"test done");
     let seen = recorder.0.lock().unwrap().clone();
     assert!(
-        ci.server_name.contains("advanced-vpn"),
+        ci.server_name.contains("cypherpunk-vpn"),
         "the test must use a revealing name"
     );
     assert_eq!(seen, vec![(None, vec![b"h3".to_vec()])]);

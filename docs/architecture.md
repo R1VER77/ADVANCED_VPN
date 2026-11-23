@@ -4,31 +4,31 @@
 
 ```mermaid
 flowchart LR
-    CLI["avpn (Rust): renders results"] -->|"--json"| CTL["avpnctl (Python, root): validates, builds network, supervises"]
-    CLI -->|"as you"| CLOUD["avpn-cloud: aws / oci CLIs, tagged resources only"]
-    CTL --> CLOAK["advanced-vpn-cloak: HTTP/3 camouflage"]
-    CTL --> WG["advanced-vpn-wireguard: GotaTun + DAITA carrier"]
+    CLI["cypherpunk (Rust): renders results"] -->|"--json"| CTL["cypherpunkctl (Python, root): validates, builds network, supervises"]
+    CLI -->|"as you"| CLOUD["cpvpn-cloud: aws / oci CLIs, tagged resources only"]
+    CTL --> CLOAK["cypherpunk-vpn-cloak: HTTP/3 camouflage"]
+    CTL --> WG["cypherpunk-vpn-wireguard: GotaTun + DAITA carrier"]
     WG <-->|"loopback"| CLOAK
-    CTL --> CORE["advanced-vpn: nested QUIC layers"]
-    CTL --> DNS["advanced-vpn-dns: DNS over TLS"]
+    CTL --> CORE["cypherpunk-vpn: nested QUIC layers"]
+    CTL --> DNS["cypherpunk-vpn-dns: DNS over TLS"]
 ```
 
-- **`avpn`** never runs privileged logic itself. It calls the controller with `--json` and renders the single result object. When it runs as root, it only executes root-owned, write-protected programs.
+- **`cypherpunk`** never runs privileged logic itself. It calls the controller with `--json` and renders the single result object. When it runs as root, it only executes root-owned, write-protected programs.
 - **The controller** owns everything privileged: keys, nftables, namespaces, routes and supervision. Data-plane children run under an unprivileged service UID with no capabilities. They receive keys through sealed memfds and die with their supervisor.
-- **`avpn-cloud`** uses your own provider sign-in. It touches only the resources it tagged.
+- **`cpvpn-cloud`** uses your own provider sign-in. It touches only the resources it tagged.
 
 ## Data path
 
-See `avpn help chains`:
+See `cypherpunk help chains`:
 - one QUIC layer per server hop (X25519MLKEM768, ML-DSA-65), nested inside-out;
 - the WireGuard + DAITA carrier innermost on the client's link, itself carried as QUIC
-  datagrams on UDP 443 (`advanced-vpn-cloak`), so that link looks like HTTP/3;
+  datagrams on UDP 443 (`cypherpunk-vpn-cloak`), so that link looks like HTTP/3;
 - the inner IP MTU is 1100 for every chain length;
-- the WireGuard carrier keeps a persistent keepalive, so the chain survives roaming between networks (`avpn help threat-model`).
+- the WireGuard carrier keeps a persistent keepalive, so the chain survives roaming between networks (`cypherpunk help threat-model`).
 
 ## Threat model
 
-See `avpn help threat-model`:
+See `cypherpunk help threat-model`:
 - the design is a multi-party relay (like iCloud Private Relay) using the MASQUE
   QUIC-datagram mechanism, with post-quantum mutual authentication and DAITA traffic
   shaping that OHTTP, MASQUE and Private Relay do not have;
@@ -38,26 +38,26 @@ See `avpn help threat-model`:
 
 ## Keys
 
-See `avpn help keys`:
+See `cypherpunk help keys`:
 - keys are generated on each device and sealed to a Nitrokey, or to TPM2 + host;
 - the operator signs with a hybrid FIDO2 Ed25519 + ML-DSA-65 key;
 - bundles contain no private keys.
 
 ## What servers keep
 
-See `avpn help retention`:
+See `cypherpunk help retention`:
 - runtime state lives in RAM only;
 - server units run with `LogLevelMax=emerg`;
 - servers keep no byte counters.
 
 ## What hops can see
 
-See `avpn help privacy`:
+See `cypherpunk help privacy`:
 - the first hop sees your address, unless upstream entry routes it through another network;
 - the exit sees destinations, but not you.
 
 ## Reference
 
-- One page per command: [`docs/cli/`](cli/), also available as `avpn help`.
+- One page per command: [`docs/cli/`](cli/), also available as `cypherpunk help`.
 - Rust API documentation: `cargo doc --open` (every public item is documented; `#![deny(missing_docs)]`).
 - Python: every public function in the product modules has a docstring (ruff `D1`, enforced in CI).

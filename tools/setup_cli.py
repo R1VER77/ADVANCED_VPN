@@ -41,7 +41,7 @@ def checkpoint_dir(args):
     if os.geteuid() == 0:
         return args.state / "setup"
     key = hashlib.sha256(str(args.state.resolve()).encode()).hexdigest()[:16]
-    return Path.home() / ".local/state/advanced-vpn/setup" / key
+    return Path.home() / ".local/state/cypherpunk-vpn/setup" / key
 
 
 def repair_plan(repair_id, findings, device=None):
@@ -115,10 +115,10 @@ def setup(args, diagnose=None, apply=None, vendor_info=None):
         )
     vault = args.vault
     if vault is None:
-        import avpnctl
+        import cypherpunkctl
 
-        protection = avpnctl.read_json_private(args.state / "protection.json", {})
-        vault = Path(protection["vault"]) if protection.get("vault") else avpnctl.DEVICE_VAULT
+        protection = cypherpunkctl.read_json_private(args.state / "protection.json", {})
+        vault = Path(protection["vault"]) if protection.get("vault") else cypherpunkctl.DEVICE_VAULT
     out = setup_flow.run(
         setup_flow.client_steps(), dict(state=args.state, vault=vault, diagnose=diagnose), checkpoint_dir(args)
     )
@@ -154,7 +154,7 @@ def print_result(args, result):
             print(f"  {mark} {row['title']}: {row['state']} — {row['say']}")
             for finding in row["findings"]:
                 if finding.get("repair"):
-                    print("      Repair plan: avpn setup --repair " + finding["repair"])
+                    print("      Repair plan: cypherpunk setup --repair " + finding["repair"])
     elif "preflight" in result:
         for row in result["preflight"]["findings"]:
             print(f"  {row['severity']}: {row['message']}")

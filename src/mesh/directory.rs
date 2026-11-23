@@ -82,7 +82,7 @@ impl NodeDb {
         Ok(Self { nodes })
     }
 
-    /// All live nodes, for `avpn mesh nodes`.
+    /// All live nodes, for `cypherpunk mesh nodes`.
     pub fn nodes(&self) -> &[Descriptor] {
         &self.nodes
     }

@@ -27,7 +27,7 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 import throughput_bench as tb  # noqa: E402
-from avpnctl import lab_guard  # noqa: E402
+from cypherpunkctl import lab_guard  # noqa: E402
 
 MARKER = "MARKER-OHTTP-5e1c"
 MEMBER = "10.81.0.2"

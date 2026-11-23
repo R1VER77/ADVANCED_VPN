@@ -7,7 +7,7 @@ network sees I2P, never a VPN server.
     entry i2pd server tunnel (0 hops: the entry is already known to the client)
         --TCP--> 127.0.0.1:8443  the entry's cloak (TLS 1.3 + proof, as on TCP 443)
 
-The entry's I2P destination is generated with its other keys (`avpn request`) and its
+The entry's I2P destination is generated with its other keys (`cypherpunk request`) and its
 b32 address is signed into the client's profile, so the client reaches exactly that
 entry. i2pd is a separate, unmodified process (BSD-3-Clause) under its own user; the
 client's firewall lets only that user leave, and never towards the entry's own address,
@@ -181,13 +181,13 @@ def tunnels_conf(front, keys=None, datadir=None):
         h = int(front["hops"])
         host, port = CLIENT_TUNNEL.rsplit(":", 1)
         return (
-            "[avpn-front]\ntype = client\naddress = %s\nport = %s\ndestination = %s\nkeys = transient\n"
+            "[cpvpn-front]\ntype = client\naddress = %s\nport = %s\ndestination = %s\nkeys = transient\n"
             "inbound.length = %d\noutbound.length = %d\ninbound.lengthVariance = 0\noutbound.lengthVariance = 0\n"
             % (host, port, front["destination"], h, h)
         ) + common
     # The entry is already known to its client: zero hops on its side costs no anonymity.
     return (
-        "[avpn-front]\ntype = server\nhost = %s\nport = %d\nkeys = %s\ninbound.length = 0\noutbound.length = 0\n"
+        "[cpvpn-front]\ntype = server\nhost = %s\nport = %d\nkeys = %s\ninbound.length = 0\noutbound.length = 0\n"
         % (SERVER_TARGET[0], SERVER_TARGET[1], os.path.relpath(Path(keys), Path(datadir)))
     ) + common
 
@@ -198,7 +198,7 @@ def front_firewall(entry_ip):
     one of its tunnel hops. A separate table, so its drop is final whatever others accept."""
     ip = ipaddress.IPv4Address(entry_ip)
     return (
-        "table inet advanced_vpn_front {\n"
+        "table inet cypherpunk_vpn_front {\n"
         " chain output { type filter hook output priority -120; policy accept;\n  ip daddr %s drop\n }\n"
         " chain input { type filter hook input priority -120; policy accept;\n  ip saddr %s drop\n }\n"
         "}\n"

@@ -67,7 +67,7 @@ already knows how to reason about).
 `v6: {prefix: 2001:db8:…/64, egress: both|v4|v6}` next to its v4
 address. Chain planning (§3 of PATH_SELECTION) refuses a dual-stack
 chain through an exit without v6 egress. The eligibility probe
-(`avpn stream-check`) records which family the service saw — a service
+(`cypherpunk stream-check`) records which family the service saw — a service
 that resolves AAAA but blocks the exit's v6 prefix is a real,
 measurable case (mechanism 1 applies to v6 ranges too, and v6
 allocations are *more* stable than v4, so a listed v6 prefix stays
@@ -114,7 +114,7 @@ bench records per family rather than hiding.
 | 1 (Rust half, CI-pending) | `Descriptor::validate` learns the `v6` field | the shared fixture runs in the Rust test; the CI compile is the remaining gate |
 | 2 (rule half done, 22 Nov) | Namespace dual-stack routing + v6-aware kill switch + AAAA inside DoT | the per-family symmetric guard text is generated and mechanically symmetry-checked in the leak suite (25 gates); the live flip waits for the Rust data plane, pinned |
 | 3 | Rate-class per-family throughput recording | bench reports v4/v6 goodput separately; cell size unchanged |
-| 4 | `avpn stream-check` records the family the service saw | eligibility rows carry `family` |
+| 4 | `cypherpunk stream-check` records the family the service saw | eligibility rows carry `family` |
 
 Stage 1–2 are sandbox-testable (a v6-capable lab exit is a local
 quinn/UDP socket pair on ::1 — no real v6 network needed); stages 3–4

@@ -52,7 +52,7 @@ class Step:
 def fingerprint(*parts):
     """A domain-separated digest of public inputs; never key material."""
     raw = json.dumps(parts, sort_keys=True, default=str).encode()
-    return hashlib.sha256(b"avpn/setup/v1\0" + raw).hexdigest()
+    return hashlib.sha256(b"cpvpn/setup/v1\0" + raw).hexdigest()
 
 
 def load(state_dir):
@@ -226,7 +226,7 @@ def check_vault(ctx):
 
 def check_profile(ctx):
     """Read the controller's validated enrolled profile; never import an unchecked bundle."""
-    import avpnctl
+    import cypherpunkctl
     from managed_profile import require_current
 
     state = Path(ctx["state"])
@@ -235,26 +235,26 @@ def check_profile(ctx):
             "waiting_for_user", "Sign and enroll this device's route, or obtain its signed file from your operator."
         )
     try:
-        profile = require_current(avpnctl.load_profile(state))
+        profile = require_current(cypherpunkctl.load_profile(state))
     except (ValueError, RuntimeError, OSError):
         return Result("blocked", "The installed route is unreadable or unsupported; check enrollment.")
     ctx["profile"] = profile
     return Result(
         "complete",
         "The installed route passes the controller's profile checks.",
-        dict(hops=len(avpnctl.chain_of(profile))),
+        dict(hops=len(cypherpunkctl.chain_of(profile))),
         fingerprint(profile),
     )
 
 
 def check_servers(ctx):
     """Public endpoints exist in the enrolled route; reachability is tested end to end later."""
-    import avpnctl
+    import cypherpunkctl
 
     profile = ctx.get("profile")
     if not profile:
         return Result("waiting_for_user", "Add your servers and enroll the signed route first.")
-    hops = avpnctl.chain_of(profile)
+    hops = cypherpunkctl.chain_of(profile)
     return Result(
         "complete",
         "Server endpoints are configured; the final connection check verifies reachability.",
@@ -270,14 +270,14 @@ def status(ctx):
     if "status" in ctx:
         value = dict(ctx["status"]() or {})
     else:
-        import avpnctl
+        import cypherpunkctl
 
         state = Path(ctx["state"])
-        rt = avpnctl.runtime_dir(state, create=False)
-        value = avpnctl.read_status(state) or {}
+        rt = cypherpunkctl.runtime_dir(state, create=False)
+        value = cypherpunkctl.read_status(state) or {}
         try:
-            controller = avpnctl.read_json_private(rt / "controller.json", {})
-            live = avpnctl.identity_of(controller["pid"]) == controller["identity"]
+            controller = cypherpunkctl.read_json_private(rt / "controller.json", {})
+            live = cypherpunkctl.identity_of(controller["pid"]) == controller["identity"]
             age = ctx.get("now", time.time)() - (rt / "status.json").stat().st_mtime
             value["_fresh"] = live and 0 <= age <= STATUS_MAX_AGE
         except (OSError, ValueError, KeyError, TypeError):

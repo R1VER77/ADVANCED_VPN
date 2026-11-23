@@ -5,9 +5,9 @@ Fly.io has no free tier, but waives a personal organization's monthly bill under
 about 55 GB of outbound traffic. That is enough for a metered exit connected six hours a
 day (about 47 GB). [The fee guard](FEE_GUARD.md) holds every server to such a cap.
 
-    avpn cloud fly server --apply --name avpn-flyexit --region fra
-    avpn cloud host setup --name avpn-flyexit --role exit --out exit.req --vault DIR
-    avpn cloud chain --apply ...      # signs the chain with --link-transport tcp
+    cypherpunk cloud fly server --apply --name cpvpn-flyexit --region fra
+    cypherpunk cloud host setup --name cpvpn-flyexit --role exit --out exit.req --vault DIR
+    cypherpunk cloud chain --apply ...      # signs the chain with --link-transport tcp
 
 ## What it is
 
@@ -20,7 +20,7 @@ day (about 47 GB). [The fee guard](FEE_GUARD.md) holds every server to such a ca
   `/run`, `/var/log` and `/tmp` are RAM. The no-logs checks pass, and there is no swap.
 - **One encrypted volume** at `/data`, with snapshots off. It holds the enrolled state
   and the month's metering only. The keys are locked to the operator's Nitrokey (a
-  Machine has no TPM), so after any restart the exit waits for `avpn cloud unlock`.
+  Machine has no TPM), so after any restart the exit waits for `cypherpunk cloud unlock`.
 - **IPv6 only, over TCP.** UDP on Fly needs a dedicated IPv4 ($2 a month) and the Fly
   proxy carries no QUIC, so the exit listens on `[::]:4444` and the app's free anycast
   IPv6 forwards raw TCP to it. The relay reaches it over a TCP paced link
@@ -57,7 +57,7 @@ address belongs on a host with its own (Oracle, AWS).
 ## Limits
 
 - **The deploy token** is a secret with control over the app. Keep it in
-  `~/.config/advanced-vpn/fly-deploy-token` (mode 600; the tool refuses a file others can
+  `~/.config/cypherpunk-vpn/fly-deploy-token` (mode 600; the tool refuses a file others can
   read) and revoke it in the Fly dashboard when the app is retired.
 - **Only one Fly server per organization** fits under the waiver. The fee guard refuses a
   second one.

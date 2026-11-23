@@ -12,7 +12,11 @@ use std::{
 };
 
 fn preferences() -> Result<Option<Vec<u8>>, ()> {
-    for parent in ["/etc", "/etc/advanced-vpn", "/etc/advanced-vpn/enrolled"] {
+    for parent in [
+        "/etc",
+        "/etc/cypherpunk-vpn",
+        "/etc/cypherpunk-vpn/enrolled",
+    ] {
         let meta = match fs::symlink_metadata(parent) {
             Ok(meta) => meta,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -25,7 +29,7 @@ fn preferences() -> Result<Option<Vec<u8>>, ()> {
     let file = match OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC)
-        .open("/etc/advanced-vpn/enrolled/preferences.json")
+        .open("/etc/cypherpunk-vpn/enrolled/preferences.json")
     {
         Ok(file) => file,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -83,7 +87,7 @@ fn run() -> Result<(), &'static str> {
     if unsafe { libc::geteuid() } != 0 {
         return Err("early guard requires root");
     }
-    let marker = match fs::symlink_metadata("/etc/advanced-vpn/whole-device.guard") {
+    let marker = match fs::symlink_metadata("/etc/cypherpunk-vpn/whole-device.guard") {
         Ok(_) => true,
         Err(error) => error.kind() != std::io::ErrorKind::NotFound,
     };

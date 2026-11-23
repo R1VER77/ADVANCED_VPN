@@ -15,13 +15,15 @@ pass. A cosmetic rename must not strand enrolled devices or disable a traffic gu
 | Signed chains / protocol domains | Treat contexts, magic values, schemas and signed payloads as protocol identifiers. Do not search-and-replace them. Any wire/schema migration needs explicit version negotiation, downgrade rejection, cross-version vectors and re-enrollment instructions where necessary. |
 | Documentation and provenance | Label old identifiers as compatibility names. Update help, onboarding, release notes, checksums, attestation-verification commands and security-report links together. Test both old and new release verification/recovery paths. |
 
-**Status (20 November 2026):** the CLI alias step is done. Both the installer and the
-native packages install `cypherpunk` beside `avpn`, and `tools/test_install.py` drives the
-installed controller through both names, requiring identical human and JSON output. The
-services, state paths, packages' install location and protocol identifiers keep their
-`advanced-vpn` names until the matrix below has run on both paths.
-
-Implement aliases first. Run the complete install/upgrade/reboot/disconnect/recovery
-matrix on old and new paths before changing canonical services or state. Publish the
-supported transition window and exact recovery commands with the release. Do not mark
-the repository, package or protocol migration complete because the README changed.
+**Status (22 November 2026 — closed by clean break, D019):** the owner chose a full
+clean break over the staged compatibility transition before shipping v0.11.0. Every
+crate, binary (`cypherpunk-vpn*`), CLI (`cypherpunk`, `cypherpunkctl`), internal prefix
+(`cpvpn`), installation/config/state path (`/opt/cypherpunk-vpn`, `/etc/cypherpunk-vpn`,
+`~/.config/cypherpunk-vpn`), systemd unit (`cypherpunk-vpn*.service`), nftables table
+(`cypherpunk_vpn*`), FIDO2 relying party (`cypherpunk-vpn.local`) and cryptographic domain
+label (`cypherpunk-vpn/…`, `cpvpn/…`) now uses its canonical `cypherpunk_vpn` name, with no
+compatibility reading of old names in the product. `cypherpunk cloud adopt-legacy` performs
+the one-time operator inventory move (`~/.config/advanced-vpn` → `~/.config/cypherpunk-vpn`,
+`avpn-*` → `cpvpn-*`), and `tools/test_names.py` gates the tree so old names cannot return
+outside historical records (`CHANGELOG.md` entries before v0.11.0, `docs/INCIDENTS.md`,
+dated evidence and decisions D001–D018).

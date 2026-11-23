@@ -21,7 +21,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 from managed_profile import lab_setup  # noqa: E402
 import shutil  # noqa: E402
-from avpnctl import lab_guard, identity_of, runtime_dir  # noqa: E402
+from cypherpunkctl import lab_guard, identity_of, runtime_dir  # noqa: E402
 
 MIB = 1048576
 
@@ -50,7 +50,7 @@ def wait(predicate, seconds, what):
 def supervisor(state, log):
     args = [
         sys.executable,
-        str(ROOT / "tools/avpnctl.py"),
+        str(ROOT / "tools/cypherpunkctl.py"),
         "--state",
         str(state),
         "--bin-dir",
@@ -69,7 +69,7 @@ def carrier_pid(state, previous=None):
 
 
 def meter_present():
-    return run("/usr/sbin/nft", "list", "table", "inet", "advanced_vpn_meter", check=False).returncode == 0
+    return run("/usr/sbin/nft", "list", "table", "inet", "cypherpunk_vpn_meter", check=False).returncode == 0
 
 
 def scenario(state, name, limit_mib, kills, prefill=False, raise_to=None):
@@ -102,7 +102,7 @@ def scenario(state, name, limit_mib, kills, prefill=False, raise_to=None):
                 # Raising the limit is an explicit preference; service must resume without a restart.
                 run(
                     sys.executable,
-                    str(ROOT / "tools/avpnctl.py"),
+                    str(ROOT / "tools/cypherpunkctl.py"),
                     "--state",
                     str(s),
                     "--lab",
@@ -132,12 +132,21 @@ def scenario(state, name, limit_mib, kills, prefill=False, raise_to=None):
                 "list",
                 "table",
                 "inet",
-                "advanced_vpn",
+                "cypherpunk_vpn",
                 check=False,
             ).returncode
             == 0
             or run(
-                "ip", "netns", "exec", "avpn-app", "/usr/sbin/nft", "list", "table", "inet", "advanced_vpn", check=False
+                "ip",
+                "netns",
+                "exec",
+                "cpvpn-app",
+                "/usr/sbin/nft",
+                "list",
+                "table",
+                "inet",
+                "cypherpunk_vpn",
+                check=False,
             ).returncode
             == 0
         )
@@ -154,7 +163,7 @@ def scenario(state, name, limit_mib, kills, prefill=False, raise_to=None):
         log.close()
         run(
             sys.executable,
-            str(ROOT / "tools/avpnctl.py"),
+            str(ROOT / "tools/cypherpunkctl.py"),
             "--state",
             str(s),
             "--lab",

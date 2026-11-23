@@ -25,7 +25,7 @@ const view = computed(() => {
   if (props.unavailable || !s) {
     return {
       title: 'Status unknown', tone: 'neutral' as Tone, on: false, busy: false,
-      line: "This window can't reach the AVPN service.",
+      line: "This window can't reach the CYPHERPUNK service.",
     }
   }
   switch (s.state) {
@@ -61,7 +61,7 @@ const notice = computed(() => {
   if (props.unavailable || !s) {
     return {
       tone: 'neutral' as Tone,
-      title: "The AVPN service isn't responding",
+      title: "The CYPHERPUNK service isn't responding",
       text: "If it was running, its firewall still blocks your traffic: it stays in place after a crash. This window just can't check right now.",
       actions: [['Start the service', 'startService'], ['Try again', 'retry']] as const,
     }
@@ -70,7 +70,7 @@ const notice = computed(() => {
     const map: Record<string, { title: string; text: string; actions: readonly (readonly [string, string])[] }> = {
       network_down: {
         title: 'No network connection',
-        text: 'Your computer is offline. AVPN reconnects by itself when the network is back; your traffic stays blocked until then.',
+        text: 'Your computer is offline. CYPHERPUNK reconnects by itself when the network is back; your traffic stays blocked until then.',
         actions: [['Try now', 'retry']],
       },
       relay_unreachable: {
@@ -80,12 +80,12 @@ const notice = computed(() => {
       },
       server_auth_failed: {
         title: "The server couldn't prove who it is",
-        text: s.detail ?? 'AVPN stopped before sending anything. Your traffic stays blocked.',
+        text: s.detail ?? 'CYPHERPUNK stopped before sending anything. Your traffic stays blocked.',
         actions: [['How to fix this', 'resign'], ['Try again', 'retry']],
       },
       chain_outdated: {
         title: 'Your connection settings are out of date',
-        text: 'They were made for an older AVPN version. Ask your operator for a new device file.',
+        text: 'They were made for an older CYPHERPUNK version. Ask your operator for a new device file.',
         actions: [['How to fix this', 'resign']],
       },
       nitrokey_pin_rejected: {
@@ -95,7 +95,7 @@ const notice = computed(() => {
       },
       nitrokey_missing: {
         title: 'Plug in your Nitrokey',
-        text: 'AVPN needs your Nitrokey to unlock your keys.',
+        text: 'CYPHERPUNK needs your Nitrokey to unlock your keys.',
         actions: [["It's plugged in", 'connect']],
       },
     }

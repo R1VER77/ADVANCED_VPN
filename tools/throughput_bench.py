@@ -21,7 +21,7 @@ are pinned to --client-cpus, busy loops load those cores on a random balanced sc
 of N windows while the tunnel idles, and the client's wire packets per window on the
 first link are scored against the schedule: packets per window, and the spread and
 largest gap between them (catch-up restores the count but not the timing); each with
-AUC, permutation p-value and a shuffled-label control. Set AVPN_CATCH_UP_MS in the environment to measure the catch-up variant.
+AUC, permutation p-value and a shuffled-label control. Set CPVPN_CATCH_UP_MS in the environment to measure the catch-up variant.
 Rate-budget and DAITA-profile overrides exist only to measure their effect.
 """
 
@@ -39,7 +39,7 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 from managed_profile import lab_setup, CHAINS, RATE_CLASSES  # noqa: E402
-from avpnctl import lab_guard, identity_of, runtime_dir  # noqa: E402
+from cypherpunkctl import lab_guard, identity_of, runtime_dir  # noqa: E402
 
 CLIENT_IP = "192.0.2.2"
 SINK = r"""
@@ -374,7 +374,7 @@ def cpu_probe(a, observers, shape_file, hops, online_seconds):
             proc.send_signal(signal.SIGTERM)
             proc.wait(timeout=5)
     clock = None
-    if os.environ.get("AVPN_WIRE_CLOCK_PPS"):
+    if os.environ.get("CPVPN_WIRE_CLOCK_PPS"):
         time.sleep(1.5)  # the cloak writes its status once a second
         status = runtime_dir(shape_file.parent / "client", create=False) / "cloak-status.json"
         try:
@@ -395,11 +395,11 @@ def cpu_probe(a, observers, shape_file, hops, online_seconds):
         probe="busy-CPU leak",
         hops=hops,
         rate=a.rate,
-        catch_up_ms=int(os.environ.get("AVPN_CATCH_UP_MS", "0") or 0),
-        wire_clock_pps=float(os.environ.get("AVPN_WIRE_CLOCK_PPS", "0") or 0),
-        wire_clock_lookahead_ms=int(os.environ.get("AVPN_WIRE_CLOCK_MS", "30") or 30),
+        catch_up_ms=int(os.environ.get("CPVPN_CATCH_UP_MS", "0") or 0),
+        wire_clock_pps=float(os.environ.get("CPVPN_WIRE_CLOCK_PPS", "0") or 0),
+        wire_clock_lookahead_ms=int(os.environ.get("CPVPN_WIRE_CLOCK_MS", "30") or 30),
         # Declared, not detected: the lab cannot see another user's open files.
-        pm_qos_us_declared=os.environ.get("AVPN_PROBE_PM_QOS_US"),
+        pm_qos_us_declared=os.environ.get("CPVPN_PROBE_PM_QOS_US"),
         client_cpus=a.client_cpus,
         server_cpus=a.server_cpus,
         load_procs=a.load_procs,
@@ -506,7 +506,7 @@ def main():
     run("mount", "--make-rprivate", "/")
     run("mount", "-t", "tmpfs", "-o", "size=64m", "tmpfs", "/run")
     # The fresh /run hides resolved's stub file; when /etc/resolv.conf is a symlink
-    # into /run (Ubuntu runners), `avpn run` needs its target to bind the private resolver.
+    # into /run (Ubuntu runners), `cypherpunk run` needs its target to bind the private resolver.
     target = Path("/etc/resolv.conf").resolve()
     target.parent.mkdir(parents=True, exist_ok=True)
     if not target.exists():
@@ -541,7 +541,7 @@ def main():
             [
                 *pin,
                 sys.executable,
-                ROOT / "tools/avpnctl.py",
+                ROOT / "tools/cypherpunkctl.py",
                 "--state",
                 state / role,
                 "--bin-dir",
@@ -559,7 +559,7 @@ def main():
             "exec",
             "av-client",
             sys.executable,
-            ROOT / "tools/avpnctl.py",
+            ROOT / "tools/cypherpunkctl.py",
             "--state",
             state / "client",
             "--lab",
@@ -603,7 +603,7 @@ def main():
                 run("ip", "-n", ns, "link", "set", dev, "up")
             if n2 != "destination":
                 ingress[n2] = d2  # server's link from its predecessor
-            if k == 0 and os.environ.get("AVPN_WIRE_CLOCK_PPS"):
+            if k == 0 and os.environ.get("CPVPN_WIRE_CLOCK_PPS"):
                 # The wire clock's departure times are honoured by the fq qdisc only.
                 tc = shutil.which("tc") or "/usr/sbin/tc"
                 for ns, dev in [("av-" + n1, d1), ("av-" + n2, d2)]:  # client upstream, first hop downstream
@@ -649,7 +649,7 @@ def main():
                 keys_before = (state / "client" / "wireguard-key.bin").read_bytes()[:32]
                 for role in roles:
                     enroll(
-                        ops / (role + ".avpn"),
+                        ops / (role + ".cpvpn"),
                         ops / "operator.pub",
                         state / role,
                         replace=(state / role / "profile.json").exists(),
@@ -847,7 +847,7 @@ def main():
                 proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 proc.kill()
-        for ns in ["avpn-app", *reversed(namespaces)]:
+        for ns in ["cpvpn-app", *reversed(namespaces)]:
             run("ip", "netns", "del", ns, check=False)
         shutil.rmtree(state / "operator-keys", ignore_errors=True)
 

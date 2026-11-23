@@ -1,4 +1,4 @@
-"""The exit's own recursive resolver (`avpn init --dns-recursive`).
+"""The exit's own recursive resolver (`cypherpunk init --dns-recursive`).
 
 By default the exit forwards every lookup over hybrid post-quantum DNS over TLS to one
 public resolver, which therefore sees every name a member resolves. In recursive mode the
@@ -8,7 +8,7 @@ resolver operator sees them all:
 - QNAME minimisation (RFC 9156): each authoritative server learns only the next label;
 - DNSSEC validation against the root trust anchor (Debian's dns-root-data);
 - 0x20 query-name randomisation, hardened referrals, no identity or version answers;
-- listening on loopback only, for the exit's own forwarder (advanced-vpn-dns), which keeps
+- listening on loopback only, for the exit's own forwarder (cypherpunk-vpn-dns), which keeps
   doing the filtering, the .invalid probe and the tunnel-side access control.
 
 The cost, named in docs/PQ_INVENTORY.md: queries from the exit to authoritative servers

@@ -110,7 +110,7 @@ class Checks(unittest.TestCase):
         raw = bytes(16) + b"\x00\x01a" + cbor.encode({1: 1, 3: -8, -1: 6, -2: b"x" * 32})
         record = dict(
             schema=1,
-            rp="advanced-vpn.local",
+            rp="cypherpunk-vpn.local",
             credential=base64.b64encode(raw).decode(),
             salt=base64.b64encode(b"s" * 32).decode(),
             counter=0,

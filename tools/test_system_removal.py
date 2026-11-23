@@ -56,7 +56,7 @@ class RemovalGate(unittest.TestCase):
         self.assertEqual(len(self.calls), 6)
 
     def test_each_active_or_enabled_unit_blocks_before_network_queries(self):
-        for unit in ("advanced-vpn.service", "advanced-vpn-guard.service", "cypherpunk-vpn-controller.service"):
+        for unit in ("cypherpunk-vpn.service", "cypherpunk-vpn-guard.service", "cypherpunk-vpn-controller.service"):
             for update in (dict(ActiveState="active"), dict(ActiveState="activating"),
                            dict(UnitFileState="enabled"), dict(UnitFileState="enabled-runtime"),
                            dict(ActiveState="unknown"), dict(UnitFileState="unknown")):  # fmt: skip
@@ -70,7 +70,7 @@ class RemovalGate(unittest.TestCase):
                     self.assertTrue(all(call[1] == "show" for call in self.calls))
 
     def test_disconnected_guard_tables_still_block_removal(self):
-        for name in ("advanced_vpn", "advanced_vpn_meter", "advanced_vpn_upstream", "advanced_vpn_front"):
+        for name in ("cypherpunk_vpn", "cypherpunk_vpn_meter", "cypherpunk_vpn_upstream", "cypherpunk_vpn_front"):
             with self.subTest(name=name):
                 self.tables = [dict(table=dict(family="inet", name=name))]
                 with self.assertRaisesRegex(RuntimeError, "guard is retained"):
@@ -89,16 +89,16 @@ class RemovalGate(unittest.TestCase):
         self.assertEqual(self.calls, [])
 
     def test_protected_namespace_and_owned_interface_block_removal(self):
-        self.namespaces = [dict(name="avpn-app")]
+        self.namespaces = [dict(name="cpvpn-app")]
         with self.assertRaisesRegex(RuntimeError, "namespace or interface"):
             self.check()
         self.namespaces = []
-        self.links = [dict(ifname="avpn0", ifalias="advanced-vpn-managed")]
+        self.links = [dict(ifname="cpvpn0", ifalias="cypherpunk-vpn-managed")]
         with self.assertRaisesRegex(RuntimeError, "namespace or interface"):
             self.check()
 
     def test_running_program_blocks_even_without_a_service(self):
-        for exe in (self.target / "bin/advanced-vpn", self.target / "venv/bin/python3.13"):
+        for exe in (self.target / "bin/cypherpunk-vpn", self.target / "venv/bin/python3.13"):
             p = self.proc / "12345"
             p.mkdir(exist_ok=True)
             link = p / "exe"
@@ -106,7 +106,7 @@ class RemovalGate(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "still running"):
                 self.check()
             link.unlink()
-        (p / "exe").symlink_to(str(self.target / "bin/avpn") + " (deleted)")
+        (p / "exe").symlink_to(str(self.target / "bin/cypherpunk") + " (deleted)")
         with self.assertRaisesRegex(RuntimeError, "still running"):
             self.check()
 

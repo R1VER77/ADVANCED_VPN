@@ -14,17 +14,17 @@ const file = ref('')
 const error = ref('')
 
 const demoFiles = [
-  ['laptop.avpn', 'a valid device file'],
-  ['laptop-corrupt.avpn', 'damaged in transfer'],
-  ['laptop-other-operator.avpn', 'signed by someone else'],
-  ['laptop-expired.avpn', 'too old'],
+  ['laptop.cpvpn', 'a valid device file'],
+  ['laptop-corrupt.cpvpn', 'damaged in transfer'],
+  ['laptop-other-operator.cpvpn', 'signed by someone else'],
+  ['laptop-expired.cpvpn', 'too old'],
 ]
 
 const errors: Record<string, [string, string]> = {
-  bundle_invalid: ["This isn't a valid AVPN device file", 'It may have been damaged when it was copied. Ask your operator to send it again.'],
-  bundle_wrong_operator: ['This file was signed by a different operator', "AVPN only installs files signed by the operator this computer trusts. If you didn't expect this, don't use the file and tell your operator."],
+  bundle_invalid: ["This isn't a valid CYPHERPUNK device file", 'It may have been damaged when it was copied. Ask your operator to send it again.'],
+  bundle_wrong_operator: ['This file was signed by a different operator', "CYPHERPUNK only installs files signed by the operator this computer trusts. If you didn't expect this, don't use the file and tell your operator."],
   bundle_expired: ['This device file has expired', 'Ask your operator for a new one.'],
-  controller_unavailable: ["The AVPN service isn't responding", 'Start the service, then try again.'],
+  controller_unavailable: ["The CYPHERPUNK service isn't responding", 'Start the service, then try again.'],
 }
 
 async function pick(name: string) {
@@ -47,12 +47,12 @@ async function pick(name: string) {
     <transition name="fade" mode="out-in">
       <div v-if="step === 'welcome'" key="w" class="body">
         <div class="welcome-icon"><AppIcon name="shield" :size="29" /></div><h1>Your privacy.<br>Your control.</h1>
-        <p>To set up AVPN on this computer you need two things from your operator:</p>
+        <p>To set up CYPHERPUNK on this computer you need two things from your operator:</p>
         <ol>
-          <li><strong>A device file</strong> ending in <code>.avpn</code></li>
+          <li><strong>A device file</strong> ending in <code>.cpvpn</code></li>
           <li><strong>Your Nitrokey</strong>, which unlocks your keys</li>
         </ol>
-        <p class="muted">Until you connect, AVPN changes nothing on this computer.</p>
+        <p class="muted">Until you connect, CYPHERPUNK changes nothing on this computer.</p>
         <button class="btn wide" @click="step = 'choose'">Add device file…</button>
       </div>
 

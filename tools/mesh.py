@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""avpn-mesh: the AVPN/Mesh community tool (installed as /opt/advanced-vpn/bin/avpn-mesh).
+"""cpvpn-mesh: the CPVPN/Mesh community tool (installed as /opt/cypherpunk-vpn/bin/cpvpn-mesh).
 
 Runs as the user, never as root: it uses the user's own cloud sign-ins (via
-avpn-cloud / tools/cloud.py) and the user's own hardware token.
+cpvpn-cloud / tools/cloud.py) and the user's own hardware token.
 
 There is no account. A member IS their hardware device: the member ID is the
-truncated SHA-256 of the operator public key produced by `avpn init` (the
+truncated SHA-256 of the operator public key produced by `cypherpunk init` (the
 ML-DSA-65 operator key sealed under the device's FIDO2 credential - Nitrokey
 preferred, any capable token works). Descriptors are signed with that key.
 
 Subcommands: identity, nodes, chain, offer, publish, quota.
 All commands accept --json (default in this launcher): the last stdout line
-is one JSON object, the contract src/bin/avpn/mesh.rs parses.
+is one JSON object, the contract src/bin/cypherpunk/mesh.rs parses.
 """
 
 import argparse
@@ -31,20 +31,20 @@ import providers  # the catalog's legal-parent table (same directory)
 SCHEMA = 1
 DESCRIPTOR_TTL_SECONDS = 7 * 24 * 3600
 GOSSIP_HOP_LIMIT = 3
-MESH_DIR = Path(os.environ.get("AVPN_MESH_DIR", Path.home() / ".config" / "advanced-vpn" / "mesh"))
-CLOUD = os.environ.get("AVPN_CLOUD", "/opt/advanced-vpn/bin/avpn-cloud")
-KEYGUARD = os.environ.get("AVPN_KEYGUARD", "/opt/advanced-vpn/tools/keyguard.py")
-VAULT = Path(os.environ.get("AVPN_VAULT", Path.home() / ".config" / "advanced-vpn" / "vault"))
-# The member's identity is the operator's own ML-DSA-65 key from `avpn init --vault`: its
+MESH_DIR = Path(os.environ.get("CPVPN_MESH_DIR", Path.home() / ".config" / "cypherpunk-vpn" / "mesh"))
+CLOUD = os.environ.get("CPVPN_CLOUD", "/opt/cypherpunk-vpn/bin/cpvpn-cloud")
+KEYGUARD = os.environ.get("CPVPN_KEYGUARD", "/opt/cypherpunk-vpn/tools/keyguard.py")
+VAULT = Path(os.environ.get("CPVPN_VAULT", Path.home() / ".config" / "cypherpunk-vpn" / "vault"))
+# The member's identity is the operator's own ML-DSA-65 key from `cypherpunk init --vault`: its
 # public half beside the vault, its private half sealed under the vault's FIDO2 credential
-# (managed_profile.HardwareOperator). AVPN_OPERATOR_KEY may instead name a raw public key or
-# the operator.pub file `avpn init` writes into the bundles.
-OPERATOR_KEY = Path(os.environ.get("AVPN_OPERATOR_KEY", VAULT / "operator-mldsa65.pub"))
-OPERATOR_ENVELOPE = Path(os.environ.get("AVPN_MESH_ENVELOPE", VAULT / "operator-mldsa65.sealed.json"))
+# (managed_profile.HardwareOperator). CPVPN_OPERATOR_KEY may instead name a raw public key or
+# the operator.pub file `cypherpunk init` writes into the bundles.
+OPERATOR_KEY = Path(os.environ.get("CPVPN_OPERATOR_KEY", VAULT / "operator-mldsa65.pub"))
+OPERATOR_ENVELOPE = Path(os.environ.get("CPVPN_MESH_ENVELOPE", VAULT / "operator-mldsa65.sealed.json"))
 # The role its envelope is bound to: the operator's (HardwareOperator) or a separately
 # sealed mesh key (keyguard mesh-seal).
 OPERATOR_ROLE = os.environ.get(
-    "AVPN_MESH_ROLE",
+    "CPVPN_MESH_ROLE",
     "operator-mldsa65" if OPERATOR_ENVELOPE.name == "operator-mldsa65.sealed.json" else "mesh-operator",
 )
 MLDSA65_PUBLIC = 1952
@@ -108,8 +108,8 @@ def member_id(public_key_bytes: bytes) -> str:
 
 def load_operator_key(path: Path | None = None) -> bytes:
     """The member's public identity: the raw ML-DSA-65 public key of the operator that
-    `avpn init` made, read from the vault's operator-mldsa65.pub, or from the operator.pub
-    JSON (schema 2 or 3) that `avpn init` writes into the bundles.
+    `cypherpunk init` made, read from the vault's operator-mldsa65.pub, or from the operator.pub
+    JSON (schema 2 or 3) that `cypherpunk init` writes into the bundles.
 
     The matching secret stays sealed under the hardware token; this file is
     public. Refuse anything that is not a private, user-owned file.
@@ -459,7 +459,7 @@ def offer_plan() -> list[dict]:
 
 
 def cmd_offer(args) -> dict:
-    """`avpn mesh offer`: show the plan, or provision with --apply."""
+    """`cypherpunk mesh offer`: show the plan, or provision with --apply."""
     if args.guided or not args.apply:
         return {
             "ok": True,
@@ -485,9 +485,9 @@ def cmd_offer(args) -> dict:
             "ok": False,
             "error": "ExitRequiresAcknowledgement",
             "hint": "an exit sees destinations and draws abuse complaints; re-run with "
-            "--i-understand-exit-risk after reading `avpn help mesh-exit`",
+            "--i-understand-exit-risk after reading `cypherpunk help mesh-exit`",
         }
-    name = args.name or f"avpn-mesh-{tier['slug']}"
+    name = args.name or f"cpvpn-mesh-{tier['slug']}"
     cmd = [CLOUD, *tier["provision"], "--apply", "--name", name, "--yes"]
     if args.dry_run:
         return {"ok": True, "rows": [{"label": "plan", "value": " ".join(cmd)}]}
@@ -504,7 +504,7 @@ def build_descriptor(args, tier: dict, name: str) -> dict:
     """A descriptor for the newly provisioned node, signed with the operator key.
 
     The node key is the server's own ML-DSA-65 key from its enrollment bundle;
-    until the enroll flow returns it through avpn-cloud, the descriptor carries
+    until the enroll flow returns it through cpvpn-cloud, the descriptor carries
     the operator key as a placeholder and is marked unpublished.
     """
     op_key = load_operator_key()
@@ -545,7 +545,7 @@ def cmd_publish(args) -> dict:
     """
     node_desc = MESH_DIR / "node.json"
     if not node_desc.exists():
-        return {"ok": False, "error": "NoNode", "hint": "run avpn mesh offer first"}
+        return {"ok": False, "error": "NoNode", "hint": "run cypherpunk mesh offer first"}
     d = json.loads(node_desc.read_text())
     if getattr(args, "gateway_key", None):
         d = attach_gateway(d, args.gateway_key)
@@ -567,15 +567,15 @@ def cmd_publish(args) -> dict:
         }
     # The operator ML-DSA key is sealed under the hardware credential and is
     # only unsealed in memory for one signing operation, exactly as in
-    # `avpn init`: keyguard mesh-sign does one PIN + touch, signs the
+    # `cypherpunk init`: keyguard mesh-sign does one PIN + touch, signs the
     # canonical descriptor, and returns it as the last JSON stdout line,
     # together with the FIDO2 membership assertion over the same bytes.
     if not OPERATOR_ENVELOPE.exists():
         return {
             "ok": False,
             "error": "NoSealedOperatorKey",
-            "hint": f"no sealed operator key at {OPERATOR_ENVELOPE}: `avpn init --vault {VAULT}` creates it "
-            "on its first signature (or point AVPN_MESH_ENVELOPE at one made by keyguard.py mesh-seal)",
+            "hint": f"no sealed operator key at {OPERATOR_ENVELOPE}: `cypherpunk init --vault {VAULT}` creates it "
+            "on its first signature (or point CPVPN_MESH_ENVELOPE at one made by keyguard.py mesh-seal)",
         }
     MESH_DIR.mkdir(parents=True, exist_ok=True)
     tmp = MESH_DIR / ".publish.tmp"
@@ -647,7 +647,7 @@ def cmd_publish(args) -> dict:
 
 
 def parse_last_json(stdout: str) -> dict:
-    """The avpn helper contract: the LAST stdout line that starts with '{' is
+    """The cypherpunk helper contract: the LAST stdout line that starts with '{' is
     the JSON result; earlier lines are human-facing logs."""
     for line in reversed(stdout.strip().splitlines()):
         line = line.strip()
@@ -821,7 +821,7 @@ def beacon_call(entry, method, path, body=b""):
     if (method, path) != ("GET", "/descriptors") and not gateway_verified(entry):
         # Unverified, a route may only fetch the public directory (which is how its key
         # gets verified): anything else could be linked by a gateway that gave this member
-        # its own key. `avpn mesh nodes --fetch` checks the key against other beacons.
+        # its own key. `cypherpunk mesh nodes --fetch` checks the key against other beacons.
         raise GatewayKeyRefused("this oblivious route's gateway key is not verified yet; fetch descriptors first")
     import ohttp
 
@@ -909,7 +909,7 @@ def fetch_from_beacons() -> int:
 
 
 def cmd_identity(_args) -> dict:
-    """`avpn mesh identity`: this member's ID and key."""
+    """`cypherpunk mesh identity`: this member's ID and key."""
     mid = member_id(load_operator_key())
     return {
         "ok": True,
@@ -951,7 +951,7 @@ def concentration(nodes: list[dict]) -> list[dict]:
 
 
 def cmd_nodes(args) -> dict:
-    """`avpn mesh nodes`: the directory (optionally fetched from beacons first)."""
+    """`cypherpunk mesh nodes`: the directory (optionally fetched from beacons first)."""
     if args.fetch:
         fetch_from_beacons()
     nodes = load_directory()
@@ -967,12 +967,12 @@ def cmd_nodes(args) -> dict:
     return {
         "ok": True,
         "rows": (rows + concentration(nodes))
-        or [{"label": "empty", "value": "no descriptors yet; avpn mesh nodes --fetch, or offer your first node"}],
+        or [{"label": "empty", "value": "no descriptors yet; cypherpunk mesh nodes --fetch, or offer your first node"}],
     }
 
 
 def cmd_chain(args) -> dict:
-    """`avpn mesh chain`: pick a diverse chain from the directory."""
+    """`cypherpunk mesh chain`: pick a diverse chain from the directory."""
     try:
         own = member_id(load_operator_key())
     except (OSError, ValueError):
@@ -1000,7 +1000,7 @@ def cmd_chain(args) -> dict:
         return {"ok": True, "rows": rows}
     # Enrollment itself goes through the existing flow: request/init/enroll,
     # one PIN + touch, keys never leave devices. The mesh planner emits the
-    # plan; avpn init consumes it.
+    # plan; cypherpunk init consumes it.
     plan = MESH_DIR / "chain-plan.json"
     plan.parent.mkdir(parents=True, exist_ok=True)
     plan.write_text(json.dumps({"schema": SCHEMA, "chain": chain}))
@@ -1009,7 +1009,7 @@ def cmd_chain(args) -> dict:
 
 
 def cmd_quota(_args) -> dict:
-    """`avpn mesh quota`: credits held and spent this epoch."""
+    """`cypherpunk mesh quota`: credits held and spent this epoch."""
     q = quota_view()
     return {
         "ok": True,
@@ -1027,7 +1027,7 @@ def cmd_quota(_args) -> dict:
 
 def main() -> int:
     """Command-line entry point."""
-    p = argparse.ArgumentParser(prog="avpn-mesh")
+    p = argparse.ArgumentParser(prog="cpvpn-mesh")
     p.add_argument("--json", action="store_true")
     sub = p.add_subparsers(dest="cmd", required=True)
 

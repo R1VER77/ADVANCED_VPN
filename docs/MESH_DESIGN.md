@@ -1,16 +1,16 @@
-# AVPN/Mesh — Design
+# CPVPN/Mesh — Design
 
 **A community-owned, post-quantum, per-hop-defended WireGuard mesh VPN.**
-Evolution of ADVANCED_VPN 0.7.0. Status: core scaffolding and multi-member data-plane fan-in landed (see
+Evolution of cypherpunk_vpn 0.7.0. Status: core scaffolding and multi-member data-plane fan-in landed (see
 *Implementation status* at the end).
 
 ## 1. Summary
 
-AVPN/Mesh turns ADVANCED_VPN from a single-operator VPN into a **community
+CPVPN/Mesh turns cypherpunk_vpn from a single-operator VPN into a **community
 mesh**: every member contributes at least one server (an always-free cloud VM
 is enough), and in return can build multi-hop chains across nodes contributed
 by other members, browsable and selectable from the CLI. It keeps everything
-ADVANCED_VPN already does (post-quantum authentication, HTTP/3 carrier
+cypherpunk_vpn already does (post-quantum authentication, HTTP/3 carrier
 camouflage, fail-closed no-retained-data, hardware-sealed keys), keeps the
 WireGuard/GotaTun carrier, and adds:
 
@@ -42,10 +42,10 @@ There is **no account number, no user record, no ledger anywhere**. A member
 *is* a key held by a hardware device:
 
 - **Preferred: Nitrokey** — open source, and the same FIDO2 hmac-secret
-  credential class ADVANCED_VPN already seals client keys with.
+  credential class cypherpunk_vpn already seals client keys with.
 - **Accepted: any capable hardware token** that can generate and hold the
   required keys (FIDO2 hmac-secret for the Ed25519 membership credential; the
-  operator ML-DSA-65 key sealed under it, exactly as `avpn init` does today).
+  operator ML-DSA-65 key sealed under it, exactly as `cypherpunk init` does today).
 
 The device private key never leaves the token. Everything the mesh knows about
 a member is derived from public material: the **member ID** is `!xxxxxxxx`,
@@ -93,7 +93,7 @@ device itself:
 
 ## 3. Gap analysis vs Mullvad and IVPN (2025–2026)
 
-| Gap in commercial VPNs | AVPN/Mesh answer |
+| Gap in commercial VPNs | CPVPN/Mesh answer |
 |---|---|
 | All relays provider-operated | Every member contributes ≥1 server; chains span members |
 | Multihop under one legal entity | Chain builder enforces distinct operator, provider **and** country per hop |
@@ -115,7 +115,7 @@ device itself:
   chaff. Honestly bounded: a global passive adversary with unlimited
   retraining remains catastrophic for any low-latency system; per-hop defense
   raises cost, it does not yield mixnet-grade unlinkability. For async traffic,
-  the mix lane (`avpn mix`) does: measured 10.7% vs 88.2% sender
+  the mix lane (`cypherpunk mix`) does: measured 10.7% vs 88.2% sender
   identification (chance 10%, post-quantum Sphinx, `MIX_LANE.json`).
 - **A4 active attacker**: timing watermarks (RAINBOW/SWIRL) destroyed only by
   re-shaping at an intermediate hop — a per-hop defense exists precisely
@@ -156,8 +156,8 @@ not the payload austerity:
 > **Membership = one contributed relay-capable server**, anchored to your
 > hardware device. An always-free cloud VM suffices.
 
-`avpn mesh offer --guided` ranks always-free providers by free egress, checks
-your sign-ins, provisions through the existing `avpn cloud` machinery,
+`cypherpunk mesh offer --guided` ranks always-free providers by free egress, checks
+your sign-ins, provisions through the existing `cypherpunk cloud` machinery,
 hardens (`retention.py`), and publishes the descriptor — or keeps it private:
 
 | Rank | Provider | Free egress | Role fit |
@@ -308,30 +308,30 @@ correlation); endpoint compromise; browser fingerprinting; a cloud provider's
 metadata on its own VM; exit operators' legal exposure; gossip metadata
 between members (beacon queries themselves can go through an oblivious relay,
 see §11). Stated in
-`avpn help threat-model`, not buried.
+`cypherpunk help threat-model`, not buried.
 
 ## 11. Implementation status
 
 | Component | Where | Status |
 |---|---|---|
-| Constant-rate bidirectional stream (`stream_grid` + `cover`) + 4 rate classes (`metered`/`standard`/`fast`/`line`) with staggered multi-slot timers | `src/daita.rs`, `vendor/gotatun/src/device/daita/`, `src/bin/advanced-vpn-wireguard.rs` | landed; `balanced` bundles refused; 0–3.7% idle-vs-busy wire rate change (`docs/evidence/RATE_CLASSES.json`) |
-| Multi-member data-plane fan-in (`members[]` peer tables across cloak, WG, inner QUIC, and DNS) | `src/config.rs`, `src/tls.rs`, `src/run.rs`, `src/cloak.rs`, `src/bin/advanced-vpn-cloak.rs`, `src/bin/advanced-vpn-wireguard.rs`, `tools/managed_profile.py` | landed (`mesh_bundles` issues N independent client bundles sharing one relay/exit peer table) |
-| Censorship ladder: QUIC/HTTP/3 cloak + automatic TCP/TLS 1.3 fallback + realistic HTML5 decoy origin | `src/cloak.rs`, `src/bin/advanced-vpn-cloak.rs`, `tools/avpnctl.py`, `tools/cloud.py` | landed (UDP 443 primary, automatic TCP 443 fallback in 2 s when UDP is blocked, 10 s QUIC recovery probe, `200 OK` HTML5 decoy page) |
-| Signed local DNS blocklist (`NXDOMAIN` before upstream DoT) | `src/bin/advanced-vpn-dns.rs`, `tools/managed_profile.py`, `tools/avpnctl.py` | landed (`avpn init --dns-blocklist FILE`) |
+| Constant-rate bidirectional stream (`stream_grid` + `cover`) + 4 rate classes (`metered`/`standard`/`fast`/`line`) with staggered multi-slot timers | `src/daita.rs`, `vendor/gotatun/src/device/daita/`, `src/bin/cypherpunk-vpn-wireguard.rs` | landed; `balanced` bundles refused; 0–3.7% idle-vs-busy wire rate change (`docs/evidence/RATE_CLASSES.json`) |
+| Multi-member data-plane fan-in (`members[]` peer tables across cloak, WG, inner QUIC, and DNS) | `src/config.rs`, `src/tls.rs`, `src/run.rs`, `src/cloak.rs`, `src/bin/cypherpunk-vpn-cloak.rs`, `src/bin/cypherpunk-vpn-wireguard.rs`, `tools/managed_profile.py` | landed (`mesh_bundles` issues N independent client bundles sharing one relay/exit peer table) |
+| Censorship ladder: QUIC/HTTP/3 cloak + automatic TCP/TLS 1.3 fallback + realistic HTML5 decoy origin | `src/cloak.rs`, `src/bin/cypherpunk-vpn-cloak.rs`, `tools/cypherpunkctl.py`, `tools/cloud.py` | landed (UDP 443 primary, automatic TCP 443 fallback in 2 s when UDP is blocked, 10 s QUIC recovery probe, `200 OK` HTML5 decoy page) |
+| Signed local DNS blocklist (`NXDOMAIN` before upstream DoT) | `src/bin/cypherpunk-vpn-dns.rs`, `tools/managed_profile.py`, `tools/cypherpunkctl.py` | landed (`cypherpunk init --dns-blocklist FILE`) |
 | Member/node identity (hardware-anchored) | `src/mesh/identity.rs` | landed |
 | Descriptor schema + validation | `src/mesh/descriptor.rs`, `tools/mesh.py` | landed |
 | Directory + diversity chain selection | `src/mesh/directory.rs`, `tools/mesh.py` | landed |
 | Contribution credits | `src/mesh/tokens.rs`, `tools/mesh_tokens.py`, `tools/mesh.py` | interim verifier landed: Chaum blind RSA-FDH credits in the Python control plane (unlinkable issue/spend, double-spend ledger, fail-closed); `tokens.rs` stays fail-closed until the VOPRF verifier is vendored |
-| `avpn mesh` CLI | `src/bin/avpn/mesh.rs`, `tools/mesh.py` | landed (nodes/chain/offer/quota/identity/publish) |
-| `avpn-mesh` launcher | `tools/install.py` | landed (user wrapper + system launcher, hash-locked venv) |
+| `cypherpunk mesh` CLI | `src/bin/cypherpunk/mesh.rs`, `tools/mesh.py` | landed (nodes/chain/offer/quota/identity/publish) |
+| `cpvpn-mesh` launcher | `tools/install.py` | landed (user wrapper + system launcher, hash-locked venv) |
 | WF simulation | `tools/mesh_wf_sim.py` | landed |
 | Gossip transport + beacons | `tools/mesh.py`, `tools/mesh_beacon.py` | landed: store-and-forward gossip with TTL hop counter, dedup, per-member rate limits, auto-ban, anti-amplification (fixed-shape small responses; POSTs never trigger data-plane traffic) |
-| Descriptor signing via hardware unseal | `tools/keyguard.py`, `tools/mesh.py` | landed: `avpn mesh publish` signs through the sealed envelope (one PIN + touch per publish), self-checks the signed descriptor, and gossips it; unsigned publishing stays refused |
+| Descriptor signing via hardware unseal | `tools/keyguard.py`, `tools/mesh.py` | landed: `cypherpunk mesh publish` signs through the sealed envelope (one PIN + touch per publish), self-checks the signed descriptor, and gossips it; unsigned publishing stays refused |
 | Ephemeral defense database (DAITA-v2-style) | `tools/defense_db.py`, `src/daita.rs` (`DefenseDb`), carrier `defense_db` | landed: rotating randomized strong-posture parameterizations, fail-closed validation mirrored in Rust and Python; no profile in force refuses the run |
 | Per-hop shaping (server↔server links) | `src/link.rs`, `src/run.rs`, `tools/managed_profile.py` (`link.kem.json`) | landed in v0.8.0: paced, encrypted constant-rate links between every pair of consecutive servers, per-link PSK sealed to each device's hybrid KEM key; measured 0.0–0.1% idle-vs-busy change on the link into the exit (`RATE_CLASSES.json`, `inner_link`). (v0.7.0 listed "inter-relay chaff" here: the carrier only ever ran client↔entry, so that row was wrong.) |
-| I2P front | `tools/i2p.py`, `src/cloak.rs` (front mode), `tools/avpnctl.py` (front table, `advanced-vpn-i2p` user) | landed in v0.9.0: the client reaches the entry only through I2P; the entry never exchanged a packet with the client in a private I2P network, and only the I2P router left the client (`I2P_FRONT.json`). |
-| Mix lane | `tools/mix.py`, `avpn mix`, Katzenpost v0.0.110 (separate, unmodified) | landed in v0.9.0: a mixnet client inside the protected namespace; against a global passive adversary with live websites, 10.7% sender identification vs 88.2% on a low-latency path, chance 10%, with X-Wing (post-quantum) Sphinx (`MIX_LANE.json`). Mesh nodes running mixnet nodes is future work. |
-| Self-healing chains: standby exits, failover, rotation | `src/run.rs` (`NextHops`), `tools/managed_profile.py`, `avpn init --standby-exit` | landed for single-operator chains: failover 4.2 s in the lab with no leak, rotation within a signed window, entry fixed as the guard (`FAILOVER.json`); mesh relays do not fail over between members' exits yet |
+| I2P front | `tools/i2p.py`, `src/cloak.rs` (front mode), `tools/cypherpunkctl.py` (front table, `cypherpunk-vpn-i2p` user) | landed in v0.9.0: the client reaches the entry only through I2P; the entry never exchanged a packet with the client in a private I2P network, and only the I2P router left the client (`I2P_FRONT.json`). |
+| Mix lane | `tools/mix.py`, `cypherpunk mix`, Katzenpost v0.0.110 (separate, unmodified) | landed in v0.9.0: a mixnet client inside the protected namespace; against a global passive adversary with live websites, 10.7% sender identification vs 88.2% on a low-latency path, chance 10%, with X-Wing (post-quantum) Sphinx (`MIX_LANE.json`). Mesh nodes running mixnet nodes is future work. |
+| Self-healing chains: standby exits, failover, rotation | `src/run.rs` (`NextHops`), `tools/managed_profile.py`, `cypherpunk init --standby-exit` | landed for single-operator chains: failover 4.2 s in the lab with no leak, rotation within a signed window, entry fixed as the guard (`FAILOVER.json`); mesh relays do not fail over between members' exits yet |
 | Own node as entry + legal spheres | `src/mesh/directory.rs`, `tools/mesh.py`, `tools/providers.py` | landed: the member's own node is its entry; the exit must answer to another legal sphere than the entry (US clouds = one sphere); Rust and Python run one shared fixture (`tools/testdata/chain_selection.json`) |
 | Oblivious control plane | `tools/ohttp.py`, `tools/ohttp_relay.py`, beacon `/ohttp` | landed: beacon queries through a relay of another operator, sealed with PQ HPKE (ML-KEM-768 + X25519); RFC 9458 design, not wire-compatible (`OHTTP_LAB.json`) |
 | 100-site WF simulation + 30-site namespace WF lab | `docs/evidence/MESH_WF_SIM.json`, `docs/evidence/DAITA_LAB.json`, `docs/evidence/RATE_CLASSES.json` | landed (1.4–2.2% vs 1% chance in 100-site exit-vantage sim; 3.3% vs 3.3% chance at fixed 6 s window in 30-site namespace lab) |

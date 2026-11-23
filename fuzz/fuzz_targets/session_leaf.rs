@@ -1,7 +1,7 @@
 //! A hop verifies the leaf certificate a client presents (hardware-bound sessions).
 #![no_main]
-use advanced_vpn::config::PeerDevice;
-use advanced_vpn::session_auth::verify;
+use cypherpunk_vpn::config::PeerDevice;
+use cypherpunk_vpn::session_auth::verify;
 use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {

@@ -1,6 +1,6 @@
 # Keys
 
-- Every device generates its own keys (`avpn request`). The operator only signs public keys.
+- Every device generates its own keys (`cypherpunk request`). The operator only signs public keys.
 - **Protection at rest:**
   - Nitrokey FIDO2 hmac-secret envelopes;
   - systemd-creds sealed to host+TPM2 when the TPM is usable;

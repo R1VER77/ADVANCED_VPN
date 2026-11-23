@@ -19,7 +19,7 @@ import time
 import bootguard_vm as guard
 import vm_validation as vm
 
-UNITS = ("advanced-vpn.service", "advanced-vpn-guard.service", "cypherpunk-vpn-controller.service")
+UNITS = ("cypherpunk-vpn.service", "cypherpunk-vpn-guard.service", "cypherpunk-vpn-controller.service")
 PACKAGE_ENV = {"DEBIAN_FRONTEND": "noninteractive", "PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C.UTF-8"}
 RPM_ADMIN_HOOK = "/usr/libexec/qemu-ga/fsfreeze-hook.d/cypherpunk-validation-exec"
 
@@ -62,7 +62,7 @@ def rpm_version_checks(agent, work):
     if code:
         raise RuntimeError("guest RPM compatibility dependencies failed")
     script = """import json,os,subprocess,sys
-sys.path.insert(0,"/opt/advanced-vpn/current/tools")
+sys.path.insert(0,"/opt/cypherpunk-vpn/current/tools")
 import native_package
 cases=[("0\\t1.2.4\\t1","newer"),("1\\t1.0.0\\t1","newer"),
        ("0\\t1.2.3\\t2","newer"),("0\\t1.2.3\\t1","allowed"),
@@ -78,7 +78,7 @@ for installed,expected in cases:
 print(json.dumps(dict(status="passed_native_rpm_evr",cases=len(cases))))
 """
     code, out, err = agent.run(
-        ["/opt/advanced-vpn/current/venv/bin/python3", "-B", "-E", "-s", "-c", script], timeout=120, check=False
+        ["/opt/cypherpunk-vpn/current/venv/bin/python3", "-B", "-E", "-s", "-c", script], timeout=120, check=False
     )
     (work / "rpm-evr.log").write_text(out + err)
     if code:
@@ -343,7 +343,7 @@ def run(
                 "-t",
                 "ext4",
                 "-L",
-                "avpnpkg",
+                "cpvpnpkg",
                 "-d",
                 str(payload),
                 str(work / "pkg.img"),
@@ -419,14 +419,14 @@ def run(
         (work / "install.log").write_text(out + err)
         if code:
             raise RuntimeError("native installation failed; see install.log")
-        first = agent.run(["/usr/bin/readlink", "/opt/advanced-vpn/current"])[1].strip()
+        first = agent.run(["/usr/bin/readlink", "/opt/cypherpunk-vpn/current"])[1].strip()
         state = units(agent)
         if any(row["active"] == "active" or row["enabled"] == "enabled" for row in state.values()):
             raise RuntimeError("installation activated a controller or guard")
-        versions = {name: agent.run(["/usr/bin/" + name, "--version"])[1].strip() for name in ("avpn", "cypherpunk")}
-        if versions["avpn"] != versions["cypherpunk"]:
-            raise RuntimeError("command aliases changed behavior")
-        guard.put(agent, "/etc/advanced-vpn/validation-private/monotonic-floor", b"9001\n", "0600")
+        versions = {name: agent.run(["/usr/bin/" + name, "--version"])[1].strip() for name in ("cypherpunk",)}
+        if not versions["cypherpunk"].startswith("cypherpunk "):
+            raise RuntimeError("installed command failed its version check")
+        guard.put(agent, "/etc/cypherpunk-vpn/validation-private/monotonic-floor", b"9001\n", "0600")
         result["phases"]["install"] = dict(slot=first, units=state, versions=versions)
         if downgrade_package:
             # dpkg -i bypasses apt's no-downgrade policy; the package's own
@@ -440,7 +440,7 @@ def run(
                 raise RuntimeError("package downgrade was not refused; see downgrade.log")
             if "Refusing package downgrade" not in (out + err):
                 raise RuntimeError("downgrade refusal did not come from the package guard")
-            if agent.run(["/usr/bin/readlink", "/opt/advanced-vpn/current"])[1].strip() != first:
+            if agent.run(["/usr/bin/readlink", "/opt/cypherpunk-vpn/current"])[1].strip() != first:
                 raise RuntimeError("refused downgrade changed the selected slot")
             query = ["/usr/bin/dpkg-query", "-W", "-f", "${Version}", "cypherpunk-vpn"]
             if family == "rpm":
@@ -453,18 +453,18 @@ def run(
         (work / "upgrade.log").write_text(out + err)
         if code:
             raise RuntimeError("native replacement failed; see upgrade.log")
-        second = agent.run(["/usr/bin/readlink", "/opt/advanced-vpn/current"])[1].strip()
+        second = agent.run(["/usr/bin/readlink", "/opt/cypherpunk-vpn/current"])[1].strip()
         if first == second:
             raise RuntimeError("replacement did not select a new slot")
-        agent.run(["/usr/bin/test", "-f", "/opt/advanced-vpn/" + first + "/bin/avpn"])
+        agent.run(["/usr/bin/test", "-f", "/opt/cypherpunk-vpn/" + first + "/bin/cypherpunk"])
         result["phases"]["replace"] = dict(slot=second, previous_retained=True)
         # Damage only replaceable code; the authenticated package payload is intact.
-        agent.sh("printf '\\n# injected VM corruption\\n' >> /opt/advanced-vpn/current/tools/controller_status.py")
+        agent.sh("printf '\\n# injected VM corruption\\n' >> /opt/cypherpunk-vpn/current/tools/controller_status.py")
         code, out, err = install_candidate(agent, guest_package, family)
         (work / "repair.log").write_text(out + err)
         if code:
             raise RuntimeError("damaged-slot repair failed; see repair.log")
-        receipt = json.loads(agent.run(["/bin/cat", "/opt/advanced-vpn/TRANSACTION.json"])[1])
+        receipt = json.loads(agent.run(["/bin/cat", "/opt/cypherpunk-vpn/TRANSACTION.json"])[1])
         if receipt.get("unusable_previous") != second.split("/", 1)[1] or receipt.get("phase") != "committed":
             raise RuntimeError("repair did not record damaged-slot exclusion")
         result["phases"]["damaged_slot_repair"] = receipt
@@ -479,8 +479,8 @@ def run(
         if controller_client:
             result["phases"]["controller_boundary"] = controller_checks(agent, work)
         result["phases"]["positive_control"] = probe(agent, work, True)
-        interpreter = "/opt/advanced-vpn/current/venv/bin/python3"
-        tools = "/opt/advanced-vpn/current/tools"
+        interpreter = "/opt/cypherpunk-vpn/current/venv/bin/python3"
+        tools = "/opt/cypherpunk-vpn/current/tools"
         prefix = "import sys; sys.path.insert(0," + repr(tools) + "); import guard_policy; "
         agent.run([interpreter, "-B", "-E", "-s", "-c", prefix + "guard_policy.arm(apply=True)"])
         removal = (
@@ -493,24 +493,24 @@ def run(
         if not code:
             raise RuntimeError("removal succeeded while persistent protection was armed")
         agent.run(["/usr/bin/test", "-x", "/usr/libexec/cypherpunk-vpn-bootguard"])
-        agent.run(["/usr/bin/test", "-x", "/opt/advanced-vpn/bin/avpn"])
+        agent.run(["/usr/bin/test", "-x", "/opt/cypherpunk-vpn/bin/cypherpunk"])
         result["phases"]["guarded_removal_refused"] = dict(exit_code=code, **probe(agent, work, False))
         # This is the trial's explicit cleanup approval, inside the disposable VM.
         agent.run([interpreter, "-B", "-E", "-s", "-c", prefix + "guard_policy.disarm()"])
-        agent.run(["/usr/sbin/nft", "delete", "table", "inet", "advanced_vpn"])
-        agent.run(["systemctl", "stop", "advanced-vpn-guard.service", "cypherpunk-vpn-controller.service"])
+        agent.run(["/usr/sbin/nft", "delete", "table", "inet", "cypherpunk_vpn"])
+        agent.run(["systemctl", "stop", "cypherpunk-vpn-guard.service", "cypherpunk-vpn-controller.service"])
         code, out, err = agent.run(package_command(removal, family), check=False, timeout=600)
         (work / "removal.log").write_text(out + err)
         if code:
             raise RuntimeError("explicitly recovered package removal failed; see removal.log")
         for path in (
-            "/opt/advanced-vpn",
+            "/opt/cypherpunk-vpn",
             "/usr/bin/cypherpunk",
             "/usr/libexec/cypherpunk-vpn-bootguard",
             "/etc/dbus-1/system.d/org.cypherpunk_vpn.Controller1.conf",
         ):
             agent.run(["/usr/bin/test", "!", "-e", path])
-        if agent.run(["/bin/cat", "/etc/advanced-vpn/validation-private/monotonic-floor"])[1] != "9001\n":
+        if agent.run(["/bin/cat", "/etc/cypherpunk-vpn/validation-private/monotonic-floor"])[1] != "9001\n":
             raise RuntimeError("private state changed during application removal")
         result["phases"]["inactive_removal"] = dict(private_fixture_preserved=True)
         boot = guard.reboot(agent, work)

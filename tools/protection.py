@@ -20,7 +20,7 @@ import struct
 import threading
 import time
 
-PROBE_NAME = "probe.avpn.invalid"
+PROBE_NAME = "probe.cpvpn.invalid"
 PROBE_SERVER = ("10.77.0.1", 53)
 PROBE_EVERY = 5.0  # seconds between probes
 PROBE_TIMEOUT = 2.0
@@ -50,7 +50,7 @@ class PathProbe(threading.Thread):
     threads stay where they are."""
 
     def __init__(self, namespace_path, server=PROBE_SERVER, every=PROBE_EVERY, timeout=PROBE_TIMEOUT, clock=time.time):
-        super().__init__(daemon=True, name="avpn-path-probe")
+        super().__init__(daemon=True, name="cpvpn-path-probe")
         self.namespace_path, self.server, self.every, self.timeout, self.clock = (
             namespace_path,
             server,

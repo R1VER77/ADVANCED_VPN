@@ -1,6 +1,6 @@
 {
  "schema": 1,
- "version": "cf37580ee1c6bf037f1ffc8b21be7d774dbeb27a569b2832ed3894e99edb70fa",
+ "version": "14517525a02973ed66ad3d4e6ae88dbcd46095df7b5502cf194335773b6da17e",
  "documents": [
   {
    "title": "Terms of service",
@@ -309,7 +309,7 @@
       },
       {
        "k": "li",
-       "t": "The relay and exit services send their output to nowhere (StandardOutput=null, LogLevelMax=emerg in deploy/advanced-vpn*.service)."
+       "t": "The relay and exit services send their output to nowhere (StandardOutput=null, LogLevelMax=emerg in deploy/cypherpunk-vpn*.service)."
       },
       {
        "k": "li",
@@ -358,11 +358,11 @@
       },
       {
        "k": "li",
-       "t": "On the client, the signed chain profile you enrolled lives in /etc/advanced-vpn/enrolled."
+       "t": "On the client, the signed chain profile you enrolled lives in /etc/cypherpunk-vpn/enrolled."
       },
       {
        "k": "li",
-       "t": "On the operator's machine, the chains and the cloud server records live in ~/.config/advanced-vpn/."
+       "t": "On the operator's machine, the chains and the cloud server records live in ~/.config/cypherpunk-vpn/."
       },
       {
        "k": "li",
@@ -374,7 +374,7 @@
       },
       {
        "k": "li",
-       "t": "Keys are made on the device that uses them, in a vault at /etc/advanced-vpn/vault."
+       "t": "Keys are made on the device that uses them, in a vault at /etc/cypherpunk-vpn/vault."
       },
       {
        "k": "li",
@@ -390,7 +390,7 @@
       },
       {
        "k": "li",
-       "t": "Diagnostics. avpn status, avpn doctor and the desktop app show connection details to you. Running them sends nothing anywhere."
+       "t": "Diagnostics. cypherpunk status, cypherpunk doctor and the desktop app show connection details to you. Running them sends nothing anywhere."
       }
      ]
     },

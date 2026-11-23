@@ -8,7 +8,7 @@ without the hardware key. This applies to the basic flow of every supported key.
 At connect, one PIN and touch return the FIDO2 hmac-secret to the computer. It unseals a
 vault holding every long-term private key the client uses: the ML-DSA-65 TLS identities
 (`outer`, `middle`, `inner`), the WireGuard key and the cloak token derived from it
-(`tools/avpnctl.py`, `load_keys` → `memory_fd`). Malware on the computer at that moment can
+(`tools/cypherpunkctl.py`, `load_keys` → `memory_fd`). Malware on the computer at that moment can
 copy them and connect from anywhere, later, without the key. Entering the PIN on the device
 (Trezor, Ledger) protects the PIN, not these keys.
 
@@ -61,12 +61,12 @@ Ledger). That is the common ground.
 
 - **Code.** `tools/session_auth.py` (statement, extension, reference verifier);
   `managed_profile.authorize_session` (the connect's one PIN and touch also signs the
-  statement) and `refresh_leaves(session=...)`; `tools/avpnctl.py` asks again an hour
+  statement) and `refresh_leaves(session=...)`; `tools/cypherpunkctl.py` asks again an hour
   before a session ends and keeps the old leaves if nobody answers, so the hops refuse them
   when they expire: it fails closed. `src/session_auth.rs` verifies; `src/tls.rs`
   `authenticated` calls it for every peer with a pinned `peer_device`.
 - **Enrollment.** A client protected by a hardware key sends its credential's public key in
-  its request (`device_public`); `avpn init` pins it on every hop facing the client. A key
+  its request (`device_public`); `cypherpunk init` pins it on every hop facing the client. A key
   whose credential is neither ES256 nor EdDSA is refused then, with its algorithm named.
   Clients enrolled before this change, and software-protected ones, are unchanged: a
   client gains hardware-bound sessions when it is enrolled again with its key.
@@ -153,7 +153,7 @@ Free shapes), so its keys were plain root-only files: a disk snapshot or backup 
 Sealing with systemd's host key alone would not help, because that key sits on the same
 disk. The owner chose the strongest option that needs no new hardware and no spend:
 
-1. **Test the host first.** `avpn cloud host setup` (and `chain`) seal and open a throwaway
+1. **Test the host first.** `cypherpunk cloud host setup` (and `chain`) seal and open a throwaway
    credential with the host and TPM2 key. If that works, the keys are sealed to the TPM2 and
    the server restarts unattended. Otherwise they are locked to the operator.
 2. **Locked to the operator** (`--protect operator`, `managed_profile`, `keyguard.lock_bytes`):
@@ -162,12 +162,12 @@ disk. The owner chose the strongest option that needs no new hardware and no spe
    operator's unlock key (hybrid X25519 + ML-KEM-768, `keyguard.kem_seal`), bound to the
    server's role and identity certificates, and the wrapped copy travels in its public
    request.
-3. **The operator's unlock key** is made once in the Nitrokey vault (`avpn unlock-key`); its
+3. **The operator's unlock key** is made once in the Nitrokey vault (`cypherpunk unlock-key`); its
    private half is sealed under the vault's hmac-secret, like the operator's ML-DSA-65 key.
 4. **Unlocking:** the chain's one signing PIN and touch also unwraps every locked server's
    data key (`init --emit-unlock`), into memory only, and the chain hands each server its key
    over SSH on stdin before enrolling it. The server keeps it in `/run` (RAM) until the next
-   reboot. After a reboot it stays down until `avpn cloud unlock NAME` (PIN + touch) does the
+   reboot. After a reboot it stays down until `cypherpunk cloud unlock NAME` (PIN + touch) does the
    same again. The unwrap is bound to the operator's own copy of that server's request, so a
    compromised server cannot get another server's data key unwrapped for it.
 5. **Never weaker keys kept.** Keys that were plain, sealed with the host key alone, or locked

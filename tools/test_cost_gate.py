@@ -1,4 +1,4 @@
-"""`avpn init` signs a chain only against a stated bandwidth allowance or an accepted cost."""
+"""`cypherpunk init` signs a chain only against a stated bandwidth allowance or an accepted cost."""
 
 from pathlib import Path
 import re
@@ -7,15 +7,15 @@ import sys
 import tempfile
 import unittest
 
-AVPNCTL = Path(__file__).resolve().parent / "avpnctl.py"
-sys.path.insert(0, str(AVPNCTL.parent))
+CYPHERPUNKCTL = Path(__file__).resolve().parent / "cypherpunkctl.py"
+sys.path.insert(0, str(CYPHERPUNKCTL.parent))
 
 from rates import rate_cost_gib  # noqa: E402
 
 
 def init(d, *extra):
     return subprocess.run(
-        [sys.executable, AVPNCTL, "init", "--out", d / "bundles", "--exit", "192.0.2.10:443", "--relay",
+        [sys.executable, CYPHERPUNKCTL, "init", "--out", d / "bundles", "--exit", "192.0.2.10:443", "--relay",
          "192.0.2.11:443", "--hops", "2", "--request", "client=%s" % (d / "missing.req"), "--software-operator",
          d / "op", *extra],
         capture_output=True, text=True, timeout=120,
@@ -45,12 +45,12 @@ if __name__ == "__main__":
 
 class EveryInitCallerTests(unittest.TestCase):
     def test_every_tool_that_signs_a_chain_states_its_cost(self):
-        # A tool that runs `avpnctl init` without an allowance or an accepted cost is
+        # A tool that runs `cypherpunkctl init` without an allowance or an accepted cost is
         # refused at run time; tools outside CI (vm_validation) would only find out then.
         tools = Path(__file__).resolve().parent
         callers = []
         for f in sorted(tools.glob("*.py")):
-            if f.name.startswith("test_") or f.name == "avpnctl.py":
+            if f.name.startswith("test_") or f.name == "cypherpunkctl.py":
                 continue
             text = f.read_text()
             if re.search(r'"init",\s*(\n\s*)*"--out"', text):

@@ -8,7 +8,7 @@
 //   Copyright (c) Mullvad VPN AB. All rights reserved.
 //
 // SPDX-License-Identifier: MPL-2.0
-// Modified by the ADVANCED_VPN project: bounded the DAITA delay so strong-mode shaping
+// Modified by the cypherpunk_vpn project: bounded the DAITA delay so strong-mode shaping
 // cannot stall the carrier when the first hop is briefly unreachable. See third_party/SOURCES.json.
 
 use super::types::{Action, DecoyHeader, DelayState, ErrorAction, PacketCount, Result};
@@ -58,7 +58,7 @@ where
     /// When the decoy loop last ran (upstream builder leaves this at the epoch; set on use).
     #[builder(default = Instant::now())]
     last_decoy_activity: Instant,
-    /// ADVANCED_VPN strict shaping (see `DaitaSettings::strict`).
+    /// cypherpunk_vpn strict shaping (see `DaitaSettings::strict`).
     #[builder(default = false)]
     strict: bool,
 }

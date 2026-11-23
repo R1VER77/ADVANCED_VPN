@@ -233,7 +233,8 @@ def _rule_s9(path, number, line) -> list[dict]:
 
 
 def _finding(path, number, rule, message, text) -> dict:
-    return {"file": str(path), "line": number, "rule": rule, "message": message, "text": text[:160]}
+    rel = str(path.relative_to(ROOT)) if Path(path).is_relative_to(ROOT) else str(path)
+    return {"file": rel, "line": number, "rule": rule, "message": message, "text": text[:160]}
 
 
 def review(root: Path = None) -> dict:

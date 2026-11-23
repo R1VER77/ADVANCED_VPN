@@ -1,6 +1,6 @@
 # Post-quantum inventory
 
-Every asymmetric primitive in ADVANCED_VPN, the layer it protects, and what makes the
+Every asymmetric primitive in cypherpunk_vpn, the layer it protects, and what makes the
 post-quantum property hold. "Enforced" means a classical peer is refused, never accepted as
 a fallback, and a test fails if the refusal is removed (mutation-checked). Checked
 16 November 2026, with a hardware-boundary correction on 18 November.
@@ -22,7 +22,7 @@ the existing physical setup results do not establish an all-interface PQ claim.
 
 ## The claim
 
-**Every layer ADVANCED_VPN encrypts, authenticates or terminates uses hybrid post-quantum
+**Every layer cypherpunk_vpn encrypts, authenticates or terminates uses hybrid post-quantum
 key exchange (ML-KEM-768 with X25519) and refuses a classical key exchange rather than
 falling back. Authentication is a separate property:** post-quantum on the inner tunnels
 (ML-DSA-65 certificates) and on the cloak (protocol v2: both ends prove the enrolled
@@ -40,8 +40,8 @@ the cloak v2 composition is this project's own, tested but not independently rev
 | WireGuard carrier (GotaTun) | X25519 Noise IK, plus a 256-bit PSK sealed to each device by hybrid KEM | WireGuard keys + the PSK | `tools/keyguard.py` `kem_seal` (X25519 + ML-KEM-768) | a supplement: both QUIC layers inside carry the PQ claim on their own |
 | Links between servers | an ephemeral X25519 + ML-KEM-768 exchange inside the cells every 120 s (forward secret: ephemerals erased); AES-256-GCM | the link PSK (sealed by `kem_seal`) authenticates the exchange | `src/link.rs` (`Initiator`, `respond`, `session_keys`); packets only under exchanged keys | `a_recorded_link_reveals_no_packet_to_a_later_stolen_psk`, `a_packet_under_a_psk_only_key_is_never_forwarded` |
 | Cloak front (HTTP/3 and TCP/TLS camouflage) | browser-like offer; **a tunnel only over X25519MLKEM768** | protocol v2: both ends prove the member's 32-byte cloak key with a role-separated HMAC over the TLS exporter before any tunnel data or "connected" state (post-quantum: the exporter comes from the hybrid exchange, the proof is symmetric); the pinned ECDSA certificate is kept only as the camouflage's facade. v1 authenticated the server by that certificate alone | `src/cloak.rs` `role_proof`, `confirm_server`, `quic_hybrid`, `tls_hybrid`; schema-1 chains refused at connect (`CLOAK_V2_REQUIRED`) | `a_classical_key_exchange_never_becomes_a_tunnel`, `audit_v2_proofs_are_role_key_and_exporter_separated`, `audit_tcp_requires_one_well_formed_server_confirmation` |
-| Exit DNS, recursive mode (`--dns-recursive`, opt-in) | none: plain DNS from the exit to authoritative servers (exception 5) | DNSSEC, classical | `tools/exit_resolver.py` (Unbound), `advanced-vpn-dns` loopback-only | `test_exit_resolver.py`, `a_recursive_exit_never_sends_plain_dns_off_the_host`; live: 20/20 names, dnssec-failed.org refused |
-| Exit DNS upstream (DNS over TLS) | X25519MLKEM768 only; DNS fails closed otherwise | classical WebPKI (exception 4) | `advanced-vpn-dns` `upstream_tls` | `the_upstream_must_offer_hybrid_post_quantum_tls`; live: Cloudflare and Google answer, Quad9 does not |
+| Exit DNS, recursive mode (`--dns-recursive`, opt-in) | none: plain DNS from the exit to authoritative servers (exception 5) | DNSSEC, classical | `tools/exit_resolver.py` (Unbound), `cypherpunk-vpn-dns` loopback-only | `test_exit_resolver.py`, `a_recursive_exit_never_sends_plain_dns_off_the_host`; live: 20/20 names, dnssec-failed.org refused |
+| Exit DNS upstream (DNS over TLS) | X25519MLKEM768 only; DNS fails closed otherwise | classical WebPKI (exception 4) | `cypherpunk-vpn-dns` `upstream_tls` | `the_upstream_must_offer_hybrid_post_quantum_tls`; live: Cloudflare and Google answer, Quad9 does not |
 | Oblivious control plane | HPKE ML-KEM-768 + X25519 (`0x647A`) | gateway key | `tools/ohttp.py` | `test_ohttp.py` |
 | Hardware-bound sessions ([design](HARDWARE_BOUND_SESSIONS.md)) | — | the client's ML-DSA-65 identity **and** its FIDO2 key's statement (ES256 or EdDSA, classical), both required by every hop that pins the key | `tools/session_auth.py`, `src/session_auth.rs` | `test_session_auth.py`, `session_auth` Rust tests, `formal/session`; the hardware half is classical, so it adds protection against copied keys, not against a quantum forger, who still needs the ML-DSA-65 key |
 | Enrollment and signed bundles | hybrid KEM sealing | the enrolled FIDO2 credential's COSE signature **and** ML-DSA-65, both required; generic enrollment does not enforce Ed25519 | `tools/managed_profile.py`, `tools/keyguard.py` | `test_managed.py`; hardware/channel caveat above |
@@ -98,7 +98,7 @@ classical authentication that only an active, quantum-capable attacker could exp
    classical WebPKI certificates: an attacker who can forge their signatures at the time,
    which needs a quantum computer then, could impersonate the resolver and answer falsely.
    Closing it needs a post-quantum-authenticated resolver or gateway, not yet built.
-5. **The exit's own recursive resolver** (`avpn init --dns-recursive`, opt-in). Instead of one
+5. **The exit's own recursive resolver** (`cypherpunk init --dns-recursive`, opt-in). Instead of one
    public resolver that sees every name, the exit's Unbound asks the authoritative servers
    itself, with DNSSEC validation and QNAME minimisation. Those queries are plain DNS, neither
    encrypted nor post-quantum, because no authoritative DNS offers either; they leave from the
@@ -127,6 +127,6 @@ classical authentication that only an active, quantum-capable attacker could exp
 
 ## Not in the product
 
-- **Option E** (`crates/avpn-mix-lane`, `advanced-vpn-mixnode`): unshipped research. Its inner
+- **Option E** (`crates/cpvpn-mix-lane`, `cypherpunk-vpn-mixnode`): unshipped research. Its inner
   hops are X25519 by design, so it is excluded from the claim and never enabled by default.
 - Release and commit signing (FIDO2 Ed25519-SK) protect the supply chain, not traffic.

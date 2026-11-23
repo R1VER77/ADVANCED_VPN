@@ -73,7 +73,7 @@ except Exception:
 
 # KDF format pin: the info string and key-material layout the model abstracts.
 kdf_info_sample = (
-    b"advanced-vpn/hybrid-kem/v1|"
+    b"cypherpunk-vpn/hybrid-kem/v1|"
     + context_a
     + b"|"
     + hashlib.sha256(base64.b64decode(envelope["ephemeral"]) + base64.b64decode(envelope["mlkem"]) + public).digest()
@@ -84,7 +84,7 @@ results["kem_seal"] = dict(
     fields=sorted(envelope),
     kdf=dict(
         function="HKDF-SHA256, length 32, salt none",
-        info_format="b'advanced-vpn/hybrid-kem/v1|' + context + b'|' + sha256(ephemeral || mlkem_ct || recipient_public)",
+        info_format="b'cypherpunk-vpn/hybrid-kem/v1|' + context + b'|' + sha256(ephemeral || mlkem_ct || recipient_public)",
         info_hex_sample=kdf_info_sample.hex(),
         key_material="x25519_shared || mlkem768_shared (both shared secrets; the hybrid_compatibility abstraction)",
     ),

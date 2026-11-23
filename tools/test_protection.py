@@ -58,7 +58,7 @@ class Dns(unittest.TestCase):
         q = p.dns_query(0x1234)
         qid, flags, qd, an, ns, ar = struct.unpack("!HHHHHH", q[:12])
         self.assertEqual((qid, flags, qd, an, ns, ar), (0x1234, 0x0100, 1, 0, 0, 0))
-        self.assertEqual(q[12:], b"\x05probe\x04avpn\x07invalid\x00" + b"\x00\x01\x00\x01")
+        self.assertEqual(q[12:], b"\x05probe\x05cpvpn\x07invalid\x00" + b"\x00\x01\x00\x01")
         with self.assertRaises(ValueError):
             p.dns_query(70000)
 
@@ -130,7 +130,7 @@ class Retry(unittest.TestCase):
 
 
 class StatusFields(unittest.TestCase):
-    """avpnctl.verdict_fields: the supervisor's status files and probe, read for real."""
+    """cypherpunkctl.verdict_fields: the supervisor's status files and probe, read for real."""
 
     def setUp(self):
         import tempfile
@@ -151,16 +151,16 @@ class StatusFields(unittest.TestCase):
         os.utime(f, (now - age, now - age))
 
     def test_fresh_files_and_a_recent_probe_are_protected(self):
-        import avpnctl
+        import cypherpunkctl
 
         self.write("cloak", dict(connected=True))
         self.write("carrier", dict(handshake=True))
         probe = type("P", (), {"ok_at": 998.0})()
-        v = avpnctl.verdict_fields(p.Evidence(), probe, self.rt, supervising=True, now=1000.0)
+        v = cypherpunkctl.verdict_fields(p.Evidence(), probe, self.rt, supervising=True, now=1000.0)
         self.assertEqual((v["lifecycle"], v["protection"]), ("connected", "protected"))
 
     def test_a_stale_or_missing_file_or_no_probe_is_blocked(self):
-        import avpnctl
+        import cypherpunkctl
 
         cases = [
             (dict(connected=True), 0, dict(handshake=True), 0, None),  # no probe yet
@@ -176,7 +176,7 @@ class StatusFields(unittest.TestCase):
                     self.write("cloak", cloak, cage)
                 self.write("carrier", carrier, kage)
                 probe = type("P", (), {"ok_at": probe_at})()
-                v = avpnctl.verdict_fields(p.Evidence(), probe, self.rt, supervising=True, now=1000.0)
+                v = cypherpunkctl.verdict_fields(p.Evidence(), probe, self.rt, supervising=True, now=1000.0)
                 self.assertEqual(v["protection"], "blocked")
 
 

@@ -149,7 +149,7 @@ fn material(
 /// keepalive) re-learns the client's new address after a physical network change, so a
 /// handover does not renegotiate the chain. The QUIC idle timeout stays short (10 s) so
 /// a server frees a stale session quickly and the client can reconnect at once; keep-
-/// alives every 2 s hold the path open through NAT. See `avpn help threat-model`.
+/// alives every 2 s hold the path open through NAT. See `cypherpunk help threat-model`.
 pub fn transport(mtu: u16) -> Arc<TransportConfig> {
     let mut cc = quinn::congestion::NewRenoConfig::default();
     cc.initial_window(1 << 20);

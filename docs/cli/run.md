@@ -1,4 +1,4 @@
-# avpn run
+# cypherpunk run
 
 Run one program inside the protected network namespace. It can reach the internet
 only through the tunnel, and it uses the tunnel's DNS. The host resolver sockets are
@@ -6,7 +6,7 @@ hidden from it.
 
 ## Usage
 
-    sudo avpn run [--uid UID] [--gid GID] -- COMMAND [ARGS...]
+    sudo cypherpunk run [--uid UID] [--gid GID] -- COMMAND [ARGS...]
 
 ## Options
 
@@ -15,7 +15,7 @@ hidden from it.
 
 ## Example
 
-    sudo avpn run -- curl https://example.com
+    sudo cypherpunk run -- curl https://example.com
 
 ## What it changes
 

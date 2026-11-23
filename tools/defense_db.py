@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""defense-db: generate the ephemeral defense database (AVPN/Mesh, DAITA v2+).
+"""defense-db: generate the ephemeral defense database (CPVPN/Mesh, DAITA v2+).
 
-The carrier (advanced-vpn-wireguard) can run the full strong DAITA posture from
+The carrier (cypherpunk-vpn-wireguard) can run the full strong DAITA posture from
 a randomized parameterization instead of the shipped constants. This tool writes
 the rotation schedule: a sequence of profiles, each valid for one time window,
 each drawn within SAFE_RANGES. The posture is identical everywhere - netflow +

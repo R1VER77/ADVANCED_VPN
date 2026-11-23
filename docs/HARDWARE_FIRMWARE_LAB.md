@@ -62,7 +62,7 @@ GetInfo reports FIDO 2.3, hmac-secret, PIN/UV protocols 2 and 1, and ES256, EdDS
 ML-DSA-44 (COSE -48) credentials. Every operation passed on protocol 2.
 
 **Third operator half.** The lab runs a second instance on other ports
-(`AVPN_CTAPHID_PORTS`, its own flash file) as a separate key. It checks that
+(`CPVPN_CTAPHID_PORTS`, its own flash file) as a separate key. It checks that
 `keyguard enroll-pq-signer` refuses the key holding the operator's credential. It then
 creates the ML-DSA-44 credential on the second key, signs with all three halves (each key
 picked by the credential it holds), and requires refusal of a wrong message, a missing
@@ -105,10 +105,10 @@ verified offline Python runtime:
 ```sh
 .venv/bin/python -B tools/device_compatibility_lab.py \
   --backend solo1-pc \
-  --simulator /home/debian/vm/advanced-vpn/hardware-lab-20261118/solo-build-a/source/main \
+  --simulator /home/debian/vm/cypherpunk-vpn/hardware-lab-20261118/solo-build-a/source/main \
   --build-record docs/evidence/SOLO1_PC_BUILD_20261118.json \
-  --runtime /home/debian/vm/advanced-vpn/offline-package-20261117/runtime-31318 \
-  --out /home/debian/vm/advanced-vpn/hardware-lab-20261118/solo-next-trial
+  --runtime /home/debian/vm/cypherpunk-vpn/offline-package-20261117/runtime-31318 \
+  --out /home/debian/vm/cypherpunk-vpn/hardware-lab-20261118/solo-next-trial
 ```
 
 The output directory must not already exist. The local Docker image identified by

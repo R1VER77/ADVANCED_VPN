@@ -58,7 +58,7 @@ jobs:
           PY
           python3 tools/bundled_runtime.py --archive cpython.tar.gz --out offline-runtime
           mkdir dist
-          name=advanced-vpn-$TAG-x86_64-linux-gnu.tar.gz
+          name=cypherpunk-vpn-$TAG-x86_64-linux-gnu.tar.gz
           python3 tools/install.py --pack "dist/$name" --runtime offline-runtime
           # The one app file: controller, services and the desktop app.
           python3 tools/native_package.py --runtime offline-runtime --out native-package \
@@ -88,17 +88,17 @@ jobs:
           sudo modprobe nf_tables
           cd "$RUNNER_TEMP/pkg"
           sudo unshare -n ./install.sh --apply --role client --protect none --insecure-plaintext-keys
-          sudo avpn --version | grep -qx "avpn ${TAG#v}"
-          test "$(readlink -f "$(sudo sh -c 'command -v avpn')")" = "$(readlink -f /opt/advanced-vpn/current/bin/avpn)"
+          sudo cypherpunk --version | grep -qx "cypherpunk ${TAG#v}"
+          test "$(readlink -f "$(sudo sh -c 'command -v cypherpunk')")" = "$(readlink -f /opt/cypherpunk-vpn/current/bin/cypherpunk)"
           # The public request is handed to the user who ran sudo, in their home.
-          test "$(stat -c %U "$HOME/advanced-vpn-client.req")" = "$(id -un)"
-          sudo avpn --json info | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["info"]["role"] == "client", d'
-          test "$(systemctl is-enabled advanced-vpn.service || true)" = disabled
+          test "$(stat -c %U "$HOME/cypherpunk-vpn-client.req")" = "$(id -un)"
+          sudo cypherpunk --json info | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["info"]["role"] == "client", d'
+          test "$(systemctl is-enabled cypherpunk-vpn.service || true)" = disabled
           sudo unshare -n ./install.sh --apply --role client --protect none --insecure-plaintext-keys | grep -q "already has keys"
           # Removing this inactive test installation preserves the device's private state.
           sudo ./install.sh --apply --uninstall
-          test ! -e /opt/advanced-vpn
-          sudo test -e /etc/advanced-vpn/enrolled/request.json
+          test ! -e /opt/cypherpunk-vpn
+          sudo test -e /etc/cypherpunk-vpn/enrolled/request.json
       - name: Attest build provenance
         uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
         with:
@@ -132,31 +132,31 @@ jobs:
           Check where it came from: the package carries a signed build-provenance
           attestation (Sigstore) naming this repository, its release workflow and commit
           \`$GITHUB_SHA\`. Verify it with
-          \`gh attestation verify advanced-vpn-$TAG-x86_64-linux-gnu.tar.gz -R $GITHUB_REPOSITORY --signer-workflow $GITHUB_REPOSITORY/.github/workflows/release.yml\`.
+          \`gh attestation verify cypherpunk-vpn-$TAG-x86_64-linux-gnu.tar.gz -R $GITHUB_REPOSITORY --signer-workflow $GITHUB_REPOSITORY/.github/workflows/release.yml\`.
 
           Upgrading: every chain now pads every hop to constant cells, and a chain signed
-          by an earlier release is refused at connect. Re-sign it (\`avpn cloud chain --apply\`,
-          or \`avpn init\`) and enroll the new bundles with \`--replace\`.
+          by an earlier release is refused at connect. Re-sign it (\`cypherpunk cloud chain --apply\`,
+          or \`cypherpunk init\`) and enroll the new bundles with \`--replace\`.
 
           Servers now keep every log in RAM and refuse to start while any would reach the
-          disk (\`avpn help retention\`). Servers created by \`avpn cloud\` are hardened at first
-          boot; run \`avpn cloud host setup\` on others, or rebuild them fresh.
+          disk (\`cypherpunk help retention\`). Servers created by \`cypherpunk cloud\` are hardened at first
+          boot; run \`cypherpunk cloud host setup\` on others, or rebuild them fresh.
 
           The QUIC handshake between hops no longer names this tool (it offers HTTP/3's \`h3\`
           and no server name), and the client's link to the first hop now looks like HTTP/3 on
           UDP 443 instead of WireGuard. Every hop and the client must run the same release, and
           the first hop needs new keys: rebuild the chain from this package with
-          \`avpn cloud chain --apply\` (it opens UDP 443 and closes the old WireGuard port).
-          DAITA's FRONT decoys now pad every burst of traffic, and \`strong\` rounds every trace on its constant clock (\`avpn help threat-model\`).
+          \`cypherpunk cloud chain --apply\` (it opens UDP 443 and closes the old WireGuard port).
+          DAITA's FRONT decoys now pad every burst of traffic, and \`strong\` rounds every trace on its constant clock (\`cypherpunk help threat-model\`).
 
           Check the download: \`sha256sum -c SHA256SUMS\`. Then unpack it, and either
           install the command line for yourself (an operator machine) with
           \`./install.sh --user\`, or install the VPN system-wide (client or
           server) with \`sudo ./install.sh --apply --role client --protect nitrokey\`
-          (servers: \`--protect systemd-creds\`). That also puts \`avpn\` on root's PATH,
+          (servers: \`--protect systemd-creds\`). That also puts \`cypherpunk\` on root's PATH,
           creates the device's Nitrokey vault and generates its keys. The service is never
           enabled by the installer. The pinned Python runtime and hash-locked dependencies
           are bundled; installation needs neither host Python nor PyPI access. Verify the
           release provenance before executing the bundled interpreter or installer.
           NOTES
-          gh release create "$TAG" dist/* --verify-tag --title "ADVANCED_VPN $TAG" --notes-file notes.md
+          gh release create "$TAG" dist/* --verify-tag --title "cypherpunk_vpn $TAG" --notes-file notes.md

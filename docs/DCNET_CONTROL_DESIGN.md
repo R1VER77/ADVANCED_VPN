@@ -1,15 +1,15 @@
 > **Status (17 November 2026):** reference library and pad tools only; no VPN command calls the DC-net core. Its one-time-pad construction admits conditional information-theoretic sender anonymity, but the current generator does not establish the required joint entropy, seed and custody assumptions. Remote hash chains remain computational. See the [paper and implementation review](INFORMATION_THEORETIC_REVIEW_20261117.md).
 
-# DCNET_CONTROL_DESIGN.md — DC-net control channel for AVPN/Mesh
+# DCNET_CONTROL_DESIGN.md — DC-net control channel for CPVPN/Mesh
 
 Status: design proposal. Position taken **after v0.9.0** (I2P front,
-Katzenpost mix lane, `avpn mix`, oblivious control plane, VERIFICATION_PLAN.md).
+Katzenpost mix lane, `cypherpunk mix`, oblivious control plane, VERIFICATION_PLAN.md).
 This doc is the step-5 item from `MIX_LANE_DESIGN.md` §4, revised in light of
 what actually shipped.
 
 ## 0. Position after v0.9.0 — read this first
 
-v0.9.0 changed the calculus. The mix lane (`avpn mix`, unmodified Katzenpost
+v0.9.0 changed the calculus. The mix lane (`cypherpunk mix`, unmodified Katzenpost
 v0.0.110) already provides computationally anonymous transport for async
 traffic, and the oblivious control plane already handles enrollment and
 directory queries. So the first question is not *how* to build a DC-net, but
@@ -548,7 +548,7 @@ state the K).
    existing mix lane (days; immediately useful).
 2. ~~Rust module `src/dcnet.rs`~~ **authored** — drop in `src/dcnet.rs`,
    wire cell assignment from directory and gossip round-sync at the
-   integration layer (`avpn mesh`).
+   integration layer (`cypherpunk mesh`).
 3. ~~Harness section F ported to Rust integration tests; Tamarin model~~
    **authored** — inline `#[cfg(test)]` module in `src/dcnet.rs` (14 tests,
    golden-vector based) + `dcnet.spthy`. Remaining: run `cargo test` and

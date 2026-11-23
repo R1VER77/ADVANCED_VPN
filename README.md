@@ -13,15 +13,15 @@ A Rust VPN data plane with signed enrollment, hardware-bound sessions, automatic
 ```mermaid
 flowchart LR
     subgraph ClientHost["Client Endpoint (Protected Namespace & Guard)"]
-        App["Protected Applications"] -->|"inner MTU 1100"| CoreC["advanced-vpn<br/>(2 or 3 Nested QUIC Layers:<br/>X25519MLKEM768 + ML-DSA-65<br/>+ FIDO2 Session Auth)"]
-        CoreC -->|"1380 B constant cells"| WGC["advanced-vpn-wireguard<br/>(Vendored GotaTun 0.10.2<br/>+ Maybenot 2.2.2 DAITA)"]
-        WGC -->|"loopback"| CloakC["advanced-vpn-cloak<br/>(1420 B cells: HTTP/3 UDP 443<br/>or TLS 1.3 TCP 443 fallback<br/>+ Cloak v2 Exporter HMAC)"]
+        App["Protected Applications"] -->|"inner MTU 1100"| CoreC["cypherpunk-vpn<br/>(2 or 3 Nested QUIC Layers:<br/>X25519MLKEM768 + ML-DSA-65<br/>+ FIDO2 Session Auth)"]
+        CoreC -->|"1380 B constant cells"| WGC["cypherpunk-vpn-wireguard<br/>(Vendored GotaTun 0.10.2<br/>+ Maybenot 2.2.2 DAITA)"]
+        WGC -->|"loopback"| CloakC["cypherpunk-vpn-cloak<br/>(1420 B cells: HTTP/3 UDP 443<br/>or TLS 1.3 TCP 443 fallback<br/>+ Cloak v2 Exporter HMAC)"]
         CloakC -.->|"optional: --front i2p"| I2PC["Local i2pd Router<br/>(Hidden NTCP2-only)"]
-        App -.->|"optional async: avpn mix"| MixC["Katzenpost Mix Client<br/>(X-Wing PQ-Sphinx)"]
+        App -.->|"optional async: cypherpunk mix"| MixC["Katzenpost Mix Client<br/>(X-Wing PQ-Sphinx)"]
     end
 
     subgraph Hop1["Hop 1: Entry Relay (Sticky Guard)"]
-        CloakR["Cloak v2 + GotaTun Carrier<br/>(TPM2-sealed keys;<br/>advanced_vpn_egress lock<br/>+ monthly fee-guard quota)"]
+        CloakR["Cloak v2 + GotaTun Carrier<br/>(TPM2-sealed keys;<br/>cypherpunk_vpn_egress lock<br/>+ monthly fee-guard quota)"]
         LinkR["Paced Link Sender (src/link.rs)<br/>(Strips outer QUIC layer;<br/>holds ZERO inner tunnel keys)"]
         CloakR --> LinkR
     end
@@ -31,8 +31,8 @@ flowchart LR
     end
 
     subgraph HopExit["Final Hop: Owned or Mesh Exit (+ Standby Exits)"]
-        ExitNode["advanced-vpn Exit<br/>(TPM2 or Operator-Nitrokey locked;<br/>decrypts inner PQ QUIC layer;<br/>never sees client IP)"]
-        ExitDNS["advanced-vpn-dns<br/>(Signed Blocklist + X25519MLKEM768 DoT<br/>or local Unbound --dns-recursive)"]
+        ExitNode["cypherpunk-vpn Exit<br/>(TPM2 or Operator-Nitrokey locked;<br/>decrypts inner PQ QUIC layer;<br/>never sees client IP)"]
+        ExitDNS["cypherpunk-vpn-dns<br/>(Signed Blocklist + X25519MLKEM768 DoT<br/>or local Unbound --dns-recursive)"]
         ExitNode --> ExitDNS
     end
 
@@ -46,7 +46,7 @@ flowchart LR
     ExitDNS -->|"PQ DoT or DNSSEC"| Internet
 ```
 
-WireGuard is the outer carrier, implemented by a vendored **GotaTun 0.10.2** (`vendor/gotatun`), with its actual DAITA integration and public **Maybenot 2.2.2** defense machines. Its ChaCha20-Poly1305 encryption and 256-bit PSK supplement the existing **two TLS 1.3 X25519 + ML-KEM-768 / AES-256-GCM layers**. WireGuard alone is not advertised as native ML-KEM. Authentication is post-quantum too: both QUIC layers accept **only ML-DSA-65** (FIPS 204) certificate chains and TLS 1.3 CertificateVerify signatures, and operator enrollment bundles require **both the classical operator signature and ML-DSA-65** (plus an optional **third operator signature half** from an **ML-DSA-44** FIDO2 credential on a separate hardware key, `avpn init --pq-vault`, schema 3). The hardware path uses the enrolled FIDO2 credential’s COSE algorithm; the software laboratory signer uses Ed25519. A correctly pinned classical (ECDSA) deployment is refused; the Rust tests prove this and fail if the restriction is removed. The listed VPN network layers enforce their hybrid key-exchange policy; compatibility dependencies and exceptions are named in the inventory. Authentication is post-quantum on the inner tunnels (ML-DSA-65, augmented by per-session hardware FIDO2 authorization when a device key is pinned) and on the cloak (protocol v2: both ends prove the enrolled key with a role-separated HMAC over the hybrid exchange; its browser-facing certificate is an ECDSA facade), while exit DNS either authenticates its DoT upstream (`X25519MLKEM768` enforced) with classical WebPKI signatures or resolves names directly on the exit with a local DNSSEC-validating recursive Unbound resolver (`avpn init --dns-recursive`). [docs/PQ_INVENTORY.md](docs/PQ_INVENTORY.md) separates key exchange from authentication for each layer, with enforcing code, tests and the five named exceptions. The local FIDO PIN/secret channel over USB uses P-256 (CTAP PIN/UV protocols 1 and 2) and is flagged on every key; the full-stack PQ/SafeCurves mandate is a migration target, not a qualification of that hardware boundary.
+WireGuard is the outer carrier, implemented by a vendored **GotaTun 0.10.2** (`vendor/gotatun`), with its actual DAITA integration and public **Maybenot 2.2.2** defense machines. Its ChaCha20-Poly1305 encryption and 256-bit PSK supplement the existing **two TLS 1.3 X25519 + ML-KEM-768 / AES-256-GCM layers**. WireGuard alone is not advertised as native ML-KEM. Authentication is post-quantum too: both QUIC layers accept **only ML-DSA-65** (FIPS 204) certificate chains and TLS 1.3 CertificateVerify signatures, and operator enrollment bundles require **both the classical operator signature and ML-DSA-65** (plus an optional **third operator signature half** from an **ML-DSA-44** FIDO2 credential on a separate hardware key, `cypherpunk init --pq-vault`, schema 3). The hardware path uses the enrolled FIDO2 credential’s COSE algorithm; the software laboratory signer uses Ed25519. A correctly pinned classical (ECDSA) deployment is refused; the Rust tests prove this and fail if the restriction is removed. The listed VPN network layers enforce their hybrid key-exchange policy; compatibility dependencies and exceptions are named in the inventory. Authentication is post-quantum on the inner tunnels (ML-DSA-65, augmented by per-session hardware FIDO2 authorization when a device key is pinned) and on the cloak (protocol v2: both ends prove the enrolled key with a role-separated HMAC over the hybrid exchange; its browser-facing certificate is an ECDSA facade), while exit DNS either authenticates its DoT upstream (`X25519MLKEM768` enforced) with classical WebPKI signatures or resolves names directly on the exit with a local DNSSEC-validating recursive Unbound resolver (`cypherpunk init --dns-recursive`). [docs/PQ_INVENTORY.md](docs/PQ_INVENTORY.md) separates key exchange from authentication for each layer, with enforcing code, tests and the five named exceptions. The local FIDO PIN/secret channel over USB uses P-256 (CTAP PIN/UV protocols 1 and 2) and is flagged on every key; the full-stack PQ/SafeCurves mandate is a migration target, not a qualification of that hardware boundary.
 
 ## Post-quantum security architecture
 
@@ -83,7 +83,7 @@ flowchart TB
 flowchart LR
     subgraph IdentityAuth["1. Identity, Enrollment & Hardware Session Boundary"]
         USB["Local USB CTAP PIN/UV 1 & 2 Channel<br/>(Classical P-256 ECDH boundary — flagged on every key)"]
-        OpSig["Operator Enrollment Bundle (avpn init)<br/>Required Branch 1: Classical FIDO2 (Ed25519 / ES256)<br/>Required Branch 2: Operator ML-DSA-65 (FIPS 204)<br/>Optional Branch 3 (--pq-vault): 2nd-key FIDO2 ML-DSA-44"]
+        OpSig["Operator Enrollment Bundle (cypherpunk init)<br/>Required Branch 1: Classical FIDO2 (Ed25519 / ES256)<br/>Required Branch 2: Operator ML-DSA-65 (FIPS 204)<br/>Optional Branch 3 (--pq-vault): 2nd-key FIDO2 ML-DSA-44"]
         SessAuth["Per-Session Hardware Authorization (<=12 h)<br/>Short-lived session_signer.py certifies fresh ML-DSA-65 leaves<br/>+ FIDO2 WebAuthn device statement verified by every hop"]
         USB --> OpSig
         USB --> SessAuth
@@ -121,10 +121,10 @@ flowchart LR
 | **Two (or three) QUIC tunnels** (Layers 02–03) | Hybrid PQ enforced (`X25519MLKEM768` only; classical peers refused) | `ML-DSA-65` (FIPS 204) only (classical ECDSA refused) |
 | **Cloak v2** (UDP/TCP 443 front) | Hybrid PQ enforced (`X25519MLKEM768` only) | Mutual role-separated symmetric HMAC proof over TLS exporter; ECDSA certificate is a browser-facing facade |
 | **Paced server-to-server links** (`src/link.rs`) | Ephemeral `X25519 + ML-KEM-768` in-cell exchange every 120 s (forward-secret; `AES-256-GCM`) | Link PSK (sealed via hybrid `kem_seal`) |
-| **Operator enrollment** (`avpn init`) | Hybrid KEM sealing (`X25519 + ML-KEM-768`) | Classical FIDO2 (`Ed25519` / `ES256`) + `ML-DSA-65` (+ optional 2nd-key `ML-DSA-44` via `--pq-vault`) |
+| **Operator enrollment** (`cypherpunk init`) | Hybrid KEM sealing (`X25519 + ML-KEM-768`) | Classical FIDO2 (`Ed25519` / `ES256`) + `ML-DSA-65` (+ optional 2nd-key `ML-DSA-44` via `--pq-vault`) |
 | **Hardware-bound sessions** (`<=12 h`) | Separate local USB CTAP PIN/UV 1 & 2 boundary (`P-256` ECDH, flagged) | Per-session `ML-DSA-65` leaf certified by long-term identity + pinned FIDO2 device WebAuthn assertion |
 | **Oblivious control plane** (OHTTP) | Hybrid HPKE (`ML-KEM-768 + X25519`, `0x647A`) | Gateway key confirmed by `>=2` independent beacon witness descriptors (`ML-DSA-65`) |
-| **Mix lane** (`avpn mix`, Katzenpost) | `X-Wing` (`ML-KEM-768 + X25519`) Sphinx packets, PQ Noise links & `X25519MLKEM768`-only exit fetches | Hybrid `Ed25519 + SPHINCS+` directory PKI |
+| **Mix lane** (`cypherpunk mix`, Katzenpost) | `X-Wing` (`ML-KEM-768 + X25519`) Sphinx packets, PQ Noise links & `X25519MLKEM768`-only exit fetches | Hybrid `Ed25519 + SPHINCS+` directory PKI |
 | **Exit DoT** (default DNS) | Hybrid PQ enforced (`X25519MLKEM768` only; fails closed otherwise) | Classical WebPKI (Exception 4) |
 | **Recursive Unbound** (`--dns-recursive`, opt-in) | Plain DNS to authoritative servers (Exception 5) | Classical DNSSEC (Exception 5) |
 
@@ -134,11 +134,12 @@ flowchart LR
 
 `cypherpunk_vpn` aims to make verifiable private communication practical: open source,
 user-controlled keys, independently operated infrastructure and clear evidence of what
-is protected. The repository, executable names and installation paths retain
-`ADVANCED_VPN` / `avpn` / `advanced-vpn` alongside the compatibility migration shim
-(`tools/name_migration.py`, `cypherpunk` CLI alias; [docs/NAME_MIGRATION.md](docs/NAME_MIGRATION.md))
-so existing commands, state paths and signed protocol domains remain recoverable while
-canonical names transition.
+is protected. Every crate, executable (`cypherpunk-vpn*`), command (`cypherpunk`,
+`cypherpunkctl`), internal prefix (`cpvpn`), installation path (`/opt/cypherpunk-vpn`,
+`/etc/cypherpunk-vpn`), service (`cypherpunk-vpn*.service`), firewall table
+(`cypherpunk_vpn*`), FIDO2 relying party (`cypherpunk-vpn.local`) and cryptographic domain
+label uses the `cypherpunk_vpn` name ([docs/NAME_MIGRATION.md](docs/NAME_MIGRATION.md),
+decision D019).
 
 The [project roadmap](docs/ROADMAP.md) includes commitments informed by the CCC's
 [Hacker Ethics](https://www.ccc.de/en/hackerethik),
@@ -163,23 +164,23 @@ and [security scope](SECURITY.md).
 ```mermaid
 flowchart TB
     subgraph UserSpace["Unprivileged User Space"]
-        CLI["avpn / cypherpunk (Rust TUI & CLI)<br/>Renders results, live checklists & key hints"]
+        CLI["cypherpunk (Rust TUI & CLI)<br/>Renders results, live checklists & key hints"]
         GUI["apps/cypherpunk-vpn (Vue 3 / Tauri 2 GUI)<br/>Read & Create/Join Write Views"]
-        CLOUD["avpn-cloud & tofu_run.py<br/>(AWS / OCI / Azure / Fly.io / SSH;<br/>Pinned OpenTofu 1.13.9, encrypted state)"]
+        CLOUD["cpvpn-cloud & tofu_run.py<br/>(AWS / OCI / Azure / Fly.io / SSH;<br/>Pinned OpenTofu 1.13.9, encrypted state)"]
     end
 
     subgraph RootSupervisor["Privileged Controller & Hardware Enclave Boundary"]
         BUS["org.cypherpunk_vpn.Controller1 (D-Bus) / --json"]
-        CTL["avpnctl (Python Root Supervisor)<br/>Atomic nftables TableWatch, netns, fee-guard quota,<br/>5 s .invalid end-to-end protection probe"]
+        CTL["cypherpunkctl (Python Root Supervisor)<br/>Atomic nftables TableWatch, netns, fee-guard quota,<br/>5 s .invalid end-to-end protection probe"]
         SIGNER["session_signer.py (Phase 2 Short-Lived Signer)<br/>PR_SET_DUMPABLE=0, mlockall, no core dumps;<br/>unseals long-term ML-DSA-65 identities ONLY during touch,<br/>certifies fresh <=12 h per-session keys, then exits"]
         HW["FIDO2 Hardware Token (Nitrokey / Trezor / Solo 2 / TKey)<br/>hmac-secret vault unseal + WebAuthn session assertion"]
     end
 
     subgraph SandboxedDataPlane["Sandboxed Data-Plane Daemons (Non-Root UID, 0 Caps, seccomp-BPF + Landlock)"]
-        CLOAK["advanced-vpn-cloak<br/>HTTP/3 UDP 443 + TLS 1.3 TCP 443 fallback<br/>Cloak v2 mutual exporter HMAC"]
-        WG["advanced-vpn-wireguard<br/>Vendored GotaTun + Maybenot strict-blocking DAITA"]
-        CORE["advanced-vpn<br/>Nested X25519MLKEM768 + ML-DSA-65 QUIC<br/>+ Paced UDP/TCP Server Links (src/link.rs)"]
-        DNS["advanced-vpn-dns<br/>Signed Blocklist + PQ DoT / Unbound DNSSEC"]
+        CLOAK["cypherpunk-vpn-cloak<br/>HTTP/3 UDP 443 + TLS 1.3 TCP 443 fallback<br/>Cloak v2 mutual exporter HMAC"]
+        WG["cypherpunk-vpn-wireguard<br/>Vendored GotaTun + Maybenot strict-blocking DAITA"]
+        CORE["cypherpunk-vpn<br/>Nested X25519MLKEM768 + ML-DSA-65 QUIC<br/>+ Paced UDP/TCP Server Links (src/link.rs)"]
+        DNS["cypherpunk-vpn-dns<br/>Signed Blocklist + PQ DoT / Unbound DNSSEC"]
     end
 
     CLI -->|"--json"| BUS
@@ -199,13 +200,13 @@ flowchart TB
 
 - A signed role bundle supplies endpoints, identities, pins and safe defaults. No JSON, firewall, route or DNS editing is needed on an enrolled device.
 - The supervisor creates WireGuard/TUN interfaces, addresses, routes, atomic `nftables` rules, an application namespace, owned-exit NAT, local DNS blocklist filtering (`NXDOMAIN` before upstream resolution, including CNAME-cloaking checks and signed allowlists), and DNS-over-TLS forwarding (or exit-local recursive Unbound DNSSEC resolution with `--dns-recursive`).
-- The carrier rides inside `advanced-vpn-cloak` on port 443: HTTP/3 (QUIC, BBR congestion control, or FixedWindow when clocked) on UDP 443 by default, with automatic 2-second fallback to TCP/TLS 1.3 on port 443 when UDP is blocked or the path MTU is below 1448 bytes, periodic 10-second QUIC recovery probes, mutual role-separated exporter HMAC confirmation (cloak protocol v2), and a realistic `200 OK` HTML5 decoy page for unauthenticated HTTP/3 or HTTPS probes.
+- The carrier rides inside `cypherpunk-vpn-cloak` on port 443: HTTP/3 (QUIC, BBR congestion control, or FixedWindow when clocked) on UDP 443 by default, with automatic 2-second fallback to TCP/TLS 1.3 on port 443 when UDP is blocked or the path MTU is below 1448 bytes, periodic 10-second QUIC recovery probes, mutual role-separated exporter HMAC confirmation (cloak protocol v2), and a realistic `200 OK` HTML5 decoy page for unauthenticated HTTP/3 or HTTPS probes.
 - The app namespace has no physical interface. The optional whole-device mode blocks direct IPv4/IPv6 fallback routes, and `TableWatch` restores the guard atomically if altered. Disconnect, controller death and data-plane death retain the guard. Optional auto-connect on untrusted networks (`tools/autoconnect.py`, decision D015) triggers fail-closed protection with a posture-only GUI surface (SSID counts only; SSIDs never cross the controller boundary).
 - All five data-plane daemons run under a dedicated non-root service UID, have no Linux capabilities, cannot gain privileges, are confined by **seccomp-BPF and Landlock** (`src/sandbox.rs`), and die if their supervisor dies. On hardware-protected clients, **long-term ML-DSA-65 identity keys never enter the running VPN processes** ([hardware-bound sessions](docs/HARDWARE_BOUND_SESSIONS.md), Phase 2): a short-lived, undumpable (`PR_SET_DUMPABLE=0`, `mlockall`) signer process (`tools/session_signer.py`) unseals the long-term identities during the PIN+touch ceremony, certifies fresh per-session ML-DSA-65 layer keys alongside the FIDO2 hardware session statement (at most 12 hours), and exits immediately. The data plane receives only the per-session keys via immutable memory descriptors (`memfd`), and every hop pins the client's FIDO2 key (`peer_device`) and refuses any leaf without both the identity signature and the hardware session authorization. Renewal prompts one hour before expiry and fails closed if unanswered.
-- `avpn status` (which works without root while the service runs) reports `"protected"` only with fresh evidence of all three: cloak v2 mutual key confirmation, a WireGuard handshake, and a 5-second end-to-end `.invalid` DNS probe answered by the exit (`tools/protection.py`). When a connected chain stops answering for a minute, a desktop notification and `avpn status` flag the stall and point to `avpn cloud health`.
-- **No fees from a free account ([the fee guard](docs/FEE_GUARD.md)).** Every production server requires and enforces a monthly outbound cap derived from the account's free allowance (shared across all servers in that account and divided by the streams each hop sends, minus a 10% margin: Oracle Cloud 9,000 GB, AWS 90 GB, Azure 90 GB, Fly.io ~55 GB in Europe / ~75 GB in `iad`/`ewr` under its $5 personal waiver). An `nftables` kernel quota (`advanced_vpn_quota`) drops traffic the instant the cap is reached (status reads `capped` until the 1st of the next UTC month, while rate-limited SSH replies survive), and an IPv4/IPv6 **egress lock** (`advanced_vpn_egress`) drops all non-VPN outbound packets, pings and unlisted ports while running a daily security-only `unattended-upgrade` in a metered maintenance window. On the client, there is **no daily cap by default**, while an optional client-only daily cap (`preferences --daily-limit-mib N`, `--no-daily-limit`) is metered in the kernel and fail-closed.
+- `cypherpunk status` (which works without root while the service runs) reports `"protected"` only with fresh evidence of all three: cloak v2 mutual key confirmation, a WireGuard handshake, and a 5-second end-to-end `.invalid` DNS probe answered by the exit (`tools/protection.py`). When a connected chain stops answering for a minute, a desktop notification and `cypherpunk status` flag the stall and point to `cypherpunk cloud health`.
+- **No fees from a free account ([the fee guard](docs/FEE_GUARD.md)).** Every production server requires and enforces a monthly outbound cap derived from the account's free allowance (shared across all servers in that account and divided by the streams each hop sends, minus a 10% margin: Oracle Cloud 9,000 GB, AWS 90 GB, Azure 90 GB, Fly.io ~55 GB in Europe / ~75 GB in `iad`/`ewr` under its $5 personal waiver). An `nftables` kernel quota (`cypherpunk_vpn_quota`) drops traffic the instant the cap is reached (status reads `capped` until the 1st of the next UTC month, while rate-limited SSH replies survive), and an IPv4/IPv6 **egress lock** (`cypherpunk_vpn_egress`) drops all non-VPN outbound packets, pings and unlisted ports while running a daily security-only `unattended-upgrade` in a metered maintenance window. On the client, there is **no daily cap by default**, while an optional client-only daily cap (`preferences --daily-limit-mib N`, `--no-daily-limit`) is metered in the kernel and fail-closed.
 
-There is one defense posture: **strong**. Your link to the first hop runs a **bidirectional constant-rate packet stream** (`src/daita.rs`: `stream_grid` + self-sustaining `cover` under GotaTun's strict-blocking scheduler, `strict: true`, `Replace: true`), and since v0.8.0 every link between two servers runs the same invariant as paced, AES-256-GCM-encrypted fixed-size cells (`src/link.rs`, over UDP by default or over TCP with `avpn init --link-transport tcp` for IPv6/TCP-only exits such as Fly.io), each hop on its own clock, keyed by an ephemeral X25519 + ML-KEM-768 exchange every two minutes, so a recording of a link stays sealed even against someone who later steals its pre-shared key. Every data packet is padded to constant size (1380 bytes inside WireGuard, 1420 bytes on the outer cloak, 1242-byte link cells), and every clock tick sends either a queued real packet or an indistinguishable decoy packet — so the outer packet rate and packet size stay flat while the shaper keeps its clock (not on a busy CPU: see below): between idle and full-speed transfers the wire packet rate changed by 0–3.7% in every measured class and hop count (`docs/evidence/RATE_CLASSES.json`; CI fails above 15%). Four rate classes, signed into the chain (`avpn init --rate auto|metered|standard|fast|line`), trade cover bandwidth for application throughput without weakening the constant-rate invariant:
+There is one defense posture: **strong**. Your link to the first hop runs a **bidirectional constant-rate packet stream** (`src/daita.rs`: `stream_grid` + self-sustaining `cover` under GotaTun's strict-blocking scheduler, `strict: true`, `Replace: true`), and since v0.8.0 every link between two servers runs the same invariant as paced, AES-256-GCM-encrypted fixed-size cells (`src/link.rs`, over UDP by default or over TCP with `cypherpunk init --link-transport tcp` for IPv6/TCP-only exits such as Fly.io), each hop on its own clock, keyed by an ephemeral X25519 + ML-KEM-768 exchange every two minutes, so a recording of a link stays sealed even against someone who later steals its pre-shared key. Every data packet is padded to constant size (1380 bytes inside WireGuard, 1420 bytes on the outer cloak, 1242-byte link cells), and every clock tick sends either a queued real packet or an indistinguishable decoy packet — so the outer packet rate and packet size stay flat while the shaper keeps its clock (not on a busy CPU: see below): between idle and full-speed transfers the wire packet rate changed by 0–3.7% in every measured class and hop count (`docs/evidence/RATE_CLASSES.json`; CI fails above 15%). Four rate classes, signed into the chain (`cypherpunk init --rate auto|metered|standard|fast|line`), trade cover bandwidth for application throughput without weakening the constant-rate invariant:
 
 | Rate class | Grid pacing | Wire rate / direction | 2-hop app throughput (v0.10.1, median of 3) | Cover volume / direction |
 |---|---|---|---|---|
@@ -214,9 +215,9 @@ There is one defense posture: **strong**. Your link to the first hop runs a **bi
 | `fast` | 2 ms × 8 staggered slots (4,000 pps) | ~44 Mbit/s | 27.9 Mbit/s | ~455 GiB/day |
 | `line` | 2 ms × 32 staggered slots (16,000 pps) | ~177 Mbit/s | 115.3 Mbit/s | ~1.8 TiB/day |
 
-Wire rate and cover volume follow from the grid. A relay sends two streams (back to the client and on to the next hop), so its outbound volume is roughly twice the per-direction figure (`avpn cloud cap` and `init --rate auto` account for both). Throughput was measured on v0.10.1 (14 Nov 2026) in the namespace benchmark (`tools/throughput_bench.py`, SHA-checked, `docs/evidence/RATE_CLASSES_v0_10_1.json`); every run kept the wire rate within 1.5% between idle and transfer. The paced link into the exit carries 0.29 Mbit/s (`metered`) and 28.0 Mbit/s (`fast`) on 2 hops, and 24.5 Mbit/s (`fast`) on 3. An interleaved A/B against v0.9.1 shows the move to BBR congestion control (v0.10.0) cost nothing: at `line` on 3 hops it is faster (median 115.0 vs 106.8 Mbit/s) and much steadier from a cold start (115–119 vs 77–113). Earlier figures: v0.7.0 in `docs/evidence/RATE_CLASSES.json`.
+Wire rate and cover volume follow from the grid. A relay sends two streams (back to the client and on to the next hop), so its outbound volume is roughly twice the per-direction figure (`cypherpunk cloud cap` and `init --rate auto` account for both). Throughput was measured on v0.10.1 (14 Nov 2026) in the namespace benchmark (`tools/throughput_bench.py`, SHA-checked, `docs/evidence/RATE_CLASSES_v0_10_1.json`); every run kept the wire rate within 1.5% between idle and transfer. The paced link into the exit carries 0.29 Mbit/s (`metered`) and 28.0 Mbit/s (`fast`) on 2 hops, and 24.5 Mbit/s (`fast`) on 3. An interleaved A/B against v0.9.1 shows the move to BBR congestion control (v0.10.0) cost nothing: at `line` on 3 hops it is faster (median 115.0 vs 106.8 Mbit/s) and much steadier from a cold start (115–119 vs 77–113). Earlier figures: v0.7.0 in `docs/evidence/RATE_CLASSES.json`.
 
-The default is `--rate auto`: the fastest class whose stream fits the smallest hop's monthly allowance (`--allowance-gib`) at the hours connected per day; with no allowance given, `metered` (manual `avpn init` requires either `--allowance-gib` or `--accept-cost`). **`metered` is a messaging class, not a browsing one**: on real websites only 31 of 900 page loads completed through it (`docs/evidence/WF_REAL_PILOT.json`). Browsing needs `standard` or faster.
+The default is `--rate auto`: the fastest class whose stream fits the smallest hop's monthly allowance (`--allowance-gib`) at the hours connected per day; with no allowance given, `metered` (manual `cypherpunk init` requires either `--allowance-gib` or `--accept-cost`). **`metered` is a messaging class, not a browsing one**: on real websites only 31 of 900 page loads completed through it (`docs/evidence/WF_REAL_PILOT.json`). Browsing needs `standard` or faster.
 
 Website fingerprinting, against a 500-tree random-forest classifier across 30 synthetic sites (`tools/daita_lab.py`, `tools/wf_attack.py`, chance = **3.3%**, fixed 6 s observation window):
 - **v0.7.0** (11 Nov 2026): the camouflaged carrier scored **3.3%** on `metered` and **1.7%** on `fast`, while the link between servers, then unshaped, scored **27.0–74.7%**.
@@ -225,13 +226,13 @@ Website fingerprinting, against a 500-tree random-forest classifier across 30 sy
 Those are synthetic sites. On **real websites** (pilot, 12–14 Nov 2026, 20 monitored sites, headless Firefox, k-FP, DF and Tik-Tok; chance 5%; `docs/evidence/WF_REAL_PILOT.json`):
 - Undefended, k-FP recognises **99.2%** (DF 94.6%, Tik-Tok 96.8%): the attacks work.
 - `fast` with the browser off the data plane's CPU: **14.8%** closed world, open-world true positives near zero.
-- **`fast` on a busy CPU leaks: 81%** when the browser shares cores with the client's data plane, as on most laptops. The shaper skips grid ticks it misses, so the missed ticks follow the page's own work (`throughput_bench.py --cpu-probe`, `docs/evidence/CPU_LEAK_PROBE.json`). A higher priority gives 75%; a bounded catch-up (`AVPN_CATCH_UP_MS=50`, off by default) about 50% (restoring packet counts while timing still leaks); a dedicated core or `SCHED_FIFO` 27–42%. None reaches the quiet-CPU level. The experimental **wire clock** (`AVPN_WIRE_CLOCK_PPS`, with FixedWindow congestion control on both ends so delayed ACKs do not collapse the relay's BBR window; `docs/evidence/KERNEL_PACING.json`), which hands packet departures to the kernel on both ends of your link, brought k-FP to chance on real websites in the 600-load interleaved re-run (5.15% against 5%, p = 0.58; the client's clock alone left 10.4%), at a cost of 3.5 points of page-load success and about 0.8 s per load ([docs/evidence/WF_REAL_RERUN2.json](docs/evidence/WF_REAL_RERUN2.json)).
+- **`fast` on a busy CPU leaks: 81%** when the browser shares cores with the client's data plane, as on most laptops. The shaper skips grid ticks it misses, so the missed ticks follow the page's own work (`throughput_bench.py --cpu-probe`, `docs/evidence/CPU_LEAK_PROBE.json`). A higher priority gives 75%; a bounded catch-up (`CPVPN_CATCH_UP_MS=50`, off by default) about 50% (restoring packet counts while timing still leaks); a dedicated core or `SCHED_FIFO` 27–42%. None reaches the quiet-CPU level. The experimental **wire clock** (`CPVPN_WIRE_CLOCK_PPS`, with FixedWindow congestion control on both ends so delayed ACKs do not collapse the relay's BBR window; `docs/evidence/KERNEL_PACING.json`), which hands packet departures to the kernel on both ends of your link, brought k-FP to chance on real websites in the 600-load interleaved re-run (5.15% against 5%, p = 0.58; the client's clock alone left 10.4%), at a cost of 3.5 points of page-load success and about 0.8 s per load ([docs/evidence/WF_REAL_RERUN2.json](docs/evidence/WF_REAL_RERUN2.json)).
 
 A subsequent **400-load relay-look-ahead A/B** (16–17 Nov, [docs/WF_REAL_RERUN3.md](docs/WF_REAL_RERUN3.md), [docs/evidence/WF_REAL_RERUN3.json](docs/evidence/WF_REAL_RERUN3.json)) gave whole-round holdout scores of **10.94% at 30 ms** and **15.15% at 5 ms** (nominal chance 5%), with the 5 ms setting completing 193/200 loads vs 182/200 but skipping **0.572%** of relay clock slots vs **0.00145%** at 30 ms. A **frozen 6-round, 720-attempt fresh-control replication** on 20 November ([docs/WF_REPLICATION.md](docs/WF_REPLICATION.md), commit `efb2bc4`, counterbalanced `undefended`, `relay30` and `relay5` arms with kernel `time64` timestamps, zero packet drops and 1,000 round-grouped permutations) scored **100%** on `undefended` (97.1% upstream, 99.6% downstream; Holm p = 0.009) and brought both defended arms near the 5% chance floor with no statistically significant signal after Holm correction (**3.8%** both-directions on `relay30`, **8.3%** on `relay5`, all Holm p ≥ 0.18). However, the strict local acceptance gate **failed** on three checks: 95% bootstrap upper bounds reached **12.1%** (above the 10% ceiling), load-success non-inferiority lower bounds were **−6.3** and **−7.1** points (below the −5 point threshold, adding 1.4–1.9 s median latency), and one window per arm had 1–2 unprotected half-second status samples out of 6,232. Defaults therefore remain unchanged (`promotes_default: false`, decision D001).
 
 Until a fix clears every acceptance gate across held-out days, networks and devices, **do not count on `fast` against website fingerprinting while the device is busy.** Fixing it remains the project's first technical priority.
 
-Sources: `docs/evidence/DAITA_LAB.json`, `avpn help threat-model`. The 100-site exit-vantage simulation is in `tools/mesh_wf_sim.py` (`docs/evidence/MESH_WF_SIM.json`), the mesh design is in [docs/MESH_DESIGN.md](docs/MESH_DESIGN.md), and a side-by-side comparison with Mullvad and IVPN is in [docs/COMPARISON.md](docs/COMPARISON.md).
+Sources: `docs/evidence/DAITA_LAB.json`, `cypherpunk help threat-model`. The 100-site exit-vantage simulation is in `tools/mesh_wf_sim.py` (`docs/evidence/MESH_WF_SIM.json`), the mesh design is in [docs/MESH_DESIGN.md](docs/MESH_DESIGN.md), and a side-by-side comparison with Mullvad and IVPN is in [docs/COMPARISON.md](docs/COMPARISON.md).
 
 ## Installation checks and resumable setup
 
@@ -246,14 +247,14 @@ the remaining distribution/signing work. Native candidates passed local package 
 
 Before installation, `python3 tools/preflight.py` checks host requirements without changing
 anything; its standard-library bootstrap runs on Python 3.8+. The installed command is
-`avpn preflight`, with machine-readable output from `avpn --json preflight`. It lists
-blockers and suggests the appropriate package-manager command. `avpn doctor` shares the
+`cypherpunk preflight`, with machine-readable output from `cypherpunk --json preflight`. It lists
+blockers and suggests the appropriate package-manager command. `cypherpunk doctor` shares the
 same host checks. System installation runs this preflight before staging or host changes;
 command-line-only user installation keeps its separate requirements. Optional hardware
 and provider checks are explicit; provider sign-ins
 stay with the ordinary user's existing CLI credentials.
 
-`sudo avpn setup` rechecks a private, resumable client checklist: host, FIDO2 capabilities,
+`sudo cypherpunk setup` rechecks a private, resumable client checklist: host, FIDO2 capabilities,
 public credential record, enrolled route, configured endpoints, traffic guard and fresh
 end-to-end protection. A saved checkpoint cannot certify a connection. The command uses
 existing enrollment/provisioning workflows; it does not create servers, enroll a key or
@@ -282,7 +283,7 @@ flowchart LR
     end
 
     subgraph Step3["3. Later Launches: Viable Profile Check"]
-        Check["Profile & Fleet Health Gate<br/>(require_current, key sealing intact,<br/>avpn cloud health check)"]
+        Check["Profile & Fleet Health Gate<br/>(require_current, key sealing intact,<br/>cypherpunk cloud health check)"]
     end
 
     Sign -->|"Enrollment complete"| DBus
@@ -290,15 +291,15 @@ flowchart LR
     Check -->|"None or adding profile"| Gemma
 ```
 
-1. **Provisioning and hardware-key setup** through pinned **OpenTofu 1.13.9** modules (`tools/tofu.py`, `tools/tofu_run.py`, SHA256SUMS and signing-key verified, with state and saved plans encrypted under a key sealed in the operator's Nitrokey vault via `avpn state-key`), currently covering `oci-server` (Oracle Cloud) and `azure-server` (Azure Trusted Launch with vTPM) alongside AWS, Fly.io and bring-your-own SSH hosts.
+1. **Provisioning and hardware-key setup** through pinned **OpenTofu 1.13.9** modules (`tools/tofu.py`, `tools/tofu_run.py`, SHA256SUMS and signing-key verified, with state and saved plans encrypted under a key sealed in the operator's Nitrokey vault via `cypherpunk state-key`), currently covering `oci-server` (Oracle Cloud) and `azure-server` (Azure Trusted Launch with vTPM) alongside AWS, Fly.io and bring-your-own SSH hosts.
 2. **The Vue/Tauri Linux GUI** ([`apps/cypherpunk-vpn`](apps/cypherpunk-vpn/README.md)) appears when provisioning completes, backed by a native D-Bus adapter, the read-side controller extension (`tools/controller_extension.py`: posture-only auto-connect, multi-hop presets, streaming eligibility table), and the create/join write side (`tools/controller_create_join.py`: branch-bound operator keys, operator-locked exit requests, and signing a route with a stated allowance, with exact hardcoded argv previews and an append-only action journal; `--accept-cost` is unreachable from the GUI).
-3. **Viable-profile checks** on every subsequent launch verify signature validity, current protocol schema, key sealing and server health (`avpn cloud health`). Multi-profile storage and the trained local Gemma model evaluation remain open roadmap gates.
+3. **Viable-profile checks** on every subsequent launch verify signature validity, current protocol schema, key sealing and server health (`cypherpunk cloud health`). Multi-profile storage and the trained local Gemma model evaluation remain open roadmap gates.
 
 | Native Linux WebKitGTK Desktop View (`1200×900`, fail-closed `status: unknown` smoke) | Narrow Responsive View (`420px`, zero horizontal overflow) |
 |---|---|
 | <img src="docs/evidence/gui/native-unknown-desktop-20261118.png" alt="Native Linux GUI Desktop View" width="560" /> | <img src="docs/evidence/gui/native-unknown-narrow-20261118.png" alt="Native Linux GUI Narrow View" width="240" /> |
 
-Hardware repairs are separate, exact plans: `avpn setup --repair ID` diagnoses and shows
+Hardware repairs are separate, exact plans: `cypherpunk setup --repair ID` diagnoses and shows
 an available fix. Applying it requires approval of the current plan and fresh verification
 afterwards. A missing YubiKey HID interface alone never proves FIDO2 is disabled. The vendor
 must identify the target and disabled application first. No repair resets FIDO, overwrites
@@ -332,33 +333,33 @@ may provision).
 
 ## Command line
 
-`avpn` (and its compatibility alias `cypherpunk`) is the front end. Run it with no arguments in a terminal for the interactive
+`cypherpunk` is the front end. Run it with no arguments in a terminal for the interactive
 view: a session header (chain, mode, key protection, service state), a history of
 results, and key hints (`c` connect, `d` disconnect, `h` hops, `s` status, `i` info,
-`o` doctor). Long-running operations (`avpn cloud chain --apply`, installs, enrollments)
+`o` doctor). Long-running operations (`cypherpunk cloud chain --apply`, installs, enrollments)
 render a live terminal checklist, and PIN prompts use a desktop pop-up (also under `sudo`)
 with a terminal fallback. Every action is also a command, and `--json` prints the controller's
 result object for scripts.
 
 ```
-$ avpn hops
+$ cypherpunk hops
 • Chain  2-hop
   └ client → relay 198.51.100.80:443 → exit 203.0.113.80:4444
 
-$ avpn doctor
+$ cypherpunk doctor
 • Doctor  11 passed · 0 failed
   ✓ trusted nft  /usr/sbin/nft
   ✓ keys bound to TPM2  sealed with host+tpm2; TPM2 usable now
   ...
 ```
 
-`avpn help` lists every command and concept page; `avpn help COMMAND` shows one. The
+`cypherpunk help` lists every command and concept page; `cypherpunk help COMMAND` shows one. The
 same pages are in [`docs/cli/`](docs/cli/). [`docs/architecture.md`](docs/architecture.md)
 explains how the pieces fit together.
 
-- **Layering:** `avpn` renders results. The privileged controller (`avpnctl`) does all the work and validates every option.
-- **Cloud:** `avpn cloud` finds free and low-cost places to run servers, provisions them with your own `aws`/`oci`/`az`/`fly` sign-in or pinned OpenTofu modules (or records servers you already have, over SSH), plans and enforces per-account monthly fee-guard caps (`avpn cloud cap`), checks fleet and account health on demand (`avpn cloud health`), unlocks TPM-less servers in RAM after a reboot (`avpn cloud unlock`), rotates exit addresses (`avpn cloud rotate`), and joins hops into one multi-hop chain.
-- **Mesh:** `avpn mesh` browses the community directory, verifies gateway key consistency across independent beacons, contributes nodes and builds chains across members' servers ([`docs/cli/mesh.md`](docs/cli/mesh.md)).
+- **Layering:** `cypherpunk` renders results. The privileged controller (`cypherpunkctl`) does all the work and validates every option.
+- **Cloud:** `cypherpunk cloud` finds free and low-cost places to run servers, provisions them with your own `aws`/`oci`/`az`/`fly` sign-in or pinned OpenTofu modules (or records servers you already have, over SSH), plans and enforces per-account monthly fee-guard caps (`cypherpunk cloud cap`), checks fleet and account health on demand (`cypherpunk cloud health`), unlocks TPM-less servers in RAM after a reboot (`cypherpunk cloud unlock`), rotates exit addresses (`cypherpunk cloud rotate`), and joins hops into one multi-hop chain.
+- **Mesh:** `cypherpunk mesh` browses the community directory, verifies gateway key consistency across independent beacons, contributes nodes and builds chains across members' servers ([`docs/cli/mesh.md`](docs/cli/mesh.md)).
 - **Style:** the layout and colour rules follow the OpenAI Codex CLI's terminal style (Apache-2.0). Only the design rules were followed; no code was copied.
 
 ## Three tiers of setup
@@ -368,9 +369,9 @@ Pick how far to go. Each tier includes the one before it.
 | | **1. General VPN** | **2. Hardened** | **3. Cypherpunk** |
 |---|---|---|---|
 | Who it's for | everyday privacy on any laptop | people a capable observer may target | people who want to trust as little hardware as they can (it reduces that trust, it cannot remove it) |
-| Tunnel | post-quantum multi-hop chain, hardware-bound sessions, kill switch, Nitrokey unlock | plus a padded rate class (`fast` or higher), optional recursive exit DNS (`--dns-recursive`), and the wire clock (experimental) | plus I2P front (`--front i2p`) or Katzenpost PQ Sphinx mix lane (`avpn mix`), and DC-net cells for control events (a library today, not yet in a command), with one-time pad books handed over in person (information-theoretic only under stated source assumptions) |
+| Tunnel | post-quantum multi-hop chain, hardware-bound sessions, kill switch, Nitrokey unlock | plus a padded rate class (`fast` or higher), optional recursive exit DNS (`--dns-recursive`), and the wire clock (experimental) | plus I2P front (`--front i2p`) or Katzenpost PQ Sphinx mix lane (`cypherpunk mix`), and DC-net cells for control events (a library today, not yet in a command), with one-time pad books handed over in person (information-theoretic only under stated source assumptions) |
 | Servers | free cloud hops with mandatory fee-guard caps and TPM2 or operator-locked keys | hops on different providers and in different countries, administered via private bastions or Instance Connect Endpoints | hops on AMD (SEV-SNP where offered) or ARM, never all on one CPU vendor |
-| Laptop | any | `avpn doctor` reports the Intel ME / AMD PSP state | Intel ME neutralized or absent (see below), or an AMD or ARM laptop |
+| Laptop | any | `cypherpunk doctor` reports the Intel ME / AMD PSP state | Intel ME neutralized or absent (see below), or an AMD or ARM laptop |
 | Randomness | the kernel | the kernel and the Nitrokey | plus assessed raw CPU-jitter entropy, extracted (`tools/padbook.py`), stored in deniable multi-layer stores (`tools/padstore.py`) |
 
 **The Intel Management Engine.** Every Intel laptop since 2008 has an always-on coprocessor
@@ -388,19 +389,19 @@ reduces what you must trust; it does not prove the absence of a backdoor.
   versions (12 and later, about 2019 on) are not recognised.
 - Writing the change normally needs an external SPI programmer: the ME region is usually
   locked against writes from the running system, and a bad image can brick the machine.
-- `avpn` therefore never touches firmware. `avpn doctor` reports what it finds, read-only:
+- `cypherpunk` therefore never touches firmware. `cypherpunk doctor` reports what it finds, read-only:
   the ME version and operating mode from the MEI driver, whether me_cleaner recognises
   that version, or AMD's PSP. The change itself is a manual, backed-up step the owner
   chooses.
 - Simpler routes to tier 3: laptops sold with the ME disabled or coreboot installed
   (Purism, System76, NovaCustom, Star Labs), or AMD or ARM hardware.
-- What `avpn doctor` reports about the coprocessor is informational, read from the
+- What `cypherpunk doctor` reports about the coprocessor is informational, read from the
   driver: it is not hardware attestation.
 
 ## Getting started: free servers, one chain
 
-After installing, `avpn` on a device that is not enrolled yet lists free and low-cost places to
-run the servers (`avpn help endpoints`): Oracle Cloud Always Free (no expiry, 10 TB/month out,
+After installing, `cypherpunk` on a device that is not enrolled yet lists free and low-cost places to
+run the servers (`cypherpunk help endpoints`): Oracle Cloud Always Free (no expiry, 10 TB/month out,
 9,000 GB cap) is the highest-capacity exit; the AWS free plan (6 months, 100 GB/month, 90 GB
 cap) and Azure free account (100 GB/month, 90 GB cap, provisioned with Trusted Launch vTPM via
 pinned OpenTofu) make good entry relays or exits on a second provider; and a **Fly.io Machine**
@@ -408,12 +409,12 @@ pinned OpenTofu) make good entry relays or exits on a second provider; and a **F
 (~55 GB/month cap in Europe under Fly's <$5 monthly waiver).
 
 ```
-avpn cloud suggest                                    # ranked, with your sign-ins checked
-avpn cloud oci server --apply --name avpn-exit --bastion OCID   # or: fly server, azure server, or host add
-avpn cloud aws relay --apply --name avpn-relay --profile P
-avpn cloud chain --apply --client-request ~/advanced-vpn-client.req --vault VAULT
-sudo avpn enroll ~/.config/advanced-vpn/chains/*/bundles/client.avpn --operator-key .../operator.pub --replace
-sudo avpn connect
+cypherpunk cloud suggest                                    # ranked, with your sign-ins checked
+cypherpunk cloud oci server --apply --name cpvpn-exit --bastion OCID   # or: fly server, azure server, or host add
+cypherpunk cloud aws relay --apply --name cpvpn-relay --profile P
+cypherpunk cloud chain --apply --client-request ~/cypherpunk-vpn-client.req --vault VAULT
+sudo cypherpunk enroll ~/.config/cypherpunk-vpn/chains/*/bundles/client.cpvpn --operator-key .../operator.pub --replace
+sudo cypherpunk connect
 ```
 
 `chain --apply` plans and writes every server's monthly fee-guard cap first (refusing any
@@ -422,13 +423,13 @@ a different provider at the entry; it refuses the same provider at both ends wit
 `--allow-same-provider`), locks the relay's IPv6 egress to the next hop's `/128:port` when the
 exit is IPv6-only, installs the packages, signs the bundles and unwraps any operator-locked
 server keys in **one PIN + touch**, and starts them. Servers can be administered without public
-SSH IP rules through an **AWS EC2 Instance Connect Endpoint** (`avpn cloud aws admin-endpoint`),
-an **OCI Bastion** (`--bastion OCID`, with automatic 3-hour session renewal via `avpn cloud host bastion`),
+SSH IP rules through an **AWS EC2 Instance Connect Endpoint** (`cypherpunk cloud aws admin-endpoint`),
+an **OCI Bastion** (`--bastion OCID`, with automatic 3-hour session renewal via `cypherpunk cloud host bastion`),
 an **Azure relay jump**, or the **Fly.io Machines API** (`tools/fly-ssh`, `tools/fly-scp`) so
 your home or VPN address is only looked up when a hop's firewall actually needs it. The
 first hop is open to any address on UDP/TCP 443, because the cloak and WireGuard never answer
 a peer they were not enrolled with, so no provider's firewall configuration names you.
-Providers still record who calls their API and see their own hop; `avpn help privacy` lists
+Providers still record who calls their API and see their own hop; `cypherpunk help privacy` lists
 exactly what each can see.
 
 ## Install
@@ -438,39 +439,39 @@ reference pages in one package, with SHA256 checksums. The repository is public,
 GitHub account is needed:
 
 ```bash
-curl -fsSLO https://github.com/R1VER77/ADVANCED_VPN/releases/download/v0.10.2/SHA256SUMS
-curl -fsSLO https://github.com/R1VER77/ADVANCED_VPN/releases/download/v0.10.2/advanced-vpn-v0.10.2-x86_64-linux-gnu.tar.gz
+curl -fsSLO https://github.com/R1VER77/CYPHERPUNK_VPN/releases/download/v0.10.2/SHA256SUMS
+curl -fsSLO https://github.com/R1VER77/CYPHERPUNK_VPN/releases/download/v0.10.2/cypherpunk-vpn-v0.10.2-x86_64-linux-gnu.tar.gz
 sha256sum -c SHA256SUMS
-mkdir advanced-vpn && tar -C advanced-vpn -xzf advanced-vpn-v0.10.2-x86_64-linux-gnu.tar.gz && cd advanced-vpn
+mkdir cypherpunk-vpn && tar -C cypherpunk-vpn -xzf cypherpunk-vpn-v0.10.2-x86_64-linux-gnu.tar.gz && cd cypherpunk-vpn
 ```
 
 Releases are built from signed tags. Releases after v0.10.1 also carry a signed
 build-provenance attestation (Sigstore) that names this repository, its release
 workflow and the exact commit. The release workflow checks it before publishing; check
 it yourself with
-`gh attestation verify FILE -R R1VER77/ADVANCED_VPN --signer-workflow R1VER77/ADVANCED_VPN/.github/workflows/release.yml`.
+`gh attestation verify FILE -R R1VER77/CYPHERPUNK_VPN --signer-workflow R1VER77/CYPHERPUNK_VPN/.github/workflows/release.yml`.
 
 There are two ways to install from there:
-- **Command line only, for you (an operator machine):** `python3 tools/install.py --user`. It needs no root and starts no services. `avpn` goes in `~/.local/bin`, with its own hash-locked Python environment. It covers `avpn help`, `init` (with the Nitrokey), `cloud`, `mesh` and the read-only commands. Run it again to upgrade; `--user --uninstall` removes it.
+- **Command line only, for you (an operator machine):** `python3 tools/install.py --user`. It needs no root and starts no services. `cypherpunk` goes in `~/.local/bin`, with its own hash-locked Python environment. It covers `cypherpunk help`, `init` (with the Nitrokey), `cloud`, `mesh` and the read-only commands. Run it again to upgrade; `--user --uninstall` removes it.
 - **The VPN itself (a client or a server), in one step:**
 
   ```bash
   sudo python3 tools/install.py --apply --role client --protect nitrokey
   ```
 
-  This installs into `/opt/advanced-vpn` with the systemd units, which are never enabled. It also:
-  - puts `avpn` on root's PATH, so `sudo avpn …` works;
-  - creates this device's own Nitrokey vault in `/etc/advanced-vpn/vault` (PIN + touch);
+  This installs into `/opt/cypherpunk-vpn` with the systemd units, which are never enabled. It also:
+  - puts `cypherpunk` on root's PATH, so `sudo cypherpunk …` works;
+  - creates this device's own Nitrokey vault in `/etc/cypherpunk-vpn/vault` (PIN + touch);
   - generates the device's keys (PIN + touch again);
-  - leaves the public request in your home directory as `advanced-vpn-client.req`.
+  - leaves the public request in your home directory as `cypherpunk-vpn-client.req`.
 
-  The operator signs that request (`avpn init`); then run `sudo avpn enroll BUNDLE --operator-key operator.pub` and `sudo avpn connect`. Running the same command again upgrades in place and never replaces existing keys.
+  The operator signs that request (`cypherpunk init`); then run `sudo cypherpunk enroll BUNDLE --operator-key operator.pub` and `sudo cypherpunk connect`. Running the same command again upgrades in place and never replaces existing keys.
 
-  On a server (`relay`, `middle` or `exit`), the installer and `avpnctl request` (`tools/sealing.py`) enforce that keys are **sealed to a working TPM2 or locked to the operator's Nitrokey, never plain and never sealed with the host key alone** (whose secret sits on the same disk):
+  On a server (`relay`, `middle` or `exit`), the installer and `cypherpunkctl request` (`tools/sealing.py`) enforce that keys are **sealed to a working TPM2 or locked to the operator's Nitrokey, never plain and never sealed with the host key alone** (whose secret sits on the same disk):
   - **with a usable TPM2** (systemd 250+, a TPM, the TSS2 libraries): `--protect systemd-creds`. The installer tests this first, by sealing and opening a throwaway credential, and refuses before installing if it does not work;
-  - **without one** (Ubuntu 22.04's systemd 249, OCI's Always Free shapes, Fly.io Machines): `--protect operator --unlock-key FILE`, where FILE is the operator's unlock key (`avpn unlock-key` on the operator's computer). Each private key is encrypted under a fresh random data key wrapped to the operator's hybrid `X25519 + ML-KEM-768` unlock key; the unwrapped data key lives only in `/run` (RAM) and vanishes on reboot, so the server stays locked after every reboot until the operator unlocks it (`avpn cloud unlock NAME`; [design](docs/HARDWARE_BOUND_SESSIONS.md)). Existing plain or host-key-only server keys are replaced with new keys—never re-wrapped—at the next `chain`.
+  - **without one** (Ubuntu 22.04's systemd 249, OCI's Always Free shapes, Fly.io Machines): `--protect operator --unlock-key FILE`, where FILE is the operator's unlock key (`cypherpunk unlock-key` on the operator's computer). Each private key is encrypted under a fresh random data key wrapped to the operator's hybrid `X25519 + ML-KEM-768` unlock key; the unwrapped data key lives only in `/run` (RAM) and vanishes on reboot, so the server stays locked after every reboot until the operator unlocks it (`cypherpunk cloud unlock NAME`; [design](docs/HARDWARE_BOUND_SESSIONS.md)). Existing plain or host-key-only server keys are replaced with new keys—never re-wrapped—at the next `chain`.
 
-  `avpn cloud host setup` and `avpn cloud chain` make this choice for you.
+  `cypherpunk cloud host setup` and `cypherpunk cloud chain` make this choice for you.
 
 Both need Python 3.10+ with `venv` (`sudo apt install python3-venv`). The release binaries are
 built on Ubuntu 22.04 (glibc 2.34), so they run on Ubuntu 22.04+ and Debian 12/13 (`x86_64`, with `aarch64` CI and pinned runtime support).
@@ -492,14 +493,14 @@ uv pip install --python .venv/bin/python --require-hashes -r tools/hardware-requ
 cargo fmt --check
 cargo clippy --locked --all-targets -- -D warnings
 export PATH="$PWD/.venv/bin:$PATH"
-cargo test --locked --lib --bin advanced-vpn
+cargo test --locked --lib --bin cypherpunk-vpn
 .venv/bin/python -m unittest discover -s tools -p 'test_*.py' -v
 
 # Both tests refuse host-root execution or an inherited external interface.
 # ML-DSA requires the hash-locked environment (cryptography 49), including for cargo test.
-unshare -Urnm python3 tools/namespace_test.py --state /tmp/avpn-legacy-01
-unshare --user --map-root-user --map-auto --net --mount python3 tools/managed_test.py --state /tmp/avpn-managed-01
-unshare --user --map-root-user --map-auto --net --mount python3 tools/budget_test.py --state /tmp/avpn-budget-01
+unshare -Urnm python3 tools/namespace_test.py --state /tmp/cpvpn-legacy-01
+unshare --user --map-root-user --map-auto --net --mount python3 tools/managed_test.py --state /tmp/cpvpn-managed-01
+unshare --user --map-root-user --map-auto --net --mount python3 tools/budget_test.py --state /tmp/cpvpn-budget-01
 unshare --user --map-root-user --map-auto --net --mount python3 tools/server_egress_test.py
 
 # Symbolic and bounded formal proofs (Tamarin 1.12.0 + Maude 3.5.1, ProVerif 2.05, Kani):
@@ -509,7 +510,7 @@ python3 tools/formal_model_vectors.py
 
 # Installed units, reboot guard ordering, impaired links and a disconnect soak in three
 # local KVM guests (Debian 13 genericcloud image; host networking is not changed).
-python3 tools/vm_validation.py --base debian-13-genericcloud-amd64.qcow2 --work /tmp/avpn-vm-01
+python3 tools/vm_validation.py --base debian-13-genericcloud-amd64.qcow2 --work /tmp/cpvpn-vm-01
 ```
 
 The managed test exercises actual WireGuard/DAITA, both PQ layers, TCP and UDP paced server links, server fee-guard caps and egress locks, system DNS over an isolated TLS upstream, NAT, IPv4/IPv6 and WebRTC/STUN leak blocking, certificate rotation, hardware-bound session authorization, the defense profile, crashes, recovery, and explicit unlock. It first demonstrates a working unencrypted fallback route, then verifies that the whole-device guard blocks it. All network/DNS changes are confined to disposable namespaces. See [current validation](docs/MANAGED_VALIDATION.md).
@@ -545,7 +546,7 @@ Closed firmware, and still usable (Ranks 3–4):
 
 **Setup validation (17–19 November 2026):** the physical Nitrokey 3, YubiKey 5C NFC, Trezor Safe 3 and Ledger Nano S Plus units passed a disposable vault round trip using a fresh hardware assertion, real missing-access detection, the confirmed udev repair and restoration of original rules/access ([physical results](docs/evidence/SETUP_HARDWARE_20261117.json), [test procedure](docs/HARDWARE_SETUP_TESTS.md)), and the YubiKey passed disabled-USB-FIDO2 detection and enable-only repair. Solo 1, Solo 2, CanoKey and Tillitis TKey passed the full production-crypto and hardware-bound session suite in the [firmware lab](docs/HARDWARE_FIRMWARE_LAB.md).
 
-**Check any key** before relying on it (libfido2's tools): `fido2-token -I /dev/hidrawN` must list `hmac-secret` under extensions, and either `clientPin` as set or `uv` (on-device verification). `avpn request --protect nitrokey` refuses a key that lacks them.
+**Check any key** before relying on it (libfido2's tools): `fido2-token -I /dev/hidrawN` must list `hmac-secret` under extensions, and either `clientPin` as set or `uv` (on-device verification). `cypherpunk request --protect nitrokey` refuses a key that lacks them.
 
 **Without a hardware key on a client or server:** on servers, `--protect systemd-creds` seals keys with a verified TPM2, and `--protect operator --unlock-key FILE` locks them to the operator's Nitrokey when the server has no TPM2 (plain or host-key-only server keys are refused). On a client without a token or TPM2, `--protect none` keeps keys in plaintext only when explicitly passed `--insecure-plaintext-keys`.
 
@@ -560,15 +561,15 @@ sequenceDiagram
     participant Exit as TPM-less Exit Server<br/>(--protect operator)
 
     Note over HW,Exit: 1. Key Generation & Operator-Locked Server Sealing (No private key ever leaves its device)
-    Signer->>HW: avpn request --role client --protect nitrokey (PIN + touch)
+    Signer->>HW: cypherpunk request --role client --protect nitrokey (PIN + touch)
     HW-->>Signer: hmac-secret seals long-term ML-DSA-65 identities + exports device_public
-    Relay->>Relay: avpn request --role relay --protect systemd-creds (TPM2 seal test)
-    Exit->>Exit: avpn request --role exit --protect operator (encrypts keys under random AES-256-GCM data key,<br/>wraps data key to operator-unlock.pub via X25519 + ML-KEM-768)
+    Relay->>Relay: cypherpunk request --role relay --protect systemd-creds (TPM2 seal test)
+    Exit->>Exit: cypherpunk request --role exit --protect operator (encrypts keys under random AES-256-GCM data key,<br/>wraps data key to operator-unlock.pub via X25519 + ML-KEM-768)
 
-    Note over HW,Exit: 2. One-Touch Chain Signing & Server RAM Unlock (avpn init / avpn cloud chain --apply)
+    Note over HW,Exit: 2. One-Touch Chain Signing & Server RAM Unlock (cypherpunk init / cypherpunk cloud chain --apply)
     Signer->>HW: One PIN + touch (unseals operator ML-DSA-65 + unlock key, signs classical FIDO2 half,<br/>and optional 2nd-key ML-DSA-44 3rd half via --pq-vault)
-    Signer->>Relay: Enroll relay.avpn (pins client ML-DSA-65 SPKI + peer_device FIDO2 key)
-    Signer->>Exit: Deliver unwrapped data key over SSH stdin into /run (RAM only) + enroll exit.avpn
+    Signer->>Relay: Enroll relay.cpvpn (pins client ML-DSA-65 SPKI + peer_device FIDO2 key)
+    Signer->>Exit: Deliver unwrapped data key over SSH stdin into /run (RAM only) + enroll exit.cpvpn
 
     Note over HW,Exit: 3. Connect & Phase 2 Hardware-Bound Session (<=12 h window)
     Signer->>Signer: Generate fresh ephemeral per-session ML-DSA-65 layer keys in memory
@@ -583,27 +584,27 @@ sequenceDiagram
 First stage the native package; staging does not install or activate anything:
 
 ```sh
-python3 tools/install.py --out /tmp/new-avpn-package
+python3 tools/install.py --out /tmp/new-cpvpn-package
 ```
 
-An operator can install with `sudo python3 tools/install.py --out /path/to/new-stage --apply`. Installation creates `/opt/advanced-vpn`, a hash-locked Python environment and service files, but **does not enable them**. Review [deployment](docs/DEPLOYMENT.md) before activation.
+An operator can install with `sudo python3 tools/install.py --out /path/to/new-stage --apply`. Installation creates `/opt/cypherpunk-vpn`, a hash-locked Python environment and service files, but **does not enable them**. Review [deployment](docs/DEPLOYMENT.md) before activation.
 
-Designed for one person running their own client, relay and exit from the command line — and, through AVPN/Mesh, for a community of such people contributing one server each (see below). **Every device generates its own private keys, and no private key ever leaves the device it was made on.** Your laptop, with the Nitrokey, is both the client and the operator.
+Designed for one person running their own client, relay and exit from the command line — and, through CPVPN/Mesh, for a community of such people contributing one server each (see below). **Every device generates its own private keys, and no private key ever leaves the device it was made on.** Your laptop, with the Nitrokey, is both the client and the operator.
 
 1. On each device, generate its keys and write a public request. The laptop seals its keys with the Nitrokey (and includes its FIDO2 device public key for hardware-bound sessions), so they're never written in plaintext. Servers seal to their TPM2 (`systemd-creds`) or lock to the operator's Nitrokey unlock key (`--protect operator --unlock-key operator-unlock.pub`).
 
 ```sh
 # laptop (client): PIN + touch
-sudo /opt/advanced-vpn/bin/avpn request --role client --protect nitrokey --vault ~/.config/advanced-vpn/vault --out client.req
+sudo /opt/cypherpunk-vpn/bin/cypherpunk request --role client --protect nitrokey --vault ~/.config/cypherpunk-vpn/vault --out client.req
 # relay with a TPM2, and exit without a TPM2 (locked to the operator's Nitrokey)
-sudo /opt/advanced-vpn/bin/avpn request --role relay --protect systemd-creds --out relay.req
-sudo /opt/advanced-vpn/bin/avpn request --role exit  --protect operator --unlock-key operator-unlock.pub --out exit.req
+sudo /opt/cypherpunk-vpn/bin/cypherpunk request --role relay --protect systemd-creds --out relay.req
+sudo /opt/cypherpunk-vpn/bin/cypherpunk request --role exit  --protect operator --unlock-key operator-unlock.pub --out exit.req
 ```
 
 2. Copy only `relay.req` and `exit.req` to the laptop. They contain public keys only (plus the exit's KEM-wrapped data key). Then sign all three bundles (and optionally emit the locked server's unwrap token) in **one PIN + touch**:
 
 ```sh
-/opt/advanced-vpn/bin/avpn init --out ./enrollment --vault ~/.config/advanced-vpn/vault \
+/opt/cypherpunk-vpn/bin/cypherpunk init --out ./enrollment --vault ~/.config/cypherpunk-vpn/vault \
   --allowance-gib 90 --relay 192.0.2.10:443 --exit 198.51.100.20:4444 \
   --request client=client.req --request relay=relay.req --request exit=exit.req
 ```
@@ -617,8 +618,8 @@ Replace the documentation IP addresses with your own.
 3. Copy each bundle and `operator.pub` to its device, then enroll and connect:
 
 ```sh
-sudo /opt/advanced-vpn/bin/avpn enroll client.avpn --operator-key operator.pub   # PIN + touch on the laptop
-sudo /opt/advanced-vpn/bin/avpn connect                                          # PIN + touch authorizes the <=12 h session
+sudo /opt/cypherpunk-vpn/bin/cypherpunk enroll client.cpvpn --operator-key operator.pub   # PIN + touch on the laptop
+sudo /opt/cypherpunk-vpn/bin/cypherpunk connect                                          # PIN + touch authorizes the <=12 h session
 ```
 
 Enrollment checks:
@@ -633,18 +634,18 @@ It then deletes the one-time KEM key. `init` keeps no device private keys, and t
 The default client protects explicitly launched applications and can coexist with an existing host VPN:
 
 ```sh
-sudo /opt/advanced-vpn/bin/avpn run -- curl https://example.com
-avpn status
-sudo /opt/advanced-vpn/bin/avpn preferences --defense strong --rate fast
-sudo /opt/advanced-vpn/bin/avpn preferences --daily-limit-mib 1024   # optional fail-closed cap
-sudo /opt/advanced-vpn/bin/avpn preferences --no-daily-limit         # default
+sudo /opt/cypherpunk-vpn/bin/cypherpunk run -- curl https://example.com
+cypherpunk status
+sudo /opt/cypherpunk-vpn/bin/cypherpunk preferences --defense strong --rate fast
+sudo /opt/cypherpunk-vpn/bin/cypherpunk preferences --daily-limit-mib 1024   # optional fail-closed cap
+sudo /opt/cypherpunk-vpn/bin/cypherpunk preferences --no-daily-limit         # default
 ```
 
 Whole-device mode is explicit. Test from a local console on the target OS, and first stop any conflicting VPN through its own controls:
 
 ```sh
-sudo /opt/advanced-vpn/bin/avpn preferences --mode whole-device
-sudo systemctl enable --now advanced-vpn-guard.service advanced-vpn.service
+sudo /opt/cypherpunk-vpn/bin/cypherpunk preferences --mode whole-device
+sudo systemctl enable --now cypherpunk-vpn-guard.service cypherpunk-vpn.service
 ```
 
 The early guard unit precedes normal networking services. Its boot ordering must still be validated on the actual distribution, including any initramfs networking. The build/test process never enables it on the development laptop.
@@ -668,22 +669,22 @@ How the layers work:
 
 ```sh
 # middle relay (three hops only): its own keys, like every device
-sudo /opt/advanced-vpn/bin/avpn request --role middle --protect systemd-creds --out middle.req
+sudo /opt/cypherpunk-vpn/bin/cypherpunk request --role middle --protect systemd-creds --out middle.req
 # laptop: sign a chain (one PIN + touch)
-/opt/advanced-vpn/bin/avpn init --hops 3 --out ./chain3 --vault ~/.config/advanced-vpn/vault \
+/opt/cypherpunk-vpn/bin/cypherpunk init --hops 3 --out ./chain3 --vault ~/.config/cypherpunk-vpn/vault \
   --allowance-gib 90 --relay 192.0.2.10:443 --middle 198.18.0.20:4445 --exit 198.51.100.20:4444 \
   --request client=client.req --request relay=relay.req --request middle=middle.req --request exit=exit.req
 ```
 
 **Switching modes** reuses every device's keys:
 1. Run `init` again with another `--hops` value and the same requests.
-2. On each device in the new chain, run `sudo avpn disconnect`, then `sudo avpn enroll <bundle> --operator-key operator.pub --replace`, then `connect`.
+2. On each device in the new chain, run `sudo cypherpunk disconnect`, then `sudo cypherpunk enroll <bundle> --operator-key operator.pub --replace`, then `connect`.
 
 Traffic stays blocked while you switch. In single-hop mode, give `--exit` the exit's port-443 endpoint: it is then the first hop. For an IPv6-only TCP exit (such as Fly.io), pass `--link-transport tcp` and `--exit [2001:db8::1]:4444`.
 
 ```sh
 # a standby exit: give its request under its name; the relay fails over and rotates
-/opt/advanced-vpn/bin/avpn init --hops 2 --out ./chain2 --vault ~/.config/advanced-vpn/vault \
+/opt/cypherpunk-vpn/bin/cypherpunk init --hops 2 --out ./chain2 --vault ~/.config/cypherpunk-vpn/vault \
   --allowance-gib 90 --relay 192.0.2.10:443 --exit 198.51.100.20:4444 --standby-exit exit2=198.51.100.30:4444 \
   --request client=client.req --request relay=relay.req --request exit=exit.req --request exit2=exit2.req
 ```
@@ -698,14 +699,14 @@ Measured on v0.10.1 in the namespace benchmark (`tools/throughput_bench.py --rat
 
 Every run also proves two things on the wire. Raw packet observers on each server's ingress never see the payload, and only the first hop ever sees the client's address. The same runs check that no server writes anything persistent while carrying traffic. CI enforces all three.
 
-## The community mesh (AVPN/Mesh)
+## The community mesh (CPVPN/Mesh)
 
-`cypherpunk_vpn` is becoming a community mesh: every member contributes at least one server — an always-free cloud VM is enough, protected against unexpected bills by the mandatory server-side [fee guard](docs/FEE_GUARD.md), and `avpn mesh offer --guided` ranks the options (Oracle Cloud Always Free first, ~10 TB/month egress) and provisions through the existing cloud machinery — and in return can build chains across nodes contributed by other members, browsable and selectable from the CLI:
+`cypherpunk_vpn` is becoming a community mesh: every member contributes at least one server — an always-free cloud VM is enough, protected against unexpected bills by the mandatory server-side [fee guard](docs/FEE_GUARD.md), and `cypherpunk mesh offer --guided` ranks the options (Oracle Cloud Always Free first, ~10 TB/month egress) and provisions through the existing cloud machinery — and in return can build chains across nodes contributed by other members, browsable and selectable from the CLI:
 
 ```
-avpn mesh nodes --fetch          # the directory: roles, providers, latency, uptime, concentration
-avpn mesh chain --hops 3         # every hop a distinct operator, provider and country
-avpn mesh quota                  # credits earned relaying vs spent on chains
+cypherpunk mesh nodes --fetch          # the directory: roles, providers, latency, uptime, concentration
+cypherpunk mesh chain --hops 3         # every hop a distinct operator, provider and country
+cypherpunk mesh quota                  # credits earned relaying vs spent on chains
 ```
 
 ```mermaid
@@ -728,10 +729,10 @@ sequenceDiagram
     Member->>Nodes: Redeem unlinked token / proof & establish 3-hop constant-rate PQ chain
 ```
 
-There is **no account anywhere**: a member is their hardware device — an open-source FIDO2 token by preference. The member ID is the hash of the device public key; the private key never leaves the token, and mesh descriptors are signed with the operator's `operator-mldsa65` key (`mesh-sign --role`) and carry typed `exit_policy` and `streaming` fields validated identically by the Python control plane and every Rust node (`tests/fixtures/descriptor_fields.json`). Nodes can also be kept private (`avpn mesh offer --private`, `tools/mesh_voprf.py`), usable only by you or an invited group. Defense is strong-only and per-hop: the client's link runs the constant-rate carrier stream and every server-to-server link a paced, encrypted constant-rate stream; your own node is your entry, and the exit must answer to another legal sphere than the entry.
+There is **no account anywhere**: a member is their hardware device — an open-source FIDO2 token by preference. The member ID is the hash of the device public key; the private key never leaves the token, and mesh descriptors are signed with the operator's `operator-mldsa65` key (`mesh-sign --role`) and carry typed `exit_policy` and `streaming` fields validated identically by the Python control plane and every Rust node (`tests/fixtures/descriptor_fields.json`). Nodes can also be kept private (`cypherpunk mesh offer --private`, `tools/mesh_voprf.py`), usable only by you or an invited group. Defense is strong-only and per-hop: the client's link runs the constant-rate carrier stream and every server-to-server link a paced, encrypted constant-rate stream; your own node is your entry, and the exit must answer to another legal sphere than the entry.
 
 Control-plane requests travel over **Oblivious HTTP (HPKE `X25519 + ML-KEM-768`)** with two anti-correlation defenses enforced in code and proved in ProVerif 2.05 (`formal/ohttp/ohttp_unlinkability.pv`):
-- **Gateway key consistency (RFC 9458 §7):** a beacon signs `ohttp_gateway` into its descriptor (`avpn mesh publish --gateway-key`), and a member uses an OHTTP route beyond directory fetches only after at least two other independent beacons present that same signed key; key equivocation is refused (`tools/test_gateway_consistency.py`).
+- **Gateway key consistency (RFC 9458 §7):** a beacon signs `ohttp_gateway` into its descriptor (`cypherpunk mesh publish --gateway-key`), and a member uses an OHTTP route beyond directory fetches only after at least two other independent beacons present that same signed key; key equivocation is refused (`tools/test_gateway_consistency.py`).
 - **Relay-clock timestamp bucketing:** requests carry a 30-second bucket of the entry relay's `Date` header (`GET /time`, refreshed on each answer), so client clock skew cannot link requests and no third-party time server is polled from your host.
 
 The contribution economy uses unlinkable blind-signed credits (Chaum RSA-FDH in `tools/mesh_tokens.py`, with RFC 9474 Finalize verification against issuer tagging attacks, daily epoch keys, an inflation alarm, and ProVerif unlinkability proofs in `formal/credits/credits_unlinkability.pv`), alongside newly implemented RFC 9497 `ristretto255` VOPRF and blind vouchers (`tools/voprf.py`, `tools/voucher.py`), a two-server XOR/DPF Private Information Retrieval (PIR) directory (`tools/pir_directory.py`), and a hash-based post-quantum STARK membership prototype (`docs/ZK_MEMBERSHIP_DESIGN.md`, forward-private nullifiers bound to `SHA-256(request)` in `tools/zkid.py`). See [docs/MESH_DESIGN.md](docs/MESH_DESIGN.md) and [docs/cli/mesh.md](docs/cli/mesh.md).
@@ -740,21 +741,21 @@ The contribution economy uses unlinkable blind-signed credits (Chaum RSA-FDH in 
 
 Like Mullvad, servers are built to hold nothing that could be handed over:
 - **No accounts, no logs.** Process output goes to `/dev/null`, and `LogLevelMax=emerg` (or the silent `deploy/fly/init.sh` supervisor on Fly.io) stops even the service manager from logging start and stop times for the VPN units.
-- **Everything written while running lives in RAM** (`/run/advanced-vpn/`): status, PIDs, locks, unwrapped operator data keys, rotated certificates, carrier counters and the resolver file.
+- **Everything written while running lives in RAM** (`/run/cypherpunk-vpn/`): status, PIDs, locks, unwrapped operator data keys, rotated certificates, carrier counters and the resolver file.
 - **A server's persistent disk holds only its enrollment and one aggregate monthly byte counter:** keys (TPM2-sealed or encrypted under an operator-locked data key), pins, peer addresses, and the fee guard's single host-wide monthly outbound integer (rounded up to 16 MiB, with no per-member, per-session, per-destination or timestamp record).
 - **The daily data cap is client-only,** so no server stores per-user byte counts.
 - **The DNS forwarder** logs and caches nothing.
 - **Flow state** (kernel conntrack and WireGuard handshakes) exists only in RAM, while a session is active.
 
-In installed Debian 13 VMs, after real traffic, the relay and exit had **written no files** under `/etc/advanced-vpn` and had **no journal entries** for the VPN units. The client keeps only its own preferences and a pre-VPN network snapshot, which it needs to restore its routes after a reboot.
+In installed Debian 13 VMs, after real traffic, the relay and exit had **written no files** under `/etc/cypherpunk-vpn` and had **no journal entries** for the VPN units. The client keeps only its own preferences and a pre-VPN network snapshot, which it needs to restore its routes after a reboot.
 
-**Zero-knowledge proofs aren't used in the single-operator design, and nothing there needs them.** Mullvad and Nym use ZK credentials to separate a paying account from what that account does on someone else's servers. With one person owning every device and every hop, there's no account or payment to unlink. AVPN/Mesh is the point where that changes: once strangers use each other's servers, usage must be decoupled from identity, so mesh contribution credits use blind signatures and VOPRF tokens today ([docs/MESH_DESIGN.md](docs/MESH_DESIGN.md)), and the v1.0 design replaces them with zero-knowledge membership proofs as hash-based STARKs with forward-private nullifiers bound to the authorized request ([docs/ZK_MEMBERSHIP_DESIGN.md](docs/ZK_MEMBERSHIP_DESIGN.md)).
+**Zero-knowledge proofs aren't used in the single-operator design, and nothing there needs them.** Mullvad and Nym use ZK credentials to separate a paying account from what that account does on someone else's servers. With one person owning every device and every hop, there's no account or payment to unlink. CPVPN/Mesh is the point where that changes: once strangers use each other's servers, usage must be decoupled from identity, so mesh contribution credits use blind signatures and VOPRF tokens today ([docs/MESH_DESIGN.md](docs/MESH_DESIGN.md)), and the v1.0 design replaces them with zero-knowledge membership proofs as hash-based STARKs with forward-private nullifiers bound to the authorized request ([docs/ZK_MEMBERSHIP_DESIGN.md](docs/ZK_MEMBERSHIP_DESIGN.md)).
 
 ## Key exposure
 
 | Stage | Where private keys exist |
 |---|---|
-| Generation (`request`) | Only on the device. Nitrokey mode seals before writing (no plaintext file). Server `systemd-creds` mode tests and seals with the TPM2 (refusing if unavailable). Server `operator` mode encrypts each key under a random AES-256-GCM data key wrapped by hybrid `X25519 + ML-KEM-768` to the operator's Nitrokey unlock key (`avpn unlock-key`) and never stores the data key on disk. Client `none` mode requires explicit `--insecure-plaintext-keys` (`0600`). |
+| Generation (`request`) | Only on the device. Nitrokey mode seals before writing (no plaintext file). Server `systemd-creds` mode tests and seals with the TPM2 (refusing if unavailable). Server `operator` mode encrypts each key under a random AES-256-GCM data key wrapped by hybrid `X25519 + ML-KEM-768` to the operator's Nitrokey unlock key (`cypherpunk unlock-key`) and never stores the data key on disk. Client `none` mode requires explicit `--insecure-plaintext-keys` (`0600`). |
 | Operator (`init`) | No device key. The FIDO2 classical key (and optional second-key ML-DSA-44 key) never leaves the token. The operator ML-DSA-65 key (and unlock key when `--emit-unlock` is used) is unsealed in memory for one signing operation. |
 | Transfer | Requests and bundles carry public data only. The WireGuard PSK, link PSKs, and operator-locked server data keys are encrypted with hybrid X25519 + ML-KEM-768 to each recipient. |
 | Session signing (`session_signer.py`, Phase 2) | On a hardware-protected client, only the short-lived, undumpable (`PR_SET_DUMPABLE=0`, core dumps off, `mlockall`) signer process unseals the long-term ML-DSA-65 TLS identities during the connect/renewal PIN + touch, certifies fresh per-session ML-DSA-65 layer keys alongside the FIDO2 hardware session statement (≤12 h), and exits immediately. |
@@ -764,20 +765,20 @@ The active session's traffic keys (WireGuard X25519 and the per-session ML-DSA-6
 
 Cold start with a Nitrokey-sealed client needs the PIN and a touch:
 - **In a desktop session (including under `sudo`),** a desktop PIN pop-up appears, with a terminal fallback.
-- **In a terminal without a display,** `avpn` asks on the command line.
-- **As a service, including whole-device mode at boot,** it asks through systemd's password agents. The prompt appears on the boot console, as a disk-encryption passphrase does, or you answer it from any terminal with `sudo avpn unlock`. The PIN is never cached in the kernel keyring; within a single multi-step CLI command it is held in memory for that command only and dropped on any error.
+- **In a terminal without a display,** `cypherpunk` asks on the command line.
+- **As a service, including whole-device mode at boot,** it asks through systemd's password agents. The prompt appears on the boot console, as a disk-encryption passphrase does, or you answer it from any terminal with `sudo cypherpunk unlock`. The PIN is never cached in the kernel keyring; within a single multi-step CLI command it is held in memory for that command only and dropped on any error.
 
 If nobody answers, the prompt times out after 5 minutes. The service restarts and asks again, and traffic stays blocked the whole time.
 
 ## Limits and provenance
 
-The relay/provider can still observe addresses, sizes, timing and outages. The owned exit sees traffic after VPN decryption; HTTPS retains its independent TLS. In a single-owner deployment, the exit's cloud provider knows its account holder by billing, and a Fly.io exit shares Fly's host-level outgoing IPv4 NAT address with other customers on that host (which can move when Fly migrates the Machine; [docs/FLY_EXIT.md](docs/FLY_EXIT.md)). Streaming eligibility (`avpn stream-check`, [docs/STREAMING_GEO_PARITY_20261120.md](docs/STREAMING_GEO_PARITY_20261120.md), decision D014) is recorded only as a dated measurement with its transport profile, never as an unblocking promise. No provider-no-logging, anonymity, TEE attestation, WAN-performance or independent-audit guarantee is made.
+The relay/provider can still observe addresses, sizes, timing and outages. The owned exit sees traffic after VPN decryption; HTTPS retains its independent TLS. In a single-owner deployment, the exit's cloud provider knows its account holder by billing, and a Fly.io exit shares Fly's host-level outgoing IPv4 NAT address with other customers on that host (which can move when Fly migrates the Machine; [docs/FLY_EXIT.md](docs/FLY_EXIT.md)). Streaming eligibility (`cypherpunk stream-check`, [docs/STREAMING_GEO_PARITY_20261120.md](docs/STREAMING_GEO_PARITY_20261120.md), decision D014) is recorded only as a dated measurement with its transport profile, never as an unblocking promise. No provider-no-logging, anonymity, TEE attestation, WAN-performance or independent-audit guarantee is made.
 
-A global passive adversary remains out of scope for any low-latency system, ours included; per-hop defense raises its cost, it does not produce mixnet-grade unlinkability. For traffic that can wait seconds, the mix lane (`avpn mix`, Katzenpost) does: with live websites such an adversary named 10.7% of senders on the mix lane against 88.2% on a low-latency path (chance 10%, post-quantum X-Wing Sphinx, `docs/evidence/MIX_LANE.json`). The mix lane's at-chance protection is a property of the delay and rate together, not of one bandwidth number (parameter sweep, v0.10.2, 10 clients, `docs/evidence/MIX_LANE_SWEEP.json`): at 200 ms mean delay per hop the adversary stays at chance down to half the client uplink (~287 kbit/s, 11.6% [7.9–15.2] against a 10% chance), and doubling the payload rate buys a shorter queue, not weaker protection (9.1% at ~917 kbit/s); but half the uplink **with** 100 ms delays leaks above chance (12.8% [10.5–15.1]). Shorter delays are therefore only safe at the full rate, and slower links only at the full delay. An I2P front (`avpn init --front i2p`) keeps your address from the entry and its provider (`docs/evidence/I2P_FRONT.json`), though I2P's internal tunnel routing remains classical (exception 2 in [docs/PQ_INVENTORY.md](docs/PQ_INVENTORY.md)). On real websites, the low-latency carrier's experimental wire clock brought k-FP accuracy to near chance (3.8–8.3% vs 100% undefended, Holm p ≥ 0.18) in the 20 November frozen 720-attempt replication ([docs/WF_REPLICATION.md](docs/WF_REPLICATION.md)), but failed the local promotion gate on 95% upper bounds (up to 12.1%), page-load success non-inferiority (−6.3 to −7.1 points) and two brief unprotected sample windows; wire-clock controls therefore remain opt-in and do not cover the TCP/TLS fallback or the I2P front.
+A global passive adversary remains out of scope for any low-latency system, ours included; per-hop defense raises its cost, it does not produce mixnet-grade unlinkability. For traffic that can wait seconds, the mix lane (`cypherpunk mix`, Katzenpost) does: with live websites such an adversary named 10.7% of senders on the mix lane against 88.2% on a low-latency path (chance 10%, post-quantum X-Wing Sphinx, `docs/evidence/MIX_LANE.json`). The mix lane's at-chance protection is a property of the delay and rate together, not of one bandwidth number (parameter sweep, v0.10.2, 10 clients, `docs/evidence/MIX_LANE_SWEEP.json`): at 200 ms mean delay per hop the adversary stays at chance down to half the client uplink (~287 kbit/s, 11.6% [7.9–15.2] against a 10% chance), and doubling the payload rate buys a shorter queue, not weaker protection (9.1% at ~917 kbit/s); but half the uplink **with** 100 ms delays leaks above chance (12.8% [10.5–15.1]). Shorter delays are therefore only safe at the full rate, and slower links only at the full delay. An I2P front (`cypherpunk init --front i2p`) keeps your address from the entry and its provider (`docs/evidence/I2P_FRONT.json`), though I2P's internal tunnel routing remains classical (exception 2 in [docs/PQ_INVENTORY.md](docs/PQ_INVENTORY.md)). On real websites, the low-latency carrier's experimental wire clock brought k-FP accuracy to near chance (3.8–8.3% vs 100% undefended, Holm p ≥ 0.18) in the 20 November frozen 720-attempt replication ([docs/WF_REPLICATION.md](docs/WF_REPLICATION.md)), but failed the local promotion gate on 95% upper bounds (up to 12.1%), page-load success non-inferiority (−6.3 to −7.1 points) and two brief unprotected sample windows; wire-clock controls therefore remain opt-in and do not cover the TCP/TLS fallback or the I2P front.
 
 DNS offers two explicit post-quantum / privacy trade-offs ([docs/PQ_INVENTORY.md](docs/PQ_INVENTORY.md) exceptions 4 and 5):
-- **Default (`advanced-vpn-dns` DoT forwarder):** the exit forwards lookups only over TLS 1.3 with the hybrid `X25519MLKEM768` group and fails closed otherwise. Because few public resolvers offer the hybrid group today, the default upstream is Cloudflare (`1.1.1.1:853`; Google also works), which concentrates your lookups at one provider (seeing them from your exit's IP, never yours) and authenticates the resolver with classical WebPKI certificates (exception 4).
-- **Opt-in exit recursive resolver (`avpn init --dns-recursive`, `tools/exit_resolver.py`):** the exit runs its own local Unbound resolver with DNSSEC validation and QNAME minimisation (verified live on 20/20 domains with `dnssec-failed.org` refused), removing any central public DNS provider. Those queries leave from the exit to authoritative DNS servers as plain DNS authenticated by classical DNSSEC (exception 5).
+- **Default (`cypherpunk-vpn-dns` DoT forwarder):** the exit forwards lookups only over TLS 1.3 with the hybrid `X25519MLKEM768` group and fails closed otherwise. Because few public resolvers offer the hybrid group today, the default upstream is Cloudflare (`1.1.1.1:853`; Google also works), which concentrates your lookups at one provider (seeing them from your exit's IP, never yours) and authenticates the resolver with classical WebPKI certificates (exception 4).
+- **Opt-in exit recursive resolver (`cypherpunk init --dns-recursive`, `tools/exit_resolver.py`):** the exit runs its own local Unbound resolver with DNSSEC validation and QNAME minimisation (verified live on 20/20 domains with `dnssec-failed.org` refused), removing any central public DNS provider. Those queries leave from the exit to authoritative DNS servers as plain DNS authenticated by classical DNSSEC (exception 5).
 
 **Formal verification, bounded model checking and fuzzing ([formal/README.md](formal/README.md), [docs/VERIFICATION_PLAN.md](docs/VERIFICATION_PLAN.md)):**
 
@@ -799,7 +800,7 @@ flowchart LR
     end
 
     subgraph BoundedAndFuzz["Kani Model Checking, Vectors & CI Fuzzing"]
-        Kani["crates/avpn-kani (src/link_bounds.rs)<br/>Replay window & reply credit proofs (4 mutants)"]
+        Kani["crates/cpvpn-kani (src/link_bounds.rs)<br/>Replay window & reply credit proofs (4 mutants)"]
         Vec["tools/formal_model_vectors.py<br/>15/15 live Rust & Python crypto test vectors"]
         Fuzz["5 cargo-fuzz targets + Python parser mutation fuzzer<br/>All external byte & leaf/bundle parsers"]
     end
@@ -811,7 +812,7 @@ flowchart LR
 
 - **Tamarin 1.12.0 (16 symbolic models, 57 verified lemmas, 26 falsified mutants in CI, `docs/evidence/TAMARIN.json`):** covers DC-net frame authenticity/decoding/collusion bounds, mix-lane re-blinding, cloak v2 mutual channel/role-bound proofs, hop-link hybrid forward secrecy (safe after a PSK leak unless both X25519 and ML-KEM are broken for that session), hybrid `kem_seal`, OHTTP response binding, credit redemption, dual-signature enrollment, and Phase 1/2 hardware-bound sessions (`stolen_session_key_expires`), each pinned to production crypto vectors by `tools/formal_model_vectors.py`.
 - **ProVerif 2.05 (`tools/proverif_check.py`, `docs/evidence/PROVERIF.json`):** proves observational equivalence (unlinkability) for OHTTP requests against the gateway and for blind-credit issuance/spending against the ledger (after closing an issuer multiplicative-tagging attack via RFC 9474 Finalize verification).
-- **Kani & CI fuzzing:** `crates/avpn-kani` (`src/link_bounds.rs`, 4 mutants caught) proves the hop link's replay window and reply-credit invariants on the Rust code; five `cargo-fuzz` targets and the Python mutation fuzzer test all external byte parsers in CI.
+- **Kani & CI fuzzing:** `crates/cpvpn-kani` (`src/link_bounds.rs`, 4 mutants caught) proves the hop link's replay window and reply-credit invariants on the Rust code; five `cargo-fuzz` targets and the Python mutation fuzzer test all external byte parsers in CI.
 - **Scope caveats:** every symbolic proof holds only within the abstractions and assumptions stated in [formal/README.md](formal/README.md) (for example, credit `no_double_spend` assumes a single shared `Ledger` spent set across relays, OHTTP freshness is modelled as a restriction, and symbolic models do not prove timing or side-channel immunity).
 
 `src/dcnet.rs` is a tested DC-net round core for anonymous mesh control events (72-bit truncated SHA-256 event integrity, end-to-end cell lab in `tools/dcnet_cell_lab.py`, deniable multi-layer storage in `tools/padstore.py` v2 with copy-on-write dual headers and Elligator 2 envelopes in `tools/elligator.py`, plus DLEQ batch, authenticated event-effect and jamming/fallback validation in `tools/dcnet_validation.py`). No VPN command calls it yet. Its one-time-pad construction supports information-theoretic sender anonymity within an honest group connected by jointly secret, uniform, never-reused pad edges. The current generator (`tools/padbook.py`) combines kernel/Nitrokey output (whose internal RNG was verified in firmware source to be a once-per-boot seeded ChaCha8 stream, hence computational alone) with assessed raw CPU-jitter noise (NIST SP 800-90B `ea_non_iid` + Toeplitz extractor); it has not established the required joint entropy, independent extractor-seed and physical custody assumptions. Its `conditional-information-theoretic` label records declared provenance, not qualification. Network-seeded hash chains remain computational. See the [design](docs/DCNET_CONTROL_DESIGN.md), [paper and implementation review](docs/INFORMATION_THEORETIC_REVIEW_20261117.md), and [pad exposure validation guide](docs/PAD_EXPOSURE_VALIDATION.md) for the precise passive-round claim and remaining gates. This does not qualify the VPN as information-theoretically secure.
@@ -841,13 +842,13 @@ flowchart TD
     subgraph P4["Plane 4: Statistical Anti-Surveillance Shield (Deployed)"]
         DAT --> CR["DAITA Strict Constant-Rate Pacing (src/daita.rs & src/link.rs)"]
         CR -->|"0-3.7% idle/busy wire delta inside HTTP/3 Cloak v2"| WIRE["Physical Ingress / Egress Wire"]
-        MIX["Katzenpost X-Wing PQ-Sphinx Mix-Lane (avpn mix)<br/>& Optional I2P Front (--front i2p)"] -.->|"Async Poisson Mixing / Entry Hiding"| WIRE
+        MIX["Katzenpost X-Wing PQ-Sphinx Mix-Lane (cypherpunk mix)<br/>& Optional I2P Front (--front i2p)"] -.->|"Async Poisson Mixing / Entry Hiding"| WIRE
     end
 ```
 
 While the RFC 9497 `ristretto255` VOPRF and voucher modules (`tools/voprf.py`, `tools/voucher.py`, `tools/mesh_voprf.py`), the two-server XOR/DPF PIR directory (`tools/pir_directory.py`), the full-tree curve inventory (`tools/curve_inventory.py`) and secret-handling audit (`tools/secret_review.py`) are now implemented and unit-tested in the tree, synthetic/reference benchmarks do not qualify live traffic immunity, post-quantum voucher unlinkability proofs, deployed multi-operator DPF network timings or production throughput. See the [18 November artifact review](docs/RESEARCH_REVIEW_20261118.md) and [roadmap §6](docs/ROADMAP.md#6-cypherpunks-research-qualification) for incorporation decisions and the remaining qualification gates.
 
-Inside the client tunnel, traffic is currently Linux/IPv4 only while **client-side IPv6 is deliberately blocked fail-closed** in every mode so it cannot escape around the tunnel — verified by the 19-gate dual-stack IPv6 leak suite (`tools/ipv6_leak_suite.py`; native inside-tunnel IPv6 is designed and staged in [docs/IPV6_TUNNELING_DESIGN.md](docs/IPV6_TUNNELING_DESIGN.md), decision D009). **Between servers**, IPv6 is supported today: paced server-to-server links run over IPv6 TCP (`avpn init --link-transport tcp`) to IPv6-only exits such as Fly.io, and the server-side egress lock and fee-guard quota enforce `inet` rules across both IPv4 and IPv6 ([docs/FEE_GUARD.md](docs/FEE_GUARD.md)). The managed profile uses inner MTU 1100 and WireGuard MTU 1340; HTTP/3 QUIC cloak requires an IPv4 underlay MTU of at least 1448 bytes, automatically falls back to TLS 1.3 over TCP 443 on paths between 576 and 1447 bytes, and refuses to connect below 576 bytes with the kill switch held. The native Linux GUI, OpenTofu onboarding, router deployment target designs ([GL.iNet GL-MT6000/GL-MT3000](docs/ROUTER_DEPLOYMENT.md), decision D010) and [Tor-over-the-tunnel recipe](docs/TOR_RECIPE.md) (decision D012) still require packaged-release, hardware-in-the-loop and full-onboarding qualification. The standalone v0.1 QUIC interface remains available; see [historical interface](docs/LEGACY_QUIC.md).
+Inside the client tunnel, traffic is currently Linux/IPv4 only while **client-side IPv6 is deliberately blocked fail-closed** in every mode so it cannot escape around the tunnel — verified by the 19-gate dual-stack IPv6 leak suite (`tools/ipv6_leak_suite.py`; native inside-tunnel IPv6 is designed and staged in [docs/IPV6_TUNNELING_DESIGN.md](docs/IPV6_TUNNELING_DESIGN.md), decision D009). **Between servers**, IPv6 is supported today: paced server-to-server links run over IPv6 TCP (`cypherpunk init --link-transport tcp`) to IPv6-only exits such as Fly.io, and the server-side egress lock and fee-guard quota enforce `inet` rules across both IPv4 and IPv6 ([docs/FEE_GUARD.md](docs/FEE_GUARD.md)). The managed profile uses inner MTU 1100 and WireGuard MTU 1340; HTTP/3 QUIC cloak requires an IPv4 underlay MTU of at least 1448 bytes, automatically falls back to TLS 1.3 over TCP 443 on paths between 576 and 1447 bytes, and refuses to connect below 576 bytes with the kill switch held. The native Linux GUI, OpenTofu onboarding, router deployment target designs ([GL.iNet GL-MT6000/GL-MT3000](docs/ROUTER_DEPLOYMENT.md), decision D010) and [Tor-over-the-tunnel recipe](docs/TOR_RECIPE.md) (decision D012) still require packaged-release, hardware-in-the-loop and full-onboarding qualification. The standalone v0.1 QUIC interface remains available; see [historical interface](docs/LEGACY_QUIC.md).
 
 ```mermaid
 flowchart TD

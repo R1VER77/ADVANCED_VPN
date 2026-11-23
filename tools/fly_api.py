@@ -1,7 +1,7 @@
 """Fly.io Machines API, and ssh/scp over its exec API, for a chain server on a Fly Machine
 (standard library only: cloud.py runs under the system Python).
 
-A Fly Machine runs no sshd: `avpn cloud` reaches it through the Machines API's exec call,
+A Fly Machine runs no sshd: `cypherpunk cloud` reaches it through the Machines API's exec call,
 which runs a command in the Machine and returns its output. `fly-ssh` and `fly-scp`
 (tools/) give that the shape of ssh and scp, so the cloud tool's host scripts run on a
 Fly exit unchanged:
@@ -11,7 +11,7 @@ Fly exit unchanged:
     fly-scp [-q] --app APP MACHINE:SRC DST       # download
 
 The token is a Fly deploy token for the app, read from a file only the user can read
-(AVPN_FLY_TOKEN_FILE, default ~/.config/advanced-vpn/fly-deploy-token); it is never
+(CPVPN_FLY_TOKEN_FILE, default ~/.config/cypherpunk-vpn/fly-deploy-token); it is never
 printed or put in an argument list.
 """
 
@@ -34,7 +34,7 @@ class FlyError(Exception):
 
 def token_path():
     """Where the deploy token is kept."""
-    return Path(os.environ.get("AVPN_FLY_TOKEN_FILE") or Path.home() / ".config/advanced-vpn/fly-deploy-token")
+    return Path(os.environ.get("CPVPN_FLY_TOKEN_FILE") or Path.home() / ".config/cypherpunk-vpn/fly-deploy-token")
 
 
 def token():

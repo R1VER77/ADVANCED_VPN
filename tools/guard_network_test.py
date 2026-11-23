@@ -13,7 +13,7 @@ from pathlib import Path
 import subprocess
 from unittest import mock
 
-import avpnctl
+import cypherpunkctl
 
 ROOT = Path(__file__).resolve().parents[1]
 NAMES = ("guard-router", "guard-wan", "guard-client")
@@ -47,7 +47,7 @@ def main():
         phases={},
         input_sha256={
             name: hashlib.sha256((ROOT / name).read_bytes()).hexdigest()
-            for name in ("tools/guard_network_test.py", "tools/avpnctl.py")
+            for name in ("tools/guard_network_test.py", "tools/cypherpunkctl.py")
         },
     )
 
@@ -172,9 +172,9 @@ def main():
         results["native_sha256"] = hashlib.sha256(native.read_bytes()).hexdigest()
         command("ip", "netns", "exec", NAMES[0], "/usr/sbin/nft", "-f", "-", input=policy)
         results["phases"]["fallback_guard"] = probes(False)
-        replace = avpnctl.replace_table
-        with mock.patch.object(avpnctl, "replace_table", side_effect=lambda body: replace(body, NAMES[0])):
-            avpnctl.whole_firewall({"network": {"relay_endpoint": "192.0.2.2:41194"}})
+        replace = cypherpunkctl.replace_table
+        with mock.patch.object(cypherpunkctl, "replace_table", side_effect=lambda body: replace(body, NAMES[0])):
+            cypherpunkctl.whole_firewall({"network": {"relay_endpoint": "192.0.2.2:41194"}})
         results["phases"]["whole_device_guard_without_tunnel"] = probes(False)
         # A broken variant must leak at the external witness. This catches a
         # false-success test that only lost replies while requests still escaped.
@@ -185,13 +185,13 @@ def main():
                 raise RuntimeError("forwarding mutant no longer matches the tested policy")
             replace(body.replace(forward, ""), NAMES[0])
 
-        with mock.patch.object(avpnctl, "replace_table", side_effect=missing_forward):
-            avpnctl.whole_firewall({"network": {"relay_endpoint": "192.0.2.2:41194"}})
+        with mock.patch.object(cypherpunkctl, "replace_table", side_effect=missing_forward):
+            cypherpunkctl.whole_firewall({"network": {"relay_endpoint": "192.0.2.2:41194"}})
         results["phases"]["broken_forwarding_policy_detected"] = probes(True, (NAMES[2],))
-        with mock.patch.object(avpnctl, "replace_table", side_effect=lambda body: replace(body, NAMES[0])):
-            avpnctl.whole_firewall({"network": {"relay_endpoint": "192.0.2.2:41194"}})
+        with mock.patch.object(cypherpunkctl, "replace_table", side_effect=lambda body: replace(body, NAMES[0])):
+            cypherpunkctl.whole_firewall({"network": {"relay_endpoint": "192.0.2.2:41194"}})
         results["phases"]["whole_device_guard_restored"] = probes(False)
-        command("ip", "netns", "exec", NAMES[0], "/usr/sbin/nft", "delete", "table", "inet", "advanced_vpn")
+        command("ip", "netns", "exec", NAMES[0], "/usr/sbin/nft", "delete", "table", "inet", "cypherpunk_vpn")
         results["phases"]["positive_control_after_removal"] = probes(True)
         results["status"] = "passed"
     except BaseException:

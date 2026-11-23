@@ -67,7 +67,7 @@ class PolicyTests(unittest.TestCase):
     def first_line(self, groups, max_protocol=None, headers=""):
         conf = self.dir / ("server-%s-%s.cnf" % (groups, max_protocol))
         conf.write_text(server_policy(groups, max_protocol))
-        env = {k: v for k, v in os.environ.items() if k not in ("OPENSSL_CONF", "AVPN_PQ_FETCH_POLICY")}
+        env = {k: v for k, v in os.environ.items() if k not in ("OPENSSL_CONF", "CPVPN_PQ_FETCH_POLICY")}
         srv = subprocess.Popen(
             [sys.executable, "-c", SERVER, self.dir / "cert.pem", self.dir / "key.pem"],
             stdout=subprocess.PIPE, text=True, env=dict(env, OPENSSL_CONF=str(conf)),

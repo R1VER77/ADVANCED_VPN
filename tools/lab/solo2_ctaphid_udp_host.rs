@@ -1,9 +1,9 @@
-//! ADVANCED_VPN laboratory host; not part of upstream Solo 2.
+//! cypherpunk_vpn laboratory host; not part of upstream Solo 2.
 //!
 //! Serves Solo 2's unmodified `fido-authenticator`, configured as `runners/lpc55` configures
 //! it (`components/solo-apps` `fido_config`), over CTAPHID on loopback UDP: 64-byte frames
 //! from 127.0.0.1:7112 to 127.0.0.1:8111, the transport the laboratory's Solo 1 and CanoKey
-//! backends use (`tools/device_compatibility_lab.py`). `AVPN_CTAPHID_PORTS=HOST,PEER` moves
+//! backends use (`tools/device_compatibility_lab.py`). `CPVPN_CTAPHID_PORTS=HOST,PEER` moves
 //! it to other loopback ports, so the lab can present a second, separate key. Upstream's PC runner serves no
 //! CTAPHID, so this file supplies only the framing that `usbd-ctaphid` does on the device;
 //! every message goes to the authenticator through the same `ctaphid_app::App::call` entry.
@@ -60,8 +60,8 @@ fn production_config() -> Config {
 
 /// (this host's address, the client's address) on loopback.
 fn addresses() -> (String, String) {
-    let ports = std::env::var("AVPN_CTAPHID_PORTS").unwrap_or_else(|_| "8111,7112".into());
-    let (me, peer) = ports.split_once(',').expect("AVPN_CTAPHID_PORTS=HOST,PEER");
+    let ports = std::env::var("CPVPN_CTAPHID_PORTS").unwrap_or_else(|_| "8111,7112".into());
+    let (me, peer) = ports.split_once(',').expect("CPVPN_CTAPHID_PORTS=HOST,PEER");
     let port = |p: &str| p.parse::<u16>().expect("a port number");
     (format!("127.0.0.1:{}", port(me)), format!("127.0.0.1:{}", port(peer)))
 }
@@ -188,7 +188,7 @@ fn serve<'i>(app: &mut dyn App<'i>) {
 fn serve_ctaphid_over_udp() {
     solo_pc::buttons::approve_sticky();
     std::thread::Builder::new()
-        .name("avpn-ctaphid-host".into())
+        .name("cpvpn-ctaphid-host".into())
         .stack_size(16 << 20)
         .spawn(|| {
             sim::with_client(|client| {

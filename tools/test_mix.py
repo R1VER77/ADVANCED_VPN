@@ -94,7 +94,7 @@ class ConfigTests(unittest.TestCase):
                 mix.request(url, method, timeout=0)
 
     def test_missing_programs_are_named(self):
-        with tempfile.TemporaryDirectory() as d, mock.patch.dict("os.environ", {"AVPN_KATZENPOST": d}):
+        with tempfile.TemporaryDirectory() as d, mock.patch.dict("os.environ", {"CPVPN_KATZENPOST": d}):
             with self.assertRaisesRegex(RuntimeError, "kpclientd and http-proxy-client"):
                 mix.binaries()
 

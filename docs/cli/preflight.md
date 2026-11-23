@@ -1,12 +1,12 @@
-# avpn preflight
+# cypherpunk preflight
 
 Check installation requirements before changing this system. Preflight never installs
 packages, changes networking, logs into providers or modifies security keys.
 
 ## Usage
 
-    avpn preflight [--package DIR] [--target DIR] [--protect MODE] [--hardware]
-    avpn --json preflight
+    cypherpunk preflight [--package DIR] [--target DIR] [--protect MODE] [--hardware]
+    cypherpunk --json preflight
     python3 tools/preflight.py --json
 
 The standalone script uses only the standard library and runs on Python 3.8+. It can
@@ -43,5 +43,5 @@ Unknown Landlock visibility is not proof it is disabled. Interface names are clu
 proof another VPN is up. Provider network requests occur only with an explicit provider selection.
 
 Missing packages form one suggested apt/dnf/pacman/zypper command; review and run it yourself.
-Exit status is zero when ready, one when blocked. `avpn doctor` shares the host checks,
-then adds enrollment and runtime checks. See `avpn help setup` for the resumable checklist.
+Exit status is zero when ready, one when blocked. `cypherpunk doctor` shares the host checks,
+then adds enrollment and runtime checks. See `cypherpunk help setup` for the resumable checklist.

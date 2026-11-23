@@ -21,7 +21,7 @@ from wf_real import host_power
 from wf_pcap import library_path
 
 ROOT = Path(__file__).resolve().parents[1]
-BINARIES = ("advanced-vpn", "advanced-vpn-cloak", "advanced-vpn-wireguard", "advanced-vpn-dns")
+BINARIES = ("cypherpunk-vpn", "cypherpunk-vpn-cloak", "cypherpunk-vpn-wireguard", "cypherpunk-vpn-dns")
 RESERVE = 2 * 1024**3
 
 
@@ -59,15 +59,15 @@ def schedule():
 
 
 def arm_environment(parent, variant):
-    """Never inherit another experiment's AVPN overrides, including in the control."""
-    env = {k: v for k, v in parent.items() if not k.startswith("AVPN_")}
+    """Never inherit another experiment's CYPHERPUNK overrides, including in the control."""
+    env = {k: v for k, v in parent.items() if not k.startswith("CPVPN_")}
     if variant != "undefended":
         env.update(
-            AVPN_WIRE_CLOCK_PPS="4000",
-            AVPN_WIRE_CLOCK_DOWNSTREAM="1",
-            AVPN_WIRE_CLOCK_MS="30",
-            AVPN_CATCH_UP_MS="50",
-            AVPN_WIRE_CLOCK_RELAY_MS=variant.removeprefix("relay"),
+            CPVPN_WIRE_CLOCK_PPS="4000",
+            CPVPN_WIRE_CLOCK_DOWNSTREAM="1",
+            CPVPN_WIRE_CLOCK_MS="30",
+            CPVPN_CATCH_UP_MS="50",
+            CPVPN_WIRE_CLOCK_RELAY_MS=variant.removeprefix("relay"),
         )
     env.update(OMP_NUM_THREADS="1", OPENBLAS_NUM_THREADS="1", MKL_NUM_THREADS="1")
     return env

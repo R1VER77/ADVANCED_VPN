@@ -3,7 +3,7 @@
 Linux frontend in Vue 3, TypeScript and Tauri 2. The ordinary-user app talks to
 `org.cypherpunk_vpn.Controller1` on the system bus. The root controller owns
 networking, enrollment and hardware access. Cloud sign-ins and the operator's vault stay
-with the user helper `avpn-desktop` (`tools/desktop_setup.py`), which the app runs with
+with the user helper `cpvpn-desktop` (`tools/desktop_setup.py`), which the app runs with
 fixed arguments only. This implementation remains under validation; creating new servers
 from the app and real participant sessions are incomplete.
 

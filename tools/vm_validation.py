@@ -147,7 +147,7 @@ def network_config(name):
 def seed(work, name, minimal_indexes=False, packages=None, administration_hook=False):
     d = work / (name + "-seed")
     d.mkdir(exist_ok=True)
-    (d / "meta-data").write_text("instance-id: avpn-%s-%s\nlocal-hostname: avpn-%s\n" % (name, work.name, name))
+    (d / "meta-data").write_text("instance-id: cpvpn-%s-%s\nlocal-hostname: cpvpn-%s\n" % (name, work.name, name))
     user = ["#cloud-config"]
     if administration_hook:
         if minimal_indexes:
@@ -186,12 +186,12 @@ def seed(work, name, minimal_indexes=False, packages=None, administration_hook=F
             '      Acquire::IndexTargets::deb::CNF::DefaultEnabled "false";',
         ]
     if name != "client":
-        # Servers boot exactly as avpn cloud creates them: every log in RAM from the start.
+        # Servers boot exactly as cypherpunk cloud creates them: every log in RAM from the start.
         import retention
 
         user += retention.cloud_init().splitlines()[1:]
     user += [
-        "hostname: avpn-" + name,
+        "hostname: cpvpn-" + name,
         "users:",
         "  - name: tester",
         "    uid: %d" % TESTER,
@@ -251,7 +251,7 @@ def package_disk(work):
             shutil.copy2(src, pkg / name)
     img = work / "pkg.img"
     subprocess.run(
-        ["/usr/sbin/mke2fs", "-q", "-t", "ext4", "-L", "avpnpkg", "-d", str(pkg), str(img), "256M"], check=True
+        ["/usr/sbin/mke2fs", "-q", "-t", "ext4", "-L", "cpvpnpkg", "-d", str(pkg), str(img), "256M"], check=True
     )
     return img
 
@@ -284,7 +284,7 @@ def start(work, base, name):
     args = [
         "qemu-system-x86_64",
         "-name",
-        "avpn-" + name,
+        "cpvpn-" + name,
         "-enable-kvm",
         "-cpu",
         "host",
@@ -341,9 +341,9 @@ def start(work, base, name):
 SNAPSHOT = r"""
 date -u +%FT%TZ
 echo '## processes (pid, seconds alive, command)'
-ps -eo pid,etimes,args | grep -E 'advanced-vpn|avpn' | grep -v grep
+ps -eo pid,etimes,args | grep -E 'cypherpunk-vpn|cypherpunk' | grep -v grep
 echo '## status files'
-for f in /run/advanced-vpn*/status.json /run/advanced-vpn*/*/status.json; do [ -f "$f" ] && { echo "$f"; cat "$f"; echo; }; done
+for f in /run/cypherpunk-vpn*/status.json /run/cypherpunk-vpn*/*/status.json; do [ -f "$f" ] && { echo "$f"; cat "$f"; echo; }; done
 echo '## udp sockets'
 ss -uanp
 echo '## kernel udp counters'
@@ -446,34 +446,34 @@ def main():
         # Only the public request leaves a guest; bundles carry no private key.
         (work / "requests").mkdir()
         for n, agent in agents.items():
-            agent.sh("mkdir -p /mnt/pkg && mount -o ro LABEL=avpnpkg /mnt/pkg")
-            # One step, as a user would: install, put avpn on root's PATH, generate keys.
+            agent.sh("mkdir -p /mnt/pkg && mount -o ro LABEL=cpvpnpkg /mnt/pkg")
+            # One step, as a user would: install, put cypherpunk on root's PATH, generate keys.
             agent.sh("python3 /mnt/pkg/tools/install.py --apply --role %s --protect systemd-creds" % n, timeout=900)
-            (work / "requests" / (n + ".json")).write_text(agent.sh("cat /root/advanced-vpn-%s.req" % n)[1])
-            # sudo searches only secure_path: avpn must resolve there, to the system install.
+            (work / "requests" / (n + ".json")).write_text(agent.sh("cat /root/cypherpunk-vpn-%s.req" % n)[1])
+            # sudo searches only secure_path: cypherpunk must resolve there, to the system install.
             secure = "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-            on_path = agent.sh(secure + " sh -c 'command -v avpn; readlink -f $(command -v avpn); avpn --version'")[
-                1
-            ].split()
+            on_path = agent.sh(
+                secure + " sh -c 'command -v cypherpunk; readlink -f $(command -v cypherpunk); cypherpunk --version'"
+            )[1].split()
             # Re-running upgrades in place: the venv is reused and the device keeps its keys.
-            venv_before = agent.sh("stat -c %i /opt/advanced-vpn/venv")[1].strip()
-            certs_before = agent.sh("sha256sum /etc/advanced-vpn/enrolled/*-cert.der")[1]
+            venv_before = agent.sh("stat -c %i /opt/cypherpunk-vpn/venv")[1].strip()
+            certs_before = agent.sh("sha256sum /etc/cypherpunk-vpn/enrolled/*-cert.der")[1]
             rerun = agent.sh(
                 "python3 /mnt/pkg/tools/install.py --apply --role %s --protect systemd-creds" % n, timeout=900
             )[1]
             upgrade = dict(
-                reported_upgrade="Upgraded /opt/advanced-vpn" in rerun,
+                reported_upgrade="Upgraded /opt/cypherpunk-vpn" in rerun,
                 keys_kept="already has keys" in rerun
-                and agent.sh("sha256sum /etc/advanced-vpn/enrolled/*-cert.der")[1] == certs_before,
-                venv_reused=agent.sh("stat -c %i /opt/advanced-vpn/venv")[1].strip() == venv_before,
-                no_leftovers=agent.sh("ls -d /opt/advanced-vpn.* 2>/dev/null | wc -l")[1].strip() == "0",
+                and agent.sh("sha256sum /etc/cypherpunk-vpn/enrolled/*-cert.der")[1] == certs_before,
+                venv_reused=agent.sh("stat -c %i /opt/cypherpunk-vpn/venv")[1].strip() == venv_before,
+                no_leftovers=agent.sh("ls -d /opt/cypherpunk-vpn.* 2>/dev/null | wc -l")[1].strip() == "0",
             )
-            assert on_path[:2] == ["/usr/local/bin/avpn", "/opt/advanced-vpn/bin/avpn"], on_path
+            assert on_path[:2] == ["/usr/local/bin/cypherpunk", "/opt/cypherpunk-vpn/bin/cypherpunk"], on_path
             assert all(upgrade.values()), upgrade
-            enabled = agent.sh("systemctl is-enabled advanced-vpn.service || true")[1].strip()
+            enabled = agent.sh("systemctl is-enabled cypherpunk-vpn.service || true")[1].strip()
             result.setdefault("install", {})[n] = dict(
                 installed=True,
-                avpn_on_sudo_path=" ".join(on_path),
+                cypherpunk_on_sudo_path=" ".join(on_path),
                 upgrade_in_place=upgrade,
                 unit_enabled_by_install=enabled == "enabled",
                 tpm2=agent.sh("systemd-analyze has-tpm2 >/dev/null 2>&1 && echo yes || echo no", check=False)[
@@ -484,7 +484,7 @@ def main():
         subprocess.run(
             [
                 sys.executable,
-                str(ROOT / "tools/avpnctl.py"),
+                str(ROOT / "tools/cypherpunkctl.py"),
                 "init",
                 "--out",
                 str(work / "operator"),
@@ -512,15 +512,21 @@ def main():
         result["bundles_contain_private_keys"] = any(
             m.endswith(("-key.der", "-key.bin", ".key"))
             for n in VMS
-            for m in zipfile.ZipFile(work / "operator" / (n + ".avpn")).namelist()
+            for m in zipfile.ZipFile(work / "operator" / (n + ".cpvpn")).namelist()
         )
         for n, agent in agents.items():
-            agent.sh("cat > /root/bundle.avpn", input=(work / "operator" / (n + ".avpn")).read_bytes())
+            agent.sh("cat > /root/bundle.cpvpn", input=(work / "operator" / (n + ".cpvpn")).read_bytes())
             agent.sh("cat > /root/operator.pub", input=(work / "operator/operator.pub").read_bytes())
             agent.run(
-                ["/opt/advanced-vpn/bin/avpnctl", "enroll", "/root/bundle.avpn", "--operator-key", "/root/operator.pub"]
+                [
+                    "/opt/cypherpunk-vpn/bin/cypherpunkctl",
+                    "enroll",
+                    "/root/bundle.cpvpn",
+                    "--operator-key",
+                    "/root/operator.pub",
+                ]
             )
-            files = agent.sh("ls /etc/advanced-vpn/enrolled")[1].split()
+            files = agent.sh("ls /etc/cypherpunk-vpn/enrolled")[1].split()
             result["install"][n].update(
                 key_files=sorted(f for f in files if "key" in f),
                 plaintext_private_keys=[
@@ -532,7 +538,7 @@ def main():
         # real keyguard.pinentry(); an agent following systemd's ask-password protocol
         # (as the boot console would) answers it. Only hashes are compared.
         props = []
-        for line in (ROOT / "deploy/advanced-vpn.service").read_text().splitlines():
+        for line in (ROOT / "deploy/cypherpunk-vpn.service").read_text().splitlines():
             key = line.split("=", 1)[0]
             if key in (
                 "NoNewPrivileges",
@@ -549,17 +555,17 @@ def main():
         client_agent = agents["client"]
         pin = "vm-test-" + os.urandom(6).hex()
         asker = (
-            "import hashlib,sys;sys.path.insert(0,'/opt/advanced-vpn/tools');import keyguard;"
-            "v=keyguard.pinentry();open('/run/avpn-askpass-result','w').write(hashlib.sha256(v.encode()).hexdigest())"
+            "import hashlib,sys;sys.path.insert(0,'/opt/cypherpunk-vpn/tools');import keyguard;"
+            "v=keyguard.pinentry();open('/run/cpvpn-askpass-result','w').write(hashlib.sha256(v.encode()).hexdigest())"
         )
         client_agent.run(
             [
                 "systemd-run",
                 "--unit",
-                "avpn-askpass-test",
+                "cpvpn-askpass-test",
                 "--collect",
                 *props,
-                "/opt/advanced-vpn/venv/bin/python",
+                "/opt/cypherpunk-vpn/venv/bin/python",
                 "-c",
                 asker,
             ]
@@ -570,7 +576,7 @@ def main():
             "while time.time()<end:\n"
             " for f in glob.glob('/run/systemd/ask-password/ask.*'):\n"
             "  c=configparser.ConfigParser();c.read(f);a=c['Ask']\n"
-            "  if a.get('Id')=='advanced-vpn:fido2-pin':\n"
+            "  if a.get('Id')=='cypherpunk-vpn:fido2-pin':\n"
             "   s=socket.socket(socket.AF_UNIX,socket.SOCK_DGRAM);s.sendto(b'+'+sys.argv[1].encode(),a['Socket']);print(a.get('Message'));sys.exit(0)\n"
             " time.sleep(.2)\n"
             "sys.exit('no ADVANCED VPN prompt appeared')\n"
@@ -579,7 +585,7 @@ def main():
         end = time.monotonic() + 20
         got = ""
         while time.monotonic() < end and not got:
-            got = client_agent.sh("cat /run/avpn-askpass-result 2>/dev/null", check=False)[1].strip()
+            got = client_agent.sh("cat /run/cpvpn-askpass-result 2>/dev/null", check=False)[1].strip()
             time.sleep(0.5)
         result["service_pin_prompt"] = dict(
             prompt_message=message,
@@ -591,18 +597,27 @@ def main():
             agents["client"].sh("readlink -f /etc/resolv.conf; systemctl is-active systemd-resolved || true")[1].split()
         )
         agents["exit"].sh(
-            "systemd-run --unit avpn-iperf iperf3 -s -B 198.51.100.2 && mkdir -p /srv/probe && echo ok > /srv/probe/index.html && "
-            "systemd-run --unit avpn-http python3 -m http.server 8080 --bind 198.51.100.2 --directory /srv/probe"
+            "systemd-run --unit cpvpn-iperf iperf3 -s -B 198.51.100.2 && mkdir -p /srv/probe && echo ok > /srv/probe/index.html && "
+            "systemd-run --unit cpvpn-http python3 -m http.server 8080 --bind 198.51.100.2 --directory /srv/probe"
         )
         for n in agents:
-            agents[n].sh("touch /root/avpn-epoch")
+            agents[n].sh("touch /root/cpvpn-epoch")
         for n in ["exit", "relay", "client"]:
-            agents[n].run(["systemctl", "start", "advanced-vpn.service"])
+            agents[n].run(["systemctl", "start", "cypherpunk-vpn.service"])
         client = agents["client"]
 
         def app(cmd, timeout=60, check=True):
             return client.run(
-                ["/opt/advanced-vpn/bin/avpnctl", "run", "--uid", str(TESTER), "--gid", str(TESTER), "--", *cmd],
+                [
+                    "/opt/cypherpunk-vpn/bin/cypherpunkctl",
+                    "run",
+                    "--uid",
+                    str(TESTER),
+                    "--gid",
+                    str(TESTER),
+                    "--",
+                    *cmd,
+                ],
                 timeout=timeout,
                 check=check,
             )
@@ -625,26 +640,26 @@ def main():
         # session on disk, and the journal has no entries for the VPN units at all.
         result["no_retained_data"] = {}
         for n in ["relay", "exit"]:
-            written = agents[n].sh("find /etc/advanced-vpn -newer /root/avpn-epoch -print", check=False)[1].split()
+            written = agents[n].sh("find /etc/cypherpunk-vpn -newer /root/cpvpn-epoch -print", check=False)[1].split()
             journal = (
                 agents[n]
                 .sh(
-                    "journalctl -q --no-pager -u advanced-vpn.service -u advanced-vpn-guard.service | wc -l",
+                    "journalctl -q --no-pager -u cypherpunk-vpn.service -u cypherpunk-vpn-guard.service | wc -l",
                     check=False,
                 )[1]
                 .strip()
             )
-            runtime = agents[n].sh("ls /run/advanced-vpn/ 2>/dev/null | wc -l", check=False)[1].strip()
+            runtime = agents[n].sh("ls /run/cypherpunk-vpn/ 2>/dev/null | wc -l", check=False)[1].strip()
             result["no_retained_data"][n] = dict(
                 persistent_files_written=written,
                 journal_lines=int(journal or -1),
                 runtime_dirs_in_ram=int(runtime or 0),
             )
         log("no retained data", result["no_retained_data"])
-        status = json.loads(client.run(["/opt/advanced-vpn/bin/avpnctl", "status"])[1])
+        status = json.loads(client.run(["/opt/cypherpunk-vpn/bin/cypherpunkctl", "status"])[1])
         result["default_uncapped"] = dict(
             daily_limit_bytes=status.get("daily_limit_bytes"),
-            meter_table=client.sh("nft list table inet advanced_vpn_meter", check=False)[0] == 0,
+            meter_table=client.sh("nft list table inet cypherpunk_vpn_meter", check=False)[0] == 0,
         )
 
         def iperf(label):
@@ -692,19 +707,19 @@ def main():
         code, out, _ = app(["iperf3", "-c", "198.51.100.2", "-n", "100M", "-J"], timeout=420)
         result["uncapped_100mib"] = dict(
             bytes=json.loads(out)["end"]["sum_received"]["bytes"],
-            carrier_alive=json.loads(client.run(["/opt/advanced-vpn/bin/avpnctl", "status"])[1])["children"]["carrier"][
-                "alive"
-            ],
+            carrier_alive=json.loads(client.run(["/opt/cypherpunk-vpn/bin/cypherpunkctl", "status"])[1])["children"][
+                "carrier"
+            ]["alive"],
         )
-        # Small underlays (design, avpnctl ensure_network): the cloak's 1448-byte QUIC packets
-        # cannot pass, so the cloak falls back on its own to TLS 1.3 over TCP 443; avpnctl only
+        # Small underlays (design, cypherpunkctl ensure_network): the cloak's 1448-byte QUIC packets
+        # cannot pass, so the cloak falls back on its own to TLS 1.3 over TCP 443; cypherpunkctl only
         # warns below 1448 and refuses below IPv4's 576. So 1419 and 1420 must both connect.
         mtu = {}
         for value in [] if a.only_whole_device else [1419, 1420]:
-            client.run(["systemctl", "stop", "advanced-vpn.service"])
+            client.run(["systemctl", "stop", "cypherpunk-vpn.service"])
             client.sh("ip link set linka mtu %d" % value)
-            client.run(["systemctl", "reset-failed", "advanced-vpn.service"], check=False)
-            client.run(["systemctl", "start", "advanced-vpn.service"])
+            client.run(["systemctl", "reset-failed", "cypherpunk-vpn.service"], check=False)
+            client.run(["systemctl", "start", "cypherpunk-vpn.service"])
             try:
                 wait_tunnel(45)
                 mtu[value] = "connected"
@@ -718,7 +733,7 @@ def main():
         if mtu.get(1420) == "connected":
             mtu["1420_large_transfer_mbps"] = iperf("mtu1420")["throughput_mbps"]
         client.sh("ip link set linka mtu 1500")
-        client.run(["systemctl", "restart", "advanced-vpn.service"])
+        client.run(["systemctl", "restart", "cypherpunk-vpn.service"])
         wait_tunnel()
         result["mtu"] = {str(k): v for k, v in mtu.items()}
         save()
@@ -727,13 +742,13 @@ def main():
         end = time.monotonic() + a.soak_seconds
         while time.monotonic() < end:
             soak["cycles"] += 1
-            client.run(["/opt/advanced-vpn/bin/avpnctl", "disconnect"], check=False)
+            client.run(["/opt/cypherpunk-vpn/bin/cypherpunkctl", "disconnect"], check=False)
             time.sleep(2)
             if app(["curl", "-sS", "-m", "3", "-o", "/dev/null", "https://deb.debian.org/"], check=False)[0] != 0:
                 soak["blocked_while_down"] += 1
             else:
                 soak["failures"].append("leak_while_down@%d" % soak["cycles"])
-            client.run(["systemctl", "restart", "advanced-vpn.service"])
+            client.run(["systemctl", "restart", "cypherpunk-vpn.service"])
             try:
                 wait_tunnel(90)
                 soak["recovered"] += 1
@@ -755,10 +770,10 @@ def main():
         save()
         log("soak", soak)
         # Whole-device mode, enabled units, reboot: guard must precede networking and nothing may leak.
-        client.run(["/opt/advanced-vpn/bin/avpnctl", "preferences", "--mode", "whole-device"])
-        client.run(["systemctl", "stop", "advanced-vpn.service"])
-        client.run(["/opt/advanced-vpn/bin/avpnctl", "reset", "--allow-cleartext"])
-        client.run(["systemctl", "enable", "advanced-vpn-guard.service", "advanced-vpn.service"])
+        client.run(["/opt/cypherpunk-vpn/bin/cypherpunkctl", "preferences", "--mode", "whole-device"])
+        client.run(["systemctl", "stop", "cypherpunk-vpn.service"])
+        client.run(["/opt/cypherpunk-vpn/bin/cypherpunkctl", "reset", "--allow-cleartext"])
+        client.run(["systemctl", "enable", "cypherpunk-vpn-guard.service", "cypherpunk-vpn.service"])
         window_start = time.time()
         boot_before = client.sh("cat /proc/sys/kernel/random/boot_id")[1].strip()
         try:
@@ -780,7 +795,7 @@ def main():
         whole = dict()
         result["whole_device_reboot"] = whole
         order = client.sh(
-            "journalctl -b -o short-monotonic --no-pager | grep -E 'Finished advanced-vpn-guard|Starting systemd-networkd.service|Started systemd-networkd.service|Starting networking.service|Starting cloud-init-network|Starting cloud-init.service' | head -20"
+            "journalctl -b -o short-monotonic --no-pager | grep -E 'Finished cypherpunk-vpn-guard|Starting systemd-networkd.service|Started systemd-networkd.service|Starting networking.service|Starting cloud-init-network|Starting cloud-init.service' | head -20"
         )[1]
         whole["boot_order_journal"] = order.strip().splitlines()
 
@@ -796,12 +811,12 @@ def main():
             v = client.sh("systemctl show -P %s %s" % (name, unit), check=False)[1].strip()
             return int(v) if v.isdigit() else None
 
-        guard = prop("advanced-vpn-guard.service", "ActiveEnterTimestampMonotonic")
+        guard = prop("cypherpunk-vpn-guard.service", "ActiveEnterTimestampMonotonic")
         net = prop("systemd-networkd.service", "ExecMainStartTimestampMonotonic")
         whole["guard_active_us"] = guard
         whole["networkd_start_us"] = net
         whole["guard_before_network"] = bool(guard and net and guard < net)
-        whole["guard_table_present"] = client.sh("nft list table inet advanced_vpn >/dev/null", check=False)[0] == 0
+        whole["guard_table_present"] = client.sh("nft list table inet cypherpunk_vpn >/dev/null", check=False)[0] == 0
         end = time.monotonic() + 120
         ok = False
         while time.monotonic() < end and not ok:
@@ -828,15 +843,17 @@ def main():
             client.sh("curl -sS -m 5 --interface wan -o /dev/null http://10.0.2.2/", check=False)[0] != 0
             and client.sh("ping -n -c 1 -W 2 -I wan 1.1.1.1", check=False)[0] != 0
         )
-        client.run(["/opt/advanced-vpn/bin/avpnctl", "disconnect"], check=False)
+        client.run(["/opt/cypherpunk-vpn/bin/cypherpunkctl", "disconnect"], check=False)
         time.sleep(3)
         whole["blocked_after_disconnect"] = (
             client.sh("curl -sS -m 5 -o /dev/null https://deb.debian.org/", check=False)[0] != 0
         )
         time.sleep(1)
         window_end = time.time()  # the explicit cleartext reset below is outside the leak window
-        client.run(["systemctl", "disable", "--now", "advanced-vpn.service", "advanced-vpn-guard.service"], check=False)
-        client.run(["/opt/advanced-vpn/bin/avpnctl", "reset", "--allow-cleartext"])
+        client.run(
+            ["systemctl", "disable", "--now", "cypherpunk-vpn.service", "cypherpunk-vpn-guard.service"], check=False
+        )
+        client.run(["/opt/cypherpunk-vpn/bin/cypherpunkctl", "reset", "--allow-cleartext"])
         whole["cleartext_after_explicit_reset"] = client.sh("ping -n -c 1 -W 3 -I wan 10.0.2.2", check=False)[0] == 0
         client_macs = {bytes.fromhex(mac(1, i).replace(":", "")) for i in (1, 2)}
         leaks = {}

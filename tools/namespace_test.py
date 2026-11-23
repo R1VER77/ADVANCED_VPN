@@ -47,7 +47,7 @@ def main():
         raise RuntimeError("requires an unprivileged isolated user namespace")
     if {r["ifname"] for r in json.loads(run("ip", "-j", "link").stdout)} != {"lo"}:
         raise RuntimeError("requires a fresh network namespace with only loopback")
-    binary = ROOT / "target/release/advanced-vpn"
+    binary = ROOT / "target/release/cypherpunk-vpn"
     state = a.state.resolve()
     configs = provision(state, "192.0.2.1:4433", "198.51.100.1:4444", adversarial=True)
     configs["exit"]["listen"] = "198.51.100.2:4444"
@@ -162,11 +162,11 @@ def main():
                 run("ip", "-n", ns, "addr", "add", addr, "dev", dev)
                 run("ip", "-n", ns, "link", "set", dev, "up")
         for ns, addr in [("av-app", "10.77.0.2/32"), ("av-exit", "10.77.0.1/32")]:
-            run("ip", "netns", "exec", ns, "ip", "tuntap", "add", "dev", "avpn0", "mode", "tun")
-            run("ip", "-n", ns, "addr", "add", addr, "dev", "avpn0")
-            run("ip", "-n", ns, "link", "set", "avpn0", "mtu", "1280", "up")
-        run("ip", "-n", "av-app", "route", "add", "default", "dev", "avpn0")
-        run("ip", "-n", "av-exit", "route", "add", "10.77.0.2/32", "dev", "avpn0")
+            run("ip", "netns", "exec", ns, "ip", "tuntap", "add", "dev", "cpvpn0", "mode", "tun")
+            run("ip", "-n", ns, "addr", "add", addr, "dev", "cpvpn0")
+            run("ip", "-n", ns, "link", "set", "cpvpn0", "mtu", "1280", "up")
+        run("ip", "-n", "av-app", "route", "add", "default", "dev", "cpvpn0")
+        run("ip", "-n", "av-exit", "route", "add", "10.77.0.2/32", "dev", "cpvpn0")
         # Owned exit forwards to a controlled destination. Use actual masquerade when available.
         run("ip", "netns", "exec", "av-exit", "/usr/sbin/sysctl", "-qw", "net.ipv4.ip_forward=1")
         nat = run(
@@ -177,7 +177,7 @@ def main():
             "/usr/sbin/nft",
             "-f",
             "-",
-            input='table ip avpn { chain post { type nat hook postrouting priority srcnat; ip saddr 10.77.0.2 oifname "e1" masquerade; }\n}\n',
+            input='table ip cypherpunk { chain post { type nat hook postrouting priority srcnat; ip saddr 10.77.0.2 oifname "e1" masquerade; }\n}\n',
             check=False,
         )
         if nat.returncode:
@@ -194,7 +194,7 @@ def main():
         wait_tunnel(c)
         ping(size=1252)
         ping(ok=False, size=1253)
-        marker = b"AVPN-PRIVATE-" + os.urandom(24).hex().encode()
+        marker = b"CPVPN-PRIVATE-" + os.urandom(24).hex().encode()
         r = echo(marker)
         assert r.returncode == 0, r.stderr
         assert json.loads((state / "echo.json").read_text())["marker_seen"]
@@ -215,7 +215,7 @@ def main():
             "av-destination", [sys.executable, ROOT / "tools/lab_peer.py", "stream", "--state", state], "stream"
         )
         time.sleep(0.1)
-        code = 'import socket,time,hashlib,json;s=socket.create_connection(("203.0.113.2",45992),3);s.settimeout(20);b=b"AVPN-TCP-PAYLOAD"*65536+b"x"*65536;b=b[:1048576];assert len(b)==1048576;t=time.monotonic();s.sendall(b);r=b""\nwhile len(r)<64:\n part=s.recv(64-len(r))\n if not part:raise RuntimeError("short digest")\n r+=part\nassert r.decode()==hashlib.sha256(b).hexdigest();print(json.dumps({"bytes":len(b),"seconds":time.monotonic()-t,"sha256_verified":True}))'
+        code = 'import socket,time,hashlib,json;s=socket.create_connection(("203.0.113.2",45992),3);s.settimeout(20);b=b"CPVPN-TCPPAYLOAD"*65536+b"x"*65536;b=b[:1048576];assert len(b)==1048576;t=time.monotonic();s.sendall(b);r=b""\nwhile len(r)<64:\n part=s.recv(64-len(r))\n if not part:raise RuntimeError("short digest")\n r+=part\nassert r.decode()==hashlib.sha256(b).hexdigest();print(json.dumps({"bytes":len(b),"seconds":time.monotonic()-t,"sha256_verified":True}))'
         streamed = run("ip", "netns", "exec", "av-app", sys.executable, "-c", code, timeout=25)
         stream = json.loads(streamed.stdout)
         stream_proc.wait(timeout=3)
@@ -227,7 +227,7 @@ def main():
         assert marker not in captured
         # Physical relay interfaces must not contain an inner TUN or private inner address.
         relay_links = json.loads(run("ip", "-n", "av-relay", "-j", "address").stdout)
-        assert all(r["ifname"] != "avpn0" for r in relay_links)
+        assert all(r["ifname"] != "cpvpn0" for r in relay_links)
         assert "10.77." not in json.dumps(relay_links)
         (state / "proxy-mode").write_text("drop")
         ping(ok=False)
@@ -283,7 +283,7 @@ def main():
         c = client()
         wait_tunnel(c)
         apps = json.loads(run("ip", "-n", "av-app", "-j", "link").stdout)
-        assert {r["ifname"] for r in apps} == {"lo", "avpn0"}
+        assert {r["ifname"] for r in apps} == {"lo", "cpvpn0"}
         result = dict(
             schema=1,
             profile="nested QUIC DATAGRAM, TLS1.3 hybrid X25519MLKEM768, AES256GCM",

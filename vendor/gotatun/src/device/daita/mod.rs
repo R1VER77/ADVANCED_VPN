@@ -39,7 +39,7 @@ pub struct DaitaSettings {
     pub max_delayed_packets: NonZeroUsize,
     /// Minimum number of free slots in the delay queue before the delay state is aborted.
     pub min_delay_capacity: usize,
-    /// ADVANCED_VPN: strict shaping for a constant-rate stream. A delay is never aborted
+    /// cypherpunk_vpn: strict shaping for a constant-rate stream. A delay is never aborted
     /// because the queue runs low, and a packet that finds the queue full is dropped
     /// instead of being sent outside the machines' slots (both would put traffic-dependent
     /// bursts on the wire). The transport above sees an ordinary bottleneck drop.

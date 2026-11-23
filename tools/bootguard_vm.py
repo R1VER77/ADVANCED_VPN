@@ -126,7 +126,7 @@ def run(base, work, keep):
             for name in (
                 "tools/bootguard_vm.py",
                 "deploy/bootguard-policy.json",
-                "deploy/advanced-vpn-guard.service",
+                "deploy/cypherpunk-vpn-guard.service",
                 "target/release/cypherpunk-bootguard",
                 "target/release/cypherpunk-preflight",
             )
@@ -169,25 +169,25 @@ def run(base, work, keep):
         if not positive:
             raise RuntimeError("leak probe has no positive-control WAN frames")
         agent.run(["systemctl", "stop", "cypherpunk-leak-probe.service"])
-        unit = (ROOT / "deploy/advanced-vpn-guard.service").read_bytes()
-        put(agent, "/etc/systemd/system/advanced-vpn-guard.service", unit)
-        put(agent, "/etc/advanced-vpn/whole-device.guard", b"cypherpunk-vpn whole-device guard v1\n", "0600")
-        put(agent, "/etc/advanced-vpn/enrolled/preferences.json", b'{"mode":"whole-device"}\n', "0600")
+        unit = (ROOT / "deploy/cypherpunk-vpn-guard.service").read_bytes()
+        put(agent, "/etc/systemd/system/cypherpunk-vpn-guard.service", unit)
+        put(agent, "/etc/cypherpunk-vpn/whole-device.guard", b"cypherpunk-vpn whole-device guard v1\n", "0600")
+        put(agent, "/etc/cypherpunk-vpn/enrolled/preferences.json", b'{"mode":"whole-device"}\n', "0600")
         policy = json.loads((ROOT / "deploy/bootguard-policy.json").read_text())
         MANAGERS, REQUIRE, DROPIN = policy["managers"], policy["requires"].encode(), policy["dropin"]
 
         for manager in MANAGERS:
             put(agent, "/etc/systemd/system/" + manager + ".d/" + DROPIN, REQUIRE)
         # No /opt application or Python runtime is installed in this trial.
-        code, _, _ = agent.run(["/usr/bin/test", "!", "-e", "/opt/advanced-vpn"], check=False)
+        code, _, _ = agent.run(["/usr/bin/test", "!", "-e", "/opt/cypherpunk-vpn"], check=False)
         if code:
             raise RuntimeError("VM unexpectedly contains an application runtime")
         agent.run(["systemctl", "daemon-reload"])
-        agent.run(["systemctl", "enable", "advanced-vpn-guard.service", "cypherpunk-leak-probe.service"])
+        agent.run(["systemctl", "enable", "cypherpunk-vpn-guard.service", "cypherpunk-leak-probe.service"])
         start = cursor(work / "client-wan.pcap")
         boot = reboot(agent, work)
         time.sleep(5)
-        active = agent.run(["systemctl", "is-active", "advanced-vpn-guard.service"], check=False)[1].strip()
+        active = agent.run(["systemctl", "is-active", "cypherpunk-vpn-guard.service"], check=False)[1].strip()
         managers = {name: agent.run(["systemctl", "is-active", name], check=False)[1].strip() for name in MANAGERS}
         addresses = json.loads(agent.run(["/usr/sbin/ip", "-4", "-j", "address", "show", "dev", "wan"])[1])
         routes = json.loads(agent.run(["/usr/sbin/ip", "-j", "route", "show", "default"])[1])
@@ -197,7 +197,7 @@ def run(base, work, keep):
             and any(item.get("scope") == "global" for interface in addresses for item in interface.get("addr_info", []))
         )
         probe = json.loads(agent.run(["/bin/cat", "/run/cypherpunk-probe/count.json"])[1])
-        rules = agent.run(["/usr/sbin/nft", "-j", "list", "table", "inet", "advanced_vpn"])[1]
+        rules = agent.run(["/usr/sbin/nft", "-j", "list", "table", "inet", "cypherpunk_vpn"])[1]
         (work / "missing-runtime-rules.json").write_text(rules)
         agent.run(["systemctl", "stop", "cypherpunk-leak-probe.service"])
         time.sleep(1)
@@ -221,7 +221,7 @@ def run(base, work, keep):
         start = cursor(work / "client-wan.pcap")
         boot = reboot(agent, work)
         time.sleep(5)
-        guard = agent.run(["systemctl", "is-failed", "advanced-vpn-guard.service"], check=False)[1].strip()
+        guard = agent.run(["systemctl", "is-failed", "cypherpunk-vpn-guard.service"], check=False)[1].strip()
         managers = {name: agent.run(["systemctl", "is-active", name], check=False)[1].strip() for name in MANAGERS}
         probe = json.loads(agent.run(["/bin/cat", "/run/cypherpunk-probe/count.json"])[1])
         agent.run(["systemctl", "stop", "cypherpunk-leak-probe.service"])

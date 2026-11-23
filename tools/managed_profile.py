@@ -46,19 +46,19 @@ MANAGED_MTU = 1100
 # off. (A constant only so tests can build a chain the way it was signed before padding
 # existed, to prove such a chain is refused.)
 CELLS = True
-PADDING_REQUIRED = "this chain was signed without constant-cell padding, which is now required; re-sign it (avpn cloud chain --apply, or avpn init) and enroll the new bundle with --replace"
-# HTTP/3 camouflage (advanced-vpn-cloak) in front of the WireGuard carrier. Always on:
+PADDING_REQUIRED = "this chain was signed without constant-cell padding, which is now required; re-sign it (cypherpunk cloud chain --apply, or cypherpunk init) and enroll the new bundle with --replace"
+# HTTP/3 camouflage (cypherpunk-vpn-cloak) in front of the WireGuard carrier. Always on:
 # WireGuard is reached only through it. (A constant only so tests can build a chain the
 # way it was signed before the cloak existed, to prove such a chain is refused.)
 CLOAK = True
-BALANCED_REMOVED = "this chain was signed with the removed balanced defense; every chain now runs the constant-rate stream. Re-sign it (avpn cloud chain --apply, or avpn init) and enroll the new bundles with --replace"
+BALANCED_REMOVED = "this chain was signed with the removed balanced defense; every chain now runs the constant-rate stream. Re-sign it (cypherpunk cloud chain --apply, or cypherpunk init) and enroll the new bundles with --replace"
 # Rate classes and their cost live in rates.py (standard library only), so the
 # cloud tool, which runs under the system Python, can plan a chain too.
 from rates import RATE_CLASSES, WIRE_PACKET_BYTES, choose_rate, rate_cost_gib  # noqa: E402,F401
 import i2p  # noqa: E402
 
-LINKS_REQUIRED = "this chain was signed before per-hop shaping, which is now required: every link between servers is paced and encrypted. Re-sign it (avpn cloud chain --apply, or avpn init) and enroll the new bundles with --replace"
-LINK_AAD = b"advanced-vpn/link-psk/"
+LINKS_REQUIRED = "this chain was signed before per-hop shaping, which is now required: every link between servers is paced and encrypted. Re-sign it (cypherpunk cloud chain --apply, or cypherpunk init) and enroll the new bundles with --replace"
+LINK_AAD = b"cypherpunk-vpn/link-psk/"
 # Standby exits: the server before the exit rotates among the live ones at a random
 # time in this window (seconds), at a session boundary. The entry never rotates.
 ROTATE_SECONDS = (900, 3600)
@@ -94,8 +94,8 @@ def endpoint_parts(endpoint, ipv6=False):
     return ip, int(port)
 
 
-CLOAK_REQUIRED = "this chain was signed before the HTTP/3 camouflage, which is now required; re-sign it (avpn cloud chain --apply, or avpn init) and enroll the new bundles with --replace"
-CLOAK_V2_REQUIRED = "this chain was signed for cloak protocol v1, whose server proves itself only with a classical certificate; v2 (mutual key confirmation over the post-quantum key exchange) is now required on both ends: re-sign it (avpn cloud chain --apply, or avpn init) and enroll the new bundles with --replace"
+CLOAK_REQUIRED = "this chain was signed before the HTTP/3 camouflage, which is now required; re-sign it (cypherpunk cloud chain --apply, or cypherpunk init) and enroll the new bundles with --replace"
+CLOAK_V2_REQUIRED = "this chain was signed for cloak protocol v1, whose server proves itself only with a classical certificate; v2 (mutual key confirmation over the post-quantum key exchange) is now required on both ends: re-sign it (cypherpunk cloud chain --apply, or cypherpunk init) and enroll the new bundles with --replace"
 CLOAK_SCHEMA = 2  # cloak wire v2; schema-1 profiles still load (reset, guard, info) but never connect
 # Fixed cloak and carrier addresses: the client's carrier sends to its local cloak; the
 # first hop's cloak listens on 8443 (its firewall redirects the public port there) and
@@ -291,12 +291,12 @@ def profile_validate(p):
         raise ValueError("carrier role separation failed")
     if (p["dns"] is not None) != (p["role"] == "exit"):
         raise ValueError("DNS role separation failed")
-    if p["core"]["tun"] != ("avpn0" if p["role"] in ("client", "exit") else None):
+    if p["core"]["tun"] != ("cpvpn0" if p["role"] in ("client", "exit") else None):
         raise ValueError("fixed managed TUN required")
     if p["carrier"]:
         w = p["carrier"]
         # "balanced" still loads (so reset/guard/info work); require_current refuses it.
-        if w["tun"] != "avwg0" or w["role"] != "wireguard" or w["defense"] not in ["balanced", "strong"]:
+        if w["tun"] != "cpwg0" or w["role"] != "wireguard" or w["defense"] not in ["balanced", "strong"]:
             raise ValueError("managed DAITA required")
         if "rate" in w and w["rate"] not in RATE_CLASSES:
             raise ValueError("unknown rate class")
@@ -439,7 +439,7 @@ CARRIER_ROLES = ("client", "relay", "exit")  # any of these may terminate WireGu
 PROTECTIONS = ("nitrokey", "systemd-creds", "operator", "none")
 # Operator-unlocked servers (keyguard.lock_bytes): the data key that opens the keys lives
 # only here, in RAM, from the operator's unlock until the next reboot.
-UNLOCK_DIR = Path("/run/advanced-vpn-unlock")
+UNLOCK_DIR = Path("/run/cypherpunk-vpn-unlock")
 
 
 def unlock_path(state):
@@ -541,7 +541,7 @@ def store_keys(state, keys, secret=None, meta=None):
             if target.exists():
                 target.unlink()
             creds_encrypt(
-                "advanced-vpn-" + name,
+                "cypherpunk-vpn-" + name,
                 value,
                 target,
                 json.loads(read_private(state / "protection.json")).get("creds_key", "host"),
@@ -566,7 +566,7 @@ def load_keys(state, names, secret=None, meta=None):
             for n in names
         }
     if mode == "systemd-creds":
-        return {n: creds_decrypt("advanced-vpn-" + n, state / (n + "-key.cred")) for n in names}
+        return {n: creds_decrypt("cypherpunk-vpn-" + n, state / (n + "-key.cred")) for n in names}
     if mode == "operator":
         from keyguard import unlock_bytes
 
@@ -583,7 +583,7 @@ def _unlocked_data_key(state):
     if not path.exists():
         raise Locked(
             "this server's keys are locked (they are sealed to the operator's Nitrokey and it has restarted "
-            "since the last unlock): on the operator's computer run  avpn cloud unlock NAME"
+            "since the last unlock): on the operator's computer run  cypherpunk cloud unlock NAME"
         )
     return read_private(path)
 
@@ -671,7 +671,7 @@ def request(role, state, protect, vault=None, unlock_public=None):
     secret = meta = None
     if protect == "nitrokey":
         secret, meta = hardware_secret(vault)
-    tmp = Path(tempfile.mkdtemp(prefix=".avpn-request-", dir=state.parent))
+    tmp = Path(tempfile.mkdtemp(prefix=".cpvpn-request-", dir=state.parent))
     try:
         if protect == "operator":
             secret = os.urandom(32)  # the data key: never written here, only wrapped
@@ -691,7 +691,7 @@ def _request_into(role, state, protect, vault, secret, meta, unlock_public=None)
     certs = {}
     for lane in LANES[role]:
         k = mldsa.MLDSA65PrivateKey.generate()
-        certs[lane] = device_certificate(NAMES[(role, lane)] + ".advanced-vpn.internal", k)
+        certs[lane] = device_certificate(NAMES[(role, lane)] + ".cypherpunk-vpn.internal", k)
         put(state / (lane + "-cert.der"), certs[lane])
         keys[lane] = k.private_bytes(
             serialization.Encoding.DER, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()
@@ -832,7 +832,7 @@ def _load_request(raw, role):
 UNLOCK_ROLE = "operator-unlock"
 # The OpenTofu state key's envelope: its role, and the public value it is bound to.
 STATE_KEY_ROLE = "tofu-state"
-STATE_KEY_BINDING = b"advanced-vpn/tofu-state/v1"
+STATE_KEY_BINDING = b"cypherpunk-vpn/tofu-state/v1"
 
 
 def unwrap_server_keys(private, items, unlock_public):
@@ -1026,7 +1026,7 @@ class HardwareOperator:
         public = self.unlock_public()
         if public is None:
             raise ValueError(
-                "no operator unlock key in %s; run: avpnctl unlock-key --vault %s" % (self.vault, self.vault)
+                "no operator unlock key in %s; run: cypherpunkctl unlock-key --vault %s" % (self.vault, self.vault)
             )
         sealed = json.loads(read_private(self.vault / "operator-unlock.sealed.json"))
         return open_bytes(secret, meta, UNLOCK_ROLE, public, sealed), public
@@ -1177,7 +1177,7 @@ def create(
     valid_cover_name(cover_name)
     if CLOAK and "cloak_spki_sha256" not in reqs[first][0]:
         raise ValueError(
-            "the %s's keys predate the HTTP/3 camouflage; create them again with this release (avpn reset, then avpn request)"
+            "the %s's keys predate the HTTP/3 camouflage; create them again with this release (cypherpunk reset, then cypherpunk request)"
             % first
         )
     allowed = destinations if destinations is not None else ["0.0.0.0/0"]
@@ -1192,7 +1192,7 @@ def create(
             raise ValueError("I2P front hops must be 1, 2 or 3")
         if "i2p_destination" not in reqs[first][0]:
             raise ValueError(
-                "the %s's keys predate the I2P front; create them again with this release (avpn reset, then avpn request)"
+                "the %s's keys predate the I2P front; create them again with this release (cypherpunk reset, then cypherpunk request)"
                 % first
             )
         import secrets
@@ -1223,7 +1223,7 @@ def create(
         if hops > 1 and "kem_public" not in reqs[role][0]:
             raise ValueError(
                 "the %s's keys predate per-hop shaping; create them again with this release "
-                "(avpn reset, then avpn request)" % role
+                "(cypherpunk reset, then cypherpunk request)" % role
             )
     payloads = {}
     role_of = {}
@@ -1246,7 +1246,7 @@ def create(
             outer=None,
             middle=None,
             inner=None,
-            tun="avpn0" if role in ("client", "exit") else None,
+            tun="cpvpn0" if role in ("client", "exit") else None,
             local_ip={"client": "10.77.0.2", "exit": "10.77.0.1"}.get(role),
             peer_ip={"client": "10.77.0.1", "exit": "10.77.0.2"}.get(role),
             destinations=allowed if role in ("client", "exit") else [],
@@ -1283,7 +1283,7 @@ def create(
                 cert=lane + "-cert.der",
                 key=lane + "-key.der",
                 peer_sha256=spki_sha256(peer_cert),
-                server_name=NAMES[(peer_role, peer_lane)] + ".advanced-vpn.internal",
+                server_name=NAMES[(peer_role, peer_lane)] + ".cypherpunk-vpn.internal",
                 pin_kind="spki",
             )
             if peer_role == "client" and "device_public" in reqs["client"][0]:
@@ -1308,12 +1308,12 @@ def create(
                 dict(schema=2, role=role, own_public_hex=req["wireguard_public_hex"], peer_public_hex=peer_public)
             )
             files["psk.kem.json"] = canonical(
-                kem_seal(base64.b64decode(req["kem_public"]), psk, b"advanced-vpn/wireguard-psk/" + role.encode())
+                kem_seal(base64.b64decode(req["kem_public"]), psk, b"cypherpunk-vpn/wireguard-psk/" + role.encode())
             )
             carrier = dict(
                 schema=2 if CLOAK else 1,
                 role="wireguard",
-                tun="avwg0",
+                tun="cpwg0",
                 listen_port=(41195 if role == "client" else 41194)
                 if CLOAK
                 else (41195 if role == "client" else int(carrier_endpoint.rsplit(":", 1)[1])),
@@ -1417,7 +1417,7 @@ def create(
     verify_operator(operator, enrollment_set, classical, pq_signature, hardware_pq)
     put(root / "operator.pub", canonical(operator))
     for role, files in payloads.items():
-        path = root / (role + ".avpn")
+        path = root / (role + ".cpvpn")
         with zipfile.ZipFile(path, "x", compression=zipfile.ZIP_STORED) as z:
             z.writestr("manifest.json", manifests[role])
             z.writestr("set.json", enrollment_set)
@@ -1692,7 +1692,7 @@ def mesh_bundles(root, mesh, signer, defense="strong", daily_mib=None, dns=None,
             outer=None,
             middle=None,
             inner=None,
-            tun="avpn0" if role == "exit" else None,
+            tun="cpvpn0" if role == "exit" else None,
             local_ip="10.77.0.1" if role == "exit" else None,
             peer_ip="10.77.0.2" if role == "exit" else None,
             destinations=allowed if role == "exit" else [],
@@ -1718,7 +1718,7 @@ def mesh_bundles(root, mesh, signer, defense="strong", daily_mib=None, dns=None,
             cert=lane + "-cert.der",
             key=lane + "-key.der",
             peer_sha256="",
-            server_name=NAMES[("client", lane)] + ".advanced-vpn.internal",
+            server_name=NAMES[("client", lane)] + ".cypherpunk-vpn.internal",
             pin_kind="spki",
             peer_members=pins,
         )
@@ -1738,7 +1738,7 @@ def mesh_bundles(root, mesh, signer, defense="strong", daily_mib=None, dns=None,
                     kem_seal(
                         base64.b64decode(hop_req[name]["kem_public"]),
                         psks[n],
-                        b"advanced-vpn/wireguard-psk/" + role.encode(),
+                        b"cypherpunk-vpn/wireguard-psk/" + role.encode(),
                     )
                     for n, _ in on_me
                 ]
@@ -1746,7 +1746,7 @@ def mesh_bundles(root, mesh, signer, defense="strong", daily_mib=None, dns=None,
             carrier = dict(
                 schema=2,
                 role="wireguard",
-                tun="avwg0",
+                tun="cpwg0",
                 listen_port=41194,
                 endpoint=None,
                 peer_public_hex="",
@@ -1835,7 +1835,7 @@ def mesh_bundles(root, mesh, signer, defense="strong", daily_mib=None, dns=None,
             outer=None,
             middle=None,
             inner=None,
-            tun="avpn0",
+            tun="cpvpn0",
             local_ip=overlay77,
             peer_ip="10.77.0.1",
             destinations=allowed,
@@ -1858,7 +1858,7 @@ def mesh_bundles(root, mesh, signer, defense="strong", daily_mib=None, dns=None,
                 cert=lane + "-cert.der",
                 key=lane + "-key.der",
                 peer_sha256=spki_sha256(server_cert),
-                server_name=NAMES[(server["role"], server_lane)] + ".advanced-vpn.internal",
+                server_name=NAMES[(server["role"], server_lane)] + ".cypherpunk-vpn.internal",
                 pin_kind="spki",
             )
         files["wireguard-binding.json"] = canonical(
@@ -1870,12 +1870,14 @@ def mesh_bundles(root, mesh, signer, defense="strong", daily_mib=None, dns=None,
             )
         )
         files["psk.kem.json"] = canonical(
-            kem_seal(base64.b64decode(member_req[name]["kem_public"]), psks[name], b"advanced-vpn/wireguard-psk/client")
+            kem_seal(
+                base64.b64decode(member_req[name]["kem_public"]), psks[name], b"cypherpunk-vpn/wireguard-psk/client"
+            )
         )
         carrier = dict(
             schema=2,
             role="wireguard",
-            tun="avwg0",
+            tun="cpwg0",
             listen_port=41195,
             endpoint=CLOAK_CLIENT["listen"],
             peer_public_hex=first_hop["request"]["wireguard_public_hex"],
@@ -1949,7 +1951,7 @@ def mesh_bundles(root, mesh, signer, defense="strong", daily_mib=None, dns=None,
     root.mkdir(mode=0o700, parents=True, exist_ok=True)
     put(root / "operator.pub", canonical(operator))
     for name, files in payloads.items():
-        path = root / (name + ".avpn")
+        path = root / (name + ".cpvpn")
         if path.exists():
             path.unlink()
         with zipfile.ZipFile(path, "x", compression=zipfile.ZIP_STORED) as z:
@@ -1959,7 +1961,7 @@ def mesh_bundles(root, mesh, signer, defense="strong", daily_mib=None, dns=None,
             for fname, b in files.items():
                 z.writestr(fname, b)
         os.chmod(path, 0o600)
-    directory_path = root / "directory.avpnd"
+    directory_path = root / "directory.cpvpnd"
     if directory_path.exists():
         directory_path.unlink()
     with zipfile.ZipFile(directory_path, "x", compression=zipfile.ZIP_STORED) as z:
@@ -2093,7 +2095,7 @@ def enroll(bundle, operator_public, state, replace=False):
             raise ValueError("bad link keys")
         link_blob = b"".join(parts)
     if profile["carrier"]:
-        aad = b"advanced-vpn/wireguard-psk/" + role.encode()
+        aad = b"cypherpunk-vpn/wireguard-psk/" + role.encode()
         if mesh_carrier:
             envelopes = json.loads(contents["psk-members.kem.json"])
             if len(envelopes) != len(profile["carrier"]["members"]):
@@ -2416,5 +2418,5 @@ def lab_setup(
     for name, data_key in (signer.unwrapped or {}).items():
         server_unlock(root / name, data_key)
     for name in roles + [n for n, _ in standby]:
-        enroll(ops / (name + ".avpn"), ops / "operator.pub", root / name)
+        enroll(ops / (name + ".cpvpn"), ops / "operator.pub", root / name)
     return ops

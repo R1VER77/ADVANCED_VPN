@@ -117,7 +117,7 @@ def fdh(token: bytes, n: int) -> int:
     out = b""
     counter = 0
     while len(out) < nbytes:
-        out += hashlib.sha256(b"avpn-mesh-credit/fdh/v1|" + token + counter.to_bytes(8, "big")).digest()
+        out += hashlib.sha256(b"cpvpn-mesh-credit/fdh/v1|" + token + counter.to_bytes(8, "big")).digest()
         counter += 1
     return int.from_bytes(out[:nbytes], "big") % n
 
@@ -209,7 +209,7 @@ def make_spend(grant: dict, signature: int, key_bits: int = KEY_BITS) -> dict:
 
 def token_digest(token: bytes) -> str:
     """The ledger key; the ledger never stores the token itself."""
-    return hashlib.sha256(b"avpn-mesh-credit/spent/v1|" + token).hexdigest()
+    return hashlib.sha256(b"cpvpn-mesh-credit/spent/v1|" + token).hexdigest()
 
 
 # ------------------------------------------------------------------ ledger

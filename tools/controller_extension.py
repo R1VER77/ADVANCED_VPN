@@ -60,7 +60,7 @@ def streaming_eligibility(evidence_dir: Path = EVIDENCE) -> dict:
             "schema": SCHEMA,
             "rows": [],
             "source": "none",
-            "note": "no eligibility table generated yet; run `avpn stream-check` and the table generator",
+            "note": "no eligibility table generated yet; run `cypherpunk stream-check` and the table generator",
         }
     try:
         table = json.loads(path.read_text())
@@ -154,7 +154,7 @@ def autoconnect_policy(policy=None) -> dict:
             "wired_trusted": False,
             "trusted_ssids_count": 0,
             "note": "no policy installed (fail-closed): auto-connect is off "
-            "until the owner writes /etc/advanced-vpn/autoconnect.json",
+            "until the owner writes /etc/cypherpunk-vpn/autoconnect.json",
         }
     trusted = policy.get("trusted", {})
     ssids = trusted.get("ssids", [])

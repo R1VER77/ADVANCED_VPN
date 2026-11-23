@@ -1,7 +1,7 @@
-"""The exit's own recursive resolver (`avpn init --dns-recursive`, tools/exit_resolver.py).
+"""The exit's own recursive resolver (`cypherpunk init --dns-recursive`, tools/exit_resolver.py).
 The resolver itself was checked live (20 Nov 2026, Debian 13, Unbound 1.26): 20 of 20
 popular names resolved, dnssec-failed.org was refused, nic.cz validated, and nothing
-answered off loopback; advanced-vpn-dns in recursive mode in front of it kept its
+answered off loopback; cypherpunk-vpn-dns in recursive mode in front of it kept its
 blocklist and .invalid handling (docs/DEPLOYMENT.md)."""
 
 import json

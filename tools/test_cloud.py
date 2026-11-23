@@ -1,4 +1,4 @@
-"""`avpn cloud` against recorded provider CLIs: exact calls, safety rules, teardown scope."""
+"""`cypherpunk cloud` against recorded provider CLIs: exact calls, safety rules, teardown scope."""
 
 import datetime
 import json
@@ -106,7 +106,7 @@ if name == "oci":
     if argv[:3] == ["compute", "instance", "list-vnics"]:
         out({"data": [{"public-ip": "16.20.0.5", "private-ip": "10.0.254.7"}]})
     if argv[2:3] == ["get"] or argv[:3] == ["network", "route-table", "update"] or argv[2:3] in (["delete"], ["terminate"]) or argv[:3] == ["network", "security-list", "update"]:
-        tags = state.get("oci_tags", {"avpn-managed": "true", "avpn-name": "avpn-exit"})
+        tags = state.get("oci_tags", {"cpvpn-managed": "true", "cpvpn-name": "cpvpn-exit"})
         out({"data": {"freeform-tags": tags, "lifecycle-state": "AVAILABLE"}})
     fail("unexpected oci call")
 if argv[:2] == ["configure", "get"]:
@@ -137,7 +137,7 @@ if key in AUDIT_DEFAULTS:
 op = argv[1]
 def flag(f):
     return argv[argv.index(f) + 1] if f in argv else None
-tagged = "Name=tag:avpn:managed,Values=true" in argv
+tagged = "Name=tag:cpvpn:managed,Values=true" in argv
 if op == "describe-images":
     if flag("--owners") == "136693071363":
         out({"Images": [
@@ -153,7 +153,7 @@ if op == "describe-instances":
         out({"Reservations": [{"Instances": [{"InstanceId": "i-1", "State": {"Name": st}, "PublicIpAddress": "16.0.0.9"}]}]})
     out({"Reservations": [{"Instances": state.get("instances", [])}] if tagged else []})
 if op == "describe-security-groups":
-    admin = any(a.endswith("-admin") for a in argv if a.startswith("Name=tag:avpn:name"))
+    admin = any(a.endswith("-admin") for a in argv if a.startswith("Name=tag:cpvpn:name"))
     out({"SecurityGroups": (state.get("admin_groups", []) if admin else state.get("groups", [])) if tagged else []})
 if op == "describe-snapshots":
     out({"Snapshots": state.get("snapshots", []) if tagged else []})
@@ -252,7 +252,9 @@ class Stubbed(unittest.TestCase):
         self.set_state({})
         self.env = mock.patch.dict(
             os.environ,
-            dict(AVPN_AWS=str(d / "aws"), AVPN_OCI=str(d / "oci"), STUB_LOG=str(self.log), STUB_STATE=str(self.state)),
+            dict(
+                CPVPN_AWS=str(d / "aws"), CPVPN_OCI=str(d / "oci"), STUB_LOG=str(self.log), STUB_STATE=str(self.state)
+            ),
         )
         self.env.start()
         self.inv = mock.patch.object(cloud, "INVENTORY", d / "config" / "cloud.json")
@@ -293,30 +295,30 @@ class Stubbed(unittest.TestCase):
 class CloudTests(Stubbed):
     def test_status_lists_oci_servers_and_rules_alike(self):
         # Live regression (14 Nov 2026): an OCI server entry (no `source`; this one never
-        # got an instance) made `avpn cloud status` fail with KeyError: 'source'.
+        # got an instance) made `cypherpunk cloud status` fail with KeyError: 'source'.
         inv = cloud.load_inventory()
-        inv["resources"]["avpn-a1exit"] = dict(provider="oci", role="exit", port=4444, region="r", subnet="s")
-        inv["resources"]["avpn-exit"] = dict(
-            provider="oci", rule="advanced-vpn:avpn-exit", source="9.9.9.9/32", port=4444
+        inv["resources"]["cpvpn-a1exit"] = dict(provider="oci", role="exit", port=4444, region="r", subnet="s")
+        inv["resources"]["cpvpn-exit"] = dict(
+            provider="oci", rule="cypherpunk-vpn:cpvpn-exit", source="9.9.9.9/32", port=4444
         )
         cloud.save_inventory(inv)
         rows = {r["label"]: r["value"] for r in self.run_cli("status")["rows"]}
-        self.assertEqual(rows["avpn-exit"], "oci advanced-vpn:avpn-exit 9.9.9.9/32:4444")
-        self.assertEqual(rows["avpn-a1exit"], "oci exit (no instance):4444")
+        self.assertEqual(rows["cpvpn-exit"], "oci cypherpunk-vpn:cpvpn-exit 9.9.9.9/32:4444")
+        self.assertEqual(rows["cpvpn-a1exit"], "oci exit (no instance):4444")
 
     def test_status_marks_servers_whose_keys_could_not_be_sealed(self):
         # Bug 9a: a host that fell back to plain keys says so wherever it is listed.
         inv = cloud.load_inventory()
-        inv["resources"]["avpn-relay"] = dict(
+        inv["resources"]["cpvpn-relay"] = dict(
             provider="aws", role="relay", instance="i-1", public_ip="16.0.0.9", key_protection="none"
         )
-        inv["resources"]["avpn-exit"] = dict(
-            provider="oci", rule="advanced-vpn:avpn-exit", source="9.9.9.9/32", port=4444, key_protection="systemd-creds"
+        inv["resources"]["cpvpn-exit"] = dict(
+            provider="oci", rule="cypherpunk-vpn:cpvpn-exit", source="9.9.9.9/32", port=4444, key_protection="systemd-creds"
         )  # fmt: skip
         cloud.save_inventory(inv)
         rows = {r["label"]: r["value"] for r in self.run_cli("status")["rows"]}
-        self.assertIn("[PLAINTEXT KEYS]", rows["avpn-relay"])
-        self.assertNotIn("[PLAINTEXT KEYS]", rows["avpn-exit"])
+        self.assertIn("[PLAINTEXT KEYS]", rows["cpvpn-relay"])
+        self.assertNotIn("[PLAINTEXT KEYS]", rows["cpvpn-exit"])
 
     def test_dry_run_plans_without_creating_anything(self):
         r = self.run_cli("aws", "relay", "--apply", "--dry-run", "--profile", "p", "--allow-from", "16.170.0.7")
@@ -381,11 +383,11 @@ class CloudTests(Stubbed):
             if c[0] == "ec2" and "--tag-specifications" in c:
                 for spec in json.loads(self.value(c, "--tag-specifications")):
                     tags = {t["Key"]: t["Value"] for t in spec["Tags"]}
-                    self.assertEqual((tags["avpn:managed"], tags["avpn:name"]), ("true", "avpn-relay"), c[1])
+                    self.assertEqual((tags["cpvpn:managed"], tags["cpvpn:name"]), ("true", "cpvpn-relay"), c[1])
         # The intermediate copy is deregistered; every call stays in the project's Region.
         self.assertIn(["ec2", "deregister-image", "--image-id", "ami-copy"], [c[:4] for c in self.calls()])
         self.assertTrue(all(self.value(c, "--region") == "eu-north-1" for c in self.calls() if c[0] == "ec2"))
-        inv = json.loads(cloud.INVENTORY.read_text())["resources"]["avpn-relay"]
+        inv = json.loads(cloud.INVENTORY.read_text())["resources"]["cpvpn-relay"]
         self.assertEqual((inv["instance"], inv["public_ip"], inv["image"]), ("i-1", "16.0.0.9", "ami-tpm"))
         self.assertEqual(stat.S_IMODE(cloud.INVENTORY.stat().st_mode), 0o600)
         self.assertNotIn("PRIVATE", cloud.INVENTORY.read_text())
@@ -406,7 +408,7 @@ class CloudTests(Stubbed):
             )
 
     def test_apply_refuses_when_the_name_already_exists(self):
-        self.set_state(dict(instances=[{"InstanceId": "i-9", "Tags": [{"Key": "Name", "Value": "avpn-relay"}]}]))
+        self.set_state(dict(instances=[{"InstanceId": "i-9", "Tags": [{"Key": "Name", "Value": "cpvpn-relay"}]}]))
         with self.assertRaisesRegex(cloud.CloudError, "already exists"):
             self.run_cli(
                 "aws",
@@ -428,13 +430,13 @@ class CloudTests(Stubbed):
                 instances=[
                     {
                         "InstanceId": "i-1",
-                        "Tags": [{"Key": "Name", "Value": "avpn-relay"}],
+                        "Tags": [{"Key": "Name", "Value": "cpvpn-relay"}],
                         "State": {"Name": "running"},
                     }
                 ],
-                groups=[{"GroupId": "sg-1", "GroupName": "avpn-relay"}],
-                keys=[{"KeyName": "avpn-relay", "KeyPairId": "key-1"}],
-                images=[{"ImageId": "ami-tpm", "Name": "avpn-relay-nitrotpm"}],
+                groups=[{"GroupId": "sg-1", "GroupName": "cpvpn-relay"}],
+                keys=[{"KeyName": "cpvpn-relay", "KeyPairId": "key-1"}],
+                images=[{"ImageId": "ami-tpm", "Name": "cpvpn-relay-nitrotpm"}],
                 snapshots=[{"SnapshotId": "snap-1"}],
             )
         )
@@ -447,10 +449,11 @@ class CloudTests(Stubbed):
                 and c[1] not in ("describe-vpcs",)
                 and "--instance-ids" not in c
             ):
-                self.assertIn("Name=tag:avpn:managed,Values=true", c, c)
-                # The server's own resources, or its admin endpoint's (avpn-relay-admin).
+                self.assertIn("Name=tag:cpvpn:managed,Values=true", c, c)
+                # The server's own resources, or its admin endpoint's (cpvpn-relay-admin).
                 self.assertTrue(
-                    {"Name=tag:avpn:name,Values=avpn-relay", "Name=tag:avpn:name,Values=avpn-relay-admin"} & set(c), c
+                    {"Name=tag:cpvpn:name,Values=cpvpn-relay", "Name=tag:cpvpn:name,Values=cpvpn-relay-admin"} & set(c),
+                    c,
                 )
         deleted = [
             c[1:4]
@@ -468,9 +471,9 @@ class CloudTests(Stubbed):
             ],
         )
 
-    def test_teardown_refuses_a_tagged_instance_not_named_avpn(self):
+    def test_teardown_refuses_a_tagged_instance_not_named_cpvpn(self):
         self.set_state(dict(instances=[{"InstanceId": "i-7", "Tags": [{"Key": "Name", "Value": "other-team-worker"}]}]))
-        with self.assertRaisesRegex(cloud.CloudError, "not named avpn"):
+        with self.assertRaisesRegex(cloud.CloudError, "not named cpvpn-"):
             self.run_cli("aws", "relay", "--teardown", "--yes", "--profile", "p")
         self.assertNotIn("terminate-instances", self.ops())
 
@@ -486,7 +489,7 @@ class CloudTests(Stubbed):
         self.assertEqual(cloud.single_ip("8.8.8.8"), "8.8.8.8/32")
 
     def test_names_are_constrained(self):
-        for bad in ["relay", "avpn-", "avpn-Relay", "avpn-x;rm", "avpn-" + "x" * 40]:
+        for bad in ["relay", "cpvpn-", "cpvpn-Relay", "cpvpn-x;rm", "cpvpn-" + "x" * 40]:
             with self.assertRaises(cloud.CloudError, msg=bad):
                 cloud.valid_name(bad)
 
@@ -521,7 +524,7 @@ class CloudTests(Stubbed):
         ]
         if extra:
             perms[0].update(extra)
-        return dict(GroupId="sg-r", GroupName="avpn-relay", IpPermissions=perms)
+        return dict(GroupId="sg-r", GroupName="cpvpn-relay", IpPermissions=perms)
 
     def opened(self):
         g = json.loads(self.state.read_text())["groups"][0]
@@ -532,7 +535,7 @@ class CloudTests(Stubbed):
 
     def test_aws_allow_replaces_sources_exactly_and_keeps_other_rules(self):
         self.set_state(dict(groups=[self.relay_group(tunnel=("16.170.0.7/32", "16.170.0.8/32"))]))
-        cloud.save_inventory(dict(schema=1, resources={"avpn-relay": dict(provider="aws", instance="i-1")}))
+        cloud.save_inventory(dict(schema=1, resources={"cpvpn-relay": dict(provider="aws", instance="i-1")}))
         r = self.run_cli(
             "aws", "allow", "--apply", "--yes", "--profile", "p", "--allow-from", "31.13.0.5", "--admin-ip", "31.13.0.5"
         )
@@ -548,7 +551,7 @@ class CloudTests(Stubbed):
         )
         text = json.dumps(r["rows"])
         self.assertIn("udp 41194 from 31.13.0.5/32 (was 16.170.0.7/32, 16.170.0.8/32)", text)
-        inv = json.loads(cloud.INVENTORY.read_text())["resources"]["avpn-relay"]
+        inv = json.loads(cloud.INVENTORY.read_text())["resources"]["cpvpn-relay"]
         self.assertEqual((inv["allow_from"], inv["admin_ip"]), (["31.13.0.5/32"], "31.13.0.5/32"))
         # Applying the same addresses again changes nothing.
         before = len(self.ops())
@@ -560,9 +563,9 @@ class CloudTests(Stubbed):
         self.set_state(dict(
             groups=[self.relay_group(tunnel=("0.0.0.0/0",), ssh=("31.13.0.5/32",))],
             instances=[dict(InstanceId="i-1", SubnetId="subnet-1", VpcId="vpc-1", PublicIpAddress="16.0.0.9",
-                            Tags=[dict(Key="Name", Value="avpn-relay")])],
+                            Tags=[dict(Key="Name", Value="cpvpn-relay")])],
         ))  # fmt: skip
-        cloud.save_inventory(dict(schema=1, resources={"avpn-relay": dict(
+        cloud.save_inventory(dict(schema=1, resources={"cpvpn-relay": dict(
             provider="aws", instance="i-1", profile="p", region="eu-north-1", public_ip="16.0.0.9",
             admin_ip="31.13.0.5/32", role="relay", first_hop=True)}))  # fmt: skip
 
@@ -584,17 +587,17 @@ class CloudTests(Stubbed):
         # The endpoint is admitted before the address is closed: no window without SSH.
         ops = [o for o in self.ops() if "security-group-ingress" in o]
         self.assertEqual(ops, ["authorize-security-group-ingress", "revoke-security-group-ingress"])
-        rec = json.loads(cloud.INVENTORY.read_text())["resources"]["avpn-relay"]
+        rec = json.loads(cloud.INVENTORY.read_text())["resources"]["cpvpn-relay"]
         self.assertEqual(rec["admin"], dict(via="eice", endpoint="eice-1", group="sg-admin", instance="i-1"))
         self.assertNotIn("admin_ip", rec)
         # SSH from this tool now goes through the endpoint, keyed to the instance.
-        base = cloud.ssh_base("avpn-relay", rec)
+        base = cloud.ssh_base("cpvpn-relay", rec)
         self.assertIn("HostKeyAlias=16.0.0.9", base)
         proxy = next(o for o in base if o.startswith("ProxyCommand="))
         self.assertIn("ec2-instance-connect open-tunnel --instance-id i-1 --profile p --region eu-north-1", proxy)
         self.assertEqual(cloud.ssh_target(rec), "admin@i-1")
         # chain's firewall step leaves the endpoint's SSH rule alone ...
-        cloud.set_firewall("avpn-relay", rec, 41194, ["0.0.0.0/0"], ["9.9.9.9/32"])
+        cloud.set_firewall("cpvpn-relay", rec, 41194, ["0.0.0.0/0"], ["9.9.9.9/32"])
         ssh = [q for q in json.loads(self.state.read_text())["groups"][0]["IpPermissions"] if q["FromPort"] == 22]
         self.assertEqual((ssh[0]["IpRanges"], [p["GroupId"] for p in ssh[0]["UserIdGroupPairs"]]), ([], ["sg-admin"]))
         # ... and aws allow refuses to pin an address again.
@@ -671,7 +674,7 @@ class CloudTests(Stubbed):
 
     def test_aws_allow_any_only_on_a_relay(self):
         relay = dict(
-            InstanceId="i-1", Tags=[dict(Key="avpn:role", Value="relay"), dict(Key="Name", Value="avpn-relay")]
+            InstanceId="i-1", Tags=[dict(Key="cpvpn:role", Value="relay"), dict(Key="Name", Value="cpvpn-relay")]
         )
         self.set_state(dict(groups=[self.relay_group()], instances=[relay]))
         self.run_cli("aws", "allow", "--apply", "--yes", "--profile", "p", "--allow-from", "any")
@@ -686,10 +689,10 @@ class CloudTests(Stubbed):
         note = next(x["value"] for x in r["rows"] if x["label"] == "caller")
         self.assertIn("16.9.9.9, this machine's address", note)
         self.assertIn("CloudTrail", note)
-        cloud.save_inventory(dict(schema=1, resources={"avpn-exit": dict(provider="ssh", public_ip="16.9.9.9")}))
+        cloud.save_inventory(dict(schema=1, resources={"cpvpn-exit": dict(provider="ssh", public_ip="16.9.9.9")}))
         r = self.run_cli("aws", "relay", "--apply", "--dry-run", "--profile", "p", "--admin-ip", "18.0.0.4")
         note = next(x["value"] for x in r["rows"] if x["label"] == "caller")
-        self.assertIn("avpn-exit, through your chain", note)
+        self.assertIn("cpvpn-exit, through your chain", note)
 
     def test_aws_allow_dry_run_and_refusals(self):
         self.set_state(dict(groups=[self.relay_group()]))
@@ -720,7 +723,7 @@ class CloudTests(Stubbed):
             "--apply",
             "--yes",
             "--name",
-            "avpn-exit",
+            "cpvpn-exit",
             "--security-list",
             "ocid1.x",
             "--allow-from",
@@ -739,7 +742,7 @@ class CloudTests(Stubbed):
             "--apply",
             "--yes",
             "--name",
-            "avpn-exit",
+            "cpvpn-exit",
             "--security-list",
             "ocid1.x",
             "--allow-from",
@@ -747,7 +750,7 @@ class CloudTests(Stubbed):
         )
         ingress = json.loads(self.state.read_text())["security_list"]["ingress-security-rules"]
         self.assertEqual([r["source"] for r in ingress], ["10.0.0.0/16", "16.0.0.10/32"])
-        self.run_cli("oci", "allow", "--teardown", "--yes", "--name", "avpn-exit", "--security-list", "ocid1.x")
+        self.run_cli("oci", "allow", "--teardown", "--yes", "--name", "cpvpn-exit", "--security-list", "ocid1.x")
         ingress = json.loads(self.state.read_text())["security_list"]["ingress-security-rules"]
         self.assertEqual([r["description"] for r in ingress], ["ssh from vcn"])
 
@@ -815,13 +818,13 @@ class OciServerTests(Stubbed):
         self.assertFalse(list(cloud.INVENTORY.parent.glob(".first-boot.*")), "user-data file left behind")
 
     def test_apply_creates_a_tagged_network_and_server_open_only_as_asked(self):
-        r = self.run_cli("oci", "server", "--apply", "--yes", "--role", "relay", "--name", "avpn-relay2",
+        r = self.run_cli("oci", "server", "--apply", "--yes", "--role", "relay", "--name", "cpvpn-relay2",
                          "--admin-ip", "18.0.0.4")  # fmt: skip
         self.assertEqual(r["summary"], "created")
         for c in self.oci_calls():
             if c[2] in ("create", "launch"):
                 tags = json.loads(c[c.index("--freeform-tags") + 1])
-                self.assertEqual(tags, {"avpn-managed": "true", "avpn-name": "avpn-relay2"}, c[:3])
+                self.assertEqual(tags, {"cpvpn-managed": "true", "cpvpn-name": "cpvpn-relay2"}, c[:3])
                 self.assertEqual(c[c.index("--compartment-id") + 1], "ocid1.tenancy.oc1..t")
             self.assertEqual(c[c.index("--region") + 1], "eu-stockholm-1")
         sl = self.oci_call("network", "security-list", "create")
@@ -837,7 +840,7 @@ class OciServerTests(Stubbed):
         self.assertTrue(json.loads(launch[launch.index("--instance-options") + 1])["areLegacyImdsEndpointsDisabled"])
         route = self.oci_call("network", "route-table", "update")
         self.assertEqual(json.loads(route[route.index("--route-rules") + 1])[0]["networkEntityId"], "ocid1.igw.1")
-        rec = json.loads(cloud.INVENTORY.read_text())["resources"]["avpn-relay2"]
+        rec = json.loads(cloud.INVENTORY.read_text())["resources"]["cpvpn-relay2"]
         self.assertEqual(
             (rec["public_ip"], rec["instance"], rec["ssh_user"]), ("16.20.0.5", "ocid1.instance.1", "ubuntu")
         )
@@ -884,16 +887,16 @@ class OciServerTests(Stubbed):
         launch = self.oci_call("compute", "instance", "launch")
         plugins = json.loads(launch[launch.index("--agent-config") + 1])["pluginsConfig"]
         self.assertIn({"name": "Bastion", "desiredState": "ENABLED"}, plugins)
-        rec = json.loads(cloud.INVENTORY.read_text())["resources"]["avpn-exit"]
+        rec = json.loads(cloud.INVENTORY.read_text())["resources"]["cpvpn-exit"]
         self.assertEqual(rec["bastion"]["id"], "ocid1.bastion.b")
-        self.assertEqual(rec["bastion"]["host"], "avpn-exit-bastion")
-        self.assertEqual(rec["ssh"], "ubuntu@avpn-exit")
+        self.assertEqual(rec["bastion"]["host"], "cpvpn-exit-bastion")
+        self.assertEqual(rec["ssh"], "ubuntu@cpvpn-exit")
         config = Path(rec["ssh_config"]).read_text()
-        self.assertIn("ProxyJump avpn-exit-bastion", config)
-        self.assertEqual(cloud.ssh_config_user(rec["ssh_config"], "avpn-exit-bastion"), "PENDING")
+        self.assertIn("ProxyJump cpvpn-exit-bastion", config)
+        self.assertEqual(cloud.ssh_config_user(rec["ssh_config"], "cpvpn-exit-bastion"), "PENDING")
         self.assertEqual(oct(Path(rec["ssh_config"]).stat().st_mode & 0o777), "0o600")
         with self.assertRaisesRegex(cloud.CloudError, "bastion's VCN"):
-            self.run_cli("oci", "server", "--apply", "--yes", "--name", "avpn-other", "--allow-from", "16.0.0.9",
+            self.run_cli("oci", "server", "--apply", "--yes", "--name", "cpvpn-other", "--allow-from", "16.0.0.9",
                          "--bastion", "ocid1.bastion.b", "--vcn", "ocid1.vcn.elsewhere")  # fmt: skip
 
     def capacity(self, fails):
@@ -906,13 +909,13 @@ class OciServerTests(Stubbed):
         self.capacity(1)
         with self.assertRaisesRegex(cloud.CloudError, "no free capacity .* network is kept"):
             self.run_cli("oci", "server", "--apply", "--yes", "--allow-from", "16.0.0.9", "--admin-ip", "18.0.0.4")
-        rec = json.loads(cloud.INVENTORY.read_text())["resources"]["avpn-exit"]
+        rec = json.loads(cloud.INVENTORY.read_text())["resources"]["cpvpn-exit"]
         self.assertTrue(rec.get("subnet") and not rec.get("instance"))
         made_before = [c[:3] for c in self.oci_calls() if c[2] == "create"]
         self.run_cli("oci", "server", "--apply", "--yes", "--allow-from", "16.0.0.9", "--admin-ip", "18.0.0.4")
         made_after = [c[:3] for c in self.oci_calls() if c[2] == "create"]
         self.assertEqual(made_after, made_before)  # no second network
-        rec = json.loads(cloud.INVENTORY.read_text())["resources"]["avpn-exit"]
+        rec = json.loads(cloud.INVENTORY.read_text())["resources"]["cpvpn-exit"]
         self.assertEqual(rec["instance"], "ocid1.instance.1")
         self.assertEqual(rec["public_ip"], "16.20.0.5")
         with self.assertRaisesRegex(cloud.CloudError, "already recorded"):  # a complete server is not relaunched
@@ -934,7 +937,7 @@ class OciServerTests(Stubbed):
         self.assertEqual(len(attempts), 3)
         domains = [a[a.index("--fault-domain") + 1] if "--fault-domain" in a else None for a in attempts]
         self.assertEqual(domains, [None, "FAULT-DOMAIN-2", "FAULT-DOMAIN-3"])
-        self.assertTrue(json.loads(cloud.INVENTORY.read_text())["resources"]["avpn-exit"]["instance"])
+        self.assertTrue(json.loads(cloud.INVENTORY.read_text())["resources"]["cpvpn-exit"]["instance"])
 
     def test_teardown_deletes_recorded_parts_in_order_and_checks_tags(self):
         self.run_cli("oci", "server", "--apply", "--yes", "--allow-from", "16.0.0.9", "--admin-ip", "18.0.0.4")
@@ -948,14 +951,14 @@ class OciServerTests(Stubbed):
             [["compute", "instance", "terminate"], ["network", "subnet", "delete"], ["network", "security-list", "delete"],
              ["network", "internet-gateway", "delete"], ["network", "vcn", "delete"]],
         )  # fmt: skip
-        self.assertNotIn("avpn-exit", json.loads(cloud.INVENTORY.read_text())["resources"])
+        self.assertNotIn("cpvpn-exit", json.loads(cloud.INVENTORY.read_text())["resources"])
 
     def test_teardown_refuses_resources_without_its_tags(self):
         self.run_cli("oci", "server", "--apply", "--yes", "--allow-from", "16.0.0.9", "--admin-ip", "18.0.0.4")
         state = json.loads(self.state.read_text())
-        state["oci_tags"] = {"avpn-managed": "true", "avpn-name": "someone-else"}
+        state["oci_tags"] = {"cpvpn-managed": "true", "cpvpn-name": "someone-else"}
         self.state.write_text(json.dumps(state))
-        with self.assertRaisesRegex(cloud.CloudError, "not tagged avpn-name=avpn-exit"):
+        with self.assertRaisesRegex(cloud.CloudError, "not tagged cpvpn-name=cpvpn-exit"):
             self.run_cli("oci", "server", "--teardown", "--yes")
         self.assertFalse([c for c in self.oci_calls() if c[2] in ("delete", "terminate")])
 
@@ -969,11 +972,11 @@ class AuditTests(Stubbed):
         self.cfg.start()
         cloud.save_inventory(
             dict(schema=1, resources={
-                "avpn-relay": dict(provider="aws", profile="p", region="eu-north-1", public_ip="13.0.0.1", ssh_key="k"),
-                "avpn-exit": dict(provider="ssh", catalog="oci", public_ip="16.40.0.2", ssh="u@16.40.0.2", ssh_key="k"),
+                "cpvpn-relay": dict(provider="aws", profile="p", region="eu-north-1", public_ip="13.0.0.1", ssh_key="k"),
+                "cpvpn-exit": dict(provider="ssh", catalog="oci", public_ip="16.40.0.2", ssh="u@16.40.0.2", ssh_key="k"),
             })
         )  # fmt: skip
-        sg = dict(GroupId="sg-r", GroupName="avpn-relay", IpPermissions=[
+        sg = dict(GroupId="sg-r", GroupName="cpvpn-relay", IpPermissions=[
             dict(IpProtocol="udp", FromPort=41194, ToPort=41194, IpRanges=[dict(CidrIp="0.0.0.0/0")]),
             dict(IpProtocol="tcp", FromPort=22, ToPort=22, IpRanges=[dict(CidrIp="16.40.0.2/32")])])  # fmt: skip
         self.base = dict(groups=[sg], oci_bastions={"ocid1.tenancy.oc1..t": [
@@ -998,7 +1001,7 @@ class AuditTests(Stubbed):
         self.assertIn("90 days", rows["aws always on"])
         self.assertIn("1 caller addresses", rows["aws always on"])
         self.assertIn("365 days", rows["oci always on"])
-        self.assertEqual(rows["aws firewall avpn-relay"], "only any-address and your servers")
+        self.assertEqual(rows["aws firewall cpvpn-relay"], "only any-address and your servers")
         self.assertFalse([v for v in rows.values() if v.startswith("FOUND")])
 
     def test_opt_in_logging_and_foreign_addresses_are_found(self):
@@ -1018,28 +1021,28 @@ class AuditTests(Stubbed):
             oci_logs={"g1": [{"display-name": "vcn-flows", "configuration": {"source": {"service": "flowlogs"}}}]},
         )  # fmt: skip
         for label in ("aws vpc flow logs", "aws trails", "aws log groups", "aws config recording",
-                      "aws firewall avpn-relay", "oci bastions", "oci flow logs"):  # fmt: skip
+                      "aws firewall cpvpn-relay", "oci bastions", "oci flow logs"):  # fmt: skip
             self.assertTrue(rows[label].startswith("FOUND"), (label, rows[label]))
-        self.assertIn("31.13.0.5/32", rows["aws firewall avpn-relay"])
+        self.assertIn("31.13.0.5/32", rows["aws firewall cpvpn-relay"])
         self.assertEqual(r["findings"], 7)
         self.assertEqual(r["summary"], "7 finding(s)")
 
     def test_a_shared_security_list_is_judged_only_by_its_own_rule(self):
         inv = cloud.load_inventory()
-        inv["resources"]["avpn-oci-rule"] = dict(
-            provider="oci", security_list="ocid1.sl", rule="advanced-vpn:avpn-oci-rule"
+        inv["resources"]["cpvpn-oci-rule"] = dict(
+            provider="oci", security_list="ocid1.sl", rule="cypherpunk-vpn:cpvpn-oci-rule"
         )
         cloud.save_inventory(inv)
         others = [
             dict(source="10.0.0.0/16", description="ssh from vcn"),
             dict(source="31.13.0.9/32", description="someone's"),
         ]
-        ours = dict(source="13.0.0.1/32", description="advanced-vpn:avpn-oci-rule")
+        ours = dict(source="13.0.0.1/32", description="cypherpunk-vpn:cpvpn-oci-rule")
         r, rows = self.audit(security_list={"ingress-security-rules": others + [ours]})
-        self.assertEqual(rows["oci firewall avpn-oci-rule"], "only any-address and your servers")
+        self.assertEqual(rows["oci firewall cpvpn-oci-rule"], "only any-address and your servers")
         r, rows = self.audit(security_list={"ingress-security-rules": others + [dict(ours, source="31.13.0.5/32")]})
-        self.assertIn("31.13.0.5/32", rows["oci firewall avpn-oci-rule"])
-        self.assertNotIn("10.0.0.0/16", rows["oci firewall avpn-oci-rule"])
+        self.assertIn("31.13.0.5/32", rows["oci firewall cpvpn-oci-rule"])
+        self.assertNotIn("10.0.0.0/16", rows["oci firewall cpvpn-oci-rule"])
 
     def test_what_cannot_be_read_is_reported_not_counted_clean(self):
         r, rows = self.audit(audit={"guardduty list-detectors": "DENIED"})
@@ -1058,21 +1061,21 @@ class BastionTests(Stubbed):
         d = Path(self.tmp.name)
         cfg = d / "oci-config"
         cfg.write_text("[DEFAULT]\ntenancy=ocid1.tenancy.t\nregion=me-dubai-1\n")
-        self.cfg = mock.patch.dict(os.environ, OCI_CLI_CONFIG_FILE=str(cfg), AVPN_SSH=str(d / "ssh"), STUB_DIR=str(d))
+        self.cfg = mock.patch.dict(os.environ, OCI_CLI_CONFIG_FILE=str(cfg), CPVPN_SSH=str(d / "ssh"), STUB_DIR=str(d))
         self.cfg.start()
         (d / "ssh").write_text(SSH_STUB)
         (d / "ssh").chmod(0o755)
         self.ssh_config = d / "exit.conf"
         self.ssh_config.write_text(
-            "Host avpn-bastion\n  HostName host.bastion.example\n  User ocid1.bastionsession.old\n"
-            "Host avpn-exit\n  HostName 10.0.1.88\n  User ubuntu\n  ProxyJump avpn-bastion\n"
+            "Host cpvpn-bastion\n  HostName host.bastion.example\n  User ocid1.bastionsession.old\n"
+            "Host cpvpn-exit\n  HostName 10.0.1.88\n  User ubuntu\n  ProxyJump cpvpn-bastion\n"
         )
         (d / "k.pub").write_text("ssh-ed25519 AAAA")
         cloud._bastion_fresh.clear()
-        cloud.save_inventory(dict(schema=1, resources={"avpn-exit": dict(
-            provider="ssh", public_ip="16.40.0.2", ssh="ubuntu@avpn-exit", ssh_config=str(self.ssh_config),
+        cloud.save_inventory(dict(schema=1, resources={"cpvpn-exit": dict(
+            provider="ssh", public_ip="16.40.0.2", ssh="ubuntu@cpvpn-exit", ssh_config=str(self.ssh_config),
             ssh_key=str(d / "k"), role="exit",
-            bastion=dict(id="ocid1.bastion.b", instance="ocid1.instance.i", user="ubuntu", host="avpn-bastion",
+            bastion=dict(id="ocid1.bastion.b", instance="ocid1.instance.i", user="ubuntu", host="cpvpn-bastion",
                          public_key=str(d / "k.pub"), oci_profile="DEFAULT"))}))  # fmt: skip
         self.now = 1_800_000_000
 
@@ -1086,20 +1089,20 @@ class BastionTests(Stubbed):
             "lifecycle-state": state, "time-created": created.isoformat(), "session-ttl-in-seconds": 10800}}))  # fmt: skip
 
     def ensure(self):
-        rec = cloud.load_inventory()["resources"]["avpn-exit"]
-        cloud.ensure_bastion("avpn-exit", rec, now=self.now)
+        rec = cloud.load_inventory()["resources"]["cpvpn-exit"]
+        cloud.ensure_bastion("cpvpn-exit", rec, now=self.now)
         return json.loads(self.state.read_text()).get("oci_created_sessions", [])
 
     def test_a_fresh_session_is_kept(self):
         self.session(age_minutes=30)
         self.assertEqual(self.ensure(), [])
-        self.assertEqual(cloud.ssh_config_user(self.ssh_config, "avpn-bastion"), "ocid1.bastionsession.old")
+        self.assertEqual(cloud.ssh_config_user(self.ssh_config, "cpvpn-bastion"), "ocid1.bastionsession.old")
 
     def test_an_expired_or_ending_or_deleted_session_is_replaced_and_the_config_updated(self):
         for age, state in ((181, "ACTIVE"), (170, "ACTIVE"), (30, "DELETED")):
             with self.subTest(age=age, state=state):
                 cloud._bastion_fresh.clear()
-                cloud.set_ssh_config_user(self.ssh_config, "avpn-bastion", "ocid1.bastionsession.old")
+                cloud.set_ssh_config_user(self.ssh_config, "cpvpn-bastion", "ocid1.bastionsession.old")
                 self.session(age_minutes=age, state=state)
                 made = self.ensure()
                 self.assertEqual(len(made), 1)
@@ -1107,42 +1110,42 @@ class BastionTests(Stubbed):
                 for flag, value in (("--bastion-id", "ocid1.bastion.b"), ("--target-resource-id", "ocid1.instance.i"),
                                     ("--target-os-username", "ubuntu"), ("--session-ttl", "10800")):  # fmt: skip
                     self.assertEqual(argv[argv.index(flag) + 1], value)
-                self.assertEqual(cloud.ssh_config_user(self.ssh_config, "avpn-bastion"), "ocid1.bastionsession.new1")
-                self.assertEqual(cloud.ssh_config_user(self.ssh_config, "avpn-exit"), "ubuntu")  # untouched
+                self.assertEqual(cloud.ssh_config_user(self.ssh_config, "cpvpn-bastion"), "ocid1.bastionsession.new1")
+                self.assertEqual(cloud.ssh_config_user(self.ssh_config, "cpvpn-exit"), "ubuntu")  # untouched
                 self.assertEqual(oct(self.ssh_config.stat().st_mode & 0o777), "0o600")
         # Cached connections for the old session are closed.
-        self.assertIn("-O exit avpn-bastion", (Path(self.tmp.name) / "log.ssh").read_text())
+        self.assertIn("-O exit cpvpn-bastion", (Path(self.tmp.name) / "log.ssh").read_text())
 
     def test_it_runs_once_per_command_and_through_remote(self):
         self.session(age_minutes=200)
-        rec = cloud.load_inventory()["resources"]["avpn-exit"]
+        rec = cloud.load_inventory()["resources"]["cpvpn-exit"]
         with mock.patch.object(cloud.time, "time", lambda: self.now):
-            cloud.remote("avpn-exit", rec)
-            cloud.remote("avpn-exit", rec)
+            cloud.remote("cpvpn-exit", rec)
+            cloud.remote("cpvpn-exit", rec)
         self.assertEqual(len(json.loads(self.state.read_text())["oci_created_sessions"]), 1)
 
     def test_host_bastion_checks_what_it_records(self):
         d = Path(self.tmp.name)
         self.session(age_minutes=30)
-        base = ["host", "bastion", "--name", "avpn-exit", "--host", "avpn-bastion", "--public-key", str(d / "k.pub")]
+        base = ["host", "bastion", "--name", "cpvpn-exit", "--host", "cpvpn-bastion", "--public-key", str(d / "k.pub")]
         with self.assertRaisesRegex(cloud.CloudError, "bastion OCID"):
             self.run_cli(*base, "--bastion-id", "ocid1.instance.x", "--instance-id", "ocid1.instance.i")
         with self.assertRaisesRegex(cloud.CloudError, "no Host nope"):
-            self.run_cli("host", "bastion", "--name", "avpn-exit", "--host", "nope", "--public-key", str(d / "k.pub"),
+            self.run_cli("host", "bastion", "--name", "cpvpn-exit", "--host", "nope", "--public-key", str(d / "k.pub"),
                          "--bastion-id", "ocid1.bastion.b", "--instance-id", "ocid1.instance.i")  # fmt: skip
         r = self.run_cli(*base, "--bastion-id", "ocid1.bastion.b", "--instance-id", "ocid1.instance.i")
         self.assertEqual(r["summary"], "recorded")
 
 
 class HealthTests(unittest.TestCase):
-    """`avpn cloud health` (owner, 20 Nov 2026): a stopped, reclaimed, locked or unreachable
+    """`cypherpunk cloud health` (owner, 20 Nov 2026): a stopped, reclaimed, locked or unreachable
     server, and an account running out, must be obvious, with the fix."""
 
     def run_health(self, ssh_line="active=active mode=operator unlocked=1", oci_state="RUNNING", plan=None,
                    ssh_error=None):  # fmt: skip
-        inv = dict(schema=1, chain=dict(hops=["avpn-relay", "avpn-exit"]), resources={
-            "avpn-relay": dict(provider="aws", profile="p", region="eu-north-1", instance="i-1", role="relay"),
-            "avpn-exit": dict(provider="ssh", role="exit", key_protection="operator",
+        inv = dict(schema=1, chain=dict(hops=["cpvpn-relay", "cpvpn-exit"]), resources={
+            "cpvpn-relay": dict(provider="aws", profile="p", region="eu-north-1", instance="i-1", role="relay"),
+            "cpvpn-exit": dict(provider="ssh", role="exit", key_protection="operator",
                               bastion=dict(instance="ocid1.instance.x", oci_profile="DEFAULT"))})  # fmt: skip
         plan = plan or {"accountPlanType": "FREE", "accountPlanStatus": "ACTIVE",
                         "accountPlanRemainingCredits": {"amount": 106.3}, "accountPlanExpirationDate": "2099-01-01T00:00:00+00:00"}  # fmt: skip
@@ -1201,7 +1204,7 @@ class HealthTests(unittest.TestCase):
         self.assertEqual(notes, [])
         self.assertIn("106.3 USD credits left", rows["aws p"])
         self.assertIn("FREE_TIER", rows["oci DEFAULT"])
-        self.assertIn("0.0 of 90 GB this month", rows["avpn-relay usage"])
+        self.assertIn("0.0 of 90 GB this month", rows["cpvpn-relay usage"])
 
     def test_a_paid_aws_plan_is_a_problem_because_the_cap_covers_traffic_only(self):
         paid = {"accountPlanType": "PAID", "accountPlanStatus": "ACTIVE"}
@@ -1211,22 +1214,22 @@ class HealthTests(unittest.TestCase):
     def test_a_locked_exit_says_how_to_unlock_it(self):
         r, rows, values, saved, notes = self.run_health(ssh_line="active=activating mode=operator unlocked=0")
         self.assertEqual(r["summary"], "problems found")
-        self.assertIn("LOCKED", rows["avpn-exit"])
-        self.assertIn("fix: avpn cloud unlock avpn-exit", values)
+        self.assertIn("LOCKED", rows["cpvpn-exit"])
+        self.assertIn("fix: cypherpunk cloud unlock cpvpn-exit", values)
         self.assertEqual(len(notes), 1)
-        self.assertIn("avpn-exit: locked", notes[0][1])
+        self.assertIn("cpvpn-exit: locked", notes[0][1])
 
     def test_a_stopped_or_deleted_server_says_so_with_the_start_command(self):
         _, rows, values, saved, _ = self.run_health(oci_state="STOPPED")
-        self.assertIn("stopped by its provider", rows["avpn-exit"])
+        self.assertIn("stopped by its provider", rows["cpvpn-exit"])
         fix = next(v for v in values if v.startswith("fix: oci compute instance action --action START"))
-        self.assertIn("then: avpn cloud unlock avpn-exit", fix)
+        self.assertIn("then: cypherpunk cloud unlock cpvpn-exit", fix)
         _, rows, _, _, _ = self.run_health(oci_state="TERMINATED")
-        self.assertIn("no longer exists", rows["avpn-exit"])
+        self.assertIn("no longer exists", rows["cpvpn-exit"])
 
     def test_unreachable_and_accounts_running_out_are_problems(self):
         _, rows, _, saved, _ = self.run_health(ssh_error="ssh: connect timed out")
-        self.assertIn("not reachable over SSH", rows["avpn-exit"])
+        self.assertIn("not reachable over SSH", rows["cpvpn-exit"])
         low = {"accountPlanType": "FREE", "accountPlanStatus": "ACTIVE", "accountPlanRemainingCredits": {"amount": 4.0},
                "accountPlanExpirationDate": "2026-11-25T00:00:00+00:00"}  # fmt: skip
         _, _, _, saved, notes = self.run_health(plan=low)
@@ -1253,7 +1256,7 @@ class AzureServerTests(unittest.TestCase):
             p.start()
             self.addCleanup(p.stop)
         (d / "relay-key").write_text("k")
-        cloud.save_inventory(dict(schema=1, resources={"avpn-relay": dict(
+        cloud.save_inventory(dict(schema=1, resources={"cpvpn-relay": dict(
             provider="aws", profile="flashbots", region="eu-north-1", public_ip="13.60.50.27", ssh_key=str(d / "relay-key"),
             admin=dict(via="eice", instance="i-0d6", endpoint="eice-1", group="sg-1"))}))  # fmt: skip
         self.calls = []
@@ -1270,7 +1273,7 @@ class AzureServerTests(unittest.TestCase):
         def apply(ws, key):
             self.calls.append(("apply",))
             return {"server": {"value": {"public_ip": "20.91.1.2", "private_ip": "10.77.110.4",
-                                         "vm_id": "/sub/vm", "resource_group": "avpn-exit-az"}}}  # fmt: skip
+                                         "vm_id": "/sub/vm", "resource_group": "cpvpn-exit-az"}}}  # fmt: skip
 
         for name, fn in (("workspace", workspace), ("plan", plan), ("apply", apply),
                          ("init", lambda ws, key: self.calls.append(("init",))),
@@ -1297,10 +1300,10 @@ class AzureServerTests(unittest.TestCase):
         self.assertEqual(variables["port"], 4444)
         self.assertFalse(variables["tcp_fallback"])
         self.assertIn(("apply",), self.calls)
-        rec = json.loads(cloud.INVENTORY.read_text())["resources"]["avpn-exit-az"]
+        rec = json.loads(cloud.INVENTORY.read_text())["resources"]["cpvpn-exit-az"]
         self.assertEqual((rec["engine"], rec["catalog"], rec["public_ip"]), ("tofu", "azure", "20.91.1.2"))
         config = Path(rec["ssh_config"]).read_text()
-        self.assertIn("ProxyJump avpn-exit-az-relay", config)
+        self.assertIn("ProxyJump cpvpn-exit-az-relay", config)
         self.assertIn("ec2-instance-connect open-tunnel --instance-id i-0d6", config)
         self.assertIn("HostName 20.91.1.2", config)
         self.assertEqual(oct(Path(rec["ssh_config"]).stat().st_mode & 0o777), "0o600")
@@ -1309,18 +1312,18 @@ class AzureServerTests(unittest.TestCase):
     def test_a_dry_run_creates_nothing_and_teardown_destroys_the_state(self):
         self.run_cli("azure", "server", "--apply", "--dry-run", "--allow-from", "13.60.50.27", "--vault", "/v")
         self.assertNotIn(("apply",), self.calls)
-        self.assertNotIn("avpn-exit-az", json.loads(cloud.INVENTORY.read_text())["resources"])
+        self.assertNotIn("cpvpn-exit-az", json.loads(cloud.INVENTORY.read_text())["resources"])
         self.run_cli("azure", "server", "--apply", "--yes", "--allow-from", "13.60.50.27", "--vault", "/v")
         self.calls.clear()
         self.run_cli("azure", "server", "--teardown", "--yes", "--vault", "/v")
         self.assertIn(("plan", True), self.calls)
         self.assertIn(("apply",), self.calls)
-        self.assertNotIn("avpn-exit-az", json.loads(cloud.INVENTORY.read_text())["resources"])
+        self.assertNotIn("cpvpn-exit-az", json.loads(cloud.INVENTORY.read_text())["resources"])
 
     def test_an_unrecorded_relay_is_refused(self):
         with self.assertRaisesRegex(cloud.CloudError, "admin-via"):
             self.run_cli("azure", "server", "--apply", "--yes", "--allow-from", "13.60.50.27", "--vault", "/v",
-                         "--admin-via", "avpn-nope")  # fmt: skip
+                         "--admin-via", "cpvpn-nope")  # fmt: skip
 
 
 class ChainTests(Stubbed):
@@ -1330,7 +1333,7 @@ class ChainTests(Stubbed):
         for name, body in [("ssh", SSH_STUB), ("scp", SCP_STUB)]:
             (d / name).write_text(body)
             (d / name).chmod(0o755)
-        ctl = d / "avpnctl"
+        ctl = d / "cypherpunkctl"
         ctl.write_text(
             "#!" + sys.executable + "\nimport json, os, sys\na = sys.argv[1:]\n"
             "if 'unlock-key' in a:\n"
@@ -1343,13 +1346,13 @@ class ChainTests(Stubbed):
             "    print(json.dumps({'ok': True, 'unlock': {name: 'cd' * 32}}))\n    sys.exit(0)\n"
             "open(os.environ['STUB_LOG'] + '.ctl', 'w').write(json.dumps(a))\n"
             "out = a[a.index('--out') + 1]\nos.makedirs(out)\n"
-            "for r in ['client', 'relay', 'middle', 'exit']:\n    open(os.path.join(out, r + '.avpn'), 'w').write(r)\n"
+            "for r in ['client', 'relay', 'middle', 'exit']:\n    open(os.path.join(out, r + '.cpvpn'), 'w').write(r)\n"
             "open(os.path.join(out, 'operator.pub'), 'w').write('pub')\n"
             "print(json.dumps({'ok': True, 'unlock': json.loads(os.environ.get('STUB_UNLOCK', '{}'))}))\n"
         )
         ctl.chmod(0o755)
         self.extra = mock.patch.dict(
-            os.environ, AVPN_SSH=str(d / "ssh"), AVPN_SCP=str(d / "scp"), AVPN_CTL=str(ctl), STUB_DIR=str(d)
+            os.environ, CPVPN_SSH=str(d / "ssh"), CPVPN_SCP=str(d / "scp"), CPVPN_CTL=str(ctl), STUB_DIR=str(d)
         )
         self.extra.start()
         self.src = self.checkout(d / "checkout")
@@ -1360,7 +1363,7 @@ class ChainTests(Stubbed):
         (d / "client.req").write_text("{}")
         relay_sg = dict(
             GroupId="sg-r",
-            GroupName="avpn-relay",
+            GroupName="cpvpn-relay",
             IpPermissions=[
                 dict(IpProtocol="udp", FromPort=41194, ToPort=41194, IpRanges=[dict(CidrIp="16.9.9.9/32")]),
                 dict(IpProtocol="tcp", FromPort=22, ToPort=22, IpRanges=[dict(CidrIp="16.9.9.9/32")]),
@@ -1371,7 +1374,7 @@ class ChainTests(Stubbed):
             dict(
                 schema=1,
                 resources={
-                    "avpn-relay": dict(
+                    "cpvpn-relay": dict(
                         provider="aws",
                         profile="p",
                         region="eu-north-1",
@@ -1405,7 +1408,7 @@ class ChainTests(Stubbed):
             (root / "target/release" / b).write_text("bin")
         return root
 
-    def add_exit(self, name="avpn-exit", provider="oci", ip="16.40.0.2"):
+    def add_exit(self, name="cpvpn-exit", provider="oci", ip="16.40.0.2"):
         self.run_cli(
             "host", "add", "--name", name, "--ssh", "ubuntu@" + ip, "--key", str(self.key), "--provider", provider
         )
@@ -1428,7 +1431,7 @@ class ChainTests(Stubbed):
         self.assertEqual(r["summary"], "built")
         # The exit is the larger allowance (OCI), the relay the AWS server.
         text = json.dumps(r["rows"])
-        self.assertIn("client -> relay(avpn-relay) -> exit(avpn-exit)", text)
+        self.assertIn("client -> relay(cpvpn-relay) -> exit(cpvpn-exit)", text)
         init = json.loads(Path(os.environ["STUB_LOG"] + ".ctl").read_text())
         self.assertEqual(init[init.index("--hops") + 1], "2")
         self.assertEqual(init[init.index("--relay") + 1], "13.0.0.1:443")
@@ -1451,9 +1454,9 @@ class ChainTests(Stubbed):
         self.assertIn("ssh admin@13.0.0.1 (while connected)", text)
         self.assertIn("ssh ubuntu@10.77.0.1 (while connected)", text)
         inv = json.loads(cloud.INVENTORY.read_text())
-        self.assertEqual(inv["chain"]["hops"], ["avpn-relay", "avpn-exit"])
-        self.assertTrue(inv["resources"]["avpn-relay"]["first_hop"])
-        self.assertFalse(inv["resources"]["avpn-exit"]["first_hop"])
+        self.assertEqual(inv["chain"]["hops"], ["cpvpn-relay", "cpvpn-exit"])
+        self.assertTrue(inv["resources"]["cpvpn-relay"]["first_hop"])
+        self.assertFalse(inv["resources"]["cpvpn-exit"]["first_hop"])
 
     def operator_exit_chain(self, data_key):
         self.add_exit()
@@ -1481,7 +1484,7 @@ class ChainTests(Stubbed):
         enrolled = next(i for i, x in enumerate(lines) if x.endswith("bash -s") and "16.40.0.2" in x)
         self.assertLess(unlocked, enrolled)
         self.assertIn("locked to the operator's Nitrokey", json.dumps(r["rows"]))
-        rec = json.loads(cloud.INVENTORY.read_text())["resources"]["avpn-exit"]
+        rec = json.loads(cloud.INVENTORY.read_text())["resources"]["cpvpn-exit"]
         self.assertEqual(rec["key_protection"], "operator")
         self.assertTrue(Path(rec["request"]).is_file())
 
@@ -1489,23 +1492,23 @@ class ChainTests(Stubbed):
         self.operator_exit_chain("ab" * 32)
         d = Path(self.tmp.name)
         (d / "unlock-stdin").unlink()
-        r = self.run_cli("unlock", "avpn-exit")
+        r = self.run_cli("unlock", "cpvpn-exit")
         self.assertEqual(r["summary"], "unlocked")
         unwrap = json.loads(Path(os.environ["STUB_LOG"] + ".unwrap").read_text())
-        rec = json.loads(cloud.INVENTORY.read_text())["resources"]["avpn-exit"]
+        rec = json.loads(cloud.INVENTORY.read_text())["resources"]["cpvpn-exit"]
         # Role and identities come from your own copy of the request; only the wrapped key
         # (ciphertext) comes from the server.
-        self.assertIn("avpn-exit=" + rec["request"], unwrap)
-        self.assertTrue(any(x.startswith("avpn-exit=") for x in unwrap[unwrap.index("--wrapped") + 1 :][:1]))
+        self.assertIn("cpvpn-exit=" + rec["request"], unwrap)
+        self.assertTrue(any(x.startswith("cpvpn-exit=") for x in unwrap[unwrap.index("--wrapped") + 1 :][:1]))
         self.assertEqual(unwrap[unwrap.index("--vault") + 1], str((d / "vault").resolve()))
         self.assertEqual((d / "unlock-stdin").read_text().strip(), "cd" * 32)
-        self.assertIn("systemctl restart advanced-vpn.service", (d / "enroll-script.sh").read_text())
+        self.assertIn("systemctl restart cypherpunk-vpn.service", (d / "enroll-script.sh").read_text())
         # A server that does not lock to the operator (here: a TPM-sealed relay) is not "unlocked".
         inv = cloud.load_inventory()
-        inv["resources"]["avpn-relay"]["key_protection"] = "systemd-creds"
+        inv["resources"]["cpvpn-relay"]["key_protection"] = "systemd-creds"
         cloud.save_inventory(inv)
         with self.assertRaisesRegex(cloud.CloudError, "does not lock its keys"):
-            self.run_cli("unlock", "avpn-relay")
+            self.run_cli("unlock", "cpvpn-relay")
 
     def test_setup_ssh_from_here_is_opened_then_removed(self):
         self.add_exit()
@@ -1543,17 +1546,17 @@ class ChainTests(Stubbed):
 
         self.add_exit()
         err = io.StringIO()
-        with mock.patch.dict(os.environ, {"AVPN_PROGRESS": "1"}), contextlib.redirect_stderr(err):
+        with mock.patch.dict(os.environ, {"CPVPN_PROGRESS": "1"}), contextlib.redirect_stderr(err):
             self.chain()
         lines = err.getvalue().splitlines()
         for step in [
             "Open the firewalls",
             "Check the operator's unlock key",
-            "Install avpn-relay as the relay",
-            "Install avpn-exit as the exit",
+            "Install cpvpn-relay as the relay",
+            "Install cpvpn-exit as the exit",
             "Sign the chain",
-            "Start avpn-exit",
-            "Start avpn-relay",
+            "Start cpvpn-exit",
+            "Start cpvpn-relay",
             "Close SSH from here",
         ]:
             self.assertTrue(any(step in line for line in lines), (step, lines))
@@ -1563,7 +1566,7 @@ class ChainTests(Stubbed):
         chains = cloud.INVENTORY.parent / "chains"
         chains.rename(chains.with_name("chains.progress"))
         with mock.patch.dict(os.environ, {}, clear=False), contextlib.redirect_stderr(err):
-            os.environ.pop("AVPN_PROGRESS", None)
+            os.environ.pop("CPVPN_PROGRESS", None)
             self.chain()
         self.assertEqual(err.getvalue(), "")
 
@@ -1580,7 +1583,7 @@ class ChainTests(Stubbed):
 
         self.add_exit()
         err = io.StringIO()
-        with mock.patch.dict(os.environ, {"AVPN_PROGRESS": "events"}), contextlib.redirect_stderr(err):
+        with mock.patch.dict(os.environ, {"CPVPN_PROGRESS": "events"}), contextlib.redirect_stderr(err):
             self.chain()
         ev = self.events(err.getvalue())
         self.assertEqual(
@@ -1588,11 +1591,11 @@ class ChainTests(Stubbed):
             [
                 "Open the firewalls",
                 "Check the operator's unlock key",
-                "Install avpn-relay as the relay",
-                "Install avpn-exit as the exit",
+                "Install cpvpn-relay as the relay",
+                "Install cpvpn-exit as the exit",
                 "Sign the chain",
-                "Start avpn-exit",
-                "Start avpn-relay",
+                "Start cpvpn-exit",
+                "Start cpvpn-relay",
                 "Close SSH from here",
             ],
         )
@@ -1609,16 +1612,16 @@ class ChainTests(Stubbed):
 
         self.add_exit()
         err = io.StringIO()
-        boom = cloud.CloudError("avpn-exit did not install")
+        boom = cloud.CloudError("cpvpn-exit did not install")
         with (
-            mock.patch.dict(os.environ, {"AVPN_PROGRESS": "events"}),
+            mock.patch.dict(os.environ, {"CPVPN_PROGRESS": "events"}),
             contextlib.redirect_stderr(err),
             mock.patch.object(cloud, "setup_server", side_effect=[("kept", "systemd-creds", "tpm2=yes"), boom]),
         ):
             with self.assertRaises(cloud.CloudError):
                 self.chain()
         ev = self.events(err.getvalue())
-        self.assertEqual(ev[-1], {"step": 3, "state": "fail", "note": "avpn-exit did not install"})
+        self.assertEqual(ev[-1], {"step": 3, "state": "fail", "note": "cpvpn-exit did not install"})
 
     def test_the_plan_names_tcp_for_the_first_hop_only(self):
         self.add_exit()
@@ -1648,7 +1651,7 @@ class ChainTests(Stubbed):
         )
         text = json.dumps(r["rows"])
         self.assertIn("NOT managed", text)
-        self.assertIn("avpn-relay: 90 GB", text)  # each hop's monthly cap, from its account
+        self.assertIn("cpvpn-relay: 90 GB", text)  # each hop's monthly cap, from its account
         self.assertFalse([c for c in self.calls()[before:] if "security-group-ingress" in (c[1:2] or [""])[0]])
         self.assertFalse(Path(os.environ["STUB_LOG"] + ".ctl").exists())
 
@@ -1657,12 +1660,12 @@ class ChainTests(Stubbed):
         init = json.loads(Path(os.environ["STUB_LOG"] + ".ctl").read_text())
         self.assertEqual((init[init.index("--hops") + 1], init[init.index("--exit") + 1]), ("1", "13.0.0.1:443"))
         self.assertNotIn("--relay", init)
-        self.assertIn("client -> exit(avpn-relay)", json.dumps(r["rows"]))
+        self.assertIn("client -> exit(cpvpn-relay)", json.dumps(r["rows"]))
         self.assertEqual(self.final_sg()[("udp", 443)], ["0.0.0.0/0"])
 
     def test_the_first_hop_presents_its_provider_dns_name(self):
         inv = cloud.load_inventory()
-        inv["resources"]["avpn-relay"]["public_dns"] = "ec2-13-0-0-1.eu-north-1.compute.amazonaws.com"
+        inv["resources"]["cpvpn-relay"]["public_dns"] = "ec2-13-0-0-1.eu-north-1.compute.amazonaws.com"
         cloud.save_inventory(inv)
         self.add_exit()
         self.chain()
@@ -1670,11 +1673,11 @@ class ChainTests(Stubbed):
         self.assertEqual(init[init.index("--cover-name") + 1], "ec2-13-0-0-1.eu-north-1.compute.amazonaws.com")
 
     def test_three_servers_put_a_different_provider_at_the_entry(self):
-        self.add_exit("avpn-exit", "oci", "16.40.0.2")
-        self.add_exit("avpn-oci2", "oci", "16.40.0.3")
+        self.add_exit("cpvpn-exit", "oci", "16.40.0.2")
+        self.add_exit("cpvpn-oci2", "oci", "16.40.0.3")
         names = cloud.chain_order(cloud.servers())
-        self.assertEqual(names[-1], "avpn-exit")
-        self.assertEqual(names[0], "avpn-relay")
+        self.assertEqual(names[-1], "cpvpn-exit")
+        self.assertEqual(names[0], "cpvpn-relay")
         layout = cloud.chain_layout(names, json.loads(cloud.INVENTORY.read_text())["resources"])
         self.assertEqual([h["role"] for h in layout], ["relay", "middle", "exit"])
         self.assertEqual(layout[1]["sources"], ["13.0.0.1/32"])
@@ -1682,22 +1685,22 @@ class ChainTests(Stubbed):
         self.assertEqual([h["ssh"] for h in layout], [["16.40.0.2/32"], ["16.40.0.2/32"], []])
 
     def test_one_provider_at_both_ends_is_refused_unless_allowed(self):
-        self.add_exit("avpn-exit", "aws", "16.40.0.2")  # the relay is on AWS too
+        self.add_exit("cpvpn-exit", "aws", "16.40.0.2")  # the relay is on AWS too
         with self.assertRaisesRegex(cloud.CloudError, "entry and the exit are both on aws"):
             self.chain()
         self.chain("--allow-same-provider")  # an explicit choice goes through
 
     def test_a_provider_with_two_inner_hops_is_named_in_the_plan(self):
-        self.add_exit("avpn-exit", "oci", "16.40.0.2")
-        self.add_exit("avpn-oci2", "oci", "16.40.0.3")
+        self.add_exit("cpvpn-exit", "oci", "16.40.0.2")
+        self.add_exit("cpvpn-oci2", "oci", "16.40.0.3")
         d = Path(self.tmp.name)
         a = cloud.build_parser().parse_args(["chain", "--apply", "--client-request", str(d / "client.req"),
                                              "--vault", str(d / "vault"), "--source", str(self.src)])  # fmt: skip
         self.assertIn("oci hosts 2 of 3 hops", json.dumps(cloud.chain_plan(a)["rows"]))
 
     def test_order_must_name_recorded_servers(self):
-        with self.assertRaisesRegex(cloud.CloudError, "not recorded as servers: avpn-nope"):
-            self.chain("--order", "avpn-relay,avpn-nope")
+        with self.assertRaisesRegex(cloud.CloudError, "not recorded as servers: cpvpn-nope"):
+            self.chain("--order", "cpvpn-relay,cpvpn-nope")
 
     def test_host_add_checks_key_address_and_provider(self):
         self.key.chmod(0o644)
@@ -1711,10 +1714,10 @@ class ChainTests(Stubbed):
         self.add_exit()
         with self.assertRaisesRegex(cloud.CloudError, "already recorded"):
             self.add_exit()
-        rec = json.loads(cloud.INVENTORY.read_text())["resources"]["avpn-exit"]
+        rec = json.loads(cloud.INVENTORY.read_text())["resources"]["cpvpn-exit"]
         self.assertEqual((rec["catalog"], rec["public_ip"], rec["ssh"]), ("oci", "16.40.0.2", "ubuntu@16.40.0.2"))
-        self.run_cli("host", "forget", "--name", "avpn-exit")
-        self.assertNotIn("avpn-exit", json.loads(cloud.INVENTORY.read_text())["resources"])
+        self.run_cli("host", "forget", "--name", "cpvpn-exit")
+        self.assertNotIn("cpvpn-exit", json.loads(cloud.INVENTORY.read_text())["resources"])
 
 
 SSH_STUB = r"""#!/bin/sh
@@ -1725,7 +1728,7 @@ case "$*" in
   *"bash -s -- "*) cat > "$STUB_DIR/remote-script.sh"; echo "keys=new"; echo "protection=${STUB_PROTECT:-systemd-creds tpm2=yes creds_key=host+tpm2}" ;;
   *"bash -s") cat > "$STUB_DIR/enroll-script.sh"; echo "$(basename "$0") enrolled" >> "$STUB_LOG.ssh"; echo active ;;
   *"server-unlock") cat >> "$STUB_DIR/unlock-stdin"; echo '{"ok": true, "unlocked": ["inner"]}' ;;
-  *"cat /etc/advanced-vpn/enrolled/protection.json") echo '{"mode": "operator", "unlock": {"from": "server"}}' ;;
+  *"cat /etc/cypherpunk-vpn/enrolled/protection.json") echo '{"mode": "operator", "unlock": {"from": "server"}}' ;;
 esac
 """
 SCP_STUB = r"""#!/bin/sh
@@ -1765,8 +1768,8 @@ class HostSetupTests(unittest.TestCase):
         self.env = mock.patch.dict(
             os.environ,
             dict(
-                AVPN_SSH=str(d / "ssh"),
-                AVPN_SCP=str(d / "scp"),
+                CPVPN_SSH=str(d / "ssh"),
+                CPVPN_SCP=str(d / "scp"),
                 STUB_LOG=str(d / "log"),
                 STUB_DIR=str(d),
                 STUB_ROLE="relay",
@@ -1779,7 +1782,7 @@ class HostSetupTests(unittest.TestCase):
             dict(
                 schema=1,
                 resources={
-                    "avpn-relay": dict(provider="aws", role="relay", public_ip="16.0.0.9", ssh_key=str(d / "key"))
+                    "cpvpn-relay": dict(provider="aws", role="relay", public_ip="16.0.0.9", ssh_key=str(d / "key"))
                 },
             )
         )
@@ -1790,7 +1793,7 @@ class HostSetupTests(unittest.TestCase):
         self.env.stop()
         self.tmp.cleanup()
 
-    def setup_host(self, name="avpn-relay"):
+    def setup_host(self, name="cpvpn-relay"):
         a = cloud.build_parser().parse_args(
             ["host", "setup", "--name", name, "--source", str(self.src), "--out", str(self.d / "relay.req")]
         )
@@ -1821,7 +1824,7 @@ class HostSetupTests(unittest.TestCase):
         self.assertNotIn("PROTECT=none", script)
         self.assertIn("replace them to make it a", script)
         # Root-run Python must not leave root-owned caches behind in the user's temp tree.
-        self.assertIn("python3 -B /tmp/avpn-src/tools/install.py", script)
+        self.assertIn("python3 -B /tmp/cpvpn-src/tools/install.py", script)
         # The system journal (sshd logs the admin's address) lives in RAM only.
         self.assertIn("Storage=volatile", script)
         self.assertIn("rm -rf /var/log/journal", script)
@@ -1830,12 +1833,12 @@ class HostSetupTests(unittest.TestCase):
         self.assertIn("IdentityAgent=none", log)
         self.assertIn("bash -s -- relay 443 no no", log)
         self.assertIn("protection=systemd-creds tpm2=yes creds_key=host+tpm2", json.dumps(r["rows"]))
-        inv = json.loads(cloud.INVENTORY.read_text())["resources"]["avpn-relay"]
+        inv = json.loads(cloud.INVENTORY.read_text())["resources"]["cpvpn-relay"]
         self.assertEqual(inv["request"], str(self.d / "relay.req"))
         self.assertEqual(inv["key_protection"], "systemd-creds")
 
     def test_binaries_too_new_for_the_servers_c_library_are_refused_before_upload(self):
-        (self.src / "target/release/advanced-vpn").write_bytes(b"\0GLIBC_2.17\0GLIBC_2.38\0GLIBC_2.4\0")
+        (self.src / "target/release/cypherpunk-vpn").write_bytes(b"\0GLIBC_2.17\0GLIBC_2.38\0GLIBC_2.4\0")
         with mock.patch.dict(os.environ, STUB_GLIBC="2.35"):
             with self.assertRaisesRegex(cloud.CloudError, "has glibc 2.35 but this package needs 2.38"):
                 self.setup_host()
@@ -1850,8 +1853,8 @@ class HostSetupTests(unittest.TestCase):
 
     def test_unbuilt_checkout_and_unknown_hosts_are_refused(self):
         with self.assertRaisesRegex(cloud.CloudError, "not a recorded host"):
-            self.setup_host("avpn-other")
-        (self.src / "target/release/avpn").unlink()
+            self.setup_host("cpvpn-other")
+        (self.src / "target/release/cypherpunk").unlink()
         with self.assertRaisesRegex(cloud.CloudError, "build first"):
             self.setup_host()
 
@@ -1866,14 +1869,14 @@ HOST_STUBS = {
     "iptables": '#!/bin/sh\necho "iptables $*" >> "$ROOT/log"\n'
     'case "$1" in -S) cat "$ROOT/iptables" 2>/dev/null ;; -C) exit 1 ;; esac\n',
 }
-FAKE_AVPNCTL = r"""#!/usr/bin/env python3
+FAKE_CYPHERPUNKCTL = r"""#!/usr/bin/env python3
 import json, os, sys
 a = sys.argv[1:]
 root = os.environ["ROOT"]
-open(root + "/log", "a").write("avpnctl " + " ".join(a) + "\n")
+open(root + "/log", "a").write("cypherpunkctl " + " ".join(a) + "\n")
 role = a[a.index("--role") + 1]
 protect = a[a.index("--protect") + 1]
-e = root + "/etc/advanced-vpn/enrolled"
+e = root + "/etc/cypherpunk-vpn/enrolled"
 os.makedirs(e, exist_ok=True)
 req = {"schema": 1, "role": role, "certificates": {}, "kem_public": "k"}
 if role in ("client", "relay", "exit"):
@@ -1905,9 +1908,9 @@ class HostScriptTests(unittest.TestCase):
         for name, body in HOST_STUBS.items():
             (stubs / name).write_text(body)
             (stubs / name).chmod(0o755)
-        ctl = self.root / "opt/advanced-vpn/bin/avpnctl"
+        ctl = self.root / "opt/cypherpunk-vpn/bin/cypherpunkctl"
         ctl.parent.mkdir(parents=True)
-        ctl.write_text(FAKE_AVPNCTL.replace("/usr/bin/env python3", sys.executable))
+        ctl.write_text(FAKE_CYPHERPUNKCTL.replace("/usr/bin/env python3", sys.executable))
         ctl.chmod(0o755)
         pkg = self.root / "pkg/tools"
         pkg.mkdir(parents=True)
@@ -1917,7 +1920,7 @@ class HostScriptTests(unittest.TestCase):
         (self.root / "root").mkdir()
         (self.root / "etc/systemd").mkdir(parents=True)
         (self.root / "var/log/journal").mkdir(parents=True)
-        self.tgz = self.root / "tmp/avpn-src.tgz"
+        self.tgz = self.root / "tmp/cpvpn-src.tgz"
         self.tgz.parent.mkdir()
         with tarfile.open(self.root / "keep.tgz", "w:gz") as tf:
             tf.add(self.root / "pkg/tools", arcname="tools")
@@ -1928,14 +1931,26 @@ class HostScriptTests(unittest.TestCase):
         self.script = cloud.HOST_SETUP.replace(retention.HARDEN.rstrip("\n"), 'echo harden >> "$ROOT/log"')
         assert "systemctl mask" not in self.script and "swapoff" not in self.script, "real hardening left in"
         for path in [
-            "/etc/advanced-vpn",
+            "/etc/cypherpunk-vpn",
             "/etc/systemd",
             "/var/log/journal",
-            "/opt/advanced-vpn",
-            "/tmp/avpn-",
+            "/opt/cypherpunk-vpn",
+            "/tmp/cpvpn-",
             "/root/",
+            # the pre-rename install the script removes (cloud.HOST_SETUP)
+            "/opt/advanced-vpn",
+            "/etc/advanced-vpn",
+            "/usr/local/bin/",
         ]:
             self.script = self.script.replace(path, str(self.root) + path)
+        # Every path the script deletes must be inside the sandbox. On 22 Nov 2026 the
+        # old-install cleanup ran `rm -rf` on the pre-rename install of the machine running
+        # these tests (refused only because the stand-in sudo is not root).
+        joined = self.script.replace("\\\n", " ")
+        for line in joined.splitlines():
+            if re.search(r"\brm\s+-", line):
+                for target in re.findall(r"(?<![\w$\"])(/[\w./*-]+)", line.split("rm", 1)[1]):
+                    assert target.startswith(str(self.root)), "unsandboxed delete in host script: " + target
         self.env = dict(os.environ, ROOT=str(self.root), PATH="%s:%s" % (stubs, os.environ["PATH"]))
         self.systemd_creds_stub(self.PIPE_ONLY_CREDS)  # a host whose TPM2 seals, unless a test says not
 
@@ -1948,7 +1963,7 @@ class HostScriptTests(unittest.TestCase):
 
         shutil.copy(self.root / "keep.tgz", self.tgz)  # the script deletes it when done
         if unlock is not None:  # the operator's unlock public key, uploaded by setup_server
-            (self.root / "tmp/avpn-unlock.pub").write_bytes(unlock)
+            (self.root / "tmp/cpvpn-unlock.pub").write_bytes(unlock)
 
         return subprocess.run(
             ["bash", "-s", "--", role, port, replace, shared, "yes" if unlock is not None else "no"],
@@ -1963,19 +1978,19 @@ class HostScriptTests(unittest.TestCase):
         return (self.root / "log").read_text()
 
     def requested(self):
-        return self.log().count("avpnctl request")
+        return self.log().count("cypherpunkctl request")
 
     def test_fresh_server_gets_keys_and_a_ram_only_journal(self):
         r = self.setup("relay")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("keys=new", r.stdout)
-        self.assertEqual(json.loads((self.root / "tmp/avpn-request.json").read_text())["role"], "relay")
+        self.assertEqual(json.loads((self.root / "tmp/cpvpn-request.json").read_text())["role"], "relay")
         self.assertIn("install", self.log())
         # The hardening runs first, before packages are installed.
         log = self.log()
         self.assertLess(log.index("harden"), log.index("apt-get"))
-        self.assertFalse((self.root / "etc/advanced-vpn/shared-host").exists())
-        self.assertFalse((self.root / "tmp/avpn-src.tgz").exists())
+        self.assertFalse((self.root / "etc/cypherpunk-vpn/shared-host").exists())
+        self.assertFalse((self.root / "tmp/cpvpn-src.tgz").exists())
 
     def test_a_flat_installation_is_stopped_and_adopted_and_a_slotted_one_is_not(self):
         # Found rebuilding the live chain (20 Nov 2026): a server installed before release
@@ -1983,22 +1998,22 @@ class HostScriptTests(unittest.TestCase):
         r = self.setup("relay")
         self.assertEqual(r.returncode, 0, r.stderr)
         log = self.log()
-        self.assertIn("systemctl stop advanced-vpn.service", log)
-        self.assertIn("systemctl stop advanced-vpn-guard.service", log)
+        self.assertIn("systemctl stop cypherpunk-vpn.service", log)
+        self.assertIn("systemctl stop cypherpunk-vpn-guard.service", log)
         self.assertIn("install --apply --adopt-legacy", log)
-        self.assertLess(log.index("systemctl stop advanced-vpn.service"), log.index("install --apply"))
+        self.assertLess(log.index("systemctl stop cypherpunk-vpn.service"), log.index("install --apply"))
         # A slotted installation (bin is a link into the current slot) is upgraded in place.
         import shutil
 
         (self.root / "log").write_text("")
-        app = self.root / "opt/advanced-vpn"
+        app = self.root / "opt/cypherpunk-vpn"
         shutil.move(app / "bin", app / "current-bin")
         (app / "bin").symlink_to("current-bin")
         r = self.setup("relay")
         self.assertEqual(r.returncode, 0, r.stderr)
         # a slotted installation keeps running (only the daily update gives way to the window)
-        self.assertNotIn("systemctl stop advanced-vpn.service", self.log())
-        self.assertNotIn("systemctl stop advanced-vpn-guard.service", self.log())
+        self.assertNotIn("systemctl stop cypherpunk-vpn.service", self.log())
+        self.assertNotIn("systemctl stop cypherpunk-vpn-guard.service", self.log())
         self.assertIn("install --apply\n", self.log())
 
     def systemd_creds_stub(self, body):
@@ -2016,9 +2031,9 @@ class HostScriptTests(unittest.TestCase):
         self.assertIn("keys=new", r.stdout)
         self.assertIn("--protect operator --unlock-key", self.log())
         self.assertNotIn("--protect none", self.log())
-        self.assertIn("avpn cloud unlock", r.stderr)
+        self.assertIn("cypherpunk cloud unlock", r.stderr)
         self.assertTrue(r.stdout.strip().splitlines()[-1].startswith("protection=operator "), r.stdout)
-        self.assertFalse((self.root / "tmp/avpn-unlock.pub").exists())
+        self.assertFalse((self.root / "tmp/cpvpn-unlock.pub").exists())
 
     def test_a_host_without_a_tpm_and_no_unlock_key_is_refused(self):
         self.systemd_creds_stub("#!/bin/sh\nexit 1\n")
@@ -2031,7 +2046,7 @@ class HostScriptTests(unittest.TestCase):
         # Owner (20 Nov 2026): keys that were plain, sealed with the host key alone, or locked
         # to another operator are replaced; copies may survive on the disk or its backups.
         unlock = b"U" * 1216
-        prot = self.root / "etc/advanced-vpn/enrolled/protection.json"
+        prot = self.root / "etc/cypherpunk-vpn/enrolled/protection.json"
         self.assertEqual(self.setup("exit", unlock=unlock).returncode, 0)
         for weak in (
             {"mode": "none"},
@@ -2079,7 +2094,7 @@ class HostScriptTests(unittest.TestCase):
         self.assertNotIn("PLAIN FILES", r.stderr)
         self.assertNotIn("file argument", r.stderr)
         self.assertTrue(r.stdout.strip().splitlines()[-1].startswith("protection=systemd-creds "), r.stdout)
-        self.assertFalse(list((self.root / "tmp").glob("avpn-creds-probe*")))
+        self.assertFalse(list((self.root / "tmp").glob("cpvpn-creds-probe*")))
 
     def test_a_probe_that_does_not_round_trip_falls_back(self):
         # Exit codes alone are not proof: a credential must decrypt to what was sealed.
@@ -2100,14 +2115,14 @@ class HostScriptTests(unittest.TestCase):
         self.assertEqual(self.requested(), 1)
         replaced = self.setup("exit", replace="yes")
         self.assertIn("keys=new", replaced.stdout)
-        self.assertIn("systemctl stop advanced-vpn.service", self.log())
-        self.assertEqual(json.loads((self.root / "tmp/avpn-request.json").read_text())["role"], "exit")
+        self.assertIn("systemctl stop cypherpunk-vpn.service", self.log())
+        self.assertEqual(json.loads((self.root / "tmp/cpvpn-request.json").read_text())["role"], "exit")
 
     def test_same_role_keys_older_than_this_release_are_renewed(self):
         # Live-chain regression (14 Nov 2026): a relay's keys from before the HTTP/3
         # camouflage were kept because the role matched; signing then refused them.
         self.assertEqual(self.setup("relay").returncode, 0)
-        req = self.root / "etc/advanced-vpn/enrolled/request.json"
+        req = self.root / "etc/cypherpunk-vpn/enrolled/request.json"
         old = json.loads(req.read_text())
         del old["cloak_spki_sha256"]
         req.write_text(json.dumps(old))
@@ -2115,8 +2130,8 @@ class HostScriptTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("keys=renewed", r.stdout)
         self.assertEqual(self.requested(), 2)
-        self.assertIn("systemctl stop advanced-vpn.service", self.log())
-        self.assertIn("cloak_spki_sha256", json.loads((self.root / "tmp/avpn-request.json").read_text()))
+        self.assertIn("systemctl stop cypherpunk-vpn.service", self.log())
+        self.assertIn("cloak_spki_sha256", json.loads((self.root / "tmp/cpvpn-request.json").read_text()))
         # Current keys are still kept.
         self.assertIn("keys=kept", self.setup("relay").stdout)
         self.assertEqual(self.requested(), 2)
@@ -2124,11 +2139,11 @@ class HostScriptTests(unittest.TestCase):
     def test_shared_host_is_marked_not_hardened(self):
         self.setup("exit", shared="yes")
         self.assertNotIn("harden", self.log())
-        self.assertTrue((self.root / "etc/advanced-vpn/shared-host").exists())
+        self.assertTrue((self.root / "etc/cypherpunk-vpn/shared-host").exists())
         # Setting it up again as a dedicated host hardens it and clears the mark.
         self.setup("exit")
         self.assertIn("harden", self.log())
-        self.assertFalse((self.root / "etc/advanced-vpn/shared-host").exists())
+        self.assertFalse((self.root / "etc/cypherpunk-vpn/shared-host").exists())
 
     def test_reject_by_default_hosts_get_the_tunnel_port_accepted(self):
         self.setup("exit", port="4444")
@@ -2156,7 +2171,7 @@ if __name__ == "__main__":
 
 class SystemPythonTests(unittest.TestCase):
     def test_the_cloud_tool_plans_rates_without_the_locked_dependencies(self):
-        # avpn-cloud runs under the system Python (Debian's cryptography may be too old
+        # cpvpn-cloud runs under the system Python (Debian's cryptography may be too old
         # for ML-DSA). Importing cloud and choosing a rate must not need cryptography.
         import subprocess
 
@@ -2177,23 +2192,62 @@ class SystemPythonTests(unittest.TestCase):
         self.assertEqual(r.stdout.strip(), "fast")
 
     def test_signing_uses_the_installed_controller_not_the_system_python(self):
-        # Live-chain regression (14 Nov 2026): signing ran avpnctl under the system
-        # Python that avpn-cloud uses, whose cryptography had no ML-DSA. An installed
-        # copy has bin/avpnctl beside tools/ (the hash-locked venv): signing must use it.
+        # Live-chain regression (14 Nov 2026): signing ran cypherpunkctl under the system
+        # Python that cpvpn-cloud uses, whose cryptography had no ML-DSA. An installed
+        # copy has bin/cypherpunkctl beside tools/ (the hash-locked venv): signing must use it.
         with tempfile.TemporaryDirectory() as d:
             app = Path(d)
             (app / "tools").mkdir()
             (app / "bin").mkdir()
-            launcher = app / "bin/avpnctl"
+            launcher = app / "bin/cypherpunkctl"
             launcher.write_text("#!/bin/sh\n")
             launcher.chmod(0o755)
-            env = {k: v for k, v in os.environ.items() if k != "AVPN_CTL"}
+            env = {k: v for k, v in os.environ.items() if k != "CPVPN_CTL"}
             with (
                 mock.patch.object(cloud, "__file__", str(app / "tools/cloud.py")),
                 mock.patch.dict(os.environ, env, clear=True),
             ):
                 self.assertEqual(cloud.controller(), [str(launcher)])
                 launcher.unlink()  # a source checkout has no bin/: the interpreter running it
-                self.assertEqual(cloud.controller(), [sys.executable, str(app / "tools/avpnctl.py")])
-            with mock.patch.dict(os.environ, {"AVPN_CTL": "/x/ctl"}):
+                self.assertEqual(cloud.controller(), [sys.executable, str(app / "tools/cypherpunkctl.py")])
+            with mock.patch.dict(os.environ, {"CPVPN_CTL": "/x/ctl"}):
                 self.assertEqual(cloud.controller(), ["/x/ctl"])
+
+    def test_adopt_legacy_moves_config_and_renames_records_keeping_provider_ids(self):
+        with tempfile.TemporaryDirectory() as d:
+            cfg = Path(d)
+            old = cfg / "advanced-vpn"
+            (old / "ssh").mkdir(parents=True)
+            (old / "ssh/avpn-relay").write_text("KEY")
+            (old / "ssh/ociexit.conf").write_text(f"Host avpn-ociexit\n  IdentityFile {old}/ssh/avpn-relay\n")
+            inv = {
+                "schema": 1,
+                "chain": {"bundles": f"{old}/chains/1/bundles", "hops": ["avpn-relay", "avpn-flyexit"]},
+                "resources": {
+                    "avpn-relay": {
+                        "provider": "aws",
+                        "instance": "i-0d675c1bbd929552a",
+                        "security_group": "sg-0ba0991393a190f63",
+                        "ssh_key": f"{old}/ssh/avpn-relay",
+                    },
+                    "avpn-ociexit": {
+                        "provider": "ssh",
+                        "ssh": "ubuntu@avpn-ociexit",
+                        "bastion": {"host": "avpn-bastion", "id": "ocid1.bastion.1"},
+                    },
+                },
+            }
+            (old / "cloud.json").write_text(json.dumps(inv))
+            new_inv = cfg / "cypherpunk-vpn/cloud.json"
+            with mock.patch.object(cloud, "INVENTORY", new_inv):
+                res = cloud.run(cloud.build_parser().parse_args(["adopt-legacy"]))
+            self.assertEqual(res["summary"], "adopted")
+            self.assertTrue(new_inv.is_file())
+            self.assertTrue((cfg / "cypherpunk-vpn/ssh/cpvpn-relay").is_file())
+            moved = json.loads(new_inv.read_text())
+            self.assertEqual(sorted(moved["resources"]), ["cpvpn-ociexit", "cpvpn-relay"])
+            self.assertEqual(moved["resources"]["cpvpn-relay"]["instance"], "i-0d675c1bbd929552a")
+            self.assertEqual(moved["resources"]["cpvpn-relay"]["ssh_key"], str(cfg / "cypherpunk-vpn/ssh/cpvpn-relay"))
+            self.assertEqual(moved["resources"]["cpvpn-ociexit"]["ssh"], "ubuntu@cpvpn-ociexit")
+            self.assertEqual(moved["resources"]["cpvpn-ociexit"]["bastion"]["host"], "cpvpn-bastion")
+            self.assertEqual(moved["chain"]["hops"], ["cpvpn-relay", "cpvpn-flyexit"])

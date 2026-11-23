@@ -57,7 +57,7 @@ pub const TCP_CELL_LEN: usize = OUTER_MTU as usize;
 pub const CARRIER_DATAGRAM: usize = 1372;
 /// How long a new connection has to prove the cloak key before it is only a web client.
 pub const AUTH_WINDOW: Duration = Duration::from_secs(3);
-/// Behind an I2P front (`advanced_vpn` tools/i2p.py) a stream crosses I2P tunnels: its
+/// Behind an I2P front (`cypherpunk_vpn` tools/i2p.py) a stream crosses I2P tunnels: its
 /// TLS handshake and proof get this long instead of [`AUTH_WINDOW`]. Only connections
 /// from loopback (the local I2P router) get it on the server.
 pub const FRONT_WINDOW: Duration = Duration::from_secs(30);
@@ -72,7 +72,7 @@ pub const TOKEN_LEN: usize = 32;
 pub const TOKEN_STREAM: [u8; 2] = [0x40, 0x9d];
 /// V2 server confirmation on a separate GREASE unidirectional stream.
 pub const SERVER_CONFIRM_STREAM: [u8; 2] = [0x40, 0xbc];
-const EXPORTER_LABEL: &[u8] = b"EXPORTER-advanced-vpn-cloak-v2";
+const EXPORTER_LABEL: &[u8] = b"EXPORTER-cypherpunk-vpn-cloak-v2";
 /// While the client's session connects, WireGuard's datagrams wait (at most this many, for
 /// at most [`HOLD_FOR`]) instead of being lost: the first handshake then gets through at
 /// once, as it would on a direct path, and DAITA's shaping never starts before a session.
@@ -157,7 +157,7 @@ pub fn tls_proof<D>(
 }
 
 fn role_proof(key: &[u8; TOKEN_LEN], exporter: &[u8; 32], role: &[u8]) -> [u8; TOKEN_LEN] {
-    let mut message = b"advanced-vpn/cloak/v2/".to_vec();
+    let mut message = b"cypherpunk-vpn/cloak/v2/".to_vec();
     message.extend_from_slice(role);
     message.push(0);
     message.extend_from_slice(exporter);
@@ -1218,7 +1218,7 @@ async fn connect_clocked(
     }
 }
 
-/// The client's wire clock (busy-CPU fix, experimental: off unless `AVPN_WIRE_CLOCK_PPS`
+/// The client's wire clock (busy-CPU fix, experimental: off unless `CPVPN_WIRE_CLOCK_PPS`
 /// is set). On a busy CPU the carrier's packets left late or not at all, and their timing
 /// traced the page's work (docs/evidence/WF_REAL_PILOT.json, CPU_LEAK_PROBE.json). With
 /// the clock, the cloak owns departure: a feeder runs `lookahead` ahead of real time and
@@ -1236,11 +1236,11 @@ pub struct WireClock {
 }
 
 impl WireClock {
-    /// From `AVPN_WIRE_CLOCK_PPS` (the carrier's packets per second) and
-    /// `AVPN_WIRE_CLOCK_MS` (look-ahead, default 30 ms); `None` when unset or invalid.
+    /// From `CPVPN_WIRE_CLOCK_PPS` (the carrier's packets per second) and
+    /// `CPVPN_WIRE_CLOCK_MS` (look-ahead, default 30 ms); `None` when unset or invalid.
     pub fn from_env() -> Option<Self> {
-        let pps: f64 = std::env::var("AVPN_WIRE_CLOCK_PPS").ok()?.parse().ok()?;
-        let ms: u64 = std::env::var("AVPN_WIRE_CLOCK_MS")
+        let pps: f64 = std::env::var("CPVPN_WIRE_CLOCK_PPS").ok()?.parse().ok()?;
+        let ms: u64 = std::env::var("CPVPN_WIRE_CLOCK_MS")
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(30);

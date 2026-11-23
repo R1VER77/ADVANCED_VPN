@@ -1,12 +1,12 @@
-# avpn unwrap
+# cypherpunk unwrap
 
 Operator only. Unwrap the data keys of servers that lock their keys to the operator
-(PIN + touch), for `avpn cloud unlock`. The data keys are printed as JSON to a pipe; the
+(PIN + touch), for `cypherpunk cloud unlock`. The data keys are printed as JSON to a pipe; the
 command refuses to print them to a terminal.
 
 ## Usage
 
-    avpn --json unwrap (--vault DIR | --software-operator DIR) --request NAME=FILE ... \
+    cypherpunk --json unwrap (--vault DIR | --software-operator DIR) --request NAME=FILE ... \
         [--wrapped NAME=FILE ...] | ...
 
 ## Options
@@ -19,4 +19,4 @@ command refuses to print them to a terminal.
 ## Security notes
 
 - A data key wrapped to another operator's unlock key, or bound to other certificates, is refused by name.
-- The output is secret: send it straight to the server (`avpn cloud unlock` does, over SSH, on stdin).
+- The output is secret: send it straight to the server (`cypherpunk cloud unlock` does, over SSH, on stdin).

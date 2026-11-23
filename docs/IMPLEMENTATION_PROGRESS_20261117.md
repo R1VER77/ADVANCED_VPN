@@ -19,7 +19,7 @@ capabilities are planned; saving/publishing their plan is not implementation.
 
 The checkpoint is now published as hardware-signed `15e79759b0d182d7e6eec1ea83f093ac7f1c36f6`;
 both local verification and GitHub report a valid signature, and remote `main` matched.
-[Verification run 44421603036](https://github.com/R1VER77/ADVANCED_VPN/actions/runs/44421603036)
+[Verification run 44421603036](https://github.com/R1VER77/CYPHERPUNK_VPN/actions/runs/44421603036)
 passed all four jobs (Linux desktop, protocol proof, formal models and Python 3.10).
 The owner's subsequent refinement defers
 repeat baseline/emulator work for **all four commissioned physical units**. The next

@@ -51,7 +51,7 @@ class MeterTests(unittest.TestCase):
         self.h.iface("lo", 10 * GB)
         self.h.iface("eth0", 3 * GB)
         self.h.iface("docker0", 1 * GB)
-        self.h.iface("avpn0", 7 * GB, tun=True)
+        self.h.iface("cpvpn0", 7 * GB, tun=True)
         self.assertEqual(self.h.meter().sample(), 4 * GB)
 
     def test_a_restart_on_the_same_boot_never_undercounts(self):
@@ -183,9 +183,9 @@ class CapTests(unittest.TestCase):
         self.assertEqual(fg.verdict(10, None, t)["capped"], False)
 
     def test_metering_lives_beside_the_enrolled_state(self):
-        cap, usage = fg.paths("/etc/advanced-vpn/enrolled")
-        self.assertEqual(str(cap), "/etc/advanced-vpn/metering/enrolled/cap.json")
-        self.assertEqual(str(usage), "/etc/advanced-vpn/metering/enrolled/usage.json")
+        cap, usage = fg.paths("/etc/cypherpunk-vpn/enrolled")
+        self.assertEqual(str(cap), "/etc/cypherpunk-vpn/metering/enrolled/cap.json")
+        self.assertEqual(str(usage), "/etc/cypherpunk-vpn/metering/enrolled/usage.json")
 
 
 if __name__ == "__main__":

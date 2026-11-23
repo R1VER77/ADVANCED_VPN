@@ -135,7 +135,7 @@ this project's threat model:
 
 AircoveOS's groups — each with VPN location, "No VPN", or "No internet"
 — are a router-level routing primitive. This project's current model is
-per-application (`avpn run`), which is fine for a single user's laptop
+per-application (`cypherpunk run`), which is fine for a single user's laptop
 but does not cover:
 
 - IoT devices that cannot run a VPN client
@@ -226,7 +226,7 @@ without forking the firmware. The path to router parity is therefore:
 1. **Package this project for OpenWrt** (aarch64, since GL.iNet's
    current lineup is MediaTek MT7986/MT7988 — aarch64).
 2. **Document a GL-MT6000 home recipe** (single-tenant mode, no GUI
-   needed; the existing `avpn` CLI is sufficient).
+   needed; the existing `cypherpunk` CLI is sufficient).
 3. **Document a GL-MT3000 travel recipe** with the Wi-Fi-link feature
    (connect to upstream Wi-Fi, tunnel downstream).
 4. **Per-device group model** as a profile extension once the router

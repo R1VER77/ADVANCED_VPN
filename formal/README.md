@@ -1,6 +1,6 @@
 # formal/
 
-Symbolic models of ADVANCED_VPN's own cryptographic constructions (plan:
+Symbolic models of cypherpunk_vpn's own cryptographic constructions (plan:
 `docs/VERIFICATION_PLAN.md`). A model is evidence only when CI proves it with a sanity
 (existence) lemma and a broken variant the prover must falsify.
 `tools/tamarin_check.py` does both for every model listed in it; CI job `formal-models`
@@ -13,7 +13,7 @@ runs it with Tamarin 1.12.0 and Maude 3.5.1, pinned by SHA-256. Results:
 | `dcnet/dcnet.spthy` | DC-net decoding | cancellation (zero, the sender's event, or a collision), key secrecy |
 | `dcnet/dcnet_no_collusion.spthy` | one round, all honest | no pad derivable |
 | `dcnet/dcnet_collusion.spthy` | one round, one colluder | exact decoding; honest key secret; the honest pad **is** derivable |
-| `../crates/avpn-mix-lane/tamarin/pq_sphinx_reblind.spthy` | option E's §2.3 re-blinding | element and pad hidden from an entry-link observer; a both-links observer holds the pad symbolically |
+| `../crates/cpvpn-mix-lane/tamarin/pq_sphinx_reblind.spthy` | option E's §2.3 re-blinding | element and pad hidden from an entry-link observer; a both-links observer holds the pad symbolically |
 
 Not machine-checked, because equivalence over XOR did not terminate in Tamarin's `--diff`
 mode (and ProVerif and DeepSec do not support XOR):

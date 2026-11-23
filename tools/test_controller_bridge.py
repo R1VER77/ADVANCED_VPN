@@ -215,7 +215,9 @@ class KeyProbeCache(unittest.TestCase):
 
             # A failed probe is never cached.
             with (
-                mock.patch.object(adapter, "diagnostics", side_effect=[bridge.Refused("hardware_probe_failed"), ["ok"]]),
+                mock.patch.object(
+                    adapter, "diagnostics", side_effect=[bridge.Refused("hardware_probe_failed"), ["ok"]]
+                ),
                 mock.patch.object(adapter, "key_fingerprint", return_value="same"),
                 mock.patch.object(adapter, "generation", return_value="same"),
             ):

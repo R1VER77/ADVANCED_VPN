@@ -19,7 +19,7 @@ import tempfile
 import threading
 import time
 
-import avpnctl
+import cypherpunkctl
 from controller_bridge import Broker, Caller, MAX_REQUEST, Refused, blob, canonical
 import controller_mutation
 import controller_request
@@ -32,7 +32,7 @@ import setup_cli
 import setup_flow
 
 ROOT = Path(__file__).resolve().parents[1]
-STATE = Path("/etc/advanced-vpn/enrolled")
+STATE = Path("/etc/cypherpunk-vpn/enrolled")
 
 
 class Adapter:
@@ -159,10 +159,10 @@ class Adapter:
     @contextlib.contextmanager
     def import_files(self, request):
         """Only decoded bounded bytes enter root-owned temporary files on /run tmpfs."""
-        runtime = avpnctl.runtime_dir(STATE)
+        runtime = cypherpunkctl.runtime_dir(STATE)
         with tempfile.TemporaryDirectory(prefix="bundle-review-", dir=runtime) as directory:
             directory = Path(directory)
-            bundle, operator = directory / "device.avpn", directory / "operator.pub"
+            bundle, operator = directory / "device.cpvpn", directory / "operator.pub"
             for path, raw in (
                 (bundle, blob(request["bundle_base64"], 1024 * 1024)),
                 (operator, blob(request["operator_key_base64"], 8192)),
@@ -222,7 +222,7 @@ class Adapter:
                            "Skip this if you keep an older or custom version on purpose."]  # fmt: skip
             effects.append("Nothing else is installed or removed; your keys and their credentials are not touched.")
         elif name == "import_bundle":
-            if avpnctl.service_active():
+            if cypherpunkctl.service_active():
                 raise Refused("disconnect_before_import")
             with self.import_files(request) as (bundle, operator):
                 checked = managed_profile.inspect_enrollment_bundle(bundle, operator, STATE, request["replace"])
@@ -239,7 +239,7 @@ class Adapter:
                 "Keep networking inactive until a separate connection approval.",
             ]
         elif name == "unlock":
-            if not avpnctl.pin_pending():
+            if not cypherpunkctl.pin_pending():
                 raise Refused("no_pending_hardware_prompt")
             summary, effects = (
                 "Answer the controller's hardware prompt",
@@ -249,12 +249,12 @@ class Adapter:
                 ],
             )
         elif name in ("connect", "retry"):
-            profile = managed_profile.require_current(avpnctl.load_profile(STATE))
+            profile = managed_profile.require_current(cypherpunkctl.load_profile(STATE))
             if profile["role"] != "client":
                 raise Refused("desktop_connection_is_client_only")
-            pref = avpnctl.read_json_private(STATE / "preferences.json", {})
+            pref = cypherpunkctl.read_json_private(STATE / "preferences.json", {})
             desired = request.get("scope", pref.get("mode", "applications"))
-            if avpnctl.service_active() and desired != pref.get("mode", "applications"):
+            if cypherpunkctl.service_active() and desired != pref.get("mode", "applications"):
                 raise Refused("disconnect_before_changing_scope")
             public_inputs["scope"] = desired
             summary = "Connect the signed route" if name == "connect" else "Retry the signed route"
@@ -291,13 +291,13 @@ class Adapter:
 
     def dispatch(self, arguments):
         """Only hardcoded operations construct controller arguments."""
-        parsed = avpnctl.build_parser().parse_args(
+        parsed = cypherpunkctl.build_parser().parse_args(
             ["--state", str(STATE), "--bin-dir", str(ROOT / "bin"), "--json", *arguments]
         )
         from keyguard import one_pin
 
         with one_pin():  # one PIN for this one operation, never for the broker's lifetime
-            avpnctl.dispatch(parsed)
+            cypherpunkctl.dispatch(parsed)
 
     def execute(self, caller, request, cancel, progress):
         """A cancellation never resets devices, discards counters or clears a guard."""
@@ -313,7 +313,7 @@ class Adapter:
                     args = ["setup", "--repair", repair.id, "--apply", "--confirm", confirmation]
                     if request["selector"]:
                         args.extend(("--device", request["selector"]))
-                    parsed = avpnctl.build_parser().parse_args(["--state", str(STATE), "--json", *args])
+                    parsed = cypherpunkctl.build_parser().parse_args(["--state", str(STATE), "--json", *args])
                     result = setup_cli.setup(parsed, diagnose=lambda: self.diagnostics(caller))
                     if not result["repair"].get("commands_succeeded"):
                         raise Refused("hardware_repair_failed")
@@ -351,9 +351,9 @@ class Adapter:
                         self.dispatch(["preferences", "--mode", request["scope"]])
                     if cancel.is_set():
                         raise InterruptedError
-                    avpnctl.cmd("systemctl", "restart" if name == "retry" else "start", "advanced-vpn.service")
+                    cypherpunkctl.cmd("systemctl", "restart" if name == "retry" else "start", "cypherpunk-vpn.service")
                 elif name == "disconnect":
-                    avpnctl.cmd("systemctl", "stop", "advanced-vpn.service")
+                    cypherpunkctl.cmd("systemctl", "stop", "cypherpunk-vpn.service")
                     self.dispatch(["disconnect"])
                 elif name in ("create_operator_keys", "request_exit", "sign_route"):
                     import controller_create_join
@@ -367,13 +367,13 @@ class Adapter:
                         "Approve the trusted hardware prompt for this setup-wizard operation.",
                     )
                     if spec.get("state"):
-                        parsed = avpnctl.build_parser().parse_args(
+                        parsed = cypherpunkctl.build_parser().parse_args(
                             ["--state", spec["state"], "--bin-dir", str(ROOT / "bin"), "--json", *spec["argv"]]
                         )
                         from keyguard import one_pin
 
                         with one_pin():  # one PIN for this one operation
-                            avpnctl.dispatch(parsed)
+                            cypherpunkctl.dispatch(parsed)
                     else:
                         self.dispatch(spec["argv"])
                     controller_create_join.journal_append(
@@ -432,8 +432,8 @@ class Adapter:
         wizard = controller_create_join.paths()
         out = setup_flow.run(
             steps,
-            dict(state=STATE, vault=avpnctl.DEVICE_VAULT, exit=wizard["exit"], diagnose=lambda: findings),
-            avpnctl.runtime_dir(STATE) / ("desktop-setup-" + str(caller.uid)),
+            dict(state=STATE, vault=cypherpunkctl.DEVICE_VAULT, exit=wizard["exit"], diagnose=lambda: findings),
+            cypherpunkctl.runtime_dir(STATE) / ("desktop-setup-" + str(caller.uid)),
         )
         report = setup_flow.report(out)
         report["branch"] = branch
@@ -449,7 +449,7 @@ def main():
     if os.geteuid() != 0 or len(sys.argv) != 1:
         raise RuntimeError("private broker worker requires root and inherited pipes")
     os.umask(0o077)
-    avpnctl.harden_process()
+    cypherpunkctl.harden_process()
     # Reserve the original stdout for protocol replies before silencing all library
     # prints and raw command output, including prints from the action thread.
     protocol = os.fdopen(os.dup(sys.stdout.fileno()), "w", buffering=1)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Preflight: what this host lacks for AVPN, checked before anything is installed.
+"""Preflight: what this host lacks for CYPHERPUNK, checked before anything is installed.
 
 The host checks of docs/INSTALL_AND_SETUP_PLAN.md (phase 1). Each finding has a severity
 (blocker, warning, info, or ok when the check passed), a plain-language reason, and where
@@ -46,7 +46,7 @@ INSTALL = dict(
     pacman="sudo pacman -S --needed",
     zypper="sudo zypper install -y",
 )
-VPN_INTERFACES = re.compile(r"^(wg\d*|tun\d+|tap\d+|nordlynx|proton\w*|mullvad\w*|ivpn\w*|avwg\d*|avpn\d*)$")
+VPN_INTERFACES = re.compile(r"^(wg\d*|tun\d+|tap\d+|nordlynx|proton\w*|mullvad\w*|ivpn\w*|cpwg\d*|cpvpn\d*)$")
 
 
 @dataclass
@@ -207,7 +207,7 @@ def check_glibc(host: Host, opts) -> List[Finding]:
     detail = dict(have="%d.%d" % have, need="%d.%d" % need)
     if have >= need:
         return [Finding("glibc", "ok", f"The C library ({detail['have']}) is new enough.", detail)]
-    return [Finding("glibc_old", "blocker", f"The C library is {detail['have']}; AVPN's programs need {detail['need']} or newer. "
+    return [Finding("glibc_old", "blocker", f"The C library is {detail['have']}; CYPHERPUNK's programs need {detail['need']} or newer. "
                     "Upgrade the system, or use a newer one.", detail)]  # fmt: skip
 
 
@@ -251,7 +251,7 @@ def check_seccomp(host: Host, opts) -> List[Finding]:
         Finding(
             "seccomp_missing",
             "blocker",
-            "The kernel has no seccomp; AVPN refuses to run its network daemons unconfined.",
+            "The kernel has no seccomp; CYPHERPUNK refuses to run its network daemons unconfined.",
         )
     ]
 
@@ -290,7 +290,7 @@ def check_python(host: Host, opts) -> List[Finding]:
     """Python 3.10+ with venv, until the bundled runtime ships."""
     major, minor = host.python
     if (major, minor) < (3, 10):
-        return [Finding("python_old", "blocker", f"Python {major}.{minor} is too old to install AVPN's tools (3.10 or newer).",
+        return [Finding("python_old", "blocker", f"Python {major}.{minor} is too old to install CYPHERPUNK's tools (3.10 or newer).",
                         dict(version="%d.%d" % (major, minor)))]  # fmt: skip
     if not host.ensurepip:
         return [Finding("venv_missing", "blocker", "Python's venv support is not installed.", package="venv")]
@@ -298,7 +298,7 @@ def check_python(host: Host, opts) -> List[Finding]:
 
 
 def check_space(host: Host, opts) -> List[Finding]:
-    """Enough free space where AVPN would be installed."""
+    """Enough free space where CYPHERPUNK would be installed."""
     target = Path(getattr(opts, "target", None) or "/opt")
     p = target
     while not host.file(str(p)).exists() and p != p.parent:
@@ -324,7 +324,7 @@ def check_other_vpns(host: Host, opts) -> List[Finding]:
     names = sorted(d.name for d in net.iterdir() if VPN_INTERFACES.match(d.name)) if net.is_dir() else []
     if not names:
         return []
-    return [Finding("other_vpns", "info", "VPN-like interfaces are present: " + ", ".join(names) + ". AVPN replaces none of "
+    return [Finding("other_vpns", "info", "VPN-like interfaces are present: " + ", ".join(names) + ". CYPHERPUNK replaces none of "
                     "them; check routing before whole-device activation.", dict(interfaces=names))]  # fmt: skip
 
 
@@ -387,7 +387,7 @@ def summary(host: Host, findings: List[Finding]) -> dict:
 def add_arguments(parser):
     """Shared standalone/controller options; preflight never applies a repair."""
     parser.add_argument("--package", type=Path, help="a release package's directory: its binaries' glibc need")
-    parser.add_argument("--target", default="/opt", help="where AVPN would be installed")
+    parser.add_argument("--target", default="/opt", help="where CYPHERPUNK would be installed")
     parser.add_argument(
         "--operator-only",
         action="store_true",

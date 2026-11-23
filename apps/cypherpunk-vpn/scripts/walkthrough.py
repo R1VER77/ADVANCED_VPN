@@ -16,7 +16,7 @@ from selenium.webdriver.firefox.service import Service
 
 p = argparse.ArgumentParser()
 p.add_argument("--url", default="http://localhost:5173")
-p.add_argument("--geckodriver", default=str(Path.home() / "vm/advanced-vpn/wf-real/tools/geckodriver"))
+p.add_argument("--geckodriver", default=str(Path.home() / "vm/cypherpunk-vpn/wf-real/tools/geckodriver"))
 p.add_argument("--shots", type=Path)
 a = p.parse_args()
 
@@ -70,7 +70,7 @@ def shot(name):
 log = {}
 shot("first-use")
 log["first use"] = read()
-for f in ["laptop-corrupt.avpn", "laptop-other-operator.avpn", "laptop-expired.avpn"]:
+for f in ["laptop-corrupt.cpvpn", "laptop-other-operator.cpvpn", "laptop-expired.cpvpn"]:
     demo("First use")
     click("Add device file")
     click(f, 1.6)
@@ -79,8 +79,8 @@ for f in ["laptop-corrupt.avpn", "laptop-other-operator.avpn", "laptop-expired.a
 demo("First use")
 click("Add device file")
 shot("choose-file")
-click("laptop.avpn", 1.6)
-log["enrol laptop.avpn"] = read()
+click("laptop.cpvpn", 1.6)
+log["enrol laptop.cpvpn"] = read()
 shot("enrolled")
 click("Connect now", 0.6)
 shot("pin-dialog")
@@ -119,7 +119,7 @@ log["wrong PIN"] = read()
 shot("wrong-pin")
 d.quit()
 expected = {
-    "enrol laptop.avpn": "Device added",
+    "enrol laptop.cpvpn": "Device added",
     "connecting": "Connecting…",
     "connected": "Connected",
     "network lost": "Reconnecting…",
@@ -132,7 +132,7 @@ expected = {
 for name, title in expected.items():
     assert log[name]["title"] == title, (name, log[name])
 assert log["switch disabled while unknown"]
-assert "valid AVPN" in log["enrol laptop-corrupt.avpn"]["title"]
-assert "different operator" in log["enrol laptop-other-operator.avpn"]["title"]
-assert "expired" in log["enrol laptop-expired.avpn"]["title"]
+assert "valid CYPHERPUNK" in log["enrol laptop-corrupt.cpvpn"]["title"]
+assert "different operator" in log["enrol laptop-other-operator.cpvpn"]["title"]
+assert "expired" in log["enrol laptop-expired.cpvpn"]["title"]
 print(json.dumps(log, indent=1))

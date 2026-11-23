@@ -413,7 +413,7 @@ def book_id(h):
 # so the size gives away only the kind and the 30-day bucket. Keys as keyguard's hybrid
 # KEM (both shared secrets feed the KDF). Residual: ML-KEM ciphertext coefficients are
 # near-uniform, not exactly uniform.
-ENVELOPE_CONTEXT = b"advanced-vpn/padbook/envelope/v3"
+ENVELOPE_CONTEXT = b"cypherpunk-vpn/padbook/envelope/v3"
 MLKEM_CT = 1088
 CHAIN_BODY = 4096  # a chain envelope's padded body
 
@@ -542,7 +542,7 @@ def file_keys(secret, meta, salt):
         algorithm=hashes.SHA256(),
         length=64,
         salt=keyguard.unb64(meta["salt"]),
-        info=b"advanced-vpn/padbook/v2|" + salt,
+        info=b"cypherpunk-vpn/padbook/v2|" + salt,
     ).derive(secret)
 
 

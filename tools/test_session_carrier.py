@@ -78,7 +78,7 @@ class CarrierError(Exception):
 
 def _hkdf(root: bytes, info: bytes, length: int = 32) -> bytes:
     """One HKDF-SHA256 derivation with the carrier domain prefix."""
-    return HKDF(algorithm=hashes.SHA256(), length=length, salt=None, info=b"avpn/session-carrier/v1|" + info).derive(
+    return HKDF(algorithm=hashes.SHA256(), length=length, salt=None, info=b"cpvpn/session-carrier/v1|" + info).derive(
         root
     )
 

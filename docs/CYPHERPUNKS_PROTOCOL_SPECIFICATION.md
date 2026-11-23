@@ -1,7 +1,7 @@
 # CYPHERPUNKS: Cellular Yield-Partitioned Pathless Hardware-Entropy Routing for Perfect Unconditional Network Kinetics and Secrecy
 
 > **Status:** Architectural Specification, Formal Validation Plan, and Benchmark Framework
-> **Target:** ADVANCED_VPN Research & Next-Generation Protocol Architecture
+> **Target:** cypherpunk_vpn Research & Next-Generation Protocol Architecture
 > **Date:** 18 November 2026
 > **Authors:** Antigravity AI Assistant & Project Core Team
 > **License:** AGPL-3.0-or-later with Cypherpunk Dual-Licensing & Hardware Linking Exception
@@ -123,7 +123,7 @@ flowchart TD
 * **Quantum Security Posture:** **Information-Theoretic Camouflage + Hybrid PQC Mix Routing.**
 * **Operation:**
   1. **Strict Constant-Rate Shaping (DAITA):** Enforces a deterministic packet grid (`stream_grid` + `cover`). Every clock tick transmits either an encrypted real payload cell or an encrypted decoy cell. The model emits an invariant count at fixed duration. Actual kernel pacing, link loss, retransmission, stopping rules and cross-link observations still require the live validation plan; no traffic-analysis immunity follows from that model alone.
-  2. **Post-Quantum Mix-Lane:** An asynchronous Sphinx mix-net ([crates/avpn-mix-lane](../crates/avpn-mix-lane)) operates out of band, with onion layers encapsulated via **ML-KEM-768**, injecting Poisson-delayed decoy pulses and refreshing entropy pools without classical ECC vulnerability.
+  2. **Post-Quantum Mix-Lane:** An asynchronous Sphinx mix-net ([crates/cpvpn-mix-lane](../crates/cpvpn-mix-lane)) operates out of band, with onion layers encapsulated via **ML-KEM-768**, injecting Poisson-delayed decoy pulses and refreshing entropy pools without classical ECC vulnerability.
 
 ---
 
@@ -150,7 +150,7 @@ readiness remain unestablished.
 The owner-supplied artifacts report the component/model results below against documentation revisions `81c1fa8` and `b801351`. Their scripts do not implement the complete proposed protocol. These figures are reported research inputs, not validated protocol guarantees; see the artifact review for scope and corrections.
 
 ### 4.1 DC-Net Information-Theoretic Correctness & Indistinguishability
-Validated via `scripts/avpn_test_dcnet.py` (400 rounds of algebraic evaluation + Monte Carlo adversary simulations):
+Validated via `scripts/cpvpn_test_dcnet.py` (400 rounds of algebraic evaluation + Monte Carlo adversary simulations):
 - **Algebraic Integrity:** 400/400 rounds passed single sender recovery, multi-sender collision detection, jam identification, and null round silence.
 - **Monte Carlo Coalition Resilience (200,000 rounds per point):**
   - With 0 colluders (5 honest nodes): Adversary classification accuracy is **50.1%** (popcount rule), Total Variation distance **0.020**, $\chi^2$ $p = 0.232$.
@@ -159,7 +159,7 @@ Validated via `scripts/avpn_test_dcnet.py` (400 rounds of algebraic evaluation +
 - **Bandwidth Footprint:** Cell transmission overhead is bounded at **<1 KiB/min** for 64-byte control frames at round rates $\le 2.31\text{ rounds/min}$ ($n=4$) and $\le 1.15\text{ rounds/min}$ ($n=8$).
 
 ### 4.2 Synthetic fixed-grid website-fingerprinting model
-Validated via `scripts/avpn_test_wf.py` across 100 synthetic site labels (9,000 generated training traces, 9,000 generated testing traces):
+Validated via `scripts/cpvpn_test_wf.py` across 100 synthetic site labels (9,000 generated training traces, 9,000 generated testing traces):
 - **Unshaped Wire Traffic:**
   - Random Forest Classifier accuracy: **71.71%** (Top-3 accuracy: **89.61%**).
   - SVM (RBF kernel) accuracy: **38.97%**.
@@ -170,7 +170,7 @@ Validated via `scripts/avpn_test_wf.py` across 100 synthetic site labels (9,000 
   - Wire variance between idle and saturated traffic: **$\Delta = 0.0\%$** (computed by the model, not measured on a live wire).
 
 ### 4.3 Post-Quantum Cryptography & Throughput Benchmarks
-Validated via `scripts/avpn_test_crypto.py` and `scripts/avpn_test_pqc_alternatives.py` (OpenSSL 3.5.7 + Python Cryptography on Intel Xeon):
+Validated via `scripts/cpvpn_test_crypto.py` and `scripts/cpvpn_test_pqc_alternatives.py` (OpenSSL 3.5.7 + Python Cryptography on Intel Xeon):
 - **AEAD Bulk Encryption Throughput:**
   - **ChaCha20-Poly1305:** 3,803 MB/s (165,279 ops/s on 1,400 B frames) $\to$ **18.5x margin** above 100 Mbit/s line-rate requirement.
   - **AES-256-GCM:** 12,374 MB/s (272,736 ops/s on 1,400 B frames) $\to$ **30.5x margin**.
@@ -185,7 +185,7 @@ Validated via `scripts/avpn_test_crypto.py` and `scripts/avpn_test_pqc_alternati
   - *Plane 1 PQ-PSK:* **0 B signature overhead** on wire $\to$ Zero fragmentation, total datagram 1,160–1,192 B with ML-KEM-768.
 
 ### 4.4 2-Server Oblivious Private Information Retrieval (PIR)
-Reported by `scripts/avpn_test_pir.py` (local XOR/CGKS array evaluations across up to 65,536 rows; DPF bandwidth is analytical):
+Reported by `scripts/cpvpn_test_pir.py` (local XOR/CGKS array evaluations across up to 65,536 rows; DPF bandwidth is analytical):
 - For a registry of **1,024 exit nodes**:
   - Client query generation: 0.0078 ms
   - Dual server evaluation: 0.0480 ms

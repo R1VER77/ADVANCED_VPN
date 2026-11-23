@@ -157,7 +157,7 @@ export class MockController implements Controller {
     const g = this.guard()
     if (g) return g
     await new Promise((r) => setTimeout(r, 900))
-    if (!bundle.endsWith('.avpn') || bundle.includes('corrupt')) return { ok: false, reason: 'bundle_invalid' }
+    if (!bundle.endsWith('.cpvpn') || bundle.includes('corrupt')) return { ok: false, reason: 'bundle_invalid' }
     if (bundle.includes('other-operator')) return { ok: false, reason: 'bundle_wrong_operator' }
     if (bundle.includes('expired')) return { ok: false, reason: 'bundle_expired' }
     this.s.enrolled = true

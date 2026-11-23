@@ -3,7 +3,7 @@
 against the real CLI's parser definitions, the backend wiring, and the
 TypeScript controller contract.
 
-The dynamic parser tests need avpnctl (whose managed_profile import needs
+The dynamic parser tests need cypherpunkctl (whose managed_profile import needs
 the hash-locked environment's mldsa/mlkem); here they are skipped and the
 source-contract tests below pin the same agreement statically, on the
 real files.
@@ -22,7 +22,7 @@ import controller_create_join as cj  # noqa: E402
 import test_controller_create_join_units as units  # noqa: E402
 
 REPO = TOOLS.parent
-AVPNCTL = (TOOLS / "avpnctl.py").read_text()
+CYPHERPUNKCTL = (TOOLS / "cypherpunkctl.py").read_text()
 BACKEND = (TOOLS / "controller_backend.py").read_text()
 TYPES_TS = (REPO / "apps/cypherpunk-vpn/src/controller/types.ts").read_text()
 CAPABILITY = (REPO / "apps/cypherpunk-vpn/src-tauri/permissions/controller-bridge.toml").read_text()
@@ -46,35 +46,38 @@ class CliContractTests(unittest.TestCase):
     types and choices the module assumes."""
 
     def test_the_unlock_key_verb_exists_and_takes_the_operator_vault(self):
-        self.assertIn('"unlock-key"', AVPNCTL)
-        self.assertIn('uk.add_argument("--vault"', AVPNCTL)
+        self.assertIn('"unlock-key"', CYPHERPUNKCTL)
+        self.assertIn('uk.add_argument("--vault"', CYPHERPUNKCTL)
         # the handler writes exactly the file check_operator reads
-        self.assertIn('operator-unlock.pub" if a.vault', AVPNCTL)
+        self.assertIn('operator-unlock.pub" if a.vault', CYPHERPUNKCTL)
         self.assertEqual(cj.OPERATOR_UNLOCK, "operator-unlock.pub")
 
     def test_the_request_verb_supports_the_exit_role_under_operator_protection(self):
-        self.assertIn('choices=["client", "relay", "middle", "exit"]', AVPNCTL)
-        self.assertIn('choices=["nitrokey", "systemd-creds", "operator", "none"]', AVPNCTL)
-        self.assertIn('rq.add_argument("--unlock-key", type=Path', AVPNCTL)
-        self.assertIn('"--out", type=Path, required=True', AVPNCTL)
+        self.assertIn('choices=["client", "relay", "middle", "exit"]', CYPHERPUNKCTL)
+        self.assertIn('choices=["nitrokey", "systemd-creds", "operator", "none"]', CYPHERPUNKCTL)
+        self.assertIn('rq.add_argument("--unlock-key", type=Path', CYPHERPUNKCTL)
+        self.assertIn('"--out", type=Path, required=True', CYPHERPUNKCTL)
 
     def test_the_init_verb_matches_the_module_constants(self):
-        self.assertIn('init = s.add_parser("init"', AVPNCTL)
+        self.assertIn('init = s.add_parser("init"', CYPHERPUNKCTL)
         # the 3-hop ceiling is the CLI's own choices list
-        found = re.search(r'"--hops", type=int, choices=\[([^\]]+)\]', AVPNCTL)
+        found = re.search(r'"--hops", type=int, choices=\[([^\]]+)\]', CYPHERPUNKCTL)
         self.assertIsNotNone(found, "the init parser must declare its hop choices")
         self.assertEqual([int(x) for x in found.group(1).split(",")], list(cj.HOPS))
-        self.assertIn('"--allowance-gib", type=int', AVPNCTL)
-        self.assertIn('"--request", action="append", required=True', AVPNCTL)
-        self.assertIn('"--cover-name"', AVPNCTL)
+        self.assertIn('"--allowance-gib", type=int', CYPHERPUNKCTL)
+        self.assertIn('"--request", action="append", required=True', CYPHERPUNKCTL)
+        self.assertIn('"--cover-name"', CYPHERPUNKCTL)
         # the cost gate: the CLI-informed acceptance exists but the GUI never emits it
-        self.assertIn('"--accept-cost", action="store_true"', AVPNCTL)
+        self.assertIn('"--accept-cost", action="store_true"', CYPHERPUNKCTL)
 
     def test_init_requires_a_hardware_signer_group(self):
-        self.assertIn("add_mutually_exclusive_group(required=True)", AVPNCTL)
-        self.assertIn('"--vault", type=Path, help="Nitrokey vault: hardware-signed operator (production)"', AVPNCTL)
+        self.assertIn("add_mutually_exclusive_group(required=True)", CYPHERPUNKCTL)
         self.assertIn(
-            '"--software-operator", type=Path, help="LAB ONLY: plaintext operator keys in this directory"', AVPNCTL
+            '"--vault", type=Path, help="Nitrokey vault: hardware-signed operator (production)"', CYPHERPUNKCTL
+        )
+        self.assertIn(
+            '"--software-operator", type=Path, help="LAB ONLY: plaintext operator keys in this directory"',
+            CYPHERPUNKCTL,
         )
 
     def test_the_module_kem_length_is_keyguards_own(self):
@@ -127,9 +130,9 @@ class TypesContractTests(unittest.TestCase):
         self.assertIn("export type SetupBranch = 'create' | 'join'", TYPES_TS)
 
 
-@unittest.skipUnless(_pq_crypto_available(), "avpnctl needs the hash-locked environment (mldsa/mlkem)")
+@unittest.skipUnless(_pq_crypto_available(), "cypherpunkctl needs the hash-locked environment (mldsa/mlkem)")
 class RealParserTests(unittest.TestCase):
-    """Every execution spec parses against the real avpnctl parser."""
+    """Every execution spec parses against the real cypherpunkctl parser."""
 
     def setUp(self):
         import tempfile
@@ -144,9 +147,11 @@ class RealParserTests(unittest.TestCase):
         (self.where["exit"] / "device.req").write_bytes(b"exit public request")
 
     def parsed(self, spec):
-        import avpnctl
+        import cypherpunkctl
 
-        return avpnctl.build_parser().parse_args(["--state", spec["state"] or str(self.tmp), "--json", *spec["argv"]])
+        return cypherpunkctl.build_parser().parse_args(
+            ["--state", spec["state"] or str(self.tmp), "--json", *spec["argv"]]
+        )
 
     def test_the_unlock_key_spec_parses(self):
         spec = cj.apply("create", "create_operator_keys", None, self.where)

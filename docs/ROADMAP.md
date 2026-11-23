@@ -218,7 +218,7 @@ throughout.
   work; existing symbolic proofs do not qualify that stronger claim.
 - [x] Remove the central public DNS dependency through a self-run resolver at the exit,
   preserving the documented post-quantum transport policy and explaining resolver limits.
-  `avpn init --dns-recursive` (20 November): the exit's Unbound validates DNSSEC and
+  `cypherpunk init --dns-recursive` (20 November): the exit's Unbound validates DNSSEC and
   minimises query names; checked live (20 of 20 names, a DNSSEC failure refused) with the
   exit's forwarder in front, which only ever speaks plain DNS to loopback. Its queries to
   authoritative servers are plain DNS, a named exception (PQ_INVENTORY exception 5), so it
@@ -248,10 +248,9 @@ and the [post-quantum inventory](PQ_INVENTORY.md).
 - [x] Use `cypherpunk_vpn` as the project name in the README.
 - [x] [Plan](NAME_MIGRATION.md) the repository, binary, package, service, state and signed-chain migration;
   preserve recovery and avoid breaking existing installations through a cosmetic rename.
-- [x] Implement and validate the compatibility migration before changing canonical
-  services, state paths or signed protocol domains.
-  On 21 November the compatibility shim landed ([tools/name_migration.py](../tools/name_migration.py),
-  13 tests): old names keep working while the canonical ones change.
+- [x] Implement and validate the clean-break rename across binaries, services, state paths
+  and signed protocol domains ([NAME_MIGRATION.md](NAME_MIGRATION.md), D019; gated by
+  `tools/test_names.py`).
 - [ ] Expand to aarch64 Linux, then additional desktop/mobile platforms, with
   platform-specific protection tests before marking each supported.
 - [x] Publish a [device/platform matrix](SUPPORT_MATRIX.md) distinguishing protocol compatibility,
@@ -352,9 +351,9 @@ load tests wait until those measurements finish.
 
 Landed, each with its tests (`python -m unittest tools.test_<name>`):
 
-- [x] Streaming eligibility as dated measurement, never a promise: `avpn stream-check`
+- [x] Streaming eligibility as dated measurement, never a promise: `cypherpunk stream-check`
   ([tools/stream_check.py](../tools/stream_check.py), with the transport profile), the generated
-  [eligibility table](STREAMING_ELIGIBILITY.md) and `avpn cloud rotate` for a fresh exit address
+  [eligibility table](STREAMING_ELIGIBILITY.md) and `cypherpunk cloud rotate` for a fresh exit address
   ([streaming parity](STREAMING_GEO_PARITY_20261120.md) §4).
 - [x] `exit_policy` and `streaming` in the signed node descriptor, validated alike by the
   Python control plane and every Rust node (one shared fixture, `tests/fixtures/descriptor_fields.json`;
@@ -381,4 +380,4 @@ Landed, each with its tests (`python -m unittest tools.test_<name>`):
   (operator keys, the exit request, signing the route with a stated allowance; accepting a
   cost above the allowance is not offered), exact argv, previews that re-verify, an
   append-only journal ([tools/controller_create_join.py](../tools/controller_create_join.py)).
-- [ ] The first live eligibility row from a real exit (D016), and a real `avpn cloud rotate`.
+- [ ] The first live eligibility row from a real exit (D016), and a real `cypherpunk cloud rotate`.

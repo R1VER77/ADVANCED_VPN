@@ -43,7 +43,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 import i2p  # noqa: E402
 from lab_resolver import private_resolver  # noqa: E402
 import throughput_bench as tb  # noqa: E402
-from avpnctl import identity_of, lab_guard, runtime_dir  # noqa: E402
+from cypherpunkctl import identity_of, lab_guard, runtime_dir  # noqa: E402
 from managed_profile import lab_setup  # noqa: E402
 
 NETID = 7
@@ -151,7 +151,7 @@ def main():
         d.chmod(0o755 if d.is_dir() or os.access(d, os.X_OK) else 0o644)
     i2pd = lab_i2p / "usr/bin/i2pd"
     libs = str(lab_i2p / "usr/lib/x86_64-linux-gnu")
-    env = dict(os.environ, AVPN_I2PD=str(i2pd), LD_LIBRARY_PATH=libs)
+    env = dict(os.environ, CPVPN_I2PD=str(i2pd), LD_LIBRARY_PATH=libs)
     env.pop("SSH_CONNECTION", None)
     procs = []
 
@@ -269,9 +269,9 @@ def main():
         spawn("destination", [sys.executable, "-c", SERVE, SIZE[a.rate], digest_file], "serve")
 
         def manager(role, whole=False):
-            args = [sys.executable, ROOT / "tools/avpnctl.py", "--state", state / "keys" / role, "--bin-dir",
+            args = [sys.executable, ROOT / "tools/cypherpunkctl.py", "--state", state / "keys" / role, "--bin-dir",
                     ROOT / "target/release", "--lab", "connect"] + (["--whole-device"] if whole else [])  # fmt: skip
-            return spawn(role, args, role, dict(AVPN_LAB_I2P=str(state / ("testnet-" + role + ".json"))))
+            return spawn(role, args, role, dict(CPVPN_LAB_I2P=str(state / ("testnet-" + role + ".json"))))
 
         manager("exit")
         manager("relay")
@@ -280,7 +280,7 @@ def main():
         client = manager("client", whole=True)
         # The client's own capture starts once its kill switch exists: from then on, the
         # only packets that may leave are the I2P router's.
-        while nsrun("client", "/usr/sbin/nft", "list", "table", "inet", "advanced_vpn", check=False).returncode:
+        while nsrun("client", "/usr/sbin/nft", "list", "table", "inet", "cypherpunk_vpn", check=False).returncode:
             if client.poll() is not None or time.monotonic() - t0 > 60:
                 raise RuntimeError("the client's kill switch never came up")
             time.sleep(0.1)

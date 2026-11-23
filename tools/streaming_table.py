@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Generate the streaming-eligibility table from `avpn stream-check` records.
+"""Generate the streaming-eligibility table from `cypherpunk stream-check` records.
 
 STREAMING_GEO_PARITY_20261120.md section 4.2: a maintained, version-
 pinned table recording which exits currently pass which services, with
 the check date and the exit's region — the RATE_CLASSES evidence
 discipline applied to streaming eligibility. Anyone running
-`avpn run -- stream-check <service>` contributes a row; the table is
+`cypherpunk run -- stream-check <service>` contributes a row; the table is
 generated, never hand-edited, and dated entries expire visibly.
 
 The honesty rules the generator enforces:
@@ -53,7 +53,7 @@ SEED_CLASS_ROWS = [
         "service": "netflix",
         "result": "blocked (class, unmeasured)",
         "note": "the owner's current OCI exit is believed blocked; measure it "
-        "with `avpn run -- stream-check netflix` to replace this row",
+        "with `cypherpunk run -- stream-check netflix` to replace this row",
     },
     {"provider": "AWS", "region": "any", "service": "netflix", "result": "blocked (class, unmeasured)", "note": ""},
     {
@@ -167,7 +167,7 @@ def build_table(records: list[dict], now: dt.datetime | None = None) -> dict:
         "generated": now.isoformat(timespec="seconds"),
         "stale_after_days": STALE_DAYS,
         "claim": "Streaming eligibility is measured per exit, per service, "
-        "dated in the exit's descriptor; run `avpn stream-check` to "
+        "dated in the exit's descriptor; run `cypherpunk stream-check` to "
         "test yours. No blanket 'works with service X' claim is "
         "made or implied by this table.",
         "services": {k: v["name"] for k, v in ADAPTERS.items()},
@@ -186,7 +186,7 @@ def render_markdown(table: dict) -> str:
         "",
         f"Rows older than {table['stale_after_days']} days are marked `stale` and must be re-measured before use.",
         "",
-        "## Measured (from `avpn stream-check` records)",
+        "## Measured (from `cypherpunk stream-check` records)",
         "",
         "| Exit | Service | Region | Result | Transport | Checked | State |",
         "|---|---|---|---|---|---|---|",
@@ -200,7 +200,7 @@ def render_markdown(table: dict) -> str:
             f"| {row['checked']} | {state} |"
         )
     if not measured:
-        lines.append("| _no measurements yet — be the first: `avpn run -- stream-check netflix`_ | | | | | | |")
+        lines.append("| _no measurements yet — be the first: `cypherpunk run -- stream-check netflix`_ | | | | | | |")
     lines += [
         "",
         "## Class knowledge (unmeasured background, replaced by any measurement)",

@@ -6,6 +6,44 @@ measured figure in the docs names the version it was measured on.
 
 ## v0.11.0 (22 Nov 2026)
 
+- **Breaking: the project is cypherpunk_vpn everywhere, as a clean break**
+  ([D019](docs/DECISIONS.md)):
+  - names: the CLI `cypherpunk` and `cypherpunkctl`, binaries `cypherpunk-vpn*`, server
+    names `cpvpn-*`;
+  - paths: `/opt/cypherpunk-vpn`, `/etc/cypherpunk-vpn`, `~/.config/cypherpunk-vpn`;
+  - system pieces: units `cypherpunk-vpn*.service`, nftables tables `cypherpunk_vpn*`,
+    the security-key relying party `cypherpunk-vpn.local`;
+  - every cryptographic label `cypherpunk-vpn/…`.
+
+  Nothing reads the old names any more, so the device and the servers are set up again.
+  - `cypherpunk cloud adopt-legacy` moves the operator's server inventory once.
+  - The package refuses to upgrade while the previous version's VPN, guard or kill switch
+    is on, and says how to stop them.
+  - Once they are stopped, it removes the previous install and says so.
+  - The test vectors that carry labels were regenerated from their real sources:
+    - session leaves and fuzz seeds from the vector generator;
+    - the cloak proof inputs, checked against the data plane;
+    - the membership hashes from the Rust prototype, whose harness reproduces the old
+      values with the old labels.
+- **Signed history is enforced.** Two commits were made with signing bypassed (re-signed
+  before any push).
+  - A pre-push hook (`tools/hooks/pre-push`, enabled with
+    `git config core.hooksPath tools/hooks`) refuses any commit not signed by a key in
+    `docs/allowed_signers`.
+  - GitHub's `main` now requires signed commits and refuses force pushes and deletion.
+- Fixed while renaming:
+  - the server-name rule accepted the bare prefix `cpvpn-`;
+  - the host-setup and package-script tests ran the old-install cleanup's `rm -rf`
+    against the machine running them, stopped only because the stand-in `sudo` was not
+    root. Every path they delete is now checked to be inside the sandbox.
+- **Paid services are decided, not built** ([D020](docs/DECISIONS.md),
+  [design](docs/PAID_CREDITS_CHECKOUT.md)):
+  - blind-token credits through an account-free checkout reached only as a Tor onion
+    service and paid only in shielded Zcash;
+  - hardware approved, types to be decided.
+
+  Nothing is sold before its gates are met.
+
 - **One app file.** `cypherpunk-vpn_0.11.0-1_amd64.deb` now carries the desktop app with
   the controller: `sudo apt install ./cypherpunk-vpn_*_amd64.deb`, then open Cypherpunk VPN
   from the menu. Built on Ubuntu 22.04 (glibc 2.35); the package refuses an app built on a
@@ -26,7 +64,7 @@ measured figure in the docs names the version it was measured on.
 
   No key, request or file is copied or pasted by hand. Joining someone else's network saves
   the device request to Documents and opens their signed file. The operator side runs as
-  you (`avpn-desktop`, fixed commands only), so cloud sign-ins never reach the root
+  you (`cpvpn-desktop`, fixed commands only), so cloud sign-ins never reach the root
   controller and device keys never leave it. Creating new servers from the app is for a
   later version.
 
@@ -40,7 +78,7 @@ measured figure in the docs names the version it was measured on.
   output is three lines unless a host check fails.
 
   Known limit: building a route reinstalls the servers with fresh keys and signs the route
-  for the one device doing the setup, as `avpn cloud chain --apply` does. Any device set up
+  for the one device doing the setup, as `cypherpunk cloud chain --apply` does. Any device set up
   earlier must be set up again; the app says so above the button. Adding a device to a
   route without rebuilding it is for a later version.
 - **Signed-out cloud accounts are caught first.** Before the security key is asked for
@@ -111,7 +149,7 @@ measured figure in the docs names the version it was measured on.
 - One PIN per command: a command or GUI operation that uses the key more than once asks
   once. The PIN is held in memory for that command only, and dropped on any error. An
   unanswered dialog now says so.
-- `avpn cloud`:
+- `cypherpunk cloud`:
   - SSH and scp are retried when the Instance Connect tunnel drops a session before the
     remote command runs;
   - a Fly.io exit's outgoing address is documented: shared and movable
@@ -126,12 +164,12 @@ measured figure in the docs names the version it was measured on.
 
   Hardened while merging: a GUI endpoint shaped like a flag (`--accept-cost`) was accepted
   by validation and only stopped by the command's own parser. Endpoints are now parsed as
-  `avpn init` parses them (IPv4 on the first hop), and request and cover names may not
+  `cypherpunk init` parses them (IPv4 on the first hop), and request and cover names may not
   start with `-` or `.`.
 - **The GLM5.3 batch, merged and re-verified in this tree** (built in a separate sandbox
   on 21 November):
-  - streaming eligibility as dated measurement (`avpn stream-check`, the eligibility table,
-    `avpn cloud rotate`);
+  - streaming eligibility as dated measurement (`cypherpunk stream-check`, the eligibility table,
+    `cypherpunk cloud rotate`);
   - auto-connect on untrusted networks;
   - multi-hop presets;
   - the IPv6 leak suite;
@@ -166,20 +204,20 @@ measured figure in the docs names the version it was measured on.
   - Only VPN traffic may leave a server: an IPv4 and IPv6 egress lock (no pings, no
     unlisted ports, no transit) replaces the update timers with a daily security-only
     `unattended-upgrade` in a counted window.
-  - `avpn cloud cap` plans and writes the caps (`chain --apply` does it first and refuses
-    an account with no allowance on record), and `avpn cloud health` shows every server's
+  - `cypherpunk cloud cap` plans and writes the caps (`chain --apply` does it first and refuses
+    an account with no allowance on record), and `cypherpunk cloud health` shows every server's
     month and pace, overdue updates, and paid or upgraded accounts.
   - A server without a cap refuses to start.
   - Proved in namespaces (`tools/server_egress_test.py`, six mutants) and end to end in
     the managed lab (a capped relay stops the chain; lifting the cap restores it).
 - **An exit on a Fly.io Machine** ([docs](docs/FLY_EXIT.md)):
-  - `avpn cloud fly server` builds the image from this tree and creates a 256 MB machine,
+  - `cypherpunk cloud fly server` builds the image from this tree and creates a 256 MB machine,
     an encrypted volume and the free IPv6.
   - It is administered through the Machines API (`tools/fly-ssh`, `tools/fly-scp`).
   - It keeps no logs and no swap; its keys are locked to the operator's Nitrokey.
 - Fixed: every client `connect` crashed at start on `main` from `c22fbf5` (a name clash in
   the supervisor; [incident](docs/INCIDENTS.md)).
-- The paced links between servers can run over TCP (`avpn init --link-transport tcp`), for a
+- The paced links between servers can run over TCP (`cypherpunk init --link-transport tcp`), for a
   later hop reachable only over TCP, such as an IPv6-only exit whose provider carries no UDP
   there: the same fixed-size cells, clock, keys, forward secrecy, credit and peer limit, one
   whole cell per TCP write. Such hops may be given as `[IPv6]:PORT`; the first hop stays
@@ -189,7 +227,7 @@ measured figure in the docs names the version it was measured on.
   hop was exactly one 1,242-byte cell; CI runs it. (After loss, TCP may repack a
   retransmission up to its MSS. That reflects the path, not the traffic: the lab saw one
   such segment, during its cap phase, when the relay's quota was dropping.)
-- `avpn cloud azure server`: an Azure chain server made by OpenTofu (the `azure-server`
+- `cypherpunk cloud azure server`: an Azure chain server made by OpenTofu (the `azure-server`
   module, `hashicorp/azurerm` 5.13.0 locked): a Trusted Launch VM (secure boot, virtual
   TPM, so its keys are TPM-sealed and it restarts unattended), the tunnel port from the
   previous hop only, SSH only from the relay (administered through the relay's Instance
@@ -200,46 +238,46 @@ measured figure in the docs names the version it was measured on.
   mirrors `cloud oci server` (provider `oracle/oci` 9.12.1, hashes locked for amd64 and
   arm64), and a workspace runner (`tools/tofu_run.py`): read-only lock file, an exact saved
   plan, state and plans encrypted by OpenTofu with a key sealed in the operator's Nitrokey
-  vault (`avpn state-key`), passed only in the environment. A live read-only plan matched
+  vault (`cypherpunk state-key`), passed only in the environment. A live read-only plan matched
   the hand-written path resource for resource.
 - A broken chain is obvious (owner, 20 November): when a connected client's chain stops
   answering for a minute, or never answers after a start, a desktop notification and
-  `avpn status` say so and point to `avpn cloud health`, which finds whether a server was
+  `cypherpunk status` say so and point to `cypherpunk cloud health`, which finds whether a server was
   stopped by its provider (free tiers stop idle servers), is locked after a reboot, gone or
   unreachable, and whether AWS credits or a free plan are running out, each with its fix.
   The providers are asked only on request, never on a timer from your address.
-- `avpn cloud oci server --bastion OCID`: an Oracle server administered only through its
+- `cypherpunk cloud oci server --bastion OCID`: an Oracle server administered only through its
   bastion (no SSH address rule, sessions renewed automatically). A launch refused for lack
   of capacity (or rate-limited) keeps its network and resumes on the next `--apply`, or
   retries itself with `--wait-capacity MINUTES`.
 - The installer knows the server key rule: `install.py --apply --role relay|middle|exit
   --protect systemd-creds` first seals and opens a test credential with the TPM2 and refuses,
   before installing anything, when that fails; `--protect operator --unlock-key FILE` locks
-  the keys to the operator's Nitrokey instead. `avpnctl request` applies the same rule
+  the keys to the operator's Nitrokey instead. `cypherpunkctl request` applies the same rule
   (`tools/sealing.py`), and both preflights accept `--protect operator`.
-- Fixed (owner's first physical connect, 20 November): `sudo avpnctl connect` in a terminal
+- Fixed (owner's first physical connect, 20 November): `sudo cypherpunkctl connect` in a terminal
   failed for a hardware-protected client, because the session signer had no terminal for the
   PIN ([incident](docs/INCIDENTS.md)). A locked server's refusal now says how to unlock it.
-- `avpn cloud host bastion`: a server reached through an OCI Bastion gets a new session
-  (3 hours) whenever the recorded one is gone or ending, so `avpn cloud unlock` and every
+- `cypherpunk cloud host bastion`: a server reached through an OCI Bastion gets a new session
+  (3 hours) whenever the recorded one is gone or ending, so `cypherpunk cloud unlock` and every
   other SSH work at any time.
 - Servers without a TPM no longer keep plain keys ([design](docs/HARDWARE_BOUND_SESSIONS.md),
   servers without a TPM). Setup tests the host first: keys are sealed to its TPM2 when
   systemd-creds can use one, otherwise locked to the operator's Nitrokey (`--protect
   operator`): encrypted under a data key that only the operator can unwrap, held in RAM until
   the next reboot. The chain's signing touch also unlocks such servers; after a reboot,
-  `avpn cloud unlock NAME`. Plain keys and keys sealed with the host key alone are no longer
+  `cypherpunk cloud unlock NAME`. Plain keys and keys sealed with the host key alone are no longer
   made, and existing ones are replaced at the next `chain` (new keys, so clients enroll the
-  new chain). New commands: `avpn unlock-key`, `avpn unwrap`, `avpn server-unlock`,
-  `avpn cloud unlock`; `avpn init --emit-unlock`; `avpn cloud host setup --vault`.
+  new chain). New commands: `cypherpunk unlock-key`, `cypherpunk unwrap`, `cypherpunk server-unlock`,
+  `cypherpunk cloud unlock`; `cypherpunk init --emit-unlock`; `cypherpunk cloud host setup --vault`.
 - Fixed (found upgrading the owner's laptop, 20 November): `install.py --adopt-legacy`
   refused every installation whose venv names the system interpreter (all source and
   pre-bundled-runtime installs), and so did a source install's own new slot; exactly those
   interpreter links (`venv/bin/python*` to a root-owned `/usr/bin/python3*`) are now
   accepted, every other link out of a slot still refused. And the system launchers, called
-  through `/usr/local/bin/avpnctl` (a symlink), looked for `/usr/local/venv`: they now
+  through `/usr/local/bin/cypherpunkctl` (a symlink), looked for `/usr/local/venv`: they now
   resolve themselves first.
-- Admin SSH without address rules: `avpn cloud aws admin-endpoint` (EC2 Instance Connect
+- Admin SSH without address rules: `cypherpunk cloud aws admin-endpoint` (EC2 Instance Connect
   Endpoint, IAM-authorised from any network).
 
 - Hardware-bound sessions ([design](docs/HARDWARE_BOUND_SESSIONS.md)): a client protected by
@@ -259,11 +297,11 @@ measured figure in the docs names the version it was measured on.
   clock (`tools/timesync.py`) remains for callers without a relay.
 - Oblivious routes check gateway key consistency (RFC 9458 section 7), the condition the
   OHTTP unlinkability proof rests on: a beacon signs its gateway key into its descriptor
-  (`avpn mesh publish --gateway-key`), and a member uses a route beyond directory fetches
+  (`cypherpunk mesh publish --gateway-key`), and a member uses a route beyond directory fetches
   only once two other beacons show that same signed key; equivocation is refused.
 - Fixed: mesh descriptor signatures could never be verified (wrong ML-DSA module name,
   hidden by stubbed tests); see docs/INCIDENTS.md.
-- `avpn init --dns-recursive`: the exit resolves names with its own Unbound (DNSSEC,
+- `cypherpunk init --dns-recursive`: the exit resolves names with its own Unbound (DNSSEC,
   QNAME minimisation) instead of one public DoT resolver. Opt-in: its queries to
   authoritative servers are plain DNS (docs/PQ_INVENTORY.md exception 5).
 - Assurance: Kani proves the link's replay window and reply credit; every parser of
@@ -279,10 +317,10 @@ measured figure in the docs names the version it was measured on.
   A/B scoring with whole-round holdouts and block-label permutation checks, and publish
   the 30 ms versus 5 ms result with its collection limitations. No defense default changes.
   The collector accepts a recorded `--seed` and propagates failed worker exits.
-- Installation/setup: `avpn preflight` checks host requirements with a Python 3.8+
+- Installation/setup: `cypherpunk preflight` checks host requirements with a Python 3.8+
   standalone bootstrap; doctor shares its host checks. Optional provider checks stay
   unprivileged and opt-in. Missing or failed required checks block readiness.
-- `avpn setup`: private, locked and durable checkpoints; every step is rechecked. Guard
+- `cypherpunk setup`: private, locked and durable checkpoints; every step is rechecked. Guard
   and protection completion require a live supervisor and fresh route evidence. Saved
   public credentials are not described as proof of possession.
 - Typed hardware diagnostics and individually confirmed repair plans. On-device user
@@ -294,27 +332,27 @@ measured figure in the docs names the version it was measured on.
   Wallet rules are restricted to FIDO interfaces. Use current udev event tags rather
   than historical tags after a rule change; keep vendor output out of JSON results.
   See [hardware setup evidence](docs/evidence/SETUP_HARDWARE_20261117.json).
-- README: three setup tiers (General VPN, Hardened, Cypherpunk) and the Intel ME. `avpn doctor`
+- README: three setup tiers (General VPN, Hardened, Cypherpunk) and the Intel ME. `cypherpunk doctor`
   reports the management coprocessor read-only: the Intel ME version and operating mode,
   whether me_cleaner recognises that version (it lists ME up to 11.x), or AMD's PSP.
 - **Website fingerprinting on a busy CPU is now in the README**, next to the synthetic
   results: `fast` leaks (81% on 20 real sites) when the browser shares the data plane's CPU.
   `metered` is stated as a messaging class (31 of 900 real page loads completed), and the
   default is stated as it is (`--rate auto`).
-- `avpn disconnect` also stops a supervisor started with `connect --foreground`, and
+- `cypherpunk disconnect` also stops a supervisor started with `connect --foreground`, and
   confirms it exited.
 - Device keys are created in a hidden directory and renamed into place, so a failed setup
   leaves nothing half-made behind.
 - Cloud host setup probes systemd-creds sealing and, on hosts that cannot seal (systemd
   <250, e.g. Ubuntu 22.04), keeps plain keys with loud warnings: `[PLAINTEXT KEYS]` in
-  `avpn cloud status`, explained by `doctor`.
+  `cypherpunk cloud status`, explained by `doctor`.
 - Carrier restarts after a stall wait a random 8–16 s instead of a fixed 12 s, drawn from
   the operating system's CSPRNG.
 - WebRTC/STUN leak test in the managed lab.
 - The busy-CPU leak reproduces locally: `throughput_bench.py --cpu-probe` scores the packet
   count and the timing per window; catch-up restores the count but not the timing
   (`docs/evidence/CPU_LEAK_PROBE.json`).
-- Experimental (off by default): the cloak's wire clock, `AVPN_WIRE_CLOCK_PPS`, a first step of
+- Experimental (off by default): the cloak's wire clock, `CPVPN_WIRE_CLOCK_PPS`, a first step of
   the busy-CPU fix: kernel-paced departure with decoys in empty slots
   (`docs/evidence/KERNEL_PACING.json`). With a fixed congestion window and slots kept on
   failed sends, it passes the busy-CPU probe 3 of 3; not yet confirmed on real websites.
@@ -323,7 +361,7 @@ measured figure in the docs names the version it was measured on.
   sub-millisecond minimum RTT), so the downstream lost 96% and real pages failed (1 of 8
   loads). A clocked chain's relay now sends with the fixed window too: 8 of 8 loads, no
   reconnects (`docs/evidence/KERNEL_PACING.json`, `downstream_collapse`).
-- Experimental: the relay clocks its downstream too (with `AVPN_WIRE_CLOCK_PPS` set on the
+- Experimental: the relay clocks its downstream too (with `CPVPN_WIRE_CLOCK_PPS` set on the
   relay; its egress link needs the `fq` qdisc): one grid per member session, every slot a
   WireGuard reply or a decoy the client's WireGuard drops. Measured on real websites (600
   page loads, interleaved, same day): with only the client clocked k-FP still scores 10.4%
@@ -346,7 +384,7 @@ measured figure in the docs names the version it was measured on.
   opens no used round; a pad is used once, a used-up book stops the cell.
   `tools/padbook.py` assesses, makes, seals and combines them; cells are 4–60 members,
   rounds every 30 s.
-- `avpn status --json` says whether traffic is actually protected, not just whether the
+- `cypherpunk status --json` says whether traffic is actually protected, not just whether the
   supervisor runs: `protection` is "protected" only with fresh evidence of all three of the
   cloak's v2 key confirmation, a WireGuard handshake, and a probe answered through the whole
   chain (a DNS query from the app namespace to the exit's resolver every 5 s, retried after
@@ -370,8 +408,8 @@ measured figure in the docs names the version it was measured on.
   which a quantum-capable attacker could forge to impersonate it. Over the hybrid
   post-quantum exchange this makes the cloak's authentication post-quantum on both sides
   (from an independent audit, reviewed here). The TCP fallback no longer offers h2, which
-  it never spoke. v1 and v2 cannot talk: re-sign chains (`avpn cloud chain --apply`, or
-  `avpn init`) and enroll the new bundles with `--replace`; a v1 chain is refused at
+  it never spoke. v1 and v2 cannot talk: re-sign chains (`cypherpunk cloud chain --apply`, or
+  `cypherpunk init`) and enroll the new bundles with `--replace`; a v1 chain is refused at
   connect with that instruction instead of failing silently.
 - Pad books, chains and the zk identity can no longer hand out a used pad or move an
   identity back an epoch when two handles or processes use them: every operation locks,
@@ -426,8 +464,8 @@ measured figure in the docs names the version it was measured on.
 - Both cloaks' status files report the QUIC path (window, round trip, losses);
   `throughput_bench.py --cpu-probe` records both directions and the client's reconnects;
   `wf_real.py` keeps each failed load's reason and the chain's logs.
-- `avpn cloud chain --apply` shows a live checklist; PIN prompts are a desktop pop-up
-  (also under sudo), and `avpn status` works without root while the service runs.
+- `cypherpunk cloud chain --apply` shows a live checklist; PIN prompts are a desktop pop-up
+  (also under sudo), and `cypherpunk status` works without root while the service runs.
 - Formal models now run and are proved in CI (Tamarin 1.12.0), each with a broken variant
   the prover must falsify. DC-net: frame authenticity across rounds, cancellation, pad
   secrecy without collusion. Mix-lane re-blinding: element and pad hidden from an entry-link

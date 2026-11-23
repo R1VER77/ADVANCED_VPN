@@ -1,11 +1,11 @@
-# avpn init
+# cypherpunk init
 
-Operator only. Sign a chain from the devices' public requests and produce one `.avpn`
+Operator only. Sign a chain from the devices' public requests and produce one `.cpvpn`
 bundle per device.
 
 ## Usage
 
-    avpn init --out DIR --hops N --exit IP:PORT [--relay IP:PORT] [--middle IP:PORT] \
+    cypherpunk init --out DIR --hops N --exit IP:PORT [--relay IP:PORT] [--middle IP:PORT] \
         --request ROLE=FILE ... (--vault DIR | --software-operator DIR) \
         [--rate auto|metered|standard|fast|line] [--allowance-gib N] \
         [--hours-per-day H] [--accept-cost] [--daily-limit-mib N] \
@@ -24,7 +24,7 @@ bundle per device.
 - `--vault DIR`: production. Signs with the Nitrokey's FIDO2 Ed25519 credential plus the ML-DSA-65 operator key sealed in the vault (PIN + touch).
 - `--software-operator DIR`: LAB ONLY. Plaintext operator keys.
 - `--link-transport udp|tcp`: how the paced links between servers travel (default `udp`). `tcp` carries the same cells, clock and keys over one TCP stream per link, for a later hop reachable only over TCP, such as an IPv6-only exit whose provider carries no UDP there; such hops may then be given as `[IPv6]:PORT`. The first hop is always IPv4.
-- `--emit-unlock` (with `--json`, output to a pipe): the same PIN and touch that signs also unwraps the data key of every server whose request locks its keys to the operator, printed as `unlock` in the JSON result. `avpn cloud chain` uses it to hand each such server its data key; it refuses to print to a terminal.
+- `--emit-unlock` (with `--json`, output to a pipe): the same PIN and touch that signs also unwraps the data key of every server whose request locks its keys to the operator, printed as `unlock` in the JSON result. `cypherpunk cloud chain` uses it to hand each such server its data key; it refuses to print to a terminal.
 - `--pq-vault DIR` (with `--vault`): adds a third signature half, a non-exportable ML-DSA-44
   FIDO2 credential on a **second, separate key**, so the operator itself stays on its locked
   key. Today only a Solo 2 Hacker (unlocked) offers ML-DSA-44 in FIDO2. Create it once with
@@ -36,24 +36,24 @@ bundle per device.
 - `--rate`: the constant-rate stream's class (`auto`, `metered`, `standard`, `fast`, or `line`; default `auto`, which selects the fastest class whose outbound cost fits `--allowance-gib` at `--hours-per-day`).
 - `--allowance-gib N`: the smallest hop's monthly outbound data allowance in GiB, used by `--rate auto` and the cost guard. A relay sends the stream on two links (back to the client and on to its next hop), so in a 2- or 3-hop chain the cost counts both.
 - `--hours-per-day H`: expected hours connected per day for the monthly GiB cost calculation (default `8`).
-- `--accept-cost`: sign a rate class even when its monthly GiB exceeds `--allowance-gib`, or without any `--allowance-gib`. One of the two is required: `init` refuses to sign a chain with neither, and prints what the stream costs a relay per month at `--hours-per-day` and around the clock (`avpn cloud` passes the providers' allowances itself).
+- `--accept-cost`: sign a rate class even when its monthly GiB exceeds `--allowance-gib`, or without any `--allowance-gib`. One of the two is required: `init` refuses to sign a chain with neither, and prints what the stream costs a relay per month at `--hours-per-day` and around the clock (`cypherpunk cloud` passes the providers' allowances itself).
 - `--daily-limit-mib N`: an optional fail-closed daily cap for the client.
 - `--dns-blocklist FILE`: an optional domain blocklist signed into the exit bundle; the exit's DoT forwarder answers `NXDOMAIN` for matching names. One rule per line, in the common list formats: `example.com` or `.example.com` (the domain and its subdomains), `*.example.com` (subdomains only), hosts-file `0.0.0.0 example.com`, or adblock `||example.com^`; `#` and `!` start comments (OISD and hagezi lists load as published). Answers are checked too: a name whose CNAME chain leads into a blocked domain (CNAME cloaking) is also answered `NXDOMAIN`. Filtering happens at your exit, inside the tunnel; no list, query or verdict leaves it.
 - `--dns-allowlist FILE`: an optional allowlist in the same formats, signed into the exit bundle. Its names are never blocked, by name or through a CNAME.
 - `--dns-recursive`: the exit resolves names itself with Unbound (install `unbound` and `dns-root-data` on the exit) instead of forwarding them to one public DNS-over-TLS resolver, so no single resolver operator sees every lookup. It validates DNSSEC and minimises query names (RFC 9156): each authoritative server learns only the next label. Its queries to authoritative servers are plain DNS, neither encrypted nor post-quantum (no authoritative DNS is today), and leave from the exit's address, which your traffic leaves from anyway; inside the chain nothing changes, and the blocklist and allowlist still apply. Default: the hybrid post-quantum DoT forwarder.
 - `--standby-exit NAME=IP:PORT`: a standby exit (2 and 3 hops; repeat for up to 7). Give its request with `--request NAME=FILE`. The server before the exit opens a session through the first live exit, fails over to the next when one stops answering (3 s of silence on the paced link), and the client trusts exactly the signed set of exits. Your entry, the guard, never changes.
 - `--rotate-seconds MIN,MAX`: with standby exits, move to another live exit at a random time in this window (default `900,3600`), always at a session boundary. Between 60 and 86400 seconds.
-- `--front i2p`: the client reaches the entry only through I2P. The entry (and its cloud provider) sees I2P routers, never your address; your network sees I2P, never a VPN server. Carries the `metered` and `standard` classes (`auto` picks `standard` at most). The entry's request must come from this release (it holds the entry's I2P destination). See `avpn help front`.
+- `--front i2p`: the client reaches the entry only through I2P. The entry (and its cloud provider) sees I2P routers, never your address; your network sees I2P, never a VPN server. Carries the `metered` and `standard` classes (`auto` picks `standard` at most). The entry's request must come from this release (it holds the entry's I2P destination). See `cypherpunk help front`.
 - `--front-hops N`: I2P hops each way between you and the entry (default `2`, so no single I2P router sees both your address and the entry's; `1` is faster, but that one router sees both, never the content; `3` is slower still).
-- `--cover-name NAME`: the server name the first hop's HTTP/3 camouflage presents. Use a name that resolves to that hop's address, such as its provider-assigned DNS name; `avpn cloud chain --apply` fills this in for AWS. Without it, no server name is sent.
+- `--cover-name NAME`: the server name the first hop's HTTP/3 camouflage presents. Use a name that resolves to that hop's address, such as its provider-assigned DNS name; `cypherpunk cloud chain --apply` fills this in for AWS. Without it, no server name is sent.
 
 ## What it changes
 
-Writes `DIR/<role>.avpn` (and `DIR/<NAME>.avpn` for each standby exit) and `DIR/operator.pub`. Nothing on any host changes.
+Writes `DIR/<role>.cpvpn` (and `DIR/<NAME>.cpvpn` for each standby exit) and `DIR/operator.pub`. Nothing on any host changes.
 
 ## Security notes
 
-Every chain is padded to constant cells on every hop, runs the constant-rate stream on the carrier and on every link between two servers (paced, encrypted cells: per-hop shaping), and camouflages the link to the first hop as HTTP/3 on UDP 443 with automatic fallback to TLS 1.3 on TCP 443; there is no option to turn any of these off (`avpn help threat-model`).
+Every chain is padded to constant cells on every hop, runs the constant-rate stream on the carrier and on every link between two servers (paced, encrypted cells: per-hop shaping), and camouflages the link to the first hop as HTTP/3 on UDP 443 with automatic fallback to TLS 1.3 on TCP 443; there is no option to turn any of these off (`cypherpunk help threat-model`).
 
 Bundles hold no private keys. The PSK is encrypted to each device's KEM key, so a
 bundle is useless on another device.

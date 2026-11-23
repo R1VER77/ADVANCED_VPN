@@ -1,5 +1,5 @@
 """A chain that stops answering is made obvious (tools/chain_watch.py): one desktop notice
-per outage, one when it answers again, and a notice in `avpn status`."""
+per outage, one when it answers again, and a notice in `cypherpunk status`."""
 
 from pathlib import Path
 import sys
@@ -24,7 +24,7 @@ class Watch(unittest.TestCase):
         self.assertEqual(self.sent, [])
         fields = self.w.observe(1000 + cw.START_GRACE, DOWN)
         self.assertIn("no answer through the chain", fields["detail"])
-        self.assertIn("avpn cloud health", fields["next"])
+        self.assertIn("cypherpunk cloud health", fields["next"])
         self.w.observe(1000 + cw.START_GRACE + 300, DOWN)
         self.assertEqual(len(self.sent), 1)  # once per outage, not every loop
         self.assertEqual(self.sent[0][0], "VPN chain not answering")

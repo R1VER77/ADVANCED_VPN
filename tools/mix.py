@@ -1,9 +1,9 @@
 """The mix lane: a Katzenpost mixnet client inside the protected namespace.
 
-    avpn mix setup --config DIR     install a mixnet's client configuration
-    avpn mix start                  run the mixnet client (and its cover traffic)
-    avpn mix fetch URL              one request through the mixnet
-    avpn mix status | stop
+    cypherpunk mix setup --config DIR     install a mixnet's client configuration
+    cypherpunk mix start                  run the mixnet client (and its cover traffic)
+    cypherpunk mix fetch URL              one request through the mixnet
+    cypherpunk mix status | stop
 
 The VPN carries low-latency traffic; the mix lane carries what can wait seconds (mail,
 chat, small fetches) and needs more than a VPN can give: every packet is held a random
@@ -11,10 +11,10 @@ time at every hop, and the client sends real-or-decoy packets and loops at a con
 Poisson rate whether or not it has anything to say, so even an adversary watching every
 link cannot tell when, or whether, it sent (docs/evidence/MIX_LANE.json).
 
-The client runs inside the protected namespace (`avpn run`), so the mixnet's gateway sees
+The client runs inside the protected namespace (`cypherpunk run`), so the mixnet's gateway sees
 the chain's exit, never this device. Its programs are Katzenpost's own, unmodified and
 separate (AGPL-3.0; third_party/katzenpost/build.sh): kpclientd and its HTTP proxy, which
-listens on 127.0.0.1:41199 inside the namespace for any application started with `avpn run`.
+listens on 127.0.0.1:41199 inside the namespace for any application started with `cypherpunk run`.
 """
 
 import argparse
@@ -32,7 +32,7 @@ import zlib
 PROXY = ("127.0.0.1", 41199)
 THIN = "127.0.0.1:41198"
 BINARIES = ("kpclientd", "http-proxy-client")
-INSTALLED = Path("/usr/lib/advanced-vpn/katzenpost")
+INSTALLED = Path("/usr/lib/cypherpunk-vpn/katzenpost")
 CONFIG_FILES = ("client.toml", "thinclient.toml")
 # Sphinx KEMs the mix lane accepts: hybrid post-quantum only.
 PQ_SPHINX = {"XWING"}
@@ -44,8 +44,8 @@ PQ_WIRE = {"XWING", "MLKEM768-X25519", "MLKEM1024-X25519"}
 
 
 def binaries():
-    """kpclientd and http-proxy-client: $AVPN_KATZENPOST (lab) or the installed copies."""
-    base = Path(os.environ.get("AVPN_KATZENPOST", INSTALLED))
+    """kpclientd and http-proxy-client: $CPVPN_KATZENPOST (lab) or the installed copies."""
+    base = Path(os.environ.get("CPVPN_KATZENPOST", INSTALLED))
     found = {b: base / b for b in BINARIES}
     missing = [b for b, p in found.items() if not os.access(p, os.X_OK)]
     if missing:
@@ -112,7 +112,7 @@ def proxy_ready(timeout=0.5):
 def serve(config):
     """Run kpclientd and the HTTP proxy until either stops (inside the protected namespace)."""
     bins = binaries()
-    work = Path(config)  # the private copy avpnctl made for this user
+    work = Path(config)  # the private copy cypherpunkctl made for this user
     procs = [subprocess.Popen([str(bins["kpclientd"]), "-c", str(work / "client.toml")], cwd=work,
                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)]  # fmt: skip
     time.sleep(2)
@@ -189,11 +189,11 @@ def request(url, method="GET", timeout=180):
         time.sleep(5)
     if last:
         return last
-    raise RuntimeError("the mix lane did not answer (is `avpn mix start` running?)")
+    raise RuntimeError("the mix lane did not answer (is `cypherpunk mix start` running?)")
 
 
 def main(argv=None):
-    """Entry point inside the protected namespace (avpnctl runs it via `avpn run`)."""
+    """Entry point inside the protected namespace (cypherpunkctl runs it via `cypherpunk run`)."""
     p = argparse.ArgumentParser(description="mix lane (inside the protected namespace)")
     s = p.add_subparsers(dest="action", required=True)
     sv = s.add_parser("serve")

@@ -1,0 +1,45 @@
+[Unit]
+Description=cypherpunk_vpn owned exit (experimental; preconfigured TUN required)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=cypherpunk-vpn
+Group=cypherpunk-vpn
+ExecStartPre=/usr/local/bin/cypherpunk-vpn --config /etc/cypherpunk-vpn/config.json --check
+ExecStart=/usr/local/bin/cypherpunk-vpn --config /etc/cypherpunk-vpn/config.json
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+DevicePolicy=closed
+DeviceAllow=/dev/net/tun rw
+RestrictAddressFamilies=AF_INET AF_UNIX
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+MemoryMax=128M
+MemorySwapMax=0
+CPUQuota=50%
+TasksMax=16
+LimitNOFILE=64
+LimitCORE=0
+StandardOutput=null
+StandardError=null
+# No logs at all: also suppresses the service manager's own messages about this unit.
+LogLevelMax=emerg
+
+[Install]
+WantedBy=multi-user.target

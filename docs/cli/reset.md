@@ -1,10 +1,10 @@
-# avpn reset
+# cypherpunk reset
 
 Remove the kill switch and restore cleartext networking. Disconnect first.
 
 ## Usage
 
-    sudo avpn reset --allow-cleartext
+    sudo cypherpunk reset --allow-cleartext
 
 ## Options
 

@@ -20,8 +20,8 @@ import json
 # A private OID arc derived from a UUID (ITU-T X.667: 2.25.<UUID as an integer>), so no
 # registration is needed and it cannot collide with a registered extension.
 OID = "2.25.304735596916668360143454144096617811569"
-VERSION = "advanced-vpn/session/v1"
-RP = "advanced-vpn.local"
+VERSION = "cypherpunk-vpn/session/v1"
+RP = "cypherpunk-vpn.local"
 ORIGIN = "https://" + RP
 MAX_SECONDS = 43200  # 12 h, the client's leaf lifetime
 SKEW = 600  # the leaf profile's tolerance, src/tls.rs certificate_lifetime

@@ -114,7 +114,7 @@ def verify_batch(client: voprf.Client, blinded: list[bytes], evaluated: list[byt
 def epoch_server(seed: bytes, epoch: int) -> tuple[voprf.Server, voprf.Client]:
     """A fresh issuer keypair per epoch, the way mesh_voprf rotates epoch keys."""
     seed32 = hashlib.sha256(seed + b"/epoch%d" % epoch).digest()
-    server = voprf.Server.from_seed(seed32, b"avpn-dleq-validation/epoch%d" % epoch)
+    server = voprf.Server.from_seed(seed32, b"cpvpn-dleq-validation/epoch%d" % epoch)
     client = voprf.Client(voprf.encode(server.pk))
     return server, client
 

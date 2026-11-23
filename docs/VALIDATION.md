@@ -31,7 +31,7 @@ Four Rust tests pass, including genuine TLS handshakes that reject classical-onl
 
 The transport's only configured key-exchange group is X25519MLKEM768, and its only application suite is AES-256-GCM. Handshake evidence is checked before IP forwarding. Mutual ECDSA certificates and exact leaf pins authenticate peers; this does not constitute post-quantum certificate authentication.
 
-A real Nitrokey enrolled the separate `advanced-vpn.local` FIDO2 credential. It sealed the two client test keys, the age recovery copy was decrypted and compared, and plaintext key files were removed. A fresh hardware operation unsealed the keys into immutable memfds; the release executable accepted them through `--check`. This is a separate hardware handoff proof, **not** a claim that the full routed test used hardware-unsealed keys. See [HARDWARE.json](evidence/HARDWARE.json).
+A real Nitrokey enrolled the separate `cypherpunk-vpn.local` FIDO2 credential. It sealed the two client test keys, the age recovery copy was decrypted and compared, and plaintext key files were removed. A fresh hardware operation unsealed the keys into immutable memfds; the release executable accepted them through `--check`. This is a separate hardware handoff proof, **not** a claim that the full routed test used hardware-unsealed keys. See [HARDWARE.json](evidence/HARDWARE.json).
 
 The hardware envelope protects software keys at rest. It does not keep leaf/session keys non-exportable while running, and does not protect an ordinary cloud guest from its host. Existing token credentials and PIN were preserved. Offline CA private keys were not deployed to a peer or published; automated hardware CA issuance is not implemented.
 

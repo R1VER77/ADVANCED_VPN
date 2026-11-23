@@ -1,0 +1,12 @@
+[package]
+name = "cpvpn-pq-sphinx"
+version = "0.2.0"
+edition = "2021"
+description = "cypherpunk_vpn mix lane: PQ-Sphinx header option E (entry ML-KEM-768 + inner X25519, XOR re-blinding) - std-only reference implementation, cross-verified; byte-identity oracle for the audited-primitives production crate"
+license = "MIT OR Apache-2.0"
+
+publish = false
+
+[lib]
+name = "cpvpn_pq_sphinx"
+path = "src/lib.rs"

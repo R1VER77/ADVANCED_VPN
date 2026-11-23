@@ -130,7 +130,7 @@ def plan_caps(servers):
         gb, why = account_free_gb(provider, **fly)
         for n in shared:
             if gb is None:
-                caps[n] = (None, why + ": set a cap (avpn cloud cap %s --gb N) or mark it --unlimited" % n)
+                caps[n] = (None, why + ": set a cap (cypherpunk cloud cap %s --gb N) or mark it --unlimited" % n)
                 continue
             share = gb * MARGIN / len(names)
             caps[n] = (int(share * GB), "%.0f GB: %d%% of %s%s" % (

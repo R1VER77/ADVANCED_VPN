@@ -8,7 +8,7 @@ The public [roadmap](ROADMAP.md) tracks which gates have actually passed.
 
 The starting point is commit `c4b4719`. Its GitHub verification workflow is fully
 green, including formal models, protocol laboratories, Python compatibility and
-offline-package tests ([run 44070958070](https://github.com/R1VER77/ADVANCED_VPN/actions/runs/44070958070)).
+offline-package tests ([run 44070958070](https://github.com/R1VER77/CYPHERPUNK_VPN/actions/runs/44070958070)).
 
 Already completed: deterministic setup checks, confirmed hardware repairs, physical
 tests of the four available devices, offline runtime packaging, guarded removal, and

@@ -197,8 +197,8 @@ fn vpn_interface(name: &str) -> bool {
     numeric("wg", true)
         || numeric("tun", false)
         || numeric("tap", false)
-        || numeric("avwg", true)
-        || numeric("avpn", true)
+        || numeric("cpwg", true)
+        || numeric("cpvpn", true)
         || name == "nordlynx"
         || ["proton", "mullvad", "ivpn"].iter().any(|x| {
             name.strip_prefix(x)

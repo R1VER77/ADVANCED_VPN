@@ -315,7 +315,7 @@ onUnmounted(() => window.clearInterval(timer))
               <p>Send your operator this device's public request, then open the signed file they send back.</p>
               <button class="btn quiet small" :disabled="!setup?.device_request" @click="saveRequest">Save my device request</button>
               <p v-if="saved" class="note">Saved to {{ saved }}. It holds public keys only.</p>
-              <label class="file">Signed device file<input type="file" accept=".avpn" @change="pick($event, 'bundle')"></label>
+              <label class="file">Signed device file<input type="file" accept=".cpvpn" @change="pick($event, 'bundle')"></label>
               <label class="file">Operator public key<input type="file" @change="pick($event, 'operator')"></label>
               <button class="btn secondary small" :disabled="!bundle || !operatorKey || busy" @click="importFiles">Install route</button>
               <button class="link" @click="mode = 'own'">Use my own servers instead</button>

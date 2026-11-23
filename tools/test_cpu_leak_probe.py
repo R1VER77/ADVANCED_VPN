@@ -106,7 +106,7 @@ class LeakScoreTests(unittest.TestCase):
         return leak_score(counts, schedule, random.Random(seed + 1), permutations=500, timing=timing)
 
     def test_catch_up_keeps_the_count_but_its_timing_is_caught(self):
-        # Measured locally (CPU_LEAK_PROBE.json): with AVPN_CATCH_UP_MS=50 the count per
+        # Measured locally (CPU_LEAK_PROBE.json): with CPVPN_CATCH_UP_MS=50 the count per
         # window is restored while the gap spread still gives the load away.
         s = self.full_score(drop=0.0, bunched=True)
         self.assertGreater(s["p_value"], 0.01, "the count alone must not see it")
@@ -142,9 +142,9 @@ class LeakScoreTests(unittest.TestCase):
 
 class CarrierHealthTests(unittest.TestCase):
     def test_both_directions_and_the_clients_reconnects_are_reported(self):
-        from avpnctl import runtime_dir
+        from cypherpunkctl import runtime_dir
 
-        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {"AVPN_RUNTIME_ROOT": tmp + "/run"}):
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {"CPVPN_RUNTIME_ROOT": tmp + "/run"}):
             state = Path(tmp) / "state"
             for role, sent, received in [("client", 10, 400), ("relay", 4000, 12)]:
                 (state / role).mkdir(parents=True)

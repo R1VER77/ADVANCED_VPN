@@ -19,11 +19,12 @@ META = dict(salt=base64.b64encode(b"s" * 32).decode(), credential=base64.b64enco
 DAY = 86400
 S0 = bytes(range(32))
 START, LIFE = 20400, 365
-# research/zk-membership: s0 = 0..31, lifetime 365, start 20400, epoch 20405, scope 0x11 * 32
+# research/zk-membership (cpvpn/ labels, regenerated 22 Nov 2026 from the host's own h/step/walk/leaf
+# and the guest's nullifier line; the same harness reproduces the pre-rename values): s0 = 0..31, lifetime 365, start 20400, epoch 20405, scope 0x11 * 32
 RUST = dict(
-    leaf="18a4c2590f55186c53dea99093d6a730bfc4ab68d5bed0b84abb03ee0a3e44e1",
-    x5="e78c8b64ef76d755a5cd88856a7efd8c52f295db3141a82bceb7ecbad68fc67f",
-    nullifier="806f88f42582dc9d3875385f0a2f5a3327b658ce4b5e666fe273dfe8a7fe593b",
+    leaf="28ff71422fb4d47a2cebce6ed260c8e0b8c461378d5168e6236706e1e6e6a88d",
+    x5="9dc8d9f4fb6260f56906afa28ca5520f29ede1157804857c52c7fae3b4ef6b26",
+    nullifier="c4ad619cc5f47bc5952caf76627eeafe42c06056ebdab82d18e4bb98cf3bfac9",
 )
 
 
