@@ -267,6 +267,9 @@ class NativePackages(unittest.TestCase):
         server = self.fixture.root / "llama-server"
         server.write_bytes(b"\x7fELF assistant server fixture, never run " + marker + b"\x00")
         server.chmod(0o755)
+        isolate = self.fixture.root / "isolate"
+        isolate.write_bytes(b"\x7fELF launcher fixture, never run GLIBC_2.2.5\x00")
+        isolate.chmod(0o755)
         return model, server
 
     def test_the_assistant_package_ships_only_the_pinned_model_with_gemmas_terms(self):
@@ -281,7 +284,11 @@ class NativePackages(unittest.TestCase):
             package.stage_assistant(ROOT, model, server, tree)
         home = tree / package.ASSISTANT_HOME.lstrip("/")
         self.assertEqual(sorted(x.name for x in home.iterdir()),
-                         ["gemma-3-1b-it-Q8_0.gguf", "gemma-3-1b-it-Q8_0.gguf.sha256", "llama-server"])  # fmt: skip
+                         ["gemma-3-1b-it-Q8_0.gguf", "gemma-3-1b-it-Q8_0.gguf.sha256", "isolate", "llama-server"])  # fmt: skip
+        self.assertEqual(os.stat(home / "isolate").st_mode & 0o777, 0o755)
+        shipped = tree / package.ASSISTANT_PROFILE_SHIPPED.lstrip("/")
+        self.assertIn("userns,", shipped.read_text())
+        self.assertIn(package.ASSISTANT_HOME + "/isolate", shipped.read_text())
         self.assertEqual((home / "gemma-3-1b-it-Q8_0.gguf.sha256").read_text().split()[0], digest)
         self.assertEqual(os.stat(home / "llama-server").st_mode & 0o777, 0o755)
         self.assertEqual(os.stat(home / package.ASSISTANT_MODEL).st_mode & 0o777, 0o644)
@@ -295,6 +302,52 @@ class NativePackages(unittest.TestCase):
         for path in tree.rglob("*"):
             self.assertFalse(path.stat().st_mode & 0o6000, path)
         self.assertEqual(sorted(x.name for x in (tree / "usr").iterdir()), ["lib", "share"])
+
+    def run_profile_script(self, script, argument, parses=True, apparmor=True):
+        """Run the assistant's postinst/prerm against a stand-in apparmor_parser, sandboxed."""
+        host = self.fixture.root / "aa-host"
+        bin_dir = self.fixture.root / "aa-bin"
+        bin_dir.mkdir(exist_ok=True)
+        log = bin_dir / "calls"
+        log.write_text("")
+        (bin_dir / "apparmor_parser").write_text(
+            '#!/bin/sh\necho "apparmor_parser $*" >> %s\ncase "$1" in -Q) exit %d;; esac\nexit 0\n'
+            % (log, 0 if parses else 1)
+        )
+        (bin_dir / "apparmor_parser").chmod(0o755)
+        shipped = host / package.ASSISTANT_PROFILE_SHIPPED.lstrip("/")
+        shipped.parent.mkdir(parents=True, exist_ok=True)
+        shipped.write_text("profile fixture {}\n")
+        (host / "etc/apparmor.d").mkdir(parents=True, exist_ok=True)
+        fs = host / "sys/kernel/security/apparmor"
+        if apparmor:
+            fs.mkdir(parents=True, exist_ok=True)
+        text = (script.replace(package.ASSISTANT_PROFILE_SHIPPED, str(shipped))
+                .replace(package.ASSISTANT_PROFILE, str(host) + package.ASSISTANT_PROFILE)
+                .replace(package.APPARMOR_FS, str(fs)))  # fmt: skip
+        env = dict(os.environ, PATH="%s:/usr/bin:/bin" % bin_dir)
+        r = subprocess.run(["/bin/sh", "-c", text, "script", argument], capture_output=True, text=True, env=env)
+        return r, log.read_text(), host / package.ASSISTANT_PROFILE.lstrip("/")
+
+    def test_the_launcher_profile_is_installed_only_where_apparmor_can_express_it(self):
+        r, calls, target = self.run_profile_script(package.assistant_configure(), "configure")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue(target.is_file())
+        self.assertIn("apparmor_parser -r -W " + str(target), calls)
+        # An AppArmor that cannot parse `userns` (Ubuntu 22.04): skipped, and said.
+        target.unlink()
+        r, calls, target = self.run_profile_script(package.assistant_configure(), "configure", parses=False)
+        self.assertEqual(r.returncode, 0)
+        self.assertFalse(target.exists())
+        self.assertIn("cannot express the launcher profile", r.stderr)
+        # Removal unloads and deletes it; an upgrade leaves it.
+        self.run_profile_script(package.assistant_configure(), "configure")
+        r, calls, target = self.run_profile_script(package.assistant_remove(), "upgrade")
+        self.assertTrue(target.is_file())
+        r, calls, target = self.run_profile_script(package.assistant_remove(), "remove")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertFalse(target.exists())
+        self.assertIn("apparmor_parser -R " + str(target), calls)
 
     def test_an_assistant_server_that_is_not_an_elf_or_too_new_is_refused(self):
         import assistant

@@ -11,8 +11,11 @@ held to a JSON schema and checked again here:
 - an explanation that reads like a command is refused.
 
 Isolation:
-- the model server runs in its own network namespace (`unshare -rn`: no interface but
-  loopback), with `--offline`, reached only through a Unix socket in a private directory;
+- the model server runs in its own network namespace (no interface but a downed
+  loopback), with `--offline`, reached only through a Unix socket in a private directory.
+  Installed, the package's launcher (`isolate`) creates it; on systems that restrict
+  unprivileged user namespaces (Ubuntu 24.04 and later) the package's AppArmor profile
+  allows exactly that launcher. From a checkout, `unshare -rn` does the same;
 - it is stopped after each answer;
 - it is given the finding's scrubbed evidence, never the raw log, a PIN or a credential.
 
@@ -40,6 +43,8 @@ SCHEMA = 1
 HOME = Path("/usr/lib/cypherpunk-vpn/assistant")
 MODEL = HOME / "gemma-3-1b-it-Q8_0.gguf"
 SERVER = HOME / "llama-server"
+# The packaged launcher: enters the network-less namespace and execs SERVER (deploy/assistant).
+ISOLATE = HOME / "isolate"
 MODEL_SHA256 = "616dfb049ad14288d971d96f5ca4953fdebbf1e3cd407ad159f3bfd47090201d"
 MAX_EXPLANATION = 600
 START_TIMEOUT = 90
@@ -173,13 +178,16 @@ def request(path, body, timeout):
 def ask_local_model(user, schema, model=MODEL, server=SERVER, threads=None):
     """Start the model server with no network, ask once, stop it."""
     installed(model, server)
-    unshare = shutil.which("unshare")
-    if not unshare:
+    if Path(server) == SERVER and ISOLATE.is_file():
+        launcher = [str(ISOLATE)]  # it execs the packaged server itself
+    elif shutil.which("unshare"):
+        launcher = [shutil.which("unshare"), "-rn", "--", str(server)]
+    else:
         raise AssistantUnavailable("no_network_isolation")
     with tempfile.TemporaryDirectory(prefix="cpvpn-assistant-") as tmp:
         os.chmod(tmp, 0o700)
         sock = Path(tmp) / "model.sock"
-        argv = [unshare, "-rn", "--", str(server), "-m", str(model), "--host", str(sock), "--offline",
+        argv = launcher + ["-m", str(model), "--host", str(sock), "--offline",
                 "-c", "4096", "-t", str(threads or max(1, (os.cpu_count() or 2) // 2)), "--log-disable"]  # fmt: skip
         proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         try:

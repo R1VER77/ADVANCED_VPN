@@ -49,7 +49,15 @@ measured figure in the docs names the version it was measured on.
     network namespace, reached over a Unix socket.
     - It sees only scrubbed evidence: no addresses, accounts, tokens, keys or PINs.
     - It never decides a fix, and an answer that reads like a command is refused.
-    - Without the package, the rules' own words are shown.
+    - Without the package, the rules' own words are shown. When the package is installed but
+      cannot run, the panel says why.
+    - **Ubuntu 24.04 and later** restrict unprivileged user namespaces, so a plain sandbox
+      fails there. The package ships a small launcher that creates the network-less
+      namespace and starts only the packaged server, plus an AppArmor profile letting that
+      launcher, and nothing else, create it (as Ubuntu does for its own applications).
+      Proved on Ubuntu 24.04.5 with the restriction on: with the profile the assistant
+      answers; with it unloaded, the same request falls back to the rules with the reason
+      ([evidence](docs/evidence/ASSISTANT_UBUNTU2404_20261123.json)).
   - **Gemma's terms:** the first-launch agreement now includes the Gemma Terms of Use and
     its Prohibited Use Policy, as those terms require of anyone who redistributes Gemma
     ([evaluation](docs/evidence/ASSISTANT_EVAL_20261123.json)).

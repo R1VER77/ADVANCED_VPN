@@ -1,7 +1,8 @@
 #!/bin/sh
 # Build llama-server for the cypherpunk-vpn-assistant package on the release baseline.
 #
-#   docker run --rm -v LLAMA_SRC:/llama:ro -v OUT:/out -e HOST_UID=$(id -u) \
+#   docker run --rm --network none -v LLAMA_SRC:/llama:ro -v OUT:/out -v REPO/deploy/assistant:/llama-deploy:ro \
+#       -e HOST_UID=$(id -u) \
 #       cypherpunk-vpn-build:jammy-20261118 sh /llama-build/build-assistant.sh
 #
 # LLAMA_SRC is a checkout of ggml-org/llama.cpp at LLAMA_REVISION (refused otherwise).
@@ -21,6 +22,9 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DLLAMA_C
 cmake --build build --target llama-server -j "$(nproc)" >/dev/null
 install -m 0755 build/bin/llama-server /out/llama-server
 strip /out/llama-server
+# The launcher that gives llama-server its network-less namespace (deploy/assistant).
+gcc -O2 -Wall -Wextra -Werror -o /out/isolate /llama-deploy/isolate.c
+strip /out/isolate
 ldd /out/llama-server | sed 's/ (0x[0-9a-f]*)//' > /out/llama-server.ldd
 ldd --version | head -1 > /out/llama-server.glibc
 printf '%s\n' "$LLAMA_REVISION" > /out/llama-server.revision

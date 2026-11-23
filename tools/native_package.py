@@ -400,9 +400,57 @@ ASSISTANT_PACKAGE = "cypherpunk-vpn-assistant"
 ASSISTANT_HOME = "/usr/lib/cypherpunk-vpn/assistant"
 ASSISTANT_MODEL = "gemma-3-1b-it-Q8_0.gguf"
 GEMMA_DOCS = ("docs/third_party/GEMMA_TERMS_OF_USE.md", "docs/third_party/GEMMA_PROHIBITED_USE_POLICY.md")
+ASSISTANT_PROFILE_SOURCE = "deploy/assistant/cypherpunk-vpn-assistant.apparmor"
+ASSISTANT_PROFILE_SHIPPED = "/usr/share/cypherpunk-vpn-assistant/apparmor/cypherpunk-vpn-assistant"
+ASSISTANT_PROFILE = "/etc/apparmor.d/cypherpunk-vpn-assistant"
+APPARMOR_FS = "/sys/kernel/security/apparmor"
 
 
-def stage_assistant(root, model, server, destination):
+def assistant_configure():
+    """Install and load the launcher's AppArmor profile where this AppArmor can express it.
+
+    Ubuntu 24.04 and later restrict unprivileged user namespaces; the profile lets the
+    assistant's launcher (and nothing else) create its network-less namespace. Older
+    AppArmor (Ubuntu 22.04) cannot parse `userns` and does not restrict them, so the
+    profile is skipped there, and said so.
+    """
+    return (
+        "#!/bin/sh\nset -eu\n"
+        'case "${1:-}" in configure)\n'
+        "    parser=$(command -v apparmor_parser || true)\n"
+        '    if [ -n "$parser" ] && "$parser" -Q -K --skip-cache '
+        + ASSISTANT_PROFILE_SHIPPED
+        + " >/dev/null 2>&1; then\n"
+        "        install -m 0644 " + ASSISTANT_PROFILE_SHIPPED + " " + ASSISTANT_PROFILE + "\n"
+        "        if [ -d " + APPARMOR_FS + ' ] && ! "$parser" -r -W ' + ASSISTANT_PROFILE + " >/dev/null 2>&1; then\n"
+        "            printf '%s\\n' 'cypherpunk-vpn-assistant: its AppArmor profile could not be loaded; the assistant may fall back to plain rules.' >&2\n"
+        "        fi\n"
+        '    elif [ -n "$parser" ]; then\n'
+        "        printf '%s\\n' 'cypherpunk-vpn-assistant: this AppArmor cannot express the launcher profile (not needed unless the system restricts user namespaces).' >&2\n"
+        "    fi\n"
+        ";; esac\n"
+    )
+
+
+def assistant_remove():
+    """Unload and delete the profile the assistant installed (dpkg runs prerm with `remove`)."""
+    return (
+        "#!/bin/sh\nset -eu\n"
+        'case "${1:-}" in remove)\n'
+        "    if [ -f " + ASSISTANT_PROFILE + " ]; then\n"
+        "        parser=$(command -v apparmor_parser || true)\n"
+        '        if [ -n "$parser" ] && [ -d '
+        + APPARMOR_FS
+        + ' ]; then "$parser" -R '
+        + ASSISTANT_PROFILE
+        + " >/dev/null 2>&1 || true; fi\n"
+        "        rm -f " + ASSISTANT_PROFILE + "\n"
+        "    fi\n"
+        ";; esac\n"
+    )
+
+
+def stage_assistant(root, model, server, destination, isolate=None):
     """The local assistant: llama-server and the pinned Gemma model, with Gemma's terms.
 
     The model must be exactly the pinned file (tools/assistant.py MODEL_SHA256) and the
@@ -412,23 +460,30 @@ def stage_assistant(root, model, server, destination):
     import assistant
 
     model, server = Path(model), Path(server)
-    for path, what in ((model, "model"), (server, "server")):
+    isolate = Path(isolate) if isolate else server.with_name("isolate")
+    for path, what in ((model, "model"), (server, "server"), (isolate, "launcher")):
         if path.is_symlink() or not path.is_file():
             raise ValueError("the assistant %s must be a regular file" % what)
     if bundled_runtime.sha256(model) != assistant.MODEL_SHA256:
         raise ValueError("the assistant model is not the pinned Gemma file")
-    with server.open("rb") as binary:
-        if binary.read(4) != b"\x7fELF":
-            raise ValueError("the assistant server is not an ELF executable")
+    for path, what in ((server, "server"), (isolate, "launcher")):
+        with path.open("rb") as binary:
+            if binary.read(4) != b"\x7fELF":
+                raise ValueError("the assistant %s is not an ELF executable" % what)
     home = destination / ASSISTANT_HOME.lstrip("/")
     home.mkdir(mode=0o755, parents=True)
-    shutil.copy2(server, home / "llama-server")
-    (home / "llama-server").chmod(0o755)
+    for path, name in ((server, "llama-server"), (isolate, "isolate")):
+        shutil.copy2(path, home / name)
+        (home / name).chmod(0o755)
     needed = preflight.glibc_need(home)
     if needed > preflight.RELEASE_GLIBC:
         raise ValueError("assistant server ABI " + ".".join(map(str, needed)) + " exceeds the release baseline")
     shutil.copy2(model, home / ASSISTANT_MODEL)
     (home / (ASSISTANT_MODEL + ".sha256")).write_text(assistant.MODEL_SHA256 + "  " + ASSISTANT_MODEL + "\n")
+    profile = destination / ASSISTANT_PROFILE_SHIPPED.lstrip("/")
+    profile.parent.mkdir(mode=0o755, parents=True)
+    shutil.copy2(root / ASSISTANT_PROFILE_SOURCE, profile)
+    profile.chmod(0o644)
     docs = destination / "usr/share/doc" / ASSISTANT_PACKAGE
     docs.mkdir(mode=0o755, parents=True)
     shutil.copy2(root / "NOTICE", docs / "NOTICE")
@@ -441,7 +496,7 @@ def stage_assistant(root, model, server, destination):
         "llama-server is from llama.cpp (MIT licence, github.com/ggml-org/llama.cpp).\n"
     )
     for path in [*home.iterdir(), *docs.iterdir()]:
-        if path.name != "llama-server":
+        if path.name not in ("llama-server", "isolate"):
             path.chmod(0o644)
     for path in (destination / "usr").rglob("*"):
         if path.is_dir():
@@ -449,7 +504,8 @@ def stage_assistant(root, model, server, destination):
 
 
 def assistant_debian(root, model, server, output, epoch):
-    """The optional assistant package: no scripts, nothing started, nothing privileged."""
+    """The optional assistant package: nothing started, nothing privileged; its scripts only
+    install or remove the launcher's AppArmor profile."""
     number = version(root).replace("-", "~", 1) + "-1"
     package = output / (ASSISTANT_PACKAGE + "_" + number + "_amd64.deb")
     if package.exists():
@@ -472,6 +528,8 @@ def assistant_debian(root, model, server, output, epoch):
             " Terms of Use found at gemma.ai/resources/terms\n"
         )
         (control / "control").chmod(0o644)
+        for name, text in (("postinst", assistant_configure()), ("prerm", assistant_remove())):
+            install.launcher(control / name, text.removeprefix("#!/bin/sh\n").rstrip("\n"))
         subprocess.run([trusted_exe("dpkg-deb"), "--root-owner-group", "--build", str(tree), str(package)],
                        check=True, env=dict(os.environ, SOURCE_DATE_EPOCH=str(epoch)), timeout=600)  # fmt: skip
     return package

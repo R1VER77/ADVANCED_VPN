@@ -1,0 +1,39 @@
+{
+ "schema": 1,
+ "date": "2026-11-23",
+ "image": "noble-server-cloudimg-amd64.img",
+ "package": "cypherpunk-vpn-assistant_0.11.0-1_amd64.deb",
+ "os": "Ubuntu 24.04.5 LTS",
+ "restrict_userns": "1",
+ "plain_unshare_refused": true,
+ "install": {
+  "code": 0,
+  "messages": [
+   "Selecting previously unselected package cypherpunk-vpn-assistant.",
+   "Unpacking cypherpunk-vpn-assistant (0.11.0-1) ...",
+   "Setting up cypherpunk-vpn-assistant (0.11.0-1) ..."
+  ]
+ },
+ "profile_loaded": true,
+ "reply": {
+  "schema": 1,
+  "source": "assistant",
+  "explanation": "The VPN route setup failed because the server was busy installing updates, preventing the build process from getting the necessary lock. You need to try again to get the route to work.",
+  "suggestion": {
+   "action": "retry_build"
+  }
+ },
+ "interfaces_in_model_namespace": "lo own-netns",
+ "reply_without_profile": {
+  "schema": 1,
+  "source": "rules",
+  "why": "no_network_isolation",
+  "explanation": "The server was busy installing updates, and the build could not get the package manager's lock in time.",
+  "suggestion": null
+ },
+ "profile_after_remove": {
+  "file": false,
+  "loaded": false
+ },
+ "passed": true
+}

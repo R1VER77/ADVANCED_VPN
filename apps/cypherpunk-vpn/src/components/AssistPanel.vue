@@ -21,6 +21,16 @@ const NOTE: Record<string, string> = {
   capped: 'The server starts carrying traffic again on the 1st of the month.',
 }
 
+// Why the installed assistant could not add its words (tools/assistant.py reasons).
+const UNAVAILABLE: Record<string, string> = {
+  no_network_isolation: 'this system did not allow its network-less sandbox',
+  model_did_not_start: 'its model did not start (this processor may lack AVX2)',
+  model_not_verified: 'its model file is not the pinned one, so it was not run',
+  model_error: 'its model did not answer',
+  answer_too_large: 'its model did not answer',
+  answer_refused: 'its answer could not be used',
+}
+
 const result = ref<Assist | null>(null)
 const asking = ref(false)
 const running = ref<string | null>(null)
@@ -58,6 +68,9 @@ async function run(fix: Fix) {
       <p class="meaning">{{ result.finding.meaning }}</p>
       <p v-if="result.reply.source === 'assistant'" class="words">
         <span class="label">In other words (local assistant; may be imprecise):</span> {{ result.reply.explanation }}
+      </p>
+      <p v-else-if="UNAVAILABLE[result.reply.why ?? '']" class="meaning">
+        The local assistant is installed but could not help: {{ UNAVAILABLE[result.reply.why ?? ''] }}.
       </p>
       <p v-if="NOTE[result.finding.code]" class="meaning">{{ NOTE[result.finding.code] }}</p>
       <div class="fixes">

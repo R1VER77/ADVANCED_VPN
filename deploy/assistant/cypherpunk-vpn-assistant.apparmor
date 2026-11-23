@@ -1,0 +1,12 @@
+# Lets the assistant's launcher create its network-less user namespace on systems that
+# restrict unprivileged user namespaces (Ubuntu 24.04 and later), the way Ubuntu's own
+# profiles do for applications that need one. It grants nothing else: the launcher
+# stays unconfined as before and execs only the packaged llama-server.
+abi <abi/4.0>,
+include <tunables/global>
+
+profile cypherpunk-vpn-assistant /usr/lib/cypherpunk-vpn/assistant/isolate flags=(unconfined) {
+  userns,
+
+  include if exists <local/cypherpunk-vpn-assistant>
+}

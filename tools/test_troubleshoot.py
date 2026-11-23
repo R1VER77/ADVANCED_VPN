@@ -15,6 +15,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -160,6 +161,42 @@ class Assistant(unittest.TestCase):
                 assistant.installed(model, server)
 
 
+class Launcher(unittest.TestCase):
+    """Installed, the packaged launcher creates the namespace; from a checkout, unshare -rn."""
+
+    def argv_for(self, packaged):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            model, server, isolate = home / "m.gguf", home / "llama-server", home / "isolate"
+            for f in (model, server, isolate):
+                f.write_bytes(b"x")
+            server.chmod(0o755)
+            seen = []
+
+            def popen(argv, **_):
+                seen.append(argv)
+                raise RuntimeError("stop before running anything")
+
+            with mock.patch.object(assistant, "SERVER", server if packaged else home / "other"), \
+                 mock.patch.object(assistant, "ISOLATE", isolate), \
+                 mock.patch.object(assistant, "installed"), \
+                 mock.patch.object(assistant.subprocess, "Popen", popen):  # fmt: skip
+                with self.assertRaises(RuntimeError):
+                    assistant.ask_local_model("q", {}, model, server)
+            return seen[0], isolate, server
+
+    def test_the_installed_server_runs_through_the_launcher(self):
+        argv, isolate, _ = self.argv_for(packaged=True)
+        self.assertEqual(argv[0], str(isolate))
+        self.assertNotIn("unshare", " ".join(argv))
+        self.assertIn("--offline", argv)
+
+    @unittest.skipUnless(shutil.which("unshare"), "needs unshare")
+    def test_a_checkout_server_runs_under_unshare(self):
+        argv, _, server = self.argv_for(packaged=False)
+        self.assertEqual(argv[1:4], ["-rn", "--", str(server)])
+
+
 def namespace_works():
     unshare = shutil.which("unshare")
     return bool(unshare) and subprocess.run([unshare, "-rn", "true"], capture_output=True).returncode == 0
@@ -171,6 +208,39 @@ class Isolation(unittest.TestCase):
         out = subprocess.run(["unshare", "-rn", "cat", "/proc/net/dev"], capture_output=True, text=True, check=True)
         names = [line.split(":")[0].strip() for line in out.stdout.splitlines()[2:]]
         self.assertEqual(names, ["lo"])
+
+
+@unittest.skipUnless(namespace_works() and shutil.which("gcc"), "needs gcc and unprivileged namespaces")
+class IsolateLauncher(unittest.TestCase):
+    """deploy/assistant/isolate.c, built pointing at cat: what the started program gets."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.exe = Path(cls.tmp.name) / "isolate"
+        source = Path(__file__).resolve().parents[1] / "deploy/assistant/isolate.c"
+        subprocess.run(["gcc", "-O2", "-Wall", "-Wextra", "-Werror", '-DSERVER="/bin/cat"', "-o", str(cls.exe),
+                        str(source)], check=True)  # fmt: skip
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def read(self, path):
+        return subprocess.run([str(self.exe), path], capture_output=True, text=True, check=True).stdout
+
+    def test_only_loopback_own_uid_no_capabilities_no_new_privileges(self):
+        self.assertEqual([x.split(":")[0].strip() for x in self.read("/proc/net/dev").splitlines()[2:]], ["lo"])
+        uid = str(os.getuid())
+        self.assertEqual(self.read("/proc/self/uid_map").split(), [uid, uid, "1"])
+        status = dict(x.split(":", 1) for x in self.read("/proc/self/status").splitlines() if ":" in x)
+        self.assertEqual(status["CapEff"].strip(), "0" * 16)
+        self.assertEqual(status["NoNewPrivs"].strip(), "1")
+
+    def test_it_starts_only_its_fixed_program(self):
+        # argv[1] is an argument to the fixed program, never a program to run.
+        r = subprocess.run([str(self.exe), "/bin/sh", "-c", "echo escaped"], capture_output=True, text=True)
+        self.assertNotIn("escaped", r.stdout)
 
 
 MODEL = os.environ.get("CPVPN_ASSISTANT_MODEL")
