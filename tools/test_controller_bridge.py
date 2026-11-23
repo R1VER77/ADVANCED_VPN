@@ -155,6 +155,33 @@ class CallerPlans(unittest.TestCase):
 
 
 class KeyProbeCache(unittest.TestCase):
+    def test_the_fingerprint_ignores_udevs_tag_order_but_not_a_tag_change(self):
+        """udev lists tags in no fixed order; the real function, not a stand-in, must repeat."""
+        from pathlib import Path
+        import tempfile
+        import controller_backend
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            sysfs, dev = root / "sys", root / "dev"
+            (sysfs / "class/hidraw/hidraw0/device").mkdir(parents=True)
+            (sysfs / "class/hidraw/hidraw0/device/uevent").write_text("HID_NAME=Nitrokey\n")
+            (sysfs / "bus/usb/devices").mkdir(parents=True)
+            dev.mkdir()
+            (dev / "hidraw0").write_text("node")
+            orders = iter([":seat:uaccess:security-device:", ":uaccess:security-device:seat:",
+                           ":security-device:seat:uaccess:"])  # fmt: skip
+            adapter = controller_backend.Adapter()
+
+            def fingerprint(tags=None):
+                value = tags or next(orders)
+                return adapter.key_fingerprint(sysfs, dev, udev=lambda n: {"CURRENT_TAGS": value, "TAGS": value})
+
+            first = fingerprint()
+            self.assertEqual(fingerprint(), first)
+            self.assertEqual(fingerprint(), first)
+            self.assertNotEqual(fingerprint(":seat:security-device:"), first)  # uaccess gone: a real change
+
     def test_key_findings_reprobes_only_when_visible_device_or_state_changes(self):
         from pathlib import Path
         import tempfile

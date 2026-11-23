@@ -131,7 +131,14 @@ class Adapter:
                 value.update(b"%d:%d:%d:%d:%d\0" % (st.st_ino, st.st_ctime_ns, st.st_mode, st.st_uid, st.st_gid))
             except OSError:
                 value.update(b"unreadable\0")
-            value.update(json.dumps(udev(d.name) or {}, sort_keys=True).encode())
+            props = dict(udev(d.name) or {})
+            # udev lists a device's tags in no fixed order (":seat:uaccess:" then
+            # ":uaccess:seat:"): compare them as sets, or the fingerprint never repeats and
+            # the key is probed on every refresh after all (found 23 Nov 2026).
+            for tags in ("TAGS", "CURRENT_TAGS"):
+                if isinstance(props.get(tags), str):
+                    props[tags] = ":".join(sorted(t for t in props[tags].split(":") if t))
+            value.update(json.dumps(props, sort_keys=True).encode())
         for u in sorted((sysfs / "bus/usb/devices").glob("*")):
             for name in ("idVendor", "idProduct", "busnum", "devnum"):
                 try:

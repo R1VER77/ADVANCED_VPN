@@ -51,6 +51,8 @@ LEGACY_LINE_SUBSTRINGS = {
         'LEGACY_TABLE = "inet advanced_vpn"',
     ),
     "tools/test_native_package.py": ("/usr/bin/avpn", "advanced-vpn.service"),
+    # Checks, in a guest, that the pre-rename install is gone after an upgrade.
+    "tools/upgrade_vm_test.py": ("/opt/advanced-vpn", "advanced-vpn*.service", "/usr/bin/avpn", "grep -c advanced-vpn"),
     "docs/cli/cloud.md": (
         "~/.config/advanced-vpn",
         "`avpn-*`",

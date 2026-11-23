@@ -333,19 +333,41 @@ def holds(device, credential_id):
     return True
 
 
+def open_devices(attempts=5, pause=0.2, sleep=time.sleep):
+    """Every FIDO2 HID device, opened. A reply addressed to another program's channel or
+    nonce (another program talking to the key at that moment) makes python-fido2 give up
+    where libfido2 discards it; opening is harmless to repeat (no PIN, no touch), so try
+    again a few times. Found 23 Nov 2026: three operator-vault enrolments in a row failed
+    on "Wrong nonce"/"Wrong channel" while ssh-keygen signed fine."""
+    from fido2.hid import CtapHidDevice, ConnectionFailure
+
+    for attempt in range(attempts):
+        opened = []
+        try:
+            for d in CtapHidDevice.list_devices():
+                opened.append(d)
+            return opened
+        except ConnectionFailure:
+            for d in opened:
+                d.close()
+            if attempt == attempts - 1:
+                raise
+            sleep(pause * (attempt + 1))
+    return []
+
+
 def client(credential_id=None, require=None, exclude=None):
     """Open the one eligible hmac-secret FIDO2 device: the one holding `credential_id`
     when several are present, only keys `require(info)` accepts, and never one holding
     the credential `exclude`. A PIN typed on this
     computer comes from `pinentry` and is never retried; a key that verifies on the device
     asks there."""
-    from fido2.hid import CtapHidDevice
     from fido2.ctap2 import Ctap2
     from fido2.client import Fido2Client, DefaultClientDataCollector, UserInteraction
     from fido2.ctap2.extensions import HmacSecretExtension
 
     found = []
-    for d in CtapHidDevice.list_devices():
+    for d in open_devices():
         info = Ctap2(d).info
         if eligible(info) and (require is None or require(info)):
             found.append(d)

@@ -66,6 +66,11 @@ measured figure in the docs names the version it was measured on.
   - **Gemma's terms:** the first-launch agreement now includes the Gemma Terms of Use and
     its Prohibited Use Policy, as those terms require of anyone who redistributes Gemma
     ([evaluation](docs/evidence/ASSISTANT_EVAL_20261123.json)).
+- Fixed before release ([incidents](docs/INCIDENTS.md)):
+  - The app still polled the security key every 2 seconds, because udev reports tags in
+    a changing order, so key operations failed while the app was open. Tags are now
+    compared as sets, and opening the key retries on another program's reply.
+  - Installed systems lacked the Fly.io helpers that `cloud health` and the Fly exit need.
 - Fixed: the PIN dialog, desktop notifications and the terminal view still said "ADVANCED
   VPN"; the name gate now also catches that spelling.
 - **Correction:** the Tor guide claimed a leak test in CI that never existed

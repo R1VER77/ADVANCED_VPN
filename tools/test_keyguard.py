@@ -414,3 +414,40 @@ class PinProtocolQuirkTests(unittest.TestCase):
         import keyguard
 
         self.assertEqual(keyguard.pin_protocols(self.info("00000000-0000-0000-0000-000000000001", [2, 1])), [2, 1])
+
+
+class OpenDevices(unittest.TestCase):
+    """A reply meant for another program (another client talking to the key at that
+    moment) is retried, not fatal; nothing opened is left open; it still gives up."""
+
+    def run_open(self, outcomes):
+        from unittest import mock
+
+        import keyguard
+        from fido2.hid import ConnectionFailure
+
+        made, attempts = [], iter(outcomes)
+
+        def devices():
+            plan = next(attempts)
+            for item in plan:
+                if item == "stray":
+                    raise ConnectionFailure("Wrong channel")
+                d = mock.Mock(name=item)
+                made.append(d)
+                yield d
+
+        with mock.patch("fido2.hid.CtapHidDevice.list_devices", side_effect=devices):
+            return keyguard.open_devices(sleep=lambda s: None), made
+
+    def test_a_stray_reply_is_retried_and_partial_opens_are_closed(self):
+        result, made = self.run_open([["first", "stray"], ["key"]])
+        self.assertEqual([d._mock_name for d in result], ["key"])
+        self.assertTrue(made[0].close.called)  # opened before the stray reply: closed
+        self.assertFalse(made[1].close.called)
+
+    def test_it_gives_up_after_its_attempts(self):
+        from fido2.hid import ConnectionFailure
+
+        with self.assertRaises(ConnectionFailure):
+            self.run_open([["stray"]] * 5)

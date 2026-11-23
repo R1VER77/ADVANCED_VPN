@@ -67,6 +67,8 @@ class UserInstallTests(unittest.TestCase):
         for b in install.BINARIES + ["cypherpunkctl", "cpvpn-cloud", "cpvpn-mesh", "cpvpn-desktop"]:
             self.assertTrue(os.access(app / "bin" / b, os.X_OK), b)
         self.assertTrue((app / "docs/cli/overview.md").exists())
+        for name in install.RUNTIME_HELPERS:  # the Fly exit path runs these from the slot
+            self.assertTrue(os.access(app / "tools" / name, os.X_OK), name)
         self.assertFalse(list(app.rglob("__pycache__")))
         r = self.cpvpn("--version")
         version = re.search(r'^version = "([^"]+)"', (install.ROOT / "Cargo.toml").read_text(), re.M).group(1)
@@ -320,6 +322,35 @@ class AppArmorManagedBlock(unittest.TestCase):
                          "fc235f708d3075bafde209b191ff0a8f2b3946c32fa3d614d927253da87b9a70")  # fmt: skip
         self.assertNotIn("fc235f708d3075bafde209b191ff0a8f2b3946c32fa3d614d927253da87b9a70",
                          install.PREVIOUS_APPARMOR_BLOCKS)  # fmt: skip
+
+
+class RuntimeHelpers(unittest.TestCase):
+    def test_every_program_the_fly_path_runs_is_installed(self):
+        """cloud.py runs these from its own folder; a slot must carry them, executable."""
+        import cloud
+
+        here = install.ROOT / "tools"
+        record = dict(provider="fly", app="a", machine="m")
+        ssh, scp = cloud.fly_tools(record)[:2] if hasattr(cloud, "fly_tools") else (None, None)
+        named = {Path(x).name for x in (ssh, scp) if x}
+        if not named:  # the reference, read from the source when the function is named differently
+            named = set(re.findall(r'here / "(fly-[a-z]+)"', (here / "cloud.py").read_text()))
+        self.assertTrue(named)
+        self.assertLessEqual(named, set(install.RUNTIME_HELPERS))
+        for name in install.RUNTIME_HELPERS:
+            self.assertTrue(os.access(here / name, os.X_OK), name)
+
+    @unittest.skipUnless(BUILT, "build the release binaries first")
+    def test_the_system_stage_carries_the_helpers(self):
+        """The system install (what the package runs with --apply), staged with --out as
+        this user: it copied only tools/*.py, so an installed `cloud health` failed."""
+        with tempfile.TemporaryDirectory() as d:
+            out = Path(d) / "stage"
+            r = subprocess.run([sys.executable, str(install.ROOT / "tools/install.py"), "--out", str(out)],
+                               capture_output=True, text=True, timeout=600)  # fmt: skip
+            self.assertEqual(r.returncode, 0, r.stderr[-2000:])
+            for name in install.RUNTIME_HELPERS:
+                self.assertTrue(os.access(out / "opt/cypherpunk-vpn/tools" / name, os.X_OK), name)
 
 
 if __name__ == "__main__":

@@ -55,6 +55,32 @@ private vulnerability reporting (see [SECURITY.md](../SECURITY.md)).
 
 ## Fixed
 
+### The app still polled the security key every 2 seconds; key operations failed while it was open (23 Nov 2026, before release)
+- **What:** the controller's key-probe cache (added 22 Nov) re-probed the key on every
+  setup refresh after all.
+  - Its fingerprint included udev's tag list, which udev reports in a different order on
+    each read (`:seat:uaccess:` then `:uaccess:seat:`), so no two fingerprints matched.
+  - While the app was open, every other program using the key, such as creating the
+    operator vault or signing, met a stranger's replies on the key's channel. python-fido2
+    gives up with "Wrong nonce" or "Wrong channel".
+- **How found:** the end-to-end setup. Listening on the key showed a new session and a
+  `getInfo` every 2.0 s, with nothing else running.
+- **Fix:**
+  - tags are compared as sets;
+  - the real fingerprint function is now tested, not a stand-in, and ten real reads in
+    20 s give one fingerprint;
+  - opening the key is retried on a stray reply, closing whatever was already opened;
+  - mutants of both fail tests.
+- **Also found:** my own "is the app open" check matched a 16-character process name the
+  kernel shortens to 15, so it always said "closed".
+
+### Installed systems lacked the Fly.io helpers (23 Nov 2026, before release)
+- **What:** a system installation copied only `tools/*.py`, so `cloud health` and every
+  other Fly.io operation failed on an installed system: `tools/fly-ssh` was missing.
+- **Fix:** the helpers are listed (`install.RUNTIME_HELPERS`) and copied, executable.
+  - A test stages the system installation the way the package does and checks for them.
+  - Another ties the list to the programs `cloud.py` runs.
+
 ### The renamed package could not upgrade the previous release (23 Nov 2026, before release)
 - **What:** upgrading the owner's laptop from the previous 0.11.0 build stopped in the
   package's post-install step: `modified AppArmor managed block; review the local policy`.

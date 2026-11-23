@@ -48,6 +48,9 @@ BINARIES = [
 ]
 SOURCES = ["tools", "tofu/modules", "deploy", "third_party", "docs/cli", "docs/OFFLINE_INSTALLATION.md", "docs/SIGNED_REPOSITORY.md", "docs/SUPPORT_MATRIX.md",
            "docs/NAME_MIGRATION.md", "README.md", "LICENSE", "NOTICE", "SECURITY.md"]  # fmt: skip
+# Non-Python programs in tools/ the installed tools run (cloud.py's Fly exit path). A slot
+# copied only tools/*.py, so `cloud health` failed on an installed system (23 Nov 2026).
+RUNTIME_HELPERS = ("fly-ssh", "fly-scp")
 PACKAGE_OWNER = Path("/var/lib/cypherpunk-vpn/package-owner")
 PACKAGE_OWNER_BYTES = b"cypherpunk-vpn package ownership v1\n"
 
@@ -914,6 +917,9 @@ def main():
         shutil.copy2(ROOT / "target/release" / name, package / "bin" / name)
     for src in (ROOT / "tools").glob("*.py"):
         shutil.copy2(src, package / "tools" / src.name)
+    for name in RUNTIME_HELPERS:
+        shutil.copy2(ROOT / "tools" / name, package / "tools" / name)
+        (package / "tools" / name).chmod(0o755)
     shutil.copy2(ROOT / "tools/hardware-requirements.txt", package / "tools/hardware-requirements.txt")
     shutil.copy2(ROOT / "tools/preflight-policy.json", package / "tools/preflight-policy.json")
     shutil.copytree(ROOT / "tools/provider_data", package / "tools/provider_data")
