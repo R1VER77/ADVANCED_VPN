@@ -152,3 +152,78 @@ class CallerPlans(unittest.TestCase):
             self.preview()
         self.broker.cancel(self.caller, operation["id"])
         self.assertEqual(self.finished(operation)["state"], "cancelled")
+
+
+class KeyProbeCache(unittest.TestCase):
+    def test_key_findings_reprobes_only_when_visible_device_or_state_changes(self):
+        from pathlib import Path
+        import tempfile
+        from unittest import mock
+        import controller_backend
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            sysfs, dev = root / "sys", root / "dev"
+            hid = sysfs / "class/hidraw/hidraw0/device"
+            usb = sysfs / "bus/usb/devices/1-1"
+            hid.mkdir(parents=True)
+            usb.mkdir(parents=True)
+            dev.mkdir(parents=True)
+            (hid / "uevent").write_text("HID_NAME=Nitrokey\n")
+            node = dev / "hidraw0"
+            node.write_text("node")
+            for name, val in (("idVendor", "20a0"), ("idProduct", "42b2"), ("busnum", "1"), ("devnum", "4")):
+                (usb / name).write_text(val + "\n")
+            udev_tags = {"hidraw0": {"TAGS": ":uaccess:"}}
+
+            adapter = controller_backend.Adapter()
+            caller = bridge.Caller("a" * 32, ":1.42", 1000)
+            calls = []
+            gen = ["g1"]
+
+            def fake_diag(c):
+                calls.append(c.uid)
+                return ["ready-%d" % len(calls)]
+
+            orig_fp = adapter.key_fingerprint
+            fp = lambda: orig_fp(sysfs=sysfs, dev=dev, udev=lambda n: udev_tags.get(n, {}))  # noqa: E731
+            with (
+                mock.patch.object(adapter, "diagnostics", side_effect=fake_diag),
+                mock.patch.object(adapter, "key_fingerprint", side_effect=fp),
+                mock.patch.object(adapter, "generation", side_effect=lambda: gen[0]),
+            ):
+                self.assertEqual(adapter.key_findings(caller, epoch=(("op1", "running"),)), ["ready-1"])
+                # Unchanged poll does not talk to the key again.
+                self.assertEqual(adapter.key_findings(caller, epoch=(("op1", "running"),)), ["ready-1"])
+                self.assertEqual(len(calls), 1)
+                # Operation state change re-probes.
+                self.assertEqual(adapter.key_findings(caller, epoch=(("op1", "complete"),)), ["ready-2"])
+                self.assertEqual(len(calls), 2)
+                # Controller state generation change re-probes.
+                gen[0] = "g2"
+                self.assertEqual(adapter.key_findings(caller, epoch=(("op1", "complete"),)), ["ready-3"])
+                # udev property change re-probes.
+                udev_tags["hidraw0"] = {"TAGS": ""}
+                self.assertEqual(adapter.key_findings(caller, epoch=(("op1", "complete"),)), ["ready-4"])
+                # Device node permission/ctime change re-probes.
+                node.chmod(0o660)
+                self.assertEqual(adapter.key_findings(caller, epoch=(("op1", "complete"),)), ["ready-5"])
+                # USB device number change (re-plug) re-probes.
+                (usb / "devnum").write_text("5\n")
+                self.assertEqual(adapter.key_findings(caller, epoch=(("op1", "complete"),)), ["ready-6"])
+                self.assertEqual(len(calls), 6)
+
+            # A failed probe is never cached.
+            with (
+                mock.patch.object(adapter, "diagnostics", side_effect=[bridge.Refused("hardware_probe_failed"), ["ok"]]),
+                mock.patch.object(adapter, "key_fingerprint", return_value="same"),
+                mock.patch.object(adapter, "generation", return_value="same"),
+            ):
+                adapter.probe_cache = None
+                with self.assertRaises(bridge.Refused):
+                    adapter.key_findings(caller)
+                self.assertEqual(adapter.key_findings(caller), ["ok"])
+
+
+if __name__ == "__main__":
+    unittest.main()

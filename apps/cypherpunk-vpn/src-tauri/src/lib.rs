@@ -193,6 +193,26 @@ async fn operator_signin(server: String) -> Result<String, String> {
         .map_err(|_| "helper_unavailable")?
 }
 
+/// The first-launch agreement: whether this version is accepted, or record acceptance.
+#[tauri::command]
+async fn operator_agreement(command: String, version: String) -> Result<String, String> {
+    if !matches!(command.as_str(), "state" | "accept") {
+        return Err("invalid_agreement_command".into());
+    }
+    operator::agreement_version(&version)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        operator::call(&["agreement", command.as_str(), version.as_str()])
+    })
+    .await
+    .map_err(|_| "helper_unavailable")?
+}
+
+/// "Reject and quit" on the agreement: close the app.
+#[tauri::command]
+fn quit_app(app: tauri::AppHandle) {
+    app.exit(0);
+}
+
 #[tauri::command]
 fn operator_build(
     order: Vec<String>,
@@ -240,7 +260,9 @@ pub fn run() {
             operator_build,
             operator_build_status,
             operator_export,
-            operator_signin
+            operator_signin,
+            operator_agreement,
+            quit_app
         ])
         .run(tauri::generate_context!())
         .expect("cypherpunk_vpn desktop application");

@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
+import AgreementGate from './components/AgreementGate.vue'
 import BrandMark from './components/BrandMark.vue'
 import MapPane from './components/MapPane.vue'
 import SetupChecklist from './components/SetupChecklist.vue'
-import { controller } from './controller/real'
+import agreement from './controller/agreement.json'
+import { controller, operator } from './controller/real'
 import type { ActionPlan, ActionRequest, Operation, Status } from './controller/types'
 
+const agreed = ref<boolean | null>(null)
 const status = ref<Status | null>(null)
 const plan = ref<ActionPlan | null>(null)
 const operation = ref<Operation | null>(null)
@@ -80,14 +83,31 @@ function trap(event: KeyboardEvent) {
   else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
 }
 
-onMounted(() => { void poll(); timer = window.setInterval(poll, 1000) })
+function start() {
+  agreed.value = true
+  if (!timer) {
+    void poll()
+    timer = window.setInterval(poll, 1000)
+  }
+}
+
+onMounted(async () => {
+  try {
+    agreed.value = (await operator.agreementState(agreement.version)).accepted
+  } catch {
+    agreed.value = false
+  }
+  if (agreed.value) start()
+})
 onUnmounted(() => window.clearInterval(timer))
 </script>
 
 <template>
   <div class="application">
     <header class="header"><BrandMark /><span class="caption">Private by design.</span></header>
-    <main class="workspace">
+    <AgreementGate v-if="agreed === false" @accepted="start" />
+    <div v-else-if="agreed === null" />
+    <main v-else class="workspace">
       <section class="controls" aria-label="Connection and setup">
         <div class="connection" aria-live="polite">
           <span class="eyebrow">Your connection</span>

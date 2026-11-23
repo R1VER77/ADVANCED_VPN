@@ -16,6 +16,7 @@ import selectors
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
 import avpnctl
@@ -36,6 +37,11 @@ STATE = Path("/etc/advanced-vpn/enrolled")
 
 class Adapter:
     """The existing controller owns all configuration, repairs and security verdicts."""
+
+    def __init__(self):
+        # The last security-key findings and what they were made from (see key_findings).
+        self.probe_lock = threading.Lock()
+        self.probe_cache = None
 
     def locked(self):
         """Share the cooperating CLI's short-mutation lock."""
@@ -108,6 +114,47 @@ class Adapter:
         if report.get("schema") != 1 or not isinstance(report.get("findings"), list) or len(report["findings"]) > 64:
             raise Refused("invalid_hardware_report")
         return [hwkey.Finding(**f) for f in report["findings"]]
+
+    def key_fingerprint(self, sysfs=Path("/sys"), dev=Path("/dev"), udev=None):
+        """The security keys as the system lists them, without talking to any of them.
+
+        Plugging or removing a key (even at the same node), new udev tags and a changed
+        device ACL (which updates the node's ctime) all change it. The key's own state does
+        not; setup operations account for that (see key_findings)."""
+        udev = udev or hwkey.udev_properties
+        value = hashlib.sha256(b"cypherpunk/key-fingerprint/v1\0")
+        for d in sorted((sysfs / "class/hidraw").glob("hidraw*")):
+            value.update(d.name.encode() + b"\0" + os.path.realpath(d / "device").encode() + b"\0")
+            try:
+                value.update((d / "device/uevent").read_bytes())
+                st = os.stat(dev / d.name)
+                value.update(b"%d:%d:%d:%d:%d\0" % (st.st_ino, st.st_ctime_ns, st.st_mode, st.st_uid, st.st_gid))
+            except OSError:
+                value.update(b"unreadable\0")
+            value.update(json.dumps(udev(d.name) or {}, sort_keys=True).encode())
+        for u in sorted((sysfs / "bus/usb/devices").glob("*")):
+            for name in ("idVendor", "idProduct", "busnum", "devnum"):
+                try:
+                    value.update((u / name).read_bytes())
+                except OSError:
+                    value.update(b"-")
+        return value.hexdigest()
+
+    def key_findings(self, caller, epoch=()):
+        """The security-key findings, probing the key only when something visible changed.
+
+        Probing talks to the key (CTAP getInfo). Done on every setup refresh (2 s), it cut
+        off any signature waiting for a touch, so commit signing and browser sign-ins failed
+        while the app was open (22 Nov 2026). Findings are kept until the key list, its
+        access, the controller's state or an operation's state changes."""
+        key = (caller.uid, self.key_fingerprint(), self.generation(), epoch)
+        with self.probe_lock:
+            if self.probe_cache is not None and self.probe_cache[0] == key:
+                return self.probe_cache[1]
+        findings = self.diagnostics(caller)  # a failed probe is not kept: it is tried again
+        with self.probe_lock:
+            self.probe_cache = (key, findings)
+        return findings
 
     @contextlib.contextmanager
     def import_files(self, request):
@@ -358,7 +405,7 @@ class Adapter:
         self._software = (time.monotonic(), families, rows)
         return rows
 
-    def setup(self, caller, branch, busy=False):
+    def setup(self, caller, branch, busy=False, epoch=()):
         """Client checks are root-authoritative; provider credentials stay ordinary-user scoped."""
         if branch not in ("create", "join"):
             raise Refused("invalid_setup_branch")
@@ -379,7 +426,7 @@ class Adapter:
             return dict(
                 schema=1, branch=branch, complete=0, total=len(rows), current=rows[0]["id"], finished=False, steps=rows
             )
-        findings = self.diagnostics(caller)
+        findings = self.key_findings(caller, epoch)
         import controller_create_join
 
         wizard = controller_create_join.paths()
@@ -440,7 +487,8 @@ def main():
                             o.public["state"] in ("running", "waiting_for_user", "waiting_for_hardware")
                             for o in broker.operations.values()
                         )
-                    result = adapter.setup(caller, value, busy)
+                        epoch = tuple(sorted((i, o.public["state"]) for i, o in broker.operations.items()))
+                    result = adapter.setup(caller, value, busy, epoch)
                 elif method == "PreviewAction":
                     result = broker.preview(caller, value)
                 elif method == "ApplyAction":

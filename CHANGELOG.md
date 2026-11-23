@@ -67,6 +67,19 @@ measured figure in the docs names the version it was measured on.
   logos ship with the release, dated (22 November 2026); the app fetches neither. Logos are
   from CC0 icon sets, pinned by digest (`tools/provider_logos.py`).
 - The app is black, white and gray.
+- **First-launch agreement.** On first launch, before polling the controller, the desktop
+  app shows a two-page agreement: *Understand the risks* (what a VPN hides and does not,
+  your servers/accounts/bills, no key recovery; two checkboxes) and *Terms and privacy* (the
+  full [terms of service](docs/TERMS_OF_SERVICE.md) and
+  [privacy notice](docs/PRIVACY_NOTICE.md) shipped as plain text; *Back*, *Reject and quit*,
+  *Accept*). Acceptance is saved locally as the SHA-256 of both documents
+  (`~/.config/…/desktop/agreement.json`, mode `0600`); editing either document asks again.
+- **Fixed: the open app interrupted other uses of the security key**
+  ([incident](docs/INCIDENTS.md)). The setup checklist refreshes every 2 s, and each refresh
+  ran `hardware_probe.py` (CTAP `getInfo`) against the key, which cut off any signature
+  waiting for a touch (`FIDO_ERR_RX`). The controller now keeps the last key findings and
+  probes again only when the system's key list, `/dev/hidraw*` node attributes or udev tags,
+  the controller's state, or an operation's state changes.
 - [Privacy notice](docs/PRIVACY_NOTICE.md) and [terms of service](docs/TERMS_OF_SERVICE.md).
 - Correction: the create-branch wizard actions listed below (operator keys, exit request,
   route signing) were never admitted by the controller's D-Bus action schema, so the app

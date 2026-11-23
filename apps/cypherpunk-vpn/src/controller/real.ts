@@ -74,4 +74,7 @@ export const operator = {
   export: (request: string) => helper<{ schema: 1; path: string }>('operator_export', { request }),
   // Opens the browser for the cloud sign-in this recorded server uses; resolves when it is done.
   signin: (server: string) => helper<{ schema: 1; server: string; profile: string; ready: boolean; why: string }>('operator_signin', { server }),
+  agreementState: (version: string) => helper<{ schema: 1; accepted: boolean }>('operator_agreement', { command: 'state', version }),
+  acceptAgreement: (version: string) => helper<{ schema: 1; accepted: boolean }>('operator_agreement', { command: 'accept', version }),
+  quit: () => invoke<void>('quit_app'),
 }

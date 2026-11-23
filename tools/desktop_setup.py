@@ -7,6 +7,7 @@
     avpn-desktop build --order A[,B[,C]] [--hours N]   (the device request on stdin)
     avpn-desktop export                save the device request (stdin) to Documents
     avpn-desktop signin SERVER         renew the cloud sign-in a recorded server uses (browser)
+    avpn-desktop agreement state|accept VERSION   the first-launch agreement (local file only)
 
 The root controller holds the device's keys and never sees a cloud credential; this
 helper holds the operator side (cloud sign-ins, the operator's Nitrokey vault, the server
@@ -15,7 +16,7 @@ stdin and gives back the signed bundle, which the app hands to the controller to
 The app passes nothing else: provider keys and server names are checked against fixed
 lists, and every command it runs is a fixed argument list.
 
-`state` reads local files only. Only `check`, `signin` and `build` touch the network, and
+`state` and `agreement` read and write local files only. Only `check`, `signin` and `build` touch the network, and
 only when the person asks, so the app makes no background requests.
 
 Every reply is one JSON object on stdout (`build` writes one per line as it goes).
@@ -42,6 +43,7 @@ NAME = re.compile(r"avpn-[a-z0-9-]{1,40}\Z")
 MAX_REQUEST = 64 * 1024
 MAX_FILE = 1024 * 1024
 HOURS = (2, 4, 6, 8, 12, 16, 24)
+AGREEMENT_VERSION = re.compile(r"[0-9a-f]{64}")
 # The installed package carries the built server binaries in this layout; a checkout
 # is used when running from source.
 PAYLOAD = Path("/usr/lib/cypherpunk-vpn/payload")
@@ -109,6 +111,36 @@ def load_profile():
 def save_profile(profile):
     """Write the profile (owner-only)."""
     write_private(profile_path(), json.dumps(profile, indent=1) + "\n")
+
+
+def agreement_path():
+    """Where this user's acceptance of the first-launch agreement is kept."""
+    return config_dir() / "agreement.json"
+
+
+def agreement_version(value):
+    """The agreement's version (the SHA-256 of its documents), or refused."""
+    if not isinstance(value, str) or not AGREEMENT_VERSION.fullmatch(value):
+        raise Refused("invalid_agreement_version")
+    return value
+
+
+def agreement_state(version):
+    """Whether this user accepted exactly this version: edited documents ask again."""
+    version = agreement_version(version)
+    try:
+        record = json.loads(agreement_path().read_text())
+        accepted = isinstance(record, dict) and record.get("schema") == SCHEMA and record.get("version") == version
+    except (FileNotFoundError, ValueError):
+        accepted = False
+    return dict(schema=SCHEMA, accepted=accepted)
+
+
+def agreement_accept(version):
+    """Record acceptance: the version and the time, nothing else, readable by this user only."""
+    version = agreement_version(version)
+    write_private(agreement_path(), json.dumps(dict(schema=SCHEMA, version=version, accepted_at=now())) + "\n")
+    return dict(schema=SCHEMA, accepted=True)
 
 
 def now():
@@ -424,6 +456,9 @@ def main(argv=None):
     for name in ("check", "add", "remove"):
         sub.add_parser(name).add_argument("key")
     sub.add_parser("signin").add_argument("server")
+    g = sub.add_parser("agreement")
+    g.add_argument("action", choices=("state", "accept"))
+    g.add_argument("version")
     b = sub.add_parser("build")
     b.add_argument("--order", required=True)
     b.add_argument("--hours", type=int, default=8)
@@ -432,7 +467,9 @@ def main(argv=None):
         if a.command == "build":
             return build(a.order, a.hours)
         result = dict(state=state, export=export, check=lambda: check(a.key), add=lambda: add(a.key),
-                      remove=lambda: remove(a.key), signin=lambda: sign_in(a.server))[a.command]()  # fmt: skip
+                      remove=lambda: remove(a.key), signin=lambda: sign_in(a.server),
+                      agreement=lambda: (agreement_accept if a.action == "accept" else agreement_state)(a.version),
+                      )[a.command]()  # fmt: skip
         print(json.dumps(result))
         return 0
     except Refused as e:

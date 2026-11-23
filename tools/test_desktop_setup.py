@@ -233,6 +233,38 @@ class DesktopSetup(unittest.TestCase):
                 desktop_setup.sign_in(name, run=done)
             self.assertEqual(str(e.exception), reason)
 
+    def test_the_agreement_is_accepted_once_per_version_and_kept_private(self):
+        v1, v2 = "a" * 64, "b" * 64
+        self.assertFalse(desktop_setup.agreement_state(v1)["accepted"])  # first launch
+        self.assertTrue(desktop_setup.agreement_accept(v1)["accepted"])
+        self.assertTrue(desktop_setup.agreement_state(v1)["accepted"])
+        path = desktop_setup.agreement_path()
+        self.assertEqual(os.stat(path).st_mode & 0o777, 0o600)
+        self.assertEqual(set(json.loads(path.read_text())), {"schema", "version", "accepted_at"})
+        # Edited documents have a new version, which asks again.
+        self.assertFalse(desktop_setup.agreement_state(v2)["accepted"])
+        path.write_text("not json")
+        self.assertFalse(desktop_setup.agreement_state(v1)["accepted"])
+
+    def test_the_agreement_takes_only_a_sha256_version(self):
+        for bad in ("", "A" * 64, "a" * 63, "a" * 65, "../" + "a" * 61, "a" * 63 + "\n", None):
+            for call in (desktop_setup.agreement_state, desktop_setup.agreement_accept):
+                with self.assertRaises(desktop_setup.Refused):
+                    call(bad)
+        self.assertFalse(desktop_setup.agreement_path().exists())
+
+    def test_the_agreement_command_answers_one_json_line(self):
+        for argv, accepted in ((["agreement", "state", "c" * 64], False), (["agreement", "accept", "c" * 64], True),
+                               (["agreement", "state", "c" * 64], True), (["agreement", "state", "d" * 64], False)):  # fmt: skip
+            out = io.StringIO()
+            with mock.patch("sys.stdout", out):
+                self.assertEqual(desktop_setup.main(argv), 0)
+            self.assertEqual(json.loads(out.getvalue()), dict(schema=1, accepted=accepted))
+        out = io.StringIO()
+        with mock.patch("sys.stdout", out):
+            self.assertEqual(desktop_setup.main(["agreement", "accept", "x"]), 1)
+        self.assertEqual(json.loads(out.getvalue())["error"], "invalid_agreement_version")
+
 
 if __name__ == "__main__":
     unittest.main()

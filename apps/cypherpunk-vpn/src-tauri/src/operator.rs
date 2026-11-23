@@ -28,6 +28,19 @@ pub fn provider_key(value: &str) -> Result<(), String> {
     }
 }
 
+/// The agreement's version: the SHA-256 of its documents, as 64 lowercase hex digits.
+pub fn agreement_version(value: &str) -> Result<(), String> {
+    let ok = value.len() == 64
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+    if ok {
+        Ok(())
+    } else {
+        Err("invalid_agreement_version".into())
+    }
+}
+
 pub fn server_name(value: &str) -> Result<(), String> {
     let rest = value.strip_prefix("avpn-").unwrap_or("");
     let ok = (1..=40).contains(&rest.len())
@@ -200,6 +213,21 @@ impl Builds {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn agreement_versions_are_sha256_hex() {
+        assert!(agreement_version(&"0a".repeat(32)).is_ok());
+        for bad in [
+            String::new(),
+            "0a".repeat(31),
+            "0a".repeat(33),
+            "0A".repeat(32),
+            format!("{}--x", "0".repeat(61)),
+            format!("{}\n", "0".repeat(63)),
+        ] {
+            assert!(agreement_version(&bad).is_err(), "{bad:?}");
+        }
+    }
 
     #[test]
     fn provider_keys_are_plain_lowercase_words() {

@@ -22,6 +22,8 @@ const paths: Record<string, string> = {
   file: 'M14 2H5v20h14V7l-5-5ZM14 2v6h5M8 13h8m-8 4h6',
   computer: 'M3 3h18v13H3V3Zm5 18h8m-4-5v5',
   arrow: 'M4 12h16m-6-6 6 6-6 6',
+  'eye-off': 'M3 3l18 18M10.6 10.6a2 2 0 0 0 2.8 2.8M9.9 5.1A10.7 10.7 0 0 1 12 5c6 0 10 7 10 7a18.5 18.5 0 0 1-3.2 4.2M6.2 6.2C3.6 8.1 2 12 2 12s4 7 10 7c1.4 0 2.8-.3 4-.9',
+  server: 'M3 4h18v6H3V4Zm0 10h18v6H3v-6Zm4-7h.01M7 17h.01',
 }
 </script>
 <template>

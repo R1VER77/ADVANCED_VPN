@@ -55,6 +55,23 @@ private vulnerability reporting (see [SECURITY.md](../SECURITY.md)).
 
 ## Fixed
 
+### The open desktop app cut off other signatures on the security key (22 Nov 2026)
+- **What:** while the Cypherpunk VPN desktop app was open on the setup checklist, it polled
+  `GetSetup` every 2 s, and each poll ran `hardware_probe.py` (CTAP `getInfo`) against the
+  connected security key. Opening the CTAP channel while another process was waiting for a
+  physical touch cut off the pending assertion (`fido_dev_get_assertion: FIDO_ERR_RX`), and
+  each timed-out SSH signature left an orphan `ssh-sk-helper` under the keyring agent.
+- **Effect:** commit signing (`git commit -S`), browser FIDO2 sign-ins, and concurrent
+  hardware-key prompts failed while the app window was open.
+- **Not affected:** the VPN tunnel, key material, or operations run with the app closed.
+- **How found:** three consecutive `git commit -S` attempts never flashed the Nitrokey while
+  the app was open; closing the app let the signature succeed immediately, and a direct
+  `ssh-keygen -Y sign` trace showed `FIDO_ERR_RX`.
+- **Fix:** `Adapter.key_findings` in `tools/controller_backend.py` caches the probe result
+  and re-probes only when a passive system observation changes (sysfs USB/hidraw device
+  list, `/dev/hidraw*` inode/ctime/mode/owner, udev properties, controller state generation,
+  or active operation state). Failed probes are not cached.
+
 ### Servers never installed security updates; a rebuild could not get apt's lock (21–22 Nov 2026)
 - **What:** the egress lock (v0.11.0's fee guard) let only root out during the daily update
   window. apt downloads as its own user (`_apt`) and names resolve through

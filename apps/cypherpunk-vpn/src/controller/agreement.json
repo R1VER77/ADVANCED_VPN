@@ -1,0 +1,523 @@
+{
+ "schema": 1,
+ "version": "cf37580ee1c6bf037f1ffc8b21be7d774dbeb27a569b2832ed3894e99edb70fa",
+ "documents": [
+  {
+   "title": "Terms of service",
+   "sections": [
+    {
+     "heading": "",
+     "blocks": [
+      {
+       "k": "p",
+       "t": "These terms govern your use of the cypherpunk_vpn software and, where applicable, your participation in the project's community and mesh. Because cypherpunk_vpn is free software rather than a service, most of the conventional terms (subscription, billing, refunds, support) do not apply; the terms that do apply are shorter and more honest than the commercial alternative. The companion PRIVACY_NOTICE.md covers data; this document covers software, contributions and dispute."
+      }
+     ]
+    },
+    {
+     "heading": "1. The software, not a service",
+     "blocks": [
+      {
+       "k": "p",
+       "t": "cypherpunk_vpn is free software published under AGPL-3.0-or-later with a dual-license commercial path. The maintainer publishes the source; the maintainer does not operate a VPN service. When you run cypherpunk_vpn, you are operating your own VPN using the project's code. You are responsible for:"
+      },
+      {
+       "k": "li",
+       "t": "the infrastructure you run it on (cloud accounts, hardware tokens, exit nodes, network egress);"
+      },
+      {
+       "k": "li",
+       "t": "the laws of the jurisdictions in which your infrastructure sits (path-selection design makes this a first-class concern);"
+      },
+      {
+       "k": "li",
+       "t": "the traffic that leaves your exit (see the threat model for what an exit operator can see);"
+      },
+      {
+       "k": "li",
+       "t": "the costs you incur (cover-traffic bandwidth, hardware tokens, cloud bills — FUNDING.md records the maintainer's standing on costs)."
+      },
+      {
+       "k": "p",
+       "t": "There is no subscription, no automatic renewal, no billing cycle, no refund policy and no support contract. If you contributed funding voluntarily, that contribution is governed by FUNDING.md and is not a purchase."
+      }
+     ]
+    },
+    {
+     "heading": "2. License",
+     "blocks": [
+      {
+       "k": "p",
+       "t": "The software is licensed under AGPL-3.0-or-later. Read LICENSE for the full text and the dual-license commercial path. The summary:"
+      },
+      {
+       "k": "li",
+       "t": "You may run, study, modify and redistribute the software, with or without modification, for any purpose."
+      },
+      {
+       "k": "li",
+       "t": "You must preserve the AGPL license on downstream copies, and under §13, if you run a modified version as a network service (including a commercial VPN service, mesh relay, or cloud exit), you must offer all network participants prominent access to the corresponding source code at no charge."
+      },
+      {
+       "k": "li",
+       "t": "You may not impose further restrictions on the rights granted by AGPL, including in the form of proprietary license terms on downstream code that incorporates this software."
+      },
+      {
+       "k": "li",
+       "t": "Commercial licenses are available from the maintainer for enterprises and OEMs that require closed-source deployment. Contact the maintainer via the project's issue tracker."
+      }
+     ]
+    },
+    {
+     "heading": "3. No warranty",
+     "blocks": [
+      {
+       "k": "p",
+       "t": "THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. The maintainer does not warrant that the software will function uninterrupted, error-free, or in a way that defeats any specific adversary."
+      },
+      {
+       "k": "p",
+       "t": "The SECURITY.md file honestly states what this release does and does not protect against. Of particular note:"
+      },
+      {
+       "k": "li",
+       "t": "The traffic-analysis defenses are measured against published attacks but are not independent evaluations; residual leakage is documented in WF_REAL_RERUN3.md."
+      },
+      {
+       "k": "li",
+       "t": "A free-tier server stops forwarding when its monthly cap is reached (FEE_GUARD.md); Fly.io has no hard spending limit."
+      },
+      {
+       "k": "li",
+       "t": "No hardware attestation is implemented; the descriptor attestation roadmap is in ROADMAP.md."
+      },
+      {
+       "k": "li",
+       "t": "One owner running every hop can correlate the chain end to end; more hops under one operator are not anonymity from that operator."
+      },
+      {
+       "k": "li",
+       "t": "The cloak's server authentication is the project's composition, with regression and mutation tests but not an independent review."
+      },
+      {
+       "k": "li",
+       "t": "Endpoint root/host memory inspection is outside the protection boundary."
+      },
+      {
+       "k": "p",
+       "t": "You accept these limitations by running the software. If you need stronger assurance than this project provides, do not run it; use a commercial VPN that publishes independent audit results, or do not use a VPN at all."
+      }
+     ]
+    },
+    {
+     "heading": "4. Limitation of liability",
+     "blocks": [
+      {
+       "k": "p",
+       "t": "To the maximum extent permitted by applicable law, neither the maintainer nor any contributor is liable for any direct, indirect, incidental, special, consequential or punitive damages, or any loss of data, revenue or profit, arising from your use of or inability to use the software — even if advised of the possibility of such damages."
+      },
+      {
+       "k": "p",
+       "t": "This limitation reflects the fact that the software is free, the maintainer receives no payment from you for it, and the burden of evaluating its fitness for your purpose rests with you. If you require a liability surface, purchase a commercial license and the corresponding support contract; the AGPL path provides no such surface."
+      }
+     ]
+    },
+    {
+     "heading": "5. Acceptable use",
+     "blocks": [
+      {
+       "k": "p",
+       "t": "The software is general-purpose networking infrastructure. You may use it for any lawful purpose. You may not use it in a way that:"
+      },
+      {
+       "k": "li",
+       "t": "violates the law of the jurisdiction in which your infrastructure sits (this is your responsibility to determine, not the project's to police);"
+      },
+      {
+       "k": "li",
+       "t": "infringes the rights of others, including through the distribution of content you do not have the right to distribute;"
+      },
+      {
+       "k": "li",
+       "t": "attempts to disrupt the project's infrastructure (issue tracker, signed-commit verification, release distribution)."
+      },
+      {
+       "k": "p",
+       "t": "The project does not monitor your traffic. The project cannot terminate your use, because there is no account to terminate and no service to cut. If your behaviour in the project's community spaces (issues, pull requests) violates the CODE_OF_CONDUCT.md, the maintainer may ban you from those spaces; this does not affect your right to use the software under AGPL."
+      }
+     ]
+    },
+    {
+     "heading": "6. Contributions",
+     "blocks": [
+      {
+       "k": "p",
+       "t": "Contributions are governed by CONTRIBUTING.md. Inbound contributions are licensed under AGPL-3.0-or-later on the same terms as the project (inbound = outbound). You retain your copyright; you grant the project a license under AGPL. Sign your commits (SSH or OpenPGP); see SIGNED_REPOSITORY.md."
+      },
+      {
+       "k": "p",
+       "t": "The maintainer decides acceptance and records unresolved objections. Disagreements are resolved on the merits of the code and evidence, not the credentials of the contributor."
+      }
+     ]
+    },
+    {
+     "heading": "7. Indemnification",
+     "blocks": [
+      {
+       "k": "p",
+       "t": "To the maximum extent permitted by law, you agree to indemnify the maintainer and contributors against any claims, losses or damages arising from your use or misuse of the software, your distribution of the software to others, or your operation of infrastructure using the software. This is the symmetric counterpart of §4: you accept the liability for what you do with the software in exchange for receiving it without paying for it."
+      }
+     ]
+    },
+    {
+     "heading": "8. Dispute resolution",
+     "blocks": [
+      {
+       "k": "p",
+       "t": "There is no arbitration agreement, no class-action waiver, and no mandatory forum. There is also no entity to arbitrate with. If you have a complaint, the path is:"
+      },
+      {
+       "k": "li",
+       "t": "1. Open an issue. Most concerns are resolved by discussion."
+      },
+      {
+       "k": "li",
+       "t": "2. If the issue is a security vulnerability, follow SECURITY.md and report privately."
+      },
+      {
+       "k": "li",
+       "t": "3. If you believe the maintainer has violated the project's PRINCIPLES.md or CODE_OF_CONDUCT.md, raise it publicly; the maintainer's decisions are recorded in DECISIONS.md and can be reopened by new evidence."
+      },
+      {
+       "k": "li",
+       "t": "4. If none of the above resolves your concern and you believe you have a legal claim against the maintainer personally, open an issue asking for a service address. Be aware that there is nothing to seize and no data to compel — see PRIVACY_NOTICE.md §7."
+      },
+      {
+       "k": "p",
+       "t": "The project does not consent to jurisdiction in any specific forum because the project is not a legal person. The maintainer's personal jurisdiction is determined by residence, not by these terms."
+      }
+     ]
+    },
+    {
+     "heading": "9. Export control",
+     "blocks": [
+      {
+       "k": "p",
+       "t": "The software is publicly available open-source code that uses encryption. Whether exporting it needs a notification or licence depends on where you are; that check is yours. You may not export, re-export or use the software in violation of any applicable sanctions regime, including the regimes administered by the US Department of the Treasury's Office of Foreign Assets Control, the European Union, the United Kingdom, or any other jurisdiction in which you operate. The software is not intended for use by any person or entity on any sanctions list."
+      }
+     ]
+    },
+    {
+     "heading": "10. Third-party content",
+     "blocks": [
+      {
+       "k": "p",
+       "t": "The software depends on third-party libraries, each under their own license. The full provenance is in third_party/SOURCES.json and docs/PROVENANCE.md. The project does not host third-party content beyond what is necessary to build the software."
+      }
+     ]
+    },
+    {
+     "heading": "11. Termination",
+     "blocks": [
+      {
+       "k": "p",
+       "t": "Your license to use the software under AGPL is irrevocable, subject to your continued compliance with AGPL's terms. The maintainer cannot terminate your license because the maintainer does not control the software — you have a copy, and AGPL grants you the rights independently of the maintainer's continued involvement."
+      },
+      {
+       "k": "p",
+       "t": "If the maintainer stops maintaining the project, the AGPL license survives. The signed-commit history and the public repository are the project; the maintainer's continued attention is convenient but not load-bearing."
+      }
+     ]
+    },
+    {
+     "heading": "12. Changes to these terms",
+     "blocks": [
+      {
+       "k": "p",
+       "t": "Changes are made by signed commit. Material changes (changes to the license terms, the liability caps, the indemnification, the dispute clause) are recorded in CHANGELOG.md and in DECISIONS.md with the reason. The git history of this file is the canonical version control; no separate change log is maintained."
+      }
+     ]
+    },
+    {
+     "heading": "13. Comparison to commercial VPN terms",
+     "blocks": [
+      {
+       "k": "p",
+       "t": "The conventional commercial VPN terms of service — like OVPN's or NordVPN's or ExpressVPN's — typically run to thousands of words covering subscription, billing, automatic renewal, refund policy, mandatory binding arbitration with a class-action waiver, indemnification, export controls and limitation of liability. Those terms exist because those products are paid services with a customer relationship."
+      },
+      {
+       "k": "p",
+       "t": "This project has no customer relationship. The terms above are the honest minimum: license, no warranty, limitation of liability, acceptable use, indemnification, no forum. If a future version of the project forms a paid service or operating entity, those terms would be added at that time, with a separate document for the service layer and these terms retained for the software layer."
+      }
+     ]
+    },
+    {
+     "heading": "14. Local Gemma troubleshooting assistant",
+     "blocks": [
+      {
+       "k": "p",
+       "t": "The optional cypherpunk-vpn-assistant package includes Google's Gemma 3 1B model (gemma-3-1b-it-Q8_0.gguf) so the desktop app can explain setup or server failures locally on your own computer without sending logs over the network. Gemma is provided under and subject to the Gemma Terms of Use found at https://ai.google.dev/gemma/terms and the Gemma Prohibited Use Policy found at https://ai.google.dev/gemma/prohibited_use_policy. By installing or using the optional assistant package, you agree not to use the bundled Gemma model in violation of the Gemma Terms of Use or the Gemma Prohibited Use Policy. The rest of cypherpunk_vpn remains free software under AGPL-3.0-or-later and works in full without the assistant package."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "title": "Privacy notice",
+   "sections": [
+    {
+     "heading": "",
+     "blocks": [
+      {
+       "k": "p",
+       "t": "This notice covers the cypherpunk_vpn project and the software it publishes. The project is free software under AGPL-3.0-or-later, with a commercial dual-licensing path. It is not a service. There is no account, no payment, no support contract and no central operator, so the project holds no data about the people who run it. That follows from how the software is built, not from a promise. The parties who do see parts of your traffic are listed in section 5."
+      }
+     ]
+    },
+    {
+     "heading": "1. Who \"we\" are",
+     "blocks": [
+      {
+       "k": "p",
+       "t": "The project is maintained under the pseudonym R1VER77. There is no company, no paid staff and no support desk. If a legal entity is ever formed, its jurisdiction will be named here, and the reason recorded in DECISIONS.md. Today there is none."
+      },
+      {
+       "k": "p",
+       "t": "If you run the software, you operate your own tunnel with the project's code. People who use your deployment should read your notice, not this one."
+      }
+     ]
+    },
+    {
+     "heading": "2. What the project collects",
+     "blocks": [
+      {
+       "k": "p",
+       "t": "Nothing. There is no account system, sign-up, email list, payment, telemetry, error reporting or analytics. The project's website is its repository. GitHub's own privacy policy covers issues, pull requests and their notifications."
+      },
+      {
+       "k": "p",
+       "t": "The commit history is public and signed with hardware-backed SSH keys (SIGNED_REPOSITORY.md)."
+      }
+     ]
+    },
+    {
+     "heading": "3. What the software does not keep",
+     "blocks": [
+      {
+       "k": "li",
+       "t": "No record of your browsing on the servers."
+      },
+      {
+       "k": "li",
+       "t": "The relay and exit services send their output to nowhere (StandardOutput=null, LogLevelMax=emerg in deploy/advanced-vpn*.service)."
+      },
+      {
+       "k": "li",
+       "t": "Their working state lives in RAM."
+      },
+      {
+       "k": "li",
+       "t": "The exit's DNS resolver runs with query logging off (tools/exit_resolver.py)."
+      },
+      {
+       "k": "li",
+       "t": "On a Fly.io exit, deploy/fly/init.sh prints nothing, because a Machine's output goes to Fly's log store."
+      },
+      {
+       "k": "li",
+       "t": "The managed validation checks that a chain leaves no retained data behind (MANAGED_VALIDATION.md, multi-hop evidence)."
+      },
+      {
+       "k": "li",
+       "t": "One counter per server. To keep a free-tier server under its monthly cap, each server stores how many bytes it has sent this month, rounded to 16 MiB (FEE_GUARD.md). It is one total per server: no clients, no destinations, no times."
+      },
+      {
+       "k": "li",
+       "t": "No connection records. While you are connected, the servers hold their current peer's address in memory, as any tunnel must. They do not write it down. Cloud providers can still see addresses on their own network (section 5)."
+      },
+      {
+       "k": "li",
+       "t": "No device or advertising identifiers. The build contains no analytics or telemetry SDK. third_party/SOURCES.json lists every vendored upstream."
+      },
+      {
+       "k": "li",
+       "t": "No DNS history. The client's signed local blocklist answers blocked names inside the tunnel. The exit's recursive resolver keeps no per-client queries."
+      },
+      {
+       "k": "li",
+       "t": "No payment data. There is no payment system. FUNDING.md records any funding the project receives; at present there is none."
+      }
+     ]
+    },
+    {
+     "heading": "4. What the software handles on your own devices",
+     "blocks": [
+      {
+       "k": "li",
+       "t": "Settings and enrollment."
+      },
+      {
+       "k": "li",
+       "t": "On the client, the signed chain profile you enrolled lives in /etc/advanced-vpn/enrolled."
+      },
+      {
+       "k": "li",
+       "t": "On the operator's machine, the chains and the cloud server records live in ~/.config/advanced-vpn/."
+      },
+      {
+       "k": "li",
+       "t": "They name your servers and providers, not you."
+      },
+      {
+       "k": "li",
+       "t": "Keys."
+      },
+      {
+       "k": "li",
+       "t": "Keys are made on the device that uses them, in a vault at /etc/advanced-vpn/vault."
+      },
+      {
+       "k": "li",
+       "t": "The vault is sealed to a security key (FIDO2 hmac-secret) or a TPM where available (HARDWARE_BOUND_SESSIONS.md)."
+      },
+      {
+       "k": "li",
+       "t": "Private keys stay on the device. The device request you hand to the operator carries only public keys."
+      },
+      {
+       "k": "li",
+       "t": "Running state. Status files and PIDs are kept in RAM (tmpfs) and disappear when the service stops or the machine restarts."
+      },
+      {
+       "k": "li",
+       "t": "Diagnostics. avpn status, avpn doctor and the desktop app show connection details to you. Running them sends nothing anywhere."
+      }
+     ]
+    },
+    {
+     "heading": "5. What other parties can see",
+     "blocks": [
+      {
+       "k": "p",
+       "t": "The design limits what each party learns, but none of them learns nothing. See also the threat model."
+      },
+      {
+       "k": "li",
+       "t": "Your ISP or local network. Can see: That you send encrypted traffic to one address (your first server, or your upstream VPN); its timing and volume. Cannot see: What is inside it. The carrier is designed to look like HTTP/3 or HTTPS; that disguise has not been independently evaluated."
+      },
+      {
+       "k": "li",
+       "t": "Your first server's provider (AWS, Oracle, Azure, …). Can see: The address you connect from, the address of the next server, and the timing and volume of the traffic. Cannot see: The contents, which are encrypted with hybrid post-quantum key exchange."
+      },
+      {
+       "k": "li",
+       "t": "Each server along the chain. Can see: Only the server before it and the server after it. Cannot see: Your address (except the first server), the destination, and the contents."
+      },
+      {
+       "k": "li",
+       "t": "The exit (yours, or a mesh peer's). Can see: The traffic leaving the tunnel and where it goes; DNS queries reach its resolver. Cannot see: Your address. It sees only the server before it."
+      },
+      {
+       "k": "li",
+       "t": "The exit's provider. Can see: The same as the exit. On Fly.io, the exit's outgoing address is shared with other Fly customers and can change (FLY_EXIT.md). Cannot see: Your address."
+      },
+      {
+       "k": "li",
+       "t": "Every cloud provider you use. Can see: Who holds the account and what calls are made to its API. Cannot see: What other providers see."
+      },
+      {
+       "k": "li",
+       "t": "Websites. Can see: The exit's address and what you send them. Cannot see: Your address."
+      },
+      {
+       "k": "li",
+       "t": "The I2P network (with --front i2p). Can see: That you take part in I2P. Cannot see: Your address, and that the destination is a VPN server."
+      },
+      {
+       "k": "li",
+       "t": "Your security key's maker. Can see: Nothing about your VPN use. Cannot see: The sealed secrets."
+      },
+      {
+       "k": "li",
+       "t": "GitHub. Can see: Whatever you post in an issue or pull request. Cannot see: Anything about your deployment."
+      },
+      {
+       "k": "p",
+       "t": "One operator who runs every server in a chain can link its ends. Adding hops under that same operator does not change this."
+      }
+     ]
+    },
+    {
+     "heading": "6. Jurisdiction",
+     "blocks": [
+      {
+       "k": "p",
+       "t": "There is no operating entity, so there is no entity jurisdiction. The law where your servers run applies to the data on them. The project leaves that choice to you; SUPPORT_MATRIX.md lists what works where."
+      }
+     ]
+    },
+    {
+     "heading": "7. Legal process",
+     "blocks": [
+      {
+       "k": "p",
+       "t": "An order served on the maintainer personally is governed by the law that applies to the maintainer, not by the project. The project's defence is structural: the logs, account database and payment records such an order would ask for do not exist."
+      }
+     ]
+    },
+    {
+     "heading": "8. Your rights",
+     "blocks": [
+      {
+       "k": "p",
+       "t": "The project holds no personal data about you, so there is nothing to access, correct, delete or move under GDPR or CCPA. Under AGPL-3.0-or-later you can do more:"
+      },
+      {
+       "k": "li",
+       "t": "read, audit and change the source (CONTRIBUTING.md);"
+      },
+      {
+       "k": "li",
+       "t": "run it entirely on your own infrastructure;"
+      },
+      {
+       "k": "li",
+       "t": "rerun the evidence yourself (the validation tools in tools/ and the formal models in formal/);"
+      },
+      {
+       "k": "li",
+       "t": "fork it. If you run a modified version as a network service, AGPL §13 requires you to offer that version's source."
+      }
+     ]
+    },
+    {
+     "heading": "9. Children",
+     "blocks": [
+      {
+       "k": "p",
+       "t": "The software is not aimed at children and collects nothing from anyone of any age."
+      }
+     ]
+    },
+    {
+     "heading": "10. Changes",
+     "blocks": [
+      {
+       "k": "p",
+       "t": "This notice changes only by signed commit, and material changes are noted in the CHANGELOG. The file's git history is its version record."
+      }
+     ]
+    },
+    {
+     "heading": "11. Contact",
+     "blocks": [
+      {
+       "k": "p",
+       "t": "Open an issue on the repository. There is no email address, support desk or chat channel. Report security problems privately, as described in SECURITY.md."
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}
