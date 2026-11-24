@@ -1330,7 +1330,7 @@ if [ -d /opt/cypherpunk-vpn/bin ] && [ ! -L /opt/cypherpunk-vpn/bin ]; then
   for unit in cypherpunk-vpn.service cypherpunk-vpn-guard.service; do sudo -n systemctl stop "$unit" 2>/dev/null || true; done
   ADOPT=--adopt-legacy
 fi
-sudo -n python3 -B "$SOURCE_STAGE/tools/install.py" --apply $ADOPT >/dev/null
+sudo -n env TMPDIR="$SOURCE_STAGE" python3 -B "$SOURCE_STAGE/tools/install.py" --apply $ADOPT >/dev/null
 fi
 HAVE=$(sudo -n python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["role"])' $E/request.json 2>/dev/null || true)
 # Same-role keys are kept only if they carry every key this release makes for the role

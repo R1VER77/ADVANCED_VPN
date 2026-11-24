@@ -1824,7 +1824,7 @@ class HostSetupTests(unittest.TestCase):
         self.assertNotIn("PROTECT=none", script)
         self.assertIn("replace them to make it a", script)
         # Root-run Python must not leave root-owned caches behind in the user's temp tree.
-        self.assertIn("python3 -B /tmp/cpvpn-src/tools/install.py", script)
+        self.assertIn('env TMPDIR="$SOURCE_STAGE" python3 -B "$SOURCE_STAGE/tools/install.py"', script)
         # The system journal (sshd logs the admin's address) lives in RAM only.
         self.assertIn("Storage=volatile", script)
         self.assertIn("rm -rf /var/log/journal", script)
@@ -1863,6 +1863,7 @@ HOST_STUBS = {
     "sudo": '#!/bin/sh\n[ "$1" = -n ] && shift\nexec "$@"\n',
     "apt-get": '#!/bin/sh\necho "apt-get $*" >> "$ROOT/log"\n',
     "apt-cache": "#!/bin/sh\necho libtss2-esys-3.0.2-0t64\n",
+    "sleep": "#!/bin/sh\nexit 0\n",
     "systemctl": '#!/bin/sh\necho "systemctl $*" >> "$ROOT/log"\n',
     "nft": '#!/bin/sh\necho "nft $*" >> "$ROOT/log"\n',
     "systemd-analyze": "#!/bin/sh\nexit 1\n",
@@ -1916,7 +1917,10 @@ class HostScriptTests(unittest.TestCase):
         pkg = self.root / "pkg/tools"
         pkg.mkdir(parents=True)
         (pkg / "install.py").write_text(
-            'import os, sys\nopen(os.environ["ROOT"] + "/log", "a").write(" ".join(["install"] + sys.argv[1:]) + "\\n")\n'
+            "import os, sys\n"
+            'with open(os.environ["ROOT"] + "/log", "a") as log:\n'
+            '    log.write(" ".join(["install"] + sys.argv[1:]) + "\\n")\n'
+            '    log.write("installer TMPDIR=" + os.environ.get("TMPDIR", "") + "\\n")\n'
         )
         (self.root / "root").mkdir()
         (self.root / "etc/systemd").mkdir(parents=True)
@@ -1932,7 +1936,7 @@ class HostScriptTests(unittest.TestCase):
 
         self.script = cloud.HOST_SETUP.replace(retention.HARDEN.rstrip("\n"), 'echo harden >> "$ROOT/log"')
         assert "systemctl mask" not in self.script and "swapoff" not in self.script, "real hardening left in"
-        for path in [
+        paths = [
             "/etc/cypherpunk-vpn",
             "/etc/systemd",
             "/var/log/journal",
@@ -1944,8 +1948,8 @@ class HostScriptTests(unittest.TestCase):
             "/opt/advanced-vpn",
             "/etc/advanced-vpn",
             "/usr/local/bin/",
-        ]:
-            self.script = self.script.replace(path, str(self.root) + path)
+        ]
+        self.script = re.sub("|".join(map(re.escape, paths)), lambda m: str(self.root) + m[0], self.script)
         # Every path the script deletes must be inside the sandbox. On 22 Nov 2026 the
         # old-install cleanup ran `rm -rf` on the pre-rename install of the machine running
         # these tests (refused only because the stand-in sudo is not root).
@@ -1992,6 +1996,7 @@ class HostScriptTests(unittest.TestCase):
         # The hardening runs first, before packages are installed.
         log = self.log()
         self.assertLess(log.index("harden"), log.index("apt-get"))
+        self.assertIn("installer TMPDIR=" + str(self.root / "var/tmp/cpvpn-src."), log)
         self.assertFalse((self.root / "etc/cypherpunk-vpn/shared-host").exists())
         self.assertFalse((self.root / "tmp/cpvpn-src.tgz").exists())
         self.assertEqual(list((self.root / "var/tmp").iterdir()), [])
