@@ -46,8 +46,25 @@ jobs:
           tar -xJf "$RUNNER_TEMP/node.tar.xz" -C "$RUNNER_TEMP"
           export PATH="$RUNNER_TEMP/node-v22.23.5-linux-x64/bin:$PATH"
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
+          sudo apt-get install -y --no-install-recommends cmake g++ libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
           sh tools/build-desktop-app.sh > desktop-app-path.txt
+      - name: Build the offline assistant
+        run: |
+          revision=$(sh tools/build-assistant.sh --revision)
+          checkout="$RUNNER_TEMP/llama-checkout"
+          source="$RUNNER_TEMP/llama-source"
+          git init -q "$checkout"
+          git -C "$checkout" fetch --depth 1 https://github.com/ggml-org/llama.cpp.git "$revision"
+          test "$(git -C "$checkout" rev-parse FETCH_HEAD^{commit})" = "$revision"
+          mkdir "$source"
+          git -C "$checkout" archive "$revision" | tar -x -C "$source"
+          printf '%s\n' "$revision" > "$source/.revision"
+          sh tools/build-assistant.sh "$source" "$RUNNER_TEMP/assistant" deploy/assistant
+          curl --fail --silent --show-error --location --retry 3 \
+            --output "$RUNNER_TEMP/gemma-3-1b-it-Q8_0.gguf" \
+            https://huggingface.co/unsloth/gemma-3-1b-it-GGUF/resolve/50a4bdb9a6df5b0e30108cacc08578bca3df97d5/gemma-3-1b-it-Q8_0.gguf
+          PYTHONPATH=tools python3 -c 'import assistant; print(assistant.MODEL_SHA256)' > "$RUNNER_TEMP/model.sha256"
+          printf '%s  %s\n' "$(cat "$RUNNER_TEMP/model.sha256")" "$RUNNER_TEMP/gemma-3-1b-it-Q8_0.gguf" | sha256sum -c -
       - name: Package
         run: |
           python3 - <<'PY'
@@ -60,11 +77,14 @@ jobs:
           mkdir dist
           name=cypherpunk-vpn-$TAG-x86_64-linux-gnu.tar.gz
           python3 tools/install.py --pack "dist/$name" --runtime offline-runtime
-          # The one app file: controller, services and the desktop app.
+          # The main package stays small. The offline model ships as a separate asset.
           python3 tools/native_package.py --runtime offline-runtime --out native-package \
-            --format deb --epoch "$(git show -s --format=%ct HEAD)" --gui "$(cat desktop-app-path.txt)"
+            --format deb --epoch "$(git show -s --format=%ct HEAD)" --gui "$(cat desktop-app-path.txt)" \
+            --assistant-model "$RUNNER_TEMP/gemma-3-1b-it-Q8_0.gguf" --assistant-server "$RUNNER_TEMP/assistant/llama-server"
           cp native-package/*.deb dist/
-          (cd dist && sha256sum "$name" cypherpunk-vpn_*.deb > SHA256SUMS)
+          version=$(printf '%s' "${TAG#v}" | sed 's/-/~/')
+          (cd dist && sha256sum "$name" "cypherpunk-vpn_${version}-1_amd64.deb" \
+            "cypherpunk-vpn-assistant_${version}-1_amd64.deb" > SHA256SUMS)
       - name: Smoke-test the package's own user installation
         run: |
           mkdir -p "$RUNNER_TEMP/pkg"
@@ -116,6 +136,7 @@ jobs:
           done
       - name: Publish
         run: |
+          deb_version=$(printf '%s' "${TAG#v}" | sed 's/-/~/')
           cat > notes.md <<NOTES
           Built by GitHub Actions on Ubuntu 22.04 from commit \`$GITHUB_SHA\` (verify passed: $VERIFY_URL).
 
@@ -126,17 +147,23 @@ jobs:
           The app makes this device's request, imports the signed bundle your operator sends back,
           and connects; the Nitrokey PIN is asked for in a system dialog, never in the app.
 
+          **Optional offline troubleshooter.** After verifying both packages, use
+          \`sudo apt install ./cypherpunk-vpn_${deb_version}-1_amd64.deb ./cypherpunk-vpn-assistant_${deb_version}-1_amd64.deb\`
+          to add Gemma 3 1B. It explains rule-based findings locally. The package contains the model,
+          its notice and terms, and the launcher that isolates the model from the network.
+
           Download it with \`curl -fsSLO\` from this page's asset links (no GitHub account
           needed), or \`gh release download $TAG -R $GITHUB_REPOSITORY\`.
 
-          Check where it came from: the package carries a signed build-provenance
+          Check where it came from: each package and the archive carry a signed build-provenance
           attestation (Sigstore) naming this repository, its release workflow and commit
-          \`$GITHUB_SHA\`. Verify it with
-          \`gh attestation verify cypherpunk-vpn-$TAG-x86_64-linux-gnu.tar.gz -R $GITHUB_REPOSITORY --signer-workflow $GITHUB_REPOSITORY/.github/workflows/release.yml\`.
+          \`$GITHUB_SHA\`. For each downloaded artifact, run
+          \`gh attestation verify FILE -R $GITHUB_REPOSITORY --signer-workflow $GITHUB_REPOSITORY/.github/workflows/release.yml\`.
 
-          Upgrading: every chain now pads every hop to constant cells, and a chain signed
-          by an earlier release is refused at connect. Re-sign it (\`cypherpunk cloud chain --apply\`,
-          or \`cypherpunk init\`) and enroll the new bundles with \`--replace\`.
+          Upgrading from v0.10.x requires new enrollment. Stop the previous VPN and its guard
+          before installing. Preserve the old vault and use \`cypherpunk cloud adopt-legacy\`
+          to migrate the operator inventory, then follow setup to enroll the client and servers
+          under the new names and cryptographic domains. See the v0.11.0 changelog for details.
 
           Servers now keep every log in RAM and refuse to start while any would reach the
           disk (\`cypherpunk help retention\`). Servers created by \`cypherpunk cloud\` are hardened at first
