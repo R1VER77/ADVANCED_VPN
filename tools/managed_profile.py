@@ -820,6 +820,8 @@ def _load_request(raw, role):
             raise ValueError("bad unlock record")
         if set(u["wrapped"]) != {"schema", "ephemeral", "mlkem", "nonce", "ciphertext"}:
             raise ValueError("bad wrapped data key")
+    if role == "client" and r.get("protection") == "nitrokey" and "device_public" not in r:
+        raise ValueError("hardware client request is missing its public session key; export a fresh device request")
     if "device_public" in r:
         import session_auth
 

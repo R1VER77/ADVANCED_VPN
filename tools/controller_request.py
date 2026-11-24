@@ -28,6 +28,8 @@ def public_request(state):
             "protection",
         )
     }
+    if "device_public" in value:
+        projected["device_public"] = value["device_public"]
     issued = value.get("issued")
     if not isinstance(issued, str) or len(issued) > 64 or not issued.isascii() or not issued.isprintable():
         raise ValueError("invalid public request issuance metadata")

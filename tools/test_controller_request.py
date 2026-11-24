@@ -7,7 +7,10 @@ import tempfile
 import unittest
 from unittest import mock
 
+from fido2 import cbor
+
 import controller_request
+import keyguard
 import managed_profile
 
 
@@ -37,6 +40,17 @@ class PublicEnrollmentRequest(unittest.TestCase):
         result = controller_request.public_request(self.state)
         self.assertNotIn("PRIVATE_SENTINEL", result["text"])
         self.assertNotIn("private_key", json.loads(result["text"]))
+
+    def test_hardware_binding_survives_export_and_is_required_for_signing(self):
+        hardware_request = dict(self.request, protection="nitrokey")
+        with self.assertRaisesRegex(ValueError, "export a fresh device request"):
+            managed_profile.load_request(managed_profile.canonical(hardware_request), "client")
+        hardware_request["device_public"] = keyguard.b64(cbor.encode({1: 1, 3: -8, -1: 6, -2: bytes(range(32))}))
+        self.write(hardware_request)
+
+        result = controller_request.public_request(self.state)
+        parsed, _ = managed_profile.load_request(result["text"], "client")
+        self.assertEqual(parsed["device_public"], hardware_request["device_public"])
 
     def test_malformed_crypto_and_wrong_role_are_refused(self):
         for update in (dict(role="exit"), dict(schema=True), dict(certificates={}), dict(kem_public="AAAA")):
