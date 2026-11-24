@@ -38,6 +38,7 @@ LEGACY_LINE_SUBSTRINGS = {
     ),
     "tools/test_cloud.py": (
         "advanced-vpn",
+        "advanced_vpn_egress",
         "avpn-relay",
         "avpn-flyexit",
         "avpn-ociexit",

@@ -1864,6 +1864,7 @@ HOST_STUBS = {
     "apt-get": '#!/bin/sh\necho "apt-get $*" >> "$ROOT/log"\n',
     "apt-cache": "#!/bin/sh\necho libtss2-esys-3.0.2-0t64\n",
     "systemctl": '#!/bin/sh\necho "systemctl $*" >> "$ROOT/log"\n',
+    "nft": '#!/bin/sh\necho "nft $*" >> "$ROOT/log"\n',
     "systemd-analyze": "#!/bin/sh\nexit 1\n",
     "netfilter-persistent": '#!/bin/sh\necho "netfilter-persistent $*" >> "$ROOT/log"\n',
     "iptables": '#!/bin/sh\necho "iptables $*" >> "$ROOT/log"\n'
@@ -1920,6 +1921,7 @@ class HostScriptTests(unittest.TestCase):
         (self.root / "root").mkdir()
         (self.root / "etc/systemd").mkdir(parents=True)
         (self.root / "var/log/journal").mkdir(parents=True)
+        (self.root / "var/tmp").mkdir()
         self.tgz = self.root / "tmp/cpvpn-src.tgz"
         self.tgz.parent.mkdir()
         with tarfile.open(self.root / "keep.tgz", "w:gz") as tf:
@@ -1934,6 +1936,7 @@ class HostScriptTests(unittest.TestCase):
             "/etc/cypherpunk-vpn",
             "/etc/systemd",
             "/var/log/journal",
+            "/var/tmp/cpvpn-src.",
             "/opt/cypherpunk-vpn",
             "/tmp/cpvpn-",
             "/root/",
@@ -1991,6 +1994,21 @@ class HostScriptTests(unittest.TestCase):
         self.assertLess(log.index("harden"), log.index("apt-get"))
         self.assertFalse((self.root / "etc/cypherpunk-vpn/shared-host").exists())
         self.assertFalse((self.root / "tmp/cpvpn-src.tgz").exists())
+        self.assertEqual(list((self.root / "var/tmp").iterdir()), [])
+
+    def test_legacy_relay_is_stopped_before_apt_and_restored_if_extraction_fails(self):
+        legacy = self.root / "opt/advanced-vpn"
+        legacy.mkdir()
+        (self.root / "keep.tgz").write_bytes(b"incomplete archive")
+
+        self.assertNotEqual(self.setup("relay").returncode, 0)
+
+        log = self.log()
+        self.assertLess(log.index("systemctl stop advanced-vpn.service"), log.index("apt-get"))
+        self.assertLess(log.index("nft delete table inet advanced_vpn_egress"), log.index("apt-get"))
+        self.assertIn("systemctl start advanced-vpn.service", log)
+        self.assertTrue(legacy.is_dir())
+        self.assertEqual(list((self.root / "var/tmp").iterdir()), [])
 
     def test_a_flat_installation_is_stopped_and_adopted_and_a_slotted_one_is_not(self):
         # Found rebuilding the live chain (20 Nov 2026): a server installed before release

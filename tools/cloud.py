@@ -1224,6 +1224,8 @@ STOPPED=no
 sudo -n install -d -m 0700 /etc/cypherpunk-vpn/metering $M
 echo $(( $(date +%s) + 1800 )) | sudo -n tee $M/maintenance-until >/dev/null
 trap 'rc=$?; sudo -n rm -f /etc/cypherpunk-vpn/metering/enrolled/maintenance-until
+if [ -n "${SOURCE_STAGE:-}" ]; then sudo -n rm -rf "$SOURCE_STAGE"; fi
+if [ $rc -ne 0 ] && [ "${LEGACY_STOPPED:-no}" = yes ] && [ -e /opt/advanced-vpn ]; then sudo -n systemctl start advanced-vpn.service || true; fi
 if [ "$STOPPED" = yes ] && { [ "$RESTART" = always ] || [ $rc -ne 0 ]; }; then sudo -n systemctl start cypherpunk-vpn.service || true; fi' EXIT
 if systemctl is-active -q cypherpunk-vpn.service 2>/dev/null; then sleep 7
 else sudo -n nft delete table inet cypherpunk_vpn_egress 2>/dev/null || true; fi
@@ -1276,6 +1278,18 @@ else
   sudo -n touch /etc/cypherpunk-vpn/shared-host
 fi
 if [ "$IMAGE" = no ]; then
+# During a clean-break upgrade the pre-rename supervisor can still own the apt lock
+# and its egress table. Stop it before apt, but keep its install until extraction succeeds.
+if [ -e /opt/advanced-vpn ] || [ -e /etc/systemd/system/advanced-vpn.service ]; then
+  if systemctl is-active -q advanced-vpn.service 2>/dev/null; then
+    sudo -n systemctl stop advanced-vpn.service
+    LEGACY_STOPPED=yes
+  fi
+  sudo -n systemctl stop advanced-vpn-security-update.service 2>/dev/null || true
+  for family in inet ip; do
+    sudo -n nft delete table "$family" advanced_vpn_egress 2>/dev/null || true
+  done
+fi
 export DEBIAN_FRONTEND=noninteractive
 @@APT_UPDATE@@
 TSS=$(apt-cache search --names-only '^libtss2-(esys|mu|rc|tcti-device)' | awk '{print $1}' | grep -v -- -dev | tr '\n' ' ')
@@ -1293,7 +1307,9 @@ if sudo -n iptables -S INPUT 2>/dev/null | grep -q -- '-j REJECT'; then
   # Persisting would also save a shared host's other runtime rules, so only a dedicated one does.
   if [ "$SHARED" != yes ] && command -v netfilter-persistent >/dev/null; then sudo -n netfilter-persistent save >/dev/null 2>&1 || true; fi
 fi
-sudo -n rm -rf /tmp/cpvpn-src && mkdir -p /tmp/cpvpn-src && tar -C /tmp/cpvpn-src -xzf /tmp/cpvpn-src.tgz
+# The received archive fits in /tmp on small hosts. The expanded package may not.
+SOURCE_STAGE=$(mktemp -d /var/tmp/cpvpn-src.XXXXXX)
+tar -C "$SOURCE_STAGE" -xzf /tmp/cpvpn-src.tgz
 if [ -e /opt/advanced-vpn ] || [ -e /etc/systemd/system/advanced-vpn.service ]; then
   for unit in advanced-vpn.service advanced-vpn-guard.service advanced-vpn-security-update.service; do
     sudo -n systemctl disable --now "$unit" 2>/dev/null || true
@@ -1314,7 +1330,7 @@ if [ -d /opt/cypherpunk-vpn/bin ] && [ ! -L /opt/cypherpunk-vpn/bin ]; then
   for unit in cypherpunk-vpn.service cypherpunk-vpn-guard.service; do sudo -n systemctl stop "$unit" 2>/dev/null || true; done
   ADOPT=--adopt-legacy
 fi
-sudo -n python3 -B /tmp/cpvpn-src/tools/install.py --apply $ADOPT >/dev/null
+sudo -n python3 -B "$SOURCE_STAGE/tools/install.py" --apply $ADOPT >/dev/null
 fi
 HAVE=$(sudo -n python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["role"])' $E/request.json 2>/dev/null || true)
 # Same-role keys are kept only if they carry every key this release makes for the role
@@ -1376,7 +1392,7 @@ fi
 sudo -n cat $E/request.json > /tmp/cpvpn-request.json
 sudo -n rm -f /tmp/cpvpn-unlock.pub
 echo "protection=$(sudo -n python3 -c 'import json;print(json.load(open("/etc/cypherpunk-vpn/enrolled/protection.json")).get("mode"))' 2>/dev/null || echo unknown) tpm2=$(systemd-analyze has-tpm2 >/dev/null 2>&1 && echo yes || echo no) creds_key=$(sudo -n python3 -c 'import json;print(json.load(open("/etc/cypherpunk-vpn/enrolled/protection.json")).get("creds_key"))')"
-sudo -n rm -rf /tmp/cpvpn-src /tmp/cpvpn-src.tgz
+sudo -n rm -f /tmp/cpvpn-src.tgz
 """.replace("@@HARDEN@@", retention.HARDEN.rstrip("\n"))
     .replace("@@APT_WINDOW@@", APT_WINDOW.rstrip("\n"))
     .replace("@@APT_UPDATE@@", APT_UPDATE.rstrip("\n"))
