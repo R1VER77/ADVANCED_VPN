@@ -344,6 +344,9 @@ jobs:
           PY
           python -c "import platform, ssl; assert platform.machine() == 'aarch64'; print(platform.machine(), ssl.OPENSSL_VERSION)"
           python -m pip install --require-hashes -r tools/hardware-requirements.txt
+          # The hosted image may contain a partial copy of the pinned toolchain.
+          export RUSTUP_HOME="$RUNNER_TEMP/cpvpn-rustup"
+          echo "RUSTUP_HOME=$RUSTUP_HOME" >> "$GITHUB_ENV"
           # The Arm image may lack rustup: install it from rustup.rs (HTTPS) if so.
           if ! command -v rustup; then
             curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none

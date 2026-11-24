@@ -43,7 +43,17 @@ strip "$output_dir/isolate"
 ldd "$output_dir/llama-server" | sed 's/ (0x[0-9a-f]*)//' > "$output_dir/llama-server.ldd"
 ldd --version | head -1 > "$output_dir/llama-server.glibc"
 printf '%s\n' "$LLAMA_REVISION" > "$output_dir/llama-server.revision"
+# The server binary does not carry the notices embedded by llama.cpp's CLI app.
+{
+  printf '%s\n\n' 'llama.cpp and ggml'
+  cat "$source_dir/LICENSE"
+  printf '\n%s\n\n' cpp-httplib
+  cat "$source_dir/vendor/cpp-httplib/LICENSE"
+  printf '\n%s\n\n' 'JSON for Modern C++'
+  cat "$source_dir/licenses/LICENSE-jsonhpp"
+} > "$output_dir/llama-server.licenses"
 if [ -n "${HOST_UID:-}" ]; then
   chown "$HOST_UID:$HOST_UID" "$output_dir/llama-server" "$output_dir/isolate" \
-    "$output_dir/llama-server.ldd" "$output_dir/llama-server.glibc" "$output_dir/llama-server.revision"
+    "$output_dir/llama-server.ldd" "$output_dir/llama-server.glibc" "$output_dir/llama-server.revision" \
+    "$output_dir/llama-server.licenses"
 fi

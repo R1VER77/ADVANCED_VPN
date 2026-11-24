@@ -461,9 +461,12 @@ def stage_assistant(root, model, server, destination, isolate=None):
 
     model, server = Path(model), Path(server)
     isolate = Path(isolate) if isolate else server.with_name("isolate")
-    for path, what in ((model, "model"), (server, "server"), (isolate, "launcher")):
+    licenses = server.with_name("llama-server.licenses")
+    for path, what in ((model, "model"), (server, "server"), (isolate, "launcher"), (licenses, "license notice")):
         if path.is_symlink() or not path.is_file():
             raise ValueError("the assistant %s must be a regular file" % what)
+    if not licenses.stat().st_size:
+        raise ValueError("the assistant license notice is empty")
     if bundled_runtime.sha256(model) != assistant.MODEL_SHA256:
         raise ValueError("the assistant model is not the pinned Gemma file")
     for path, what in ((server, "server"), (isolate, "launcher")):
@@ -487,13 +490,15 @@ def stage_assistant(root, model, server, destination, isolate=None):
     docs = destination / "usr/share/doc" / ASSISTANT_PACKAGE
     docs.mkdir(mode=0o755, parents=True)
     shutil.copy2(root / "NOTICE", docs / "NOTICE")
+    shutil.copy2(licenses, docs / licenses.name)
     for name in GEMMA_DOCS:
         shutil.copy2(root / name, docs / Path(name).name)
     (docs / "copyright").write_text(
         "The Gemma 3 1B model in this package is unmodified.\n"
         "Gemma is provided under and subject to the Gemma Terms of Use found at gemma.ai/resources/terms\n"
         "Copies: GEMMA_TERMS_OF_USE.md and GEMMA_PROHIBITED_USE_POLICY.md in this folder.\n"
-        "llama-server is from llama.cpp (MIT licence, github.com/ggml-org/llama.cpp).\n"
+        "llama-server is from llama.cpp (github.com/ggml-org/llama.cpp).\n"
+        "See llama-server.licenses for its copyright and dependency license notices.\n"
     )
     for path in [*home.iterdir(), *docs.iterdir()]:
         if path.name not in ("llama-server", "isolate"):

@@ -270,6 +270,7 @@ class NativePackages(unittest.TestCase):
         isolate = self.fixture.root / "isolate"
         isolate.write_bytes(b"\x7fELF launcher fixture, never run GLIBC_2.2.5\x00")
         isolate.chmod(0o755)
+        server.with_name("llama-server.licenses").write_text("llama.cpp and dependency license fixture\n")
         return model, server
 
     def test_the_assistant_package_ships_only_the_pinned_model_with_gemmas_terms(self):
@@ -298,6 +299,11 @@ class NativePackages(unittest.TestCase):
         self.assertIn(notice, (docs / "copyright").read_text())
         for name in ("GEMMA_TERMS_OF_USE.md", "GEMMA_PROHIBITED_USE_POLICY.md"):
             self.assertTrue((docs / name).is_file(), name)
+        licenses = server.with_name("llama-server.licenses")
+        self.assertEqual((docs / licenses.name).read_bytes(), licenses.read_bytes())
+        licenses.unlink()
+        with self.assertRaisesRegex(ValueError, "license notice must be a regular file"):
+            package.stage_assistant(ROOT, model, server, tree)
         # Nothing setuid, nothing outside its own folders.
         for path in tree.rglob("*"):
             self.assertFalse(path.stat().st_mode & 0o6000, path)
