@@ -17,8 +17,9 @@ use ratatui::widgets::{Block, BorderType, Padding, Paragraph};
 use serde_json::Value;
 
 use crate::actions::{Done, perform};
-use crate::cells::{Cell, Row, chain_short, render};
-use crate::controller::Controller;
+use crate::cells::{Cell, Row, chain_short, connection_guidance, hop_place, hop_role, render};
+use crate::controller::{Controller, is_root};
+use crate::guided;
 use crate::theme::Theme;
 
 /// Shown once on a device that is not enrolled yet. Generated from the endpoint catalog
@@ -51,6 +52,10 @@ const SPINNER: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "�
 /// Keys shown in the footer, in order.
 pub const KEYS: &[(&str, &str)] = &[
     ("c", "connect"),
+    ("u", "unlock"),
+    ("l", "locations"),
+    ("p", "settings"),
+    ("e", "setup"),
     ("d", "disconnect"),
     ("h", "hops"),
     ("s", "status"),
@@ -71,6 +76,9 @@ pub struct Header {
     pub protection: String,
     /// The supervisor state.
     pub status: String,
+    pub locations: Vec<String>,
+    /// The next milestone or action associated with the current status.
+    pub guidance: Option<&'static str>,
 }
 
 impl Header {
@@ -95,17 +103,34 @@ impl Header {
             (Some(p), None) => p,
             _ => "—".into(),
         };
-        let status = i
-            .get("status")
-            .and_then(|s| s.get("state"))
+        let state = &i["status"];
+        let status = state
+            .get("lifecycle")
+            .or_else(|| state.get("state"))
             .and_then(Value::as_str)
             .unwrap_or("unknown")
             .to_string();
+        let guidance = match chain.as_str() {
+            "not enrolled" => Some("Press e to start setup or import a signed bundle."),
+            "unknown" => {
+                Some("Press e for setup. Open sudo cypherpunk to see private device status.")
+            }
+            _ => connection_guidance(state),
+        };
+        let locations = i["chain"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|hop| hop.get("country").is_some())
+            .map(|hop| format!("{}  {}", hop_role(hop), hop_place(hop)))
+            .collect();
         Self {
             chain,
             mode,
             protection,
             status,
+            locations,
+            guidance,
         }
     }
 }
@@ -173,12 +198,12 @@ impl App {
     fn header_lines(&self) -> Vec<Line<'static>> {
         let t = self.theme;
         let status_style = match self.header.status.as_str() {
-            "supervising" => t.success(),
+            "connected" => t.success(),
             "blocked" => t.error(),
             _ => t.dim(),
         };
         let label = |l: &str| Span::styled(format!("{l:<12}"), t.dim());
-        vec![
+        let mut lines = vec![
             Line::from(vec![
                 Span::styled(">_ ", t.dim()),
                 Span::styled("CYPHERPUNK VPN", t.brand()),
@@ -199,18 +224,32 @@ impl App {
                 Span::styled(" · service ", t.dim()),
                 Span::styled(self.header.status.clone(), status_style),
             ]),
-        ]
+        ];
+        lines.extend(self.header.locations.iter().map(|location| {
+            Line::from(vec![
+                Span::raw("  "),
+                Span::styled(location.clone(), t.text()),
+            ])
+        }));
+        lines
     }
 
     fn footer(&self) -> Line<'static> {
         let t = self.theme;
         let mut spans = vec![Span::raw(" ")];
-        for (i, (key, label)) in KEYS.iter().enumerate() {
+        for (i, (key, label)) in KEYS
+            .iter()
+            .filter(|(k, _)| !matches!(*k, "h" | "i" | "o" | "q"))
+            .enumerate()
+        {
             if i > 0 {
                 spans.push(Span::styled(" · ", t.dim()));
             }
             spans.push(Span::styled(*key, t.bold()));
-            spans.push(Span::styled(format!(" {label}"), t.dim()));
+            spans.push(Span::styled(
+                format!(" {}", if *key == "d" { "stop" } else { label }),
+                t.dim(),
+            ));
         }
         Line::from(spans)
     }
@@ -234,7 +273,9 @@ impl App {
                     ),
                 ])
             }
-            None => Line::default(),
+            None => self.header.guidance.map_or_else(Line::default, |hint| {
+                Line::from(Span::styled(hint, t.accent()))
+            }),
         }
     }
 
@@ -285,6 +326,10 @@ impl App {
     pub fn action_for(key: &KeyEvent) -> Option<&'static str> {
         match key.code {
             KeyCode::Char('c') => Some("connect"),
+            KeyCode::Char('u') => Some("unlock"),
+            KeyCode::Char('l') => Some("locations"),
+            KeyCode::Char('p') => Some("settings"),
+            KeyCode::Char('e') => Some("setup"),
             KeyCode::Char('d') => Some("disconnect"),
             KeyCode::Char('h') => Some("hops"),
             KeyCode::Char('s') => Some("status"),
@@ -329,6 +374,9 @@ pub fn run(ctrl: Controller, theme: Theme, reduced_motion: bool) -> Result<()> {
         app.history.push(get_started());
     }
     let (tx, rx): (Sender<Finished>, Receiver<Finished>) = channel();
+    let (header_tx, header_rx) = channel();
+    let mut refreshing = false;
+    let mut next_refresh = Instant::now() + Duration::from_secs(2);
     let mut terminal = ratatui::try_init()?;
     let result = (|| -> Result<()> {
         while !app.quit {
@@ -338,6 +386,24 @@ pub fn run(ctrl: Controller, theme: Theme, reduced_motion: bool) -> Result<()> {
                 if refresh && let Ok(o) = ctrl.call("info", &[]) {
                     app.header = Header::from_info(&o.value);
                 }
+            }
+            if let Ok(header) = header_rx.try_recv() {
+                if let Some(header) = header {
+                    app.header = header;
+                }
+                refreshing = false;
+            }
+            if !app.busy() && !refreshing && Instant::now() >= next_refresh {
+                refreshing = true;
+                next_refresh = Instant::now() + Duration::from_secs(2);
+                let (ctrl, header_tx) = (ctrl.clone(), header_tx.clone());
+                std::thread::spawn(move || {
+                    let header = ctrl
+                        .call("info", &[])
+                        .ok()
+                        .map(|o| Header::from_info(&o.value));
+                    let _ = header_tx.send(header);
+                });
             }
             if !event::poll(Duration::from_millis(80))? {
                 continue;
@@ -350,6 +416,20 @@ pub fn run(ctrl: Controller, theme: Theme, reduced_motion: bool) -> Result<()> {
             }
             match App::action_for(&key) {
                 Some(_) if key.modifiers.contains(KeyModifiers::CONTROL) => app.key(&key),
+                Some(action) if !app.busy() && terminal_action(action, &app.header) => {
+                    ratatui::try_restore()?;
+                    ratatui::crossterm::execute!(
+                        std::io::stdout(),
+                        ratatui::crossterm::cursor::Show
+                    )?;
+                    let result = run_terminal_action(&ctrl, action, theme, reduced_motion);
+                    terminal = ratatui::try_init()?;
+                    result?;
+                    if let Ok(o) = ctrl.call("info", &[]) {
+                        app.header = Header::from_info(&o.value);
+                    }
+                    next_refresh = Instant::now();
+                }
                 Some(action) if !app.busy() => {
                     app.start(action);
                     let (ctrl, tx) = (ctrl.clone(), tx.clone());
@@ -366,6 +446,44 @@ pub fn run(ctrl: Controller, theme: Theme, reduced_motion: bool) -> Result<()> {
     })();
     ratatui::restore();
     result
+}
+
+fn terminal_action(action: &str, header: &Header) -> bool {
+    matches!(action, "setup" | "unlock" | "locations" | "settings")
+        || (action == "connect" && is_root() && header.protection.starts_with("nitrokey"))
+}
+
+fn run_terminal_action(
+    ctrl: &Controller,
+    action: &str,
+    theme: Theme,
+    reduced_motion: bool,
+) -> Result<()> {
+    match action {
+        "setup" => guided::setup(ctrl, theme, reduced_motion)?,
+        "locations" => guided::locations(ctrl)?,
+        "settings" => guided::settings(ctrl, theme)?,
+        "unlock" if !is_root() => {
+            println!("Run sudo cypherpunk and press u, or run sudo cypherpunk unlock here.")
+        }
+        "unlock" => {
+            ctrl.command(false, "unlock", &[]).status()?;
+        }
+        "connect" => {
+            println!("Starting the VPN service…");
+            let started = perform(ctrl, "connect", &[]);
+            for line in render(&started.cells, theme) {
+                println!("{}", crate::theme::to_ansi(&[line], theme).trim_end());
+            }
+            if started.code == 0 {
+                ctrl.command(false, "unlock", &["--if-needed".into()])
+                    .status()?;
+            }
+        }
+        _ => unreachable!(),
+    }
+    guided::prompt("\nPress Enter to return to the VPN view. ")?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -430,7 +548,7 @@ mod tests {
         assert!(s[8].contains("Press a key below"));
         assert_eq!(
             s[13],
-            " c connect · d disconnect · h hops · s status · i info · o doctor · ? help · q quit"
+            " c connect · u unlock · l locations · p settings · e setup · d stop · s status · ? help"
         );
     }
 
@@ -486,6 +604,8 @@ mod tests {
     fn keys_map_to_actions_and_quit() {
         let k = |c| KeyEvent::from(KeyCode::Char(c));
         assert_eq!(App::action_for(&k('h')), Some("hops"));
+        assert_eq!(App::action_for(&k('u')), Some("unlock"));
+        assert_eq!(App::action_for(&k('e')), Some("setup"));
         assert_eq!(App::action_for(&k('x')), None);
         let mut app = App::new(Theme::plain(), true, Header::default());
         app.key(&k('?'));
@@ -534,5 +654,45 @@ mod tests {
         let h = Header::from_info(&json!({"ok": false}));
         assert_eq!(h.chain, "unknown");
         assert_eq!(h.status, "unknown");
+    }
+
+    #[test]
+    fn narrow_view_shows_each_hop_location_without_a_painted_background() {
+        let header = Header::from_info(&json!({"info": {"enrolled": true, "chain": [
+            {"hop": "relay", "city": "Dubai", "country": "United Arab Emirates"},
+            {"hop": "middle", "city": null, "country": null},
+            {"hop": "exit", "city": "Frankfurt", "country": "Germany", "primary": true}
+        ]}}));
+        let app = App::new(Theme::full(), true, header);
+        let mut terminal = Terminal::new(TestBackend::new(48, 17)).unwrap();
+        terminal.draw(|f| app.draw(f, app.started)).unwrap();
+        let buffer = terminal.backend().buffer();
+        let screen = screen(&app, 48, 17).join("\n");
+        for place in [
+            "Dubai, United Arab Emirates",
+            "middle  Unknown",
+            "primary exit  Frankfurt, Germany",
+        ] {
+            assert!(screen.contains(place), "{screen}");
+        }
+        assert!(
+            buffer
+                .content
+                .iter()
+                .all(|cell| cell.bg == ratatui::style::Color::Reset)
+        );
+    }
+
+    #[test]
+    fn connection_hint_names_the_waiting_step() {
+        let view =
+            |status| Header::from_info(&json!({"info": {"enrolled": true, "status": status}}));
+        let pin = view(json!({"state": "waiting for the Nitrokey PIN"}));
+        assert!(pin.guidance.unwrap().contains("Press u"));
+        let path = view(
+            json!({"state": "supervising", "lifecycle": "connecting", "stale": {"probe": null}}),
+        );
+        assert_eq!(path.status, "connecting");
+        assert!(path.guidance.unwrap().contains("end-to-end"));
     }
 }

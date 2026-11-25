@@ -11,6 +11,7 @@ mod app;
 mod cells;
 mod cloud;
 mod controller;
+mod guided;
 mod mesh;
 mod progress;
 mod theme;
@@ -72,6 +73,9 @@ enum Cmd {
     /// The enrolled chain, hop by hop.
     #[command(disable_help_flag = true)]
     Hops(Rest),
+    /// List, import and select saved signed chains.
+    #[command(disable_help_flag = true)]
+    Chains(Rest),
     /// Self-checks; --check-egress shows the address your first hop sees.
     #[command(disable_help_flag = true)]
     Doctor(Rest),
@@ -148,6 +152,7 @@ impl Cmd {
             Cmd::Status(r) => ("status", r.args),
             Cmd::Info(r) => ("info", r.args),
             Cmd::Hops(r) => ("hops", r.args),
+            Cmd::Chains(r) => ("chains", r.args),
             Cmd::Doctor(r) => ("doctor", r.args),
             Cmd::Preflight(r) => ("preflight", r.args),
             Cmd::Setup(r) => ("setup", r.args),
@@ -273,7 +278,7 @@ fn run(cli: Cli, theme: Theme) -> i32 {
         }
     };
     match action {
-        "run" | "unlock" | "mix" => return exec(&ctrl, action, &args),
+        "run" | "unlock" | "mix" | "chains" => return exec(&ctrl, action, &args),
         // The terminal (a PIN prompt) or the pipes (a data key, printed only as JSON to a
         // pipe) belong to the controller, which also keeps --json.
         "unlock-key" | "unwrap" | "server-unlock" | "state-key" => {

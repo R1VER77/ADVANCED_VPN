@@ -123,7 +123,7 @@ pub fn perform(ctrl: &Controller, action: &str, args: &[String]) -> Done {
                 title: "VPN service started".into(),
                 summary: Some(SERVICE.into()),
                 rows: vec![Row::detail(
-                    "If prompted for the Nitrokey, run sudo cypherpunk unlock at a shell prompt. The terminal hides the PIN as you type.",
+                    "If the VPN is waiting for a Nitrokey, press u in the interactive view or run sudo cypherpunk unlock.",
                 )],
             }];
             cells.extend(status_cells(ctrl));

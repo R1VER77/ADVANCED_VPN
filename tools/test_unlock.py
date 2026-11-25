@@ -46,6 +46,15 @@ class PinPendingTests(unittest.TestCase):
 
 
 class UnlockWaitTests(unittest.TestCase):
+    def test_automatic_unlock_skips_the_prompt_for_an_unlocked_supervisor(self):
+        with (
+            mock.patch.object(cypherpunkctl, "pin_pending", return_value=False),
+            mock.patch.object(cypherpunkctl, "service_active", return_value=True),
+            mock.patch.object(cypherpunkctl.time, "sleep") as slept,
+        ):
+            self.assertFalse(cypherpunkctl.wait_for_pin_request(already_running=lambda: True))
+        slept.assert_not_called()
+
     def test_unlock_waits_for_the_request_while_the_service_starts(self):
         seen = iter([False, False, False, True, True])
         with (

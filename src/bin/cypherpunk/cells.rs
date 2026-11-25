@@ -198,6 +198,26 @@ pub fn chain_short(chain: &Value) -> Option<String> {
     Some(parts.join(" → "))
 }
 
+/// Display-only location, keeping fallback exit labels explicit.
+pub fn hop_place(hop: &Value) -> String {
+    let city = hop["city"].as_str();
+    let country = hop["country"].as_str();
+    match (city, country) {
+        (Some(city), Some(country)) => format!("{city}, {country}"),
+        (_, Some(country)) => country.into(),
+        _ => "Unknown".into(),
+    }
+}
+
+pub fn hop_role(hop: &Value) -> &str {
+    match hop["hop"].as_str() {
+        Some("relay") => "entry",
+        Some("exit") if hop["primary"].as_bool() == Some(true) => "primary exit",
+        Some(role) => role,
+        None => "hop",
+    }
+}
+
 fn title_case(action: &str) -> String {
     let mut c = action.chars();
     c.next()
@@ -227,8 +247,49 @@ fn hints(action: &str, o: &Outcome) -> Vec<String> {
 }
 
 /// Status rows from a status object.
+/// The next visible milestone, using the controller's protection evidence.
+pub fn connection_guidance(st: &Value) -> Option<&'static str> {
+    match st["state"].as_str() {
+        Some("waiting for the Nitrokey PIN") => {
+            return Some("Waiting for your Nitrokey PIN. Press u to enter it.");
+        }
+        Some("not running") => {
+            return Some("VPN stopped. Press c to connect or e to set up a chain.");
+        }
+        Some("capped") => {
+            return Some("The traffic limit is keeping the VPN blocked. Press s for details.");
+        }
+        _ => {}
+    }
+    match st["lifecycle"].as_str() {
+        Some("connecting" | "reconnecting") if st["stale"].get("cloak").is_some() => {
+            Some("Waiting for the secure connection to the first hop.")
+        }
+        Some("connecting" | "reconnecting") if st["stale"].get("carrier").is_some() => {
+            Some("Waiting for the WireGuard handshake through the chain.")
+        }
+        Some("connecting" | "reconnecting") if st["stale"].get("probe").is_some() => {
+            Some("Waiting for the end-to-end check through the exit.")
+        }
+        Some("connecting" | "reconnecting") => {
+            Some("Checking the tunnel. Protected traffic is held.")
+        }
+        _ if st["protection"].as_str() == Some("protected") => Some(match st["scope"].as_str() {
+            Some("applications") => "Protected. Use cypherpunk run to launch a protected app.",
+            _ => "Protected. Press s to check the scope and connection.",
+        }),
+        _ if st["state"].as_str() == Some("blocked") => {
+            Some("VPN traffic is held by the kill switch. Press s for details or e for setup.")
+        }
+        _ => None,
+    }
+}
+
 pub fn status_rows(st: &Value) -> Vec<Row> {
     let mut rows = Vec::new();
+    if let Some(guidance) = connection_guidance(st) {
+        rows.push(Row::detail(guidance));
+    }
     if let Some(k) = st.get("kill_switch").and_then(Value::as_bool) {
         rows.push(Row::pair(
             "kill switch",
@@ -364,7 +425,26 @@ pub fn from_outcome(action: &str, o: &Outcome) -> Vec<Cell> {
                 Some(text) => vec![Cell::Result {
                     title: "Chain".into(),
                     summary: s(v, "hops").map(|h| format!("{h}-hop")),
-                    rows: vec![Row::detail(text)],
+                    rows: std::iter::once(Row::detail(text))
+                        .chain(
+                            chain
+                                .as_array()
+                                .into_iter()
+                                .flatten()
+                                .filter(|hop| hop.get("country").is_some())
+                                .map(|hop| {
+                                    let source = hop["location_source"]
+                                        .as_str()
+                                        .unwrap_or("no local location");
+                                    let detail = format!(
+                                        "{} · {} ({source})",
+                                        hop_place(hop),
+                                        hop["endpoint"].as_str().unwrap_or("unknown endpoint")
+                                    );
+                                    Row::pair(hop_role(hop), detail)
+                                }),
+                        )
+                        .collect(),
                 }],
                 None => vec![Cell::Result {
                     title: "Chain".into(),
@@ -573,7 +653,7 @@ mod tests {
         );
         assert!(
             colored.starts_with(
-                "\x1b[38;2;243;139;168;48;2;30;30;46m■ \x1b[0m\x1b[1;38;2;243;139;168;48;2;30;30;46mstatus failed"
+                "\x1b[38;2;243;139;168m■ \x1b[0m\x1b[1;38;2;243;139;168mstatus failed"
             ),
             "{colored:?}"
         );

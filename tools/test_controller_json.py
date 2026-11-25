@@ -3,6 +3,7 @@
 Every command must print exactly one JSON object on stdout, errors included, and
 read-only queries must not create runtime state."""
 
+import contextlib
 import json
 import os
 from pathlib import Path
@@ -142,11 +143,11 @@ class ControllerJsonTests(unittest.TestCase):
 
         status = dict(state="supervising", detail="no answer through the chain since 10:00. A server may be stopped",
                       next="on your computer, as yourself: cypherpunk cloud health")  # fmt: skip
-        with mock.patch.object(cypherpunkctl, "read_status", lambda state, default=None: status):
+        with mock.patch.object(cypherpunkctl, "status_for_display", return_value=status):
             checks = {c["check"]: c for c in cypherpunkctl.doctor(self.root / "client")}
         self.assertFalse(checks["chain answering"]["ok"])
         self.assertIn("cypherpunk cloud health", checks["chain answering"]["detail"])
-        with mock.patch.object(cypherpunkctl, "read_status", lambda state, default=None: dict(state="supervising")):
+        with mock.patch.object(cypherpunkctl, "status_for_display", return_value=dict(state="supervising")):
             self.assertNotIn("chain answering", {c["check"] for c in cypherpunkctl.doctor(self.root / "client")})
 
     def test_doctor_reports_missing_tools_instead_of_crashing(self):
@@ -253,6 +254,7 @@ class PrePaddingChainTests(unittest.TestCase):
         touched = mock.Mock(side_effect=AssertionError("host touched before the padding check"))
         with (
             mock.patch.object(cypherpunkctl, "root_guard", lambda lab: None),
+            mock.patch.object(cypherpunkctl, "supervisor_locks", return_value=contextlib.nullcontext(self.root)),
             mock.patch.object(cypherpunkctl, "service_identity", touched),
             mock.patch.object(cypherpunkctl, "ensure_network", touched),
         ):
@@ -315,6 +317,7 @@ class PreCloakChainTests(unittest.TestCase):
         touched = mock.Mock(side_effect=AssertionError("host touched before the cloak check"))
         with (
             mock.patch.object(cypherpunkctl, "root_guard", lambda lab: None),
+            mock.patch.object(cypherpunkctl, "supervisor_locks", return_value=contextlib.nullcontext(self.root)),
             mock.patch.object(cypherpunkctl, "service_identity", touched),
             mock.patch.object(cypherpunkctl, "ensure_network", touched),
         ):
@@ -358,6 +361,7 @@ class ServerRetentionGateTests(unittest.TestCase):
         reached = mock.Mock(side_effect=self.Reached)
         with (
             mock.patch.object(cypherpunkctl, "root_guard", lambda lab: None),
+            mock.patch.object(cypherpunkctl, "supervisor_locks", return_value=contextlib.nullcontext(self.root)),
             mock.patch.object(cypherpunkctl, "service_identity", reached),
             mock.patch.object(retention, "failures", lambda: failing),
             mock.patch.object(retention, "SHARED_MARKER", marker),

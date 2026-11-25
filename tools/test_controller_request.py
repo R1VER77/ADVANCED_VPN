@@ -1,6 +1,8 @@
 """Only validated public enrollment fields may cross the desktop boundary."""
 
 import hashlib
+import contextlib
+import io
 import json
 from pathlib import Path
 import tempfile
@@ -10,6 +12,7 @@ from unittest import mock
 from fido2 import cbor
 
 import controller_request
+import cypherpunkctl
 import keyguard
 import managed_profile
 
@@ -33,6 +36,23 @@ class PublicEnrollmentRequest(unittest.TestCase):
         self.assertEqual(result["sha256"], hashlib.sha256(result["text"].encode()).hexdigest())
         parsed, _ = managed_profile.load_request(result["text"], "client")
         self.assertEqual(parsed["certificates"], self.request["certificates"])
+
+    def test_cli_export_preserves_keys_and_refuses_to_replace_the_output(self):
+        output = self.state.parent / "client.req"
+        args = cypherpunkctl.build_parser().parse_args(
+            ["--state", str(self.state), "request", "--existing", "--out", str(output)]
+        )
+        with (
+            mock.patch.object(cypherpunkctl, "root_guard"),
+            mock.patch.object(cypherpunkctl, "hand_to_invoker"),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            cypherpunkctl.dispatch(args)
+            exported = output.read_text()
+            self.assertEqual(exported, controller_request.public_request(self.state)["text"])
+            with self.assertRaises(FileExistsError):
+                cypherpunkctl.dispatch(args)
+        self.assertEqual(output.read_text(), exported)
 
     def test_unknown_future_private_fields_are_not_exported(self):
         self.request["private_key"] = "PRIVATE_SENTINEL_MUST_NEVER_REACH_GUI"

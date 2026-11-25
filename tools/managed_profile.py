@@ -2007,11 +2007,19 @@ def inspect_enrollment_bundle(bundle, operator_public, state, replace=False):
             raise ValueError("bundle expansion bound")
         enrollment_set = z.read("set.json")
         verify_archive_signature(z, operator, enrollment_set)
+        signed_set = json.loads(enrollment_set)
+        if "expires" in signed_set:
+            expiry = signed_set["expires"]
+            if not isinstance(expiry, str):
+                raise ValueError("Invalid signed enrollment expiry")
+            deadline = dt.datetime.fromisoformat(expiry.replace("Z", "+00:00"))
+            if deadline.tzinfo is None or deadline <= dt.datetime.now(dt.timezone.utc):
+                raise ValueError("Signed enrollment has expired or has no expiry time zone")
         raw = z.read("manifest.json")
         manifest = json.loads(raw)
         role = manifest["role"]
         bundle_key = manifest.get("name", role)
-        if json.loads(enrollment_set)["bundles"].get(bundle_key) != hashlib.sha256(raw).hexdigest():
+        if signed_set["bundles"].get(bundle_key) != hashlib.sha256(raw).hexdigest():
             raise ValueError("manifest not covered by signature")
         if manifest["schema"] != 2 or set(names) != set(manifest["files"]) | signed:
             raise ValueError("unsigned bundle content")

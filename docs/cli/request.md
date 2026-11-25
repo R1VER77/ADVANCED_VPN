@@ -6,6 +6,7 @@ operator. Private keys never leave the device.
 ## Usage
 
     sudo cypherpunk request --role ROLE --protect MODE [--vault DIR] [--unlock-key FILE] [--insecure-plaintext-keys] --out FILE
+    sudo cypherpunk request --existing --out FILE
 
 ## Options
 
@@ -19,6 +20,7 @@ operator. Private keys never leave the device.
 - `--vault DIR`: the Nitrokey vault (with `--protect nitrokey`). The default is `/etc/cypherpunk-vpn/vault`, created on first use (PIN + touch). The VPN service reads it as root, so a vault must be a private directory owned by root. One in your home directory is refused before anything is created.
 - `--unlock-key FILE`: the operator's unlock public key (`cypherpunk unlock-key`), with `--protect operator` only.
 - `--out FILE`: the public request. Copy only this file to the operator.
+- `--existing`: export the saved public request into a new file and reuse the device's keys.
 
 `sudo python3 tools/install.py --apply --role ROLE --protect MODE` runs this for you
 right after installing.

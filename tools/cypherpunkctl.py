@@ -1268,9 +1268,32 @@ def launch_core(binary, config, ns, log=None, key_fds=None, uid=0, gid=0):
         )
 
 
-def supervise(state, bin_dir, lab=False, whole=False):
+@contextlib.contextmanager
+def supervisor_locks(state):
+    """Exclude other supervisors and route selection in the current network namespace."""
+    rt = runtime_dir(state)
+    net_lock = "/run/cypherpunk-vpn-" + str(os.stat("/proc/self/ns/net").st_ino) + ".lock"
+    with contextlib.ExitStack() as stack:
+        for path in (rt / "controller.lock", net_lock):
+            lock = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+            stack.callback(os.close, lock)
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                raise RuntimeError("The VPN is active or changing chains. Disconnect before switching") from None
+        yield rt
+
+
+def supervise(state, bin_dir, lab=False, whole=None):
     """The supervisor: build the network, start and restart the data plane, enforce the budget, write status."""
     root_guard(lab)
+    with supervisor_locks(state) as rt:
+        if whole is None:
+            whole = read_json_private(state / "preferences.json", {}).get("mode") == "whole-device"
+        _supervise(state, bin_dir, lab, whole, rt)
+
+
+def _supervise(state, bin_dir, lab, whole, rt):
     # Refuse an unpadded chain before anything on the host changes. reset, guard and
     # info still accept it, so the kill switch can always be cleared to re-sign.
     profile = load_profile(state)
@@ -1289,15 +1312,6 @@ def supervise(state, bin_dir, lab=False, whole=False):
             )
     uid, gid = service_identity(lab)
     front_uid, front_gid = front_identity(lab) if profile.get("front") else (None, None)
-    rt = runtime_dir(state)
-    lock = os.open(rt / "controller.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
-    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    global_lock = os.open(
-        "/run/cypherpunk-vpn-" + str(os.stat("/proc/self/ns/net").st_ino) + ".lock",
-        os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW,
-        0o600,
-    )
-    fcntl.flock(global_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     save(rt / "controller.json", dict(pid=os.getpid(), identity=identity_of(os.getpid())))
     early = read_json_private(state / "preferences.json", {}) if profile["role"] == "client" else {}
     if whole and not lab:
@@ -1646,8 +1660,6 @@ def supervise(state, bin_dir, lab=False, whole=False):
             final.update(protection="blocked", lifecycle="blocked", evidence=None, since=round(time.time(), 3))
         save(rt / "status.json", final)
         # Persistent nftables, TUN and namespace are deliberately retained on exit/crash.
-        os.close(lock)
-        os.close(global_lock)
         for fd in key_handles.values():
             os.close(fd)
         shutil.rmtree(device_dir, ignore_errors=True)
@@ -1945,12 +1957,14 @@ def service_active():
     return cmd("systemctl", "is-active", "--quiet", "cypherpunk-vpn.service", check=False).returncode == 0
 
 
-def wait_for_pin_request(seconds=60):
+def wait_for_pin_request(seconds=60, *, already_running=None):
     """`cypherpunk connect` returns once the service has started; its PIN request follows a
     moment later. Wait for it while the service is active, so `connect && unlock`
     never finds nothing and exits silently."""
     deadline = time.monotonic() + seconds
     while not pin_pending() and time.monotonic() < deadline and service_active():
+        if already_running is not None and already_running():
+            return False
         time.sleep(0.5)
     return pin_pending()
 
@@ -2024,6 +2038,28 @@ def wait_for_unlock(state, request, submitted_ns, progress, seconds=90):
     raise RuntimeError("Unlock could not be confirmed. Run sudo cypherpunk status to check the service")
 
 
+def recently_supervising(state):
+    """Recognize an already unlocked supervisor through its live status writes."""
+    path = runtime_dir(state, create=False) / "status.json"
+    try:
+        modified = path.stat(follow_symlinks=False).st_mtime
+    except FileNotFoundError:
+        return False
+    return 0 <= time.time() - modified <= 3 and (read_status(state) or {}).get("state") == "supervising"
+
+
+def status_for_display(state):
+    """Prefer a live PIN request over status left by an earlier supervisor."""
+    if pin_pending():
+        return dict(state="waiting for the Nitrokey PIN", next="sudo cypherpunk unlock")
+    status = read_status(state) or dict(state="not running")
+    if status.get("state") == "supervising" and not recently_supervising(state):
+        return dict(
+            state="unknown", detail="The supervisor has stopped reporting fresh status", next="sudo cypherpunk status"
+        )
+    return status
+
+
 def read_json_private(path, default=None):
     """Load a private JSON file, or return `default` when it does not exist."""
     return json.loads(read_private(path)) if path.exists() else default
@@ -2054,6 +2090,8 @@ def device_info(state):
         if protection["mode"] == "operator":
             info["locked"] = server_locked(state)
     if info["enrolled"]:
+        from saved_chains import describe_hops, inventory, labels
+
         profile = load_profile(state)
         preferences = read_json_private(state / "preferences.json", {})
         info.update(
@@ -2062,14 +2100,15 @@ def device_info(state):
             padded=profile["core"].get("cells") is True,
             # None: this device runs no carrier (a middle relay, or the exit of a longer chain).
             camouflaged=bool(profile.get("cloak")) if profile["carrier"] else None,
-            chain=[dict(hop=name, endpoint=endpoint) for name, endpoint in chain_of(profile)],
+            chain=describe_hops(profile, labels(state), inventory()),
             defense=(profile["carrier"] or {}).get("defense"),
             rate=(profile["carrier"] or {}).get("rate", "metered") if profile["carrier"] else None,
             mode=preferences.get("mode", "applications"),
             upstream_interface=preferences.get("upstream_interface"),
+            upstream_gateway=preferences.get("upstream_gateway"),
             daily_limit_bytes=daily_limit(preferences, profile) if profile["role"] == "client" else None,
         )
-    info["status"] = read_status(state, dict(state="not running"))
+    info["status"] = status_for_display(state)
     return info
 
 
@@ -2295,16 +2334,15 @@ def build_parser():
         s.add_parser("setup", help="check resumable client setup or review an exact hardware repair")
     )
     rq = s.add_parser("request", help="generate this device's keys locally; prints the public request")
+    rq.add_argument("--existing", action="store_true", help="export the public request without generating new keys")
     rq.add_argument(
         "--role",
         choices=["client", "relay", "middle", "exit"],
-        required=True,
         help="what this device will be in the chain",
     )
     rq.add_argument(
         "--protect",
         choices=["nitrokey", "systemd-creds", "operator", "none"],
-        required=True,
         help="how the private keys are sealed at rest (operator: a server without a TPM, whose keys only the "
         "operator's Nitrokey unlocks, after every reboot)",
     )
@@ -2445,6 +2483,21 @@ def build_parser():
     s.add_parser("status", help="runtime status written by the supervisor")
     s.add_parser("info", help="non-secret summary: role, chain, protection, preferences, status")
     s.add_parser("hops", help="the enrolled chain, hop by hop")
+    chains = s.add_parser("chains", help="list, import and select saved signed client chains")
+    chain_commands = chains.add_subparsers(dest="chain_action", required=True)
+    chain_commands.add_parser("list")
+    saved_import = chain_commands.add_parser("import")
+    saved_import.add_argument("name")
+    saved_import.add_argument("bundle", type=Path)
+    select = chain_commands.add_parser("select")
+    select.add_argument("name")
+    select.add_argument("--allow-unsaved-current", action="store_true")
+    location = chain_commands.add_parser("location").add_subparsers(dest="location_action", required=True)
+    location_set = location.add_parser("set")
+    location_set.add_argument("hop", choices=["entry", "relay", "middle", "exit"])
+    location_set.add_argument("--country", required=True)
+    location_set.add_argument("--city")
+    location_set.add_argument("--chain", help="label a hop in a saved chain instead of the current chain")
     doc = s.add_parser("doctor", help="self-checks for installation, keys, firewall, resolver and units")
     doc.add_argument("--check-egress", action="store_true", help="also show the public address seen outside the tunnel")
     s.add_parser("rotate", help="rotate the short-lived session certificates now")
@@ -2462,7 +2515,8 @@ def build_parser():
     pref.add_argument(
         "--upstream-gateway", help="next hop on an Ethernet-like upstream interface (point-to-point ones need none)"
     )
-    s.add_parser("unlock", help="answer a pending Nitrokey PIN prompt from the VPN service (e.g. after boot)")
+    unlock = s.add_parser("unlock", help="answer a pending Nitrokey PIN prompt from the VPN service (e.g. after boot)")
+    unlock.add_argument("--if-needed", action="store_true", help="skip the prompt if the service is already unlocked")
     reset_cmd = s.add_parser("reset", help="remove the kill switch and restore cleartext networking")
     reset_cmd.add_argument(
         "--allow-cleartext", action="store_true", required=True, help="required: confirms traffic may leave unprotected"
@@ -2579,7 +2633,7 @@ def main():
 
     scope = contextlib.nullcontext() if a.action in ("connect", "run") else one_pin()
     with scope:
-        if a.action in ("request", "enroll", "preferences", "reset") or (a.action == "setup" and a.apply):
+        if a.action in ("request", "enroll", "preferences", "reset", "chains") or (a.action == "setup" and a.apply):
             from controller_mutation import locked
 
             with locked(a.state):
@@ -2603,6 +2657,22 @@ def dispatch(a):
             raise SystemExit(1)
         return
     if a.action == "request":
+        if a.existing:
+            root_guard(a.lab)
+            if a.role or a.protect or a.vault or a.unlock_key or a.insecure_plaintext_keys:
+                raise ValueError("--existing only exports the current public request")
+            from controller_request import public_request
+
+            saved = public_request(a.state.resolve())
+            if saved is None:
+                raise RuntimeError("This device has no public client request yet")
+            with a.out.open("x", encoding="ascii") as output:
+                output.write(saved["text"])
+            hand_to_invoker(a.out)
+            emit(a, "Public request exported. Give this file to the operator.", request=str(a.out))
+            return
+        if not a.role or not a.protect:
+            raise ValueError("Generating a request requires --role and --protect")
         if a.protect == "none" and not (a.lab or a.insecure_plaintext_keys):
             raise SystemExit(
                 "refusing --protect none: the private keys would be plain files anyone with root or the disk can "
@@ -2763,13 +2833,53 @@ def dispatch(a):
         )
         return
     if a.action == "connect":
-        preferences = (
-            json.loads(read_private(a.state / "preferences.json")) if (a.state / "preferences.json").exists() else {}
-        )
         if a.whole_device and a.app_only:
             raise ValueError("choose one connection mode")
-        whole = a.whole_device or (not a.app_only and preferences.get("mode") == "whole-device")
+        whole = True if a.whole_device else False if a.app_only else None
         supervise(a.state.resolve(), a.bin_dir.resolve(), a.lab, whole)
+    elif a.action == "chains":
+        from saved_chains import import_bundle, list_chains, select_chain, set_label
+
+        root_guard(a.lab)
+        state = a.state.resolve()
+        if a.chain_action == "import":
+            import_bundle(state, a.name, a.bundle)
+            emit(a, "Signed chain saved.")
+        elif a.chain_action == "select":
+            select_chain(state, a.name, a.allow_unsaved_current)
+            emit(a, "Signed chain selected. Use Connect when ready.")
+        else:
+            listing = list_chains(state)
+            if a.chain_action == "list":
+                lines = ["Current enrollment"] + [
+                    "%s %s %s" % (hop["hop"], hop["endpoint"], hop["country"] or "Unknown")
+                    for hop in listing["current"]
+                ]
+                for row in listing["saved"]:
+                    suffix = " (current)" if row.get("active") else "" if row["available"] else " (unavailable)"
+                    lines.append(row["name"] + suffix)
+                    lines += [
+                        "  %s %s" % (hop["hop"], ", ".join(x for x in (hop["city"], hop["country"]) if x) or "Unknown")
+                        for hop in row.get("hops", [])
+                    ]
+                emit(a, "\n".join(lines), **listing)
+            else:
+                hops = listing["current"]
+                if a.chain:
+                    hops = next(
+                        (row["hops"] for row in listing["saved"] if row["name"] == a.chain and row["available"]), None
+                    )
+                    if hops is None:
+                        raise ValueError("Choose an available saved chain")
+                endpoint = next(
+                    (hop["endpoint"] for hop in hops if hop["hop"] == ("relay" if a.hop == "entry" else a.hop)), None
+                )
+                if a.hop == "entry" and len(hops) == 1:
+                    endpoint = hops[0]["endpoint"]
+                if endpoint is None:
+                    raise ValueError("This chain has no such hop")
+                set_label(state, endpoint, a.country, a.city)
+                emit(a, "Local location label saved.")
     elif a.action == "disconnect":
         root_guard(a.lab)
         # Live regression (bug 8): `disconnect` reported success whenever the service
@@ -2836,7 +2946,15 @@ def dispatch(a):
             print(message, file=sys.stderr, flush=True)
 
         progress("Looking for the VPN service's Nitrokey PIN request…")
-        if not wait_for_pin_request():
+        already_running = (lambda: recently_supervising(a.state)) if a.if_needed else None
+        if not wait_for_pin_request(already_running=already_running):
+            if already_running is not None and already_running() and not pin_pending():
+                emit(a, "The VPN service is already unlocked.", unlocked=True, status=read_status(a.state))
+                return
+            if a.if_needed:
+                raise RuntimeError(
+                    "The VPN did not reach a PIN prompt or an unlocked state. Run sudo cypherpunk status"
+                )
             raise RuntimeError("no Nitrokey PIN request is pending; start the service first: sudo cypherpunk connect")
         pin_request = pending_pin_request()
         if pin_request is None:
@@ -2862,10 +2980,7 @@ def dispatch(a):
     elif a.action == "status":
         # While the service waits for its PIN, say so: the status file is either not
         # written yet or left over from an earlier run (e.g. "blocked, disconnected").
-        if pin_pending():
-            status = dict(state="waiting for the Nitrokey PIN", next="sudo cypherpunk unlock")
-        else:
-            status = read_status(a.state) or dict(state="not running")
+        status = status_for_display(a.state)
         emit(a, json.dumps(status, sort_keys=True), status=status)
     elif a.action == "info":
         info = device_info(a.state.resolve())

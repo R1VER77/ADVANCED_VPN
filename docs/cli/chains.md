@@ -14,3 +14,28 @@ bytes, and each outer layer adds 56 bytes of budget.
 
 Switch chains with `cypherpunk init` (new bundles), then `cypherpunk enroll BUNDLE --replace` on
 each device.
+
+## Saved client chains
+
+Press `l` in the interactive view to list signed chains, import bundles, or
+filter by the country or city of a hop.
+
+    sudo cypherpunk chains list
+    sudo cypherpunk chains import NAME BUNDLE
+    sudo cypherpunk chains select NAME
+    sudo cypherpunk chains location set exit --country DE --city Frankfurt
+    sudo cypherpunk chains location set entry --chain NAME --country AE --city Dubai
+
+Use a bundle for this device signed by its enrolled operator. Import the
+original bundle if you want to switch back to a route that predates saved
+chains. If you intend to leave the current route unsaved, explicitly pass
+`--allow-unsaved-current` to `chains select`. Disconnect before selecting,
+then connect when ready. The kill switch stays in place.
+
+An expiry in the signed set is enforced. Older bundles may have no signed
+expiry. Live servers still validate their own peer authorization.
+
+Locations come from endpoint labels you set or a matching local operator
+inventory record with a known region. Missing values appear as Unknown.
+The country and city are display labels. A listed primary exit may have
+a standby.

@@ -5,7 +5,6 @@ use std::io::IsTerminal;
 use ratatui::style::{Color, Modifier, Style};
 
 // https://catppuccin.com/palette/#mocha
-const BASE: Color = Color::Rgb(30, 30, 46);
 const TEXT: Color = Color::Rgb(205, 214, 244);
 const SUBTEXT: Color = Color::Rgb(166, 173, 200);
 const MAUVE: Color = Color::Rgb(203, 166, 247);
@@ -63,13 +62,9 @@ impl Theme {
         self.colored(TEXT)
     }
 
-    /// The base foreground and background for the view and command output.
+    /// Apply the palette's foreground and inherit the terminal's background.
     pub fn surface(&self) -> Style {
-        if self.color {
-            self.text().bg(BASE)
-        } else {
-            Style::new()
-        }
+        self.text()
     }
 
     /// Headers and key names.
@@ -189,7 +184,7 @@ mod tests {
         ])];
         assert_eq!(
             to_ansi(&lines, t),
-            "\x1b[1;38;2;203;166;247;48;2;30;30;46mVPN\x1b[0m\x1b[38;2;205;214;244;48;2;30;30;46m ready\x1b[0m\n"
+            "\x1b[1;38;2;203;166;247mVPN\x1b[0m\x1b[38;2;205;214;244m ready\x1b[0m\n"
         );
     }
 }

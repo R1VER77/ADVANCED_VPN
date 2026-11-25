@@ -334,12 +334,11 @@ may provision).
 ## Command line
 
 `cypherpunk` is the front end. Run it with no arguments in a terminal for the interactive
-view: a session header (chain, mode, key protection, service state), a history of
-results, and key hints (`c` connect, `d` disconnect, `h` hops, `s` status, `i` info,
-`o` doctor). Long-running operations (`cypherpunk cloud chain --apply`, installs, enrollments)
-render a live terminal checklist, and PIN prompts use a desktop pop-up (also under `sudo`)
-with a terminal fallback. Every action is also a command, and `--json` prints the controller's
-result object for scripts.
+view. Open `sudo cypherpunk` for guided connection and local enrollment. Press
+`c` to connect, `u` to answer a pending Nitrokey prompt, `e` to set up or
+replace a chain, or `s` for connection details. The view shows the next
+protection check. Long-running cloud operations render a live terminal
+checklist. Command-line use also supports `--json` for scripts.
 
 ```
 $ cypherpunk hops
