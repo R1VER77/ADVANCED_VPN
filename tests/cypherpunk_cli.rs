@@ -21,6 +21,7 @@ impl Stubs {
             r#"echo "$@" >> "$STUB/ctl.log"
 for a in "$@"; do last="$a"; done
 case "$*" in
+  *--json*chains*) echo '{"ok": true, "action": "chains", "saved": []}' ;;
   *--json*hops*) echo '{"ok": true, "action": "hops", "hops": 1, "chain": [{"hop": "exit", "endpoint": "16.0.0.9:51820"}]}' ;;
   *--json*status*) echo '{"ok": true, "action": "status", "status": {"state": "supervising", "kill_switch": true, "children": {"carrier": {"pid": 7, "alive": true}}}}' ;;
   *--json*disconnect*) echo '{"ok": true, "action": "disconnect", "message": "Disconnect requested; the kill switch stays in place."}' ;;
@@ -101,6 +102,16 @@ fn json_passes_the_controller_object_through() {
     let v: serde_json::Value = serde_json::from_str(text(&o).trim()).unwrap();
     assert_eq!(v["chain"][0]["hop"], "exit");
     assert_eq!(s.log("ctl.log").trim(), "--json --state /tmp/x hops");
+}
+
+#[test]
+fn saved_chain_listing_honors_json() {
+    let s = Stubs::new("chains-json");
+    let o = s.cpvpn(&["--json", "chains", "list"]);
+    assert!(o.status.success());
+    let result: serde_json::Value = serde_json::from_str(text(&o).trim()).unwrap();
+    assert_eq!(result["saved"], serde_json::json!([]));
+    assert_eq!(s.log("ctl.log").trim(), "--json chains list");
 }
 
 #[test]

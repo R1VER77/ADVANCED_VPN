@@ -278,7 +278,8 @@ fn run(cli: Cli, theme: Theme) -> i32 {
         }
     };
     match action {
-        "run" | "unlock" | "mix" | "chains" => return exec(&ctrl, action, &args),
+        "run" | "unlock" | "mix" => return exec(&ctrl, action, &args),
+        "chains" if !cli.json => return exec(&ctrl, action, &args),
         // The terminal (a PIN prompt) or the pipes (a data key, printed only as JSON to a
         // pipe) belong to the controller, which also keeps --json.
         "unlock-key" | "unwrap" | "server-unlock" | "state-key" => {
