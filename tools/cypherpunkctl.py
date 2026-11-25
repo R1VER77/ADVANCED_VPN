@@ -1989,6 +1989,41 @@ def answer_pin_request(request, pin):
         s.close()
 
 
+def wait_for_unlock(state, request, submitted_ns, progress, seconds=90):
+    """Wait for fresh supervisor status after the service receives the PIN."""
+    status_path = runtime_dir(state, create=False) / "status.json"
+    deadline = time.monotonic() + seconds
+    next_notice = time.monotonic()
+    last_wait = None
+    while time.monotonic() < deadline:
+        pending = pending_pin_request()
+        if pending and pending != request:
+            raise RuntimeError("The VPN requested a new Nitrokey PIN. Check sudo cypherpunk status before retrying")
+        try:
+            fresh = status_path.stat(follow_symlinks=False).st_mtime_ns >= submitted_ns
+        except FileNotFoundError:
+            fresh = False
+        if fresh and not pending:
+            status = read_status(state) or {}
+            if status.get("state") == "supervising":
+                return status
+            if status.get("state") in ("blocked", "capped"):
+                raise RuntimeError(
+                    "The VPN reported it is blocked during unlock. Run sudo cypherpunk status for details"
+                )
+        waiting = (
+            "Waiting for the VPN service to read the PIN."
+            if pending
+            else "Waiting for the Nitrokey and VPN service. Touch the key if it flashes."
+        )
+        now = time.monotonic()
+        if waiting != last_wait or now >= next_notice:
+            progress(waiting)
+            last_wait, next_notice = waiting, now + 10
+        time.sleep(0.5)
+    raise RuntimeError("Unlock could not be confirmed. Run sudo cypherpunk status to check the service")
+
+
 def read_json_private(path, default=None):
     """Load a private JSON file, or return `default` when it does not exist."""
     return json.loads(read_private(path)) if path.exists() else default
@@ -2795,27 +2830,35 @@ def dispatch(a):
         emit(a, "Guard checked.")
     elif a.action == "unlock":
         root_guard(False)
+        from keyguard import pinentry, terminal_pinentry
+
+        def progress(message):
+            print(message, file=sys.stderr, flush=True)
+
+        progress("Looking for the VPN service's Nitrokey PIN request…")
         if not wait_for_pin_request():
             raise RuntimeError("no Nitrokey PIN request is pending; start the service first: sudo cypherpunk connect")
         pin_request = pending_pin_request()
         if pin_request is None:
             raise RuntimeError("the PIN request expired; start the service again: sudo cypherpunk connect")
-        # The same PIN path as everywhere: a desktop pop-up (as you, also under sudo),
-        # else a labelled terminal prompt. Not systemd's bare agent, whose prompt shows
-        # no label or cursor.
-        from keyguard import pinentry
-
-        answer_pin_request(pin_request, pinentry())
-        print("PIN sent. Touch the Nitrokey when it flashes.", flush=True)
-        deadline = time.monotonic() + 90
-        status = None
-        while time.monotonic() < deadline:
-            status = read_status(a.state)
-            if status and status.get("state") not in (None, "blocked") and not pin_pending():
-                break
-            time.sleep(0.5)
-        state = (status or {}).get("state", "not running")
-        emit(a, "Unlocked; the VPN is %s." % state, unlocked=True, status=status or dict(state=state))
+        pin = terminal_pinentry() if sys.stdin.isatty() else pinentry()
+        submitted_ns = time.time_ns()
+        try:
+            answer_pin_request(pin_request, pin)
+        except OSError:
+            raise RuntimeError(
+                "The PIN request ended before the answer could be sent. Run sudo cypherpunk status"
+            ) from None
+        finally:
+            del pin
+        progress("PIN submitted. Touch the Nitrokey when it flashes.")
+        status = wait_for_unlock(a.state, pin_request, submitted_ns, progress)
+        message = (
+            "Nitrokey unlocked. VPN protection is active."
+            if status.get("protection") == "protected"
+            else "Nitrokey unlocked. Run sudo cypherpunk status to check tunnel protection."
+        )
+        emit(a, message, unlocked=True, status=status)
     elif a.action == "status":
         # While the service waits for its PIN, say so: the status file is either not
         # written yet or left over from an earlier run (e.g. "blocked, disconnected").

@@ -73,7 +73,7 @@ def atomic(path, data):
 
 ASK_PASSWORD = "/usr/bin/systemd-ask-password"
 PINENTRY = "/usr/bin/pinentry-gnome3"
-PIN_PROMPT = "Cypherpunk VPN: FIDO2 PIN, then touch the Nitrokey when it flashes"
+PIN_PROMPT = "Cypherpunk VPN: type your Nitrokey FIDO2 PIN (hidden), then press Enter. Touch the key when it flashes."
 _PROMPT_CALLER = contextvars.ContextVar("cypherpunk_authenticated_prompt_caller", default=None)
 _PROMPT_CANCEL = contextvars.ContextVar("cypherpunk_prompt_cancellation", default=None)
 
@@ -166,6 +166,16 @@ def pinentry():
     return value
 
 
+def terminal_pinentry():
+    """Read the Nitrokey PIN from a terminal with echo disabled."""
+    import getpass
+
+    value = getpass.getpass("Type your Nitrokey FIDO2 PIN (hidden), then press Enter: ")
+    if not value:
+        raise RuntimeError("No Nitrokey PIN was entered")
+    return value
+
+
 def _ask_pin():
     """PIN source, in order: a desktop dialog (pinentry-gnome3) on the session of the
     person at this keyboard, also under sudo; a terminal (no-echo prompt with a
@@ -187,12 +197,7 @@ def _ask_pin():
     if _PROMPT_CALLER.get() is not None:
         raise RuntimeError("trusted desktop prompt unavailable; use the local terminal unlock command")
     if sys.stdin.isatty():
-        import getpass
-
-        value = getpass.getpass("Nitrokey PIN (then touch the key when it flashes): ")
-        if not value:
-            raise RuntimeError("PIN unavailable")
-        return value
+        return terminal_pinentry()
     if os.environ.get("INVOCATION_ID") and Path(ASK_PASSWORD).exists():
         # No --keyname/--accept-cached: the PIN is never cached in the kernel keyring.
         r = subprocess.run(

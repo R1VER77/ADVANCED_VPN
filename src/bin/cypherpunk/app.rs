@@ -78,10 +78,13 @@ impl Header {
     pub fn from_info(v: &Value) -> Self {
         let i = v.get("info").cloned().unwrap_or(Value::Null);
         let get = |k: &str| i.get(k).and_then(Value::as_str).map(str::to_string);
-        let chain = i
-            .get("chain")
-            .and_then(chain_short)
-            .unwrap_or_else(|| "not enrolled".into());
+        let chain = i.get("chain").and_then(chain_short).unwrap_or_else(|| {
+            match i.get("enrolled").and_then(Value::as_bool) {
+                Some(false) => "not enrolled".into(),
+                Some(true) => "enrolled".into(),
+                None => "unknown".into(),
+            }
+        });
         let mode = match (get("mode"), get("rate")) {
             (Some(m), Some(r)) => format!("{m} · rate {r}"),
             (Some(m), None) => m,
@@ -506,7 +509,11 @@ mod tests {
     #[test]
     fn get_started_lists_free_endpoints_and_the_next_commands() {
         let app = {
-            let mut a = App::new(Theme::plain(), true, Header::from_info(&Value::Null));
+            let mut a = App::new(
+                Theme::plain(),
+                true,
+                Header::from_info(&json!({"info": {"enrolled": false}})),
+            );
             a.history.push(get_started());
             a
         };
@@ -525,7 +532,7 @@ mod tests {
     #[test]
     fn unknown_info_falls_back_cleanly() {
         let h = Header::from_info(&json!({"ok": false}));
-        assert_eq!(h.chain, "not enrolled");
+        assert_eq!(h.chain, "unknown");
         assert_eq!(h.status, "unknown");
     }
 }

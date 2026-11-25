@@ -146,7 +146,11 @@ fn connect_starts_the_unit_then_shows_status() {
         "start cypherpunk-vpn.service"
     );
     let t = text(&o);
-    assert!(t.contains("• Connected  cypherpunk-vpn.service"), "{t}");
+    assert!(
+        t.contains("• VPN service started  cypherpunk-vpn.service"),
+        "{t}"
+    );
+    assert!(t.contains("sudo cypherpunk unlock"), "{t}");
     assert!(t.contains("• Status  supervising"), "{t}");
     assert!(t.contains("  ✓ carrier  pid 7"), "{t}");
 }

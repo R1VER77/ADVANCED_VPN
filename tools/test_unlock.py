@@ -10,6 +10,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -98,6 +99,59 @@ class StatusWordingTests(unittest.TestCase):
             (ask / "ask.vpn").unlink()
             r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=60)
             self.assertEqual(json.loads(r.stdout.strip().splitlines()[-1])["status"], {"state": "not running"})
+
+
+class UnlockConfirmationTests(unittest.TestCase):
+    def test_unlock_waits_for_fresh_supervisor_status(self):
+        with (
+            tempfile.TemporaryDirectory() as d,
+            mock.patch.object(cypherpunkctl, "runtime_dir", return_value=Path(d)),
+            mock.patch.object(cypherpunkctl, "pending_pin_request", side_effect=[("socket", "ask"), None]),
+            mock.patch.object(cypherpunkctl.time, "sleep"),
+            mock.patch.object(cypherpunkctl, "read_status", return_value={"state": "supervising"}),
+        ):
+            submitted = time.time_ns()
+            path = Path(d) / "status.json"
+            path.touch()
+            os.utime(path, ns=(submitted, submitted))
+            progress = mock.Mock()
+            status = cypherpunkctl.wait_for_unlock(d, ("socket", "ask"), submitted, progress)
+            self.assertEqual(status, {"state": "supervising"})
+            progress.assert_called_once_with("Waiting for the VPN service to read the PIN.")
+
+    def test_stale_status_never_confirms_unlock(self):
+        with (
+            tempfile.TemporaryDirectory() as d,
+            mock.patch.object(cypherpunkctl, "runtime_dir", return_value=Path(d)),
+            mock.patch.object(cypherpunkctl, "pending_pin_request", return_value=None),
+            mock.patch.object(cypherpunkctl.time, "monotonic", side_effect=range(20)),
+            mock.patch.object(cypherpunkctl.time, "sleep"),
+            mock.patch.object(cypherpunkctl, "read_status", return_value={"state": "supervising"}) as status,
+        ):
+            path = Path(d) / "status.json"
+            path.touch()
+            with self.assertRaisesRegex(RuntimeError, "Unlock could not be confirmed"):
+                cypherpunkctl.wait_for_unlock(d, ("socket", "ask"), path.stat().st_mtime_ns + 1, mock.Mock(), seconds=5)
+            status.assert_not_called()
+
+    def test_fresh_blocked_status_is_a_failure(self):
+        with (
+            tempfile.TemporaryDirectory() as d,
+            mock.patch.object(cypherpunkctl, "runtime_dir", return_value=Path(d)),
+            mock.patch.object(cypherpunkctl, "pending_pin_request", return_value=None),
+            mock.patch.object(cypherpunkctl, "read_status", return_value={"state": "blocked"}),
+        ):
+            submitted = time.time_ns()
+            path = Path(d) / "status.json"
+            path.touch()
+            os.utime(path, ns=(submitted, submitted))
+            with self.assertRaisesRegex(RuntimeError, "VPN reported it is blocked"):
+                cypherpunkctl.wait_for_unlock(d, ("socket", "ask"), submitted, mock.Mock())
+
+    def test_a_new_request_is_reported_without_resending_the_pin(self):
+        with mock.patch.object(cypherpunkctl, "pending_pin_request", return_value=("new-socket", "new-ask")):
+            with self.assertRaisesRegex(RuntimeError, "requested a new Nitrokey PIN"):
+                cypherpunkctl.wait_for_unlock(Path.cwd(), ("socket", "ask"), time.time_ns(), mock.Mock())
 
 
 class AnswerTests(unittest.TestCase):

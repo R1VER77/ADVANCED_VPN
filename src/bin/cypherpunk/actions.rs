@@ -120,10 +120,10 @@ pub fn perform(ctrl: &Controller, action: &str, args: &[String]) -> Done {
                 return failed("connect failed".into(), h);
             }
             let mut cells = vec![Cell::Result {
-                title: "Connected".into(),
+                title: "VPN service started".into(),
                 summary: Some(SERVICE.into()),
                 rows: vec![Row::detail(
-                    "started; a Nitrokey PIN, if needed, is asked for now (or: sudo cypherpunk unlock)",
+                    "If prompted for the Nitrokey, run sudo cypherpunk unlock at a shell prompt. The terminal hides the PIN as you type.",
                 )],
             }];
             cells.extend(status_cells(ctrl));
