@@ -38,6 +38,12 @@ class Metadata(unittest.TestCase):
         variants["relay5"] = variant()
         variants["relay30"]["window_evidence"][0]["protection_observations"]["all_samples_protected"] = False
         self.assertEqual(replication.local_acceptance(variants, paired)["status"], "failed")
+        variants["relay30"] = variant()
+        for arm in ("undefended", "relay30"):
+            with self.subTest(arm=arm):
+                variants[arm]["excluded"] = [dict(reason="no_valid_browser_start")]
+                self.assertEqual(replication.local_acceptance(variants, paired)["status"], "failed")
+                variants[arm]["excluded"] = []
 
     def test_frozen_analysis_and_actual_variant_order_must_match(self):
         with tempfile.TemporaryDirectory() as temporary:

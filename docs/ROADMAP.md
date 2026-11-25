@@ -31,6 +31,8 @@ of the validated checkpoint. It preserves the remaining main-plan acceptance gat
   run completed on 20 November ([result](WF_REPLICATION.md)): defended accuracy is near
   chance with no corrected signal, but the local gate failed on upper bounds (up to 12.1%),
   load success (−6 to −7 points) and one unprotected sample window per arm; defaults stay.
+  The [25 November follow-up](WF_REPLICATION.md#follow-up-on-25-november-2026) checks
+  those samples, adds observer diagnostics and measures held-out mix-lane timing.
   Cross-environment qualification remains open.
 - [ ] Validate the busy-CPU fix on held-out days, networks and devices, with confidence
   intervals, negative results and load failures reported alongside positive results.

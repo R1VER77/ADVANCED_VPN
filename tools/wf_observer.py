@@ -55,8 +55,12 @@ def snapshot(runtime, now=None):
             for c in children.values()
         )
         evidence = status.get("evidence") or {}
-        good = all(
-            isinstance(evidence.get(key), (int, float))
+        stale = status.get("stale", {})
+        if not isinstance(evidence, dict) or not isinstance(stale, dict):
+            raise ValueError("invalid controller evidence")
+        evidence_fresh = {
+            kind: isinstance(evidence.get(key), (int, float))
+            and not isinstance(evidence[key], bool)
             and math.isfinite(evidence[key])
             and -0.001 <= now - evidence[key] <= MAX_AGE[kind]
             for key, kind in (
@@ -64,20 +68,23 @@ def snapshot(runtime, now=None):
                 ("carrier_handshake_at", "carrier"),
                 ("path_probe_at", "probe"),
             )
-        )
+        }
         row.update(
             lifecycle=status.get("lifecycle"),
             kill_switch=status.get("kill_switch") is True,
             status_age=now - modified,
             controller_alive=alive,
             children_alive=children_alive,
+            controller_protection=status.get("protection"),
+            controller_stale=[kind for kind in MAX_AGE if kind in stale],
+            evidence_fresh=evidence_fresh,
         )
         if not fresh or not alive or not children_alive:
             row["reason"] = "stale_or_dead_controller"
         elif (
             status.get("protection") == "protected"
             and status.get("state") == "supervising"
-            and good
+            and all(evidence_fresh.values())
             and row["kill_switch"]
         ):
             row.update(protection="protected", reason="fresh_controller_evidence")

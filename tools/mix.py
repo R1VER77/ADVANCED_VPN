@@ -6,10 +6,9 @@
     cypherpunk mix status | stop
 
 The VPN carries low-latency traffic; the mix lane carries what can wait seconds (mail,
-chat, small fetches) and needs more than a VPN can give: every packet is held a random
-time at every hop, and the client sends real-or-decoy packets and loops at a constant
-Poisson rate whether or not it has anything to say, so even an adversary watching every
-link cannot tell when, or whether, it sent (docs/evidence/MIX_LANE.json).
+chat, small fetches). Random delays and continuous cover traffic reduce timing
+correlation. Measured protection depends on the network parameters and the
+concurrent sender pool (docs/WF_REPLICATION.md).
 
 The client runs inside the protected namespace (`cypherpunk run`), so the mixnet's gateway sees
 the chain's exit, never this device. Its programs are Katzenpost's own, unmodified and

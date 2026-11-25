@@ -350,7 +350,7 @@ def local_acceptance(variants, paired):
         for view in baseline["views"].values()
     )
     control_valid = (
-        all(r["reason"] in ("no_valid_browser_start", "unmonitored") for r in baseline["excluded"])
+        not baseline["excluded"]
         and all(s["capture"].get("unexpected_outgoing") == 0 for s in baseline["sources"])
         and all(r.get("protection_observations", {}).get("control_samples_valid") for r in baseline["window_evidence"])
     )
@@ -367,9 +367,7 @@ def local_acceptance(variants, paired):
                 v["primary"]["p_holm_all_nine_primary_views"] > 0.05 for v in variant["views"].values()
             ),
             success_noninferiority=paired[name]["success_difference_two_way_cluster_ci95"][0] >= -0.05,
-            no_invalid_capture_windows=all(
-                r["reason"] in ("no_valid_browser_start", "unmonitored") for r in variant["excluded"]
-            ),
+            no_invalid_capture_windows=not variant["excluded"],
             underlay_metadata_audit=all(s["capture"].get("unexpected_outgoing") == 0 for s in variant["sources"]),
             all_sampled_protection_valid=all(
                 r.get("protection_observations", {}).get("all_samples_protected") for r in variant["window_evidence"]

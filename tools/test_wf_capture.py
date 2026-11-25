@@ -107,12 +107,21 @@ class ProtectionSamples(unittest.TestCase):
                 ),
                 mock.patch.object(cypherpunkctl, "identity_of", side_effect=lambda pid: {1: "one", 2: "two"}[pid]),
             ):
-                self.assertEqual(wf_observer.snapshot(root, now)["protection"], "protected")
+                observed = wf_observer.snapshot(root, now)
+                self.assertEqual(observed["protection"], "protected")
+                self.assertEqual(observed["evidence_fresh"], {"cloak": True, "carrier": True, "probe": True})
                 self.assertEqual(wf_observer.snapshot(root, now + 20)["protection"], "unknown")
                 with mock.patch.object(cypherpunkctl, "identity_of", return_value="reused"):
                     self.assertEqual(wf_observer.snapshot(root, now)["protection"], "unknown")
                 os.utime(root / "status.json", (now + 1, now + 1))
                 self.assertEqual(wf_observer.snapshot(root, now)["protection"], "unknown")
+                status.update(protection="blocked", lifecycle="reconnecting", evidence=None, stale={"probe": 16})
+                (root / "status.json").write_text(json.dumps(status))
+                os.utime(root / "status.json", (now, now))
+                observed = wf_observer.snapshot(root, now)
+                self.assertEqual(observed["protection"], "blocked")
+                self.assertTrue(observed["kill_switch"])
+                self.assertEqual(observed["controller_stale"], ["probe"])
 
     def test_observer_has_samples_before_and_after_the_observed_interval(self):
         with tempfile.TemporaryDirectory() as temporary:
