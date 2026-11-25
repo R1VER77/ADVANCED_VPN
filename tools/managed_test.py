@@ -477,6 +477,7 @@ def main():
         manager("relay")
         manager("exit")
         client = manager("client")
+        client_log = Path(logs[-1].name)
         wait_online(client, 240 if a.hardware_vault else 25)
         silence = probe_first_hop(state, run)
         # The monthly cap, end to end: a relay whose cap is set just above what it has
@@ -575,28 +576,34 @@ def main():
                     "table", "inet", "cypherpunk_vpn", check=False)  # fmt: skip
             return r.stdout if r.returncode == 0 else None
 
-        def restored_within(expected, limit=8):
+        def restored_within(expected, cause, log_offset, limit=8):
             t0 = time.monotonic()
             seen = None
+            recovery = f"kill switch table cypherpunk_vpn restored in cpvpn-app: was {cause} (".encode()
             while time.monotonic() - t0 < limit:
                 seen = app_table()
                 if seen == expected:
-                    return round(time.monotonic() - t0, 2)
+                    with client_log.open("rb") as log:
+                        log.seek(log_offset)
+                        if recovery in log.read():
+                            return round(time.monotonic() - t0, 2)
                 time.sleep(0.2)
             diff = "\n".join(difflib.unified_diff((expected or "").splitlines(), (seen or "<absent>").splitlines(),
                                                   "expected", "last seen", lineterm=""))  # fmt: skip
-            raise RuntimeError("the kill switch was not restored\n" + diff)
+            raise RuntimeError(f"the watchdog did not confirm restoration of the {cause} kill switch\n" + diff)
 
         expected_table = app_table()
         assert expected_table and "policy drop" in expected_table, expected_table
+        # The checked nft mutations can be repaired before a second command observes them.
+        # Require a new watchdog event for each mutation as well as the exact restored table.
+        offset = client_log.stat().st_size
         run("ip", "netns", "exec", "av-client", "ip", "netns", "exec", "cpvpn-app", "/usr/sbin/nft", "delete", "table",
             "inet", "cypherpunk_vpn")  # fmt: skip
-        assert app_table() is None
-        restore_deleted = restored_within(expected_table)
+        restore_deleted = restored_within(expected_table, "absent", offset)
+        offset = client_log.stat().st_size
         run("ip", "netns", "exec", "av-client", "ip", "netns", "exec", "cpvpn-app", "/usr/sbin/nft", "insert", "rule",
             "inet", "cypherpunk_vpn", "output", "accept")  # fmt: skip
-        assert app_table() != expected_table
-        restore_altered = restored_within(expected_table)
+        restore_altered = restored_within(expected_table, "altered", offset)
         marker = "PRIVATE-MANAGED-" + os.urandom(16).hex()
         app(
             "import socket;s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.settimeout(3);b="
