@@ -32,6 +32,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       TAG: ${{ inputs.tag || github.ref_name }}
+      SOURCE_PREDICATE: ${{ format('{0}/{1}/attestations/release-source/v1', github.server_url, github.repository) }}
     steps:
       - name: Validate the tag ref
         run: |
@@ -147,41 +148,46 @@ jobs:
       - name: Record the signed source of a dispatched rebuild
         if: github.event_name == 'workflow_dispatch'
         run: |
-          repo="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
-          workflow="$repo/.github/workflows/release.yml"
-          jq -n --arg repo "$repo" --arg workflow "$workflow" --arg ref "$GITHUB_REF" \
-            --arg builder "${GITHUB_SERVER_URL}/${GITHUB_WORKFLOW_REF}" \
-            --arg workflow_sha "$GITHUB_WORKFLOW_SHA" --arg tag "refs/tags/$TAG" \
-            --arg source_sha "$RELEASE_SHA" --arg invocation "$repo/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT" '
-              {buildDefinition: {
-                buildType: $workflow,
-                externalParameters: {sourceRef: $tag},
-                resolvedDependencies: [
-                  {uri: ("git+" + $repo + "@" + $tag), digest: {gitCommit: $source_sha}},
-                  {uri: ("git+" + $repo + "@" + $ref), digest: {gitCommit: $workflow_sha}}
-                ]
-              }, runDetails: {builder: {id: $builder}, metadata: {invocationId: $invocation}}}' \
-            > "$RUNNER_TEMP/release-predicate.json"
+          jq -n --arg repo "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" --arg ref "refs/tags/$TAG" \
+            --arg sha "$RELEASE_SHA" '{repository: $repo, ref: $ref, commit: $sha}' > "$RUNNER_TEMP/release-source.json"
       - name: Attest build provenance
         uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
         with:
           subject-path: |
             dist/*.tar.gz
             dist/*.deb
-          predicate-type: ${{ github.event_name == 'workflow_dispatch' && 'https://slsa.dev/provenance/v1' || '' }}
-          predicate-path: ${{ github.event_name == 'workflow_dispatch' && format('{0}/release-predicate.json', runner.temp) || '' }}
           # Storage records exist only for organisation-owned repositories and are not
           # needed to verify; skipping them keeps the job off artifact-metadata: write.
+          create-storage-record: false
+      - name: Attest the signed release source
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with:
+          subject-path: |
+            dist/*.tar.gz
+            dist/*.deb
+          predicate-type: ${{ env.SOURCE_PREDICATE }}
+          predicate-path: ${{ runner.temp }}/release-source.json
           create-storage-record: false
       - name: The attestation verifies before anything is published
         run: |
           set -o pipefail
+          repo="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
+          invocation="$repo/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT"
           for asset in dist/*.tar.gz dist/*.deb; do
-            gh attestation verify "$asset" -R "$GITHUB_REPOSITORY" \
-              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" --format json |
-              jq -e --arg uri "git+$GITHUB_SERVER_URL/$GITHUB_REPOSITORY@refs/tags/$TAG" --arg sha "$RELEASE_SHA" '
-                any(.[]; any(.verificationResult.statement.predicate.buildDefinition.resolvedDependencies[];
-                  .uri == $uri and .digest.gitCommit == $sha))' >/dev/null
+            verify=(gh attestation verify "$asset" -R "$GITHUB_REPOSITORY"
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" --format json)
+            "${verify[@]}" | jq -e --arg invocation "$invocation" '
+              any(.[]; .verificationResult.signature.certificate.runInvocationURI == $invocation)' >/dev/null
+            if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
+              "${verify[@]}" --predicate-type "$SOURCE_PREDICATE" | jq -e --arg invocation "$invocation" \
+                --arg repo "$repo" --arg ref "refs/tags/$TAG" --arg sha "$RELEASE_SHA" '
+                  any(.[]; .verificationResult |
+                    .signature.certificate.runInvocationURI == $invocation and
+                    .statement.predicate == {repository: $repo, ref: $ref, commit: $sha})' >/dev/null
+            else
+              test "$RELEASE_SHA" = "$GITHUB_SHA"
+            fi
           done
       - name: Publish
         run: |
@@ -205,8 +211,7 @@ jobs:
           needed), or \`gh release download $TAG -R $GITHUB_REPOSITORY\`.
 
           Check where it came from: each package and the archive carry a signed build-provenance
-          attestation (Sigstore) naming this repository, its release workflow and source commit
-          \`$RELEASE_SHA\`. For each downloaded artifact, run
+          attestation (Sigstore) identifying the GitHub Actions build. For each downloaded artifact, run
           \`gh attestation verify FILE -R $GITHUB_REPOSITORY --signer-workflow $GITHUB_REPOSITORY/.github/workflows/release.yml\`.
 
           Upgrading from v0.10.x requires new enrollment. Stop the previous VPN and its guard
@@ -235,4 +240,7 @@ jobs:
           are bundled; installation needs neither host Python nor PyPI access. Verify the
           release provenance before executing the bundled interpreter or installer.
           NOTES
+          if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
+            printf '\nThis rebuild also binds each artifact to the signed release tag and source commit. Verify that statement with the same command and \`--predicate-type %s\`.\n' "$SOURCE_PREDICATE" >> notes.md
+          fi
           gh release create "$TAG" dist/* --verify-tag --title "cypherpunk_vpn $TAG" --notes-file notes.md
