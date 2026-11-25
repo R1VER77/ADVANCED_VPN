@@ -180,7 +180,12 @@ jobs:
             "${verify[@]}" | jq -e --arg invocation "$invocation" '
               any(.[]; .verificationResult.signature.certificate.runInvocationURI == $invocation)' >/dev/null
             if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
-              "${verify[@]}" --predicate-type "$SOURCE_PREDICATE" | jq -e --arg invocation "$invocation" \
+              digest=$(sha256sum "$asset" | cut -d ' ' -f 1)
+              # The API lists custom attestations but does not accept their types as filters.
+              bundles="$RUNNER_TEMP/release-bundles.jsonl"
+              gh api --paginate "repos/$GITHUB_REPOSITORY/attestations/sha256:$digest" \
+                --jq '.attestations[].bundle' > "$bundles"
+              "${verify[@]}" --bundle "$bundles" --predicate-type "$SOURCE_PREDICATE" | jq -e --arg invocation "$invocation" \
                 --arg repo "$repo" --arg ref "refs/tags/$TAG" --arg sha "$RELEASE_SHA" '
                   any(.[]; .verificationResult |
                     .signature.certificate.runInvocationURI == $invocation and
@@ -241,6 +246,13 @@ jobs:
           release provenance before executing the bundled interpreter or installer.
           NOTES
           if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
-            printf '\nThis rebuild also binds each artifact to the signed release tag and source commit. Verify that statement with the same command and \`--predicate-type %s\`.\n' "$SOURCE_PREDICATE" >> notes.md
+            cat >> notes.md <<NOTES
+
+          This rebuild also binds each artifact to the signed tag and source commit.
+          Fetch the bundles for an artifact with
+          \`gh api --paginate repos/$GITHUB_REPOSITORY/attestations/sha256:DIGEST --jq '.attestations[].bundle' > bundles.jsonl\`
+          using its SHA-256 digest in place of DIGEST. Add
+          \`--bundle bundles.jsonl --predicate-type $SOURCE_PREDICATE\` to the verification command.
+          NOTES
           fi
           gh release create "$TAG" dist/* --verify-tag --title "cypherpunk_vpn $TAG" --notes-file notes.md
