@@ -32,7 +32,7 @@ class CoreTunTests(unittest.TestCase):
         with (
             mock.patch("cypherpunkctl.os.open", return_value=40) as open_fd,
             mock.patch("cypherpunkctl.os.close") as close_fd,
-            mock.patch("cypherpunkctl.os.setns") as setns,
+            mock.patch("cypherpunkctl.os.setns", create=True) as setns,
             mock.patch("cypherpunkctl.fcntl.ioctl") as attach,
             mock.patch("cypherpunkctl.subprocess.Popen") as spawn,
         ):
@@ -56,13 +56,14 @@ class CoreTunTests(unittest.TestCase):
         with (
             mock.patch("cypherpunkctl.os.open", side_effect=[40, 41, 42]),
             mock.patch("cypherpunkctl.os.close") as close_fd,
-            mock.patch("cypherpunkctl.os.setns") as setns,
+            mock.patch("cypherpunkctl.os.setns", create=True) as setns,
+            mock.patch("cypherpunkctl.os.CLONE_NEWNET", mock.sentinel.netns, create=True),
             mock.patch("cypherpunkctl.fcntl.ioctl", side_effect=PermissionError("TUNSETIFF")),
             mock.patch("cypherpunkctl.subprocess.Popen") as spawn,
         ):
             with self.assertRaises(PermissionError):
                 launch_core("core", "runtime.json", APP)
-        self.assertEqual(setns.call_args_list, [mock.call(41, os.CLONE_NEWNET), mock.call(40, os.CLONE_NEWNET)])
+        self.assertEqual(setns.call_args_list, [mock.call(41, mock.sentinel.netns), mock.call(40, mock.sentinel.netns)])
         self.assertEqual(close_fd.call_args_list, [mock.call(41), mock.call(40), mock.call(42)])
         spawn.assert_not_called()
 
