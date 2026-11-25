@@ -15,7 +15,7 @@ import subprocess
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from managed_profile import create, enroll, runtime, refresh_leaves, canonical
-from cypherpunkctl import Allowance
+from cypherpunkctl import APP, TUN, Allowance, child_guard, launch_core
 from keyguard import memory_fd
 
 
@@ -25,6 +25,46 @@ def _requests(root, roles=("client", "relay", "exit"), prefix="dev"):
     for role in roles:
         request(role, root / prefix / role, "none")
     return {r: (root / prefix / r / "request.json").read_bytes() for r in roles}
+
+
+class CoreTunTests(unittest.TestCase):
+    def test_exit_inherits_the_attached_tun_and_keeps_the_service_identity(self):
+        with (
+            mock.patch("cypherpunkctl.os.open", return_value=40) as open_fd,
+            mock.patch("cypherpunkctl.os.close") as close_fd,
+            mock.patch("cypherpunkctl.os.setns") as setns,
+            mock.patch("cypherpunkctl.fcntl.ioctl") as attach,
+            mock.patch("cypherpunkctl.subprocess.Popen") as spawn,
+        ):
+            self.assertIs(
+                launch_core("core", "runtime.json", None, key_fds={"inner": 41}, uid=123, gid=456), spawn.return_value
+            )
+        open_fd.assert_called_once_with("/dev/net/tun", os.O_RDWR | os.O_NONBLOCK | os.O_CLOEXEC)
+        setns.assert_not_called()
+        self.assertEqual(attach.call_args.args[:2], (40, 0x400454CA))
+        self.assertEqual(attach.call_args.args[2].split(b"\0", 1)[0], TUN.encode())
+        self.assertEqual(
+            spawn.call_args.args[0], ["core", "--config", "runtime.json", "--tun-fd", "40", "--key-fd", "inner=41"]
+        )
+        self.assertEqual(spawn.call_args.kwargs["pass_fds"], [40, 41])
+        guard = spawn.call_args.kwargs["preexec_fn"]
+        self.assertIs(guard.func, child_guard)
+        self.assertEqual(guard.args, (os.getpid(), 123, 456))
+        close_fd.assert_called_once_with(40)
+
+    def test_failed_app_tun_attachment_restores_underlay_and_closes_descriptors(self):
+        with (
+            mock.patch("cypherpunkctl.os.open", side_effect=[40, 41, 42]),
+            mock.patch("cypherpunkctl.os.close") as close_fd,
+            mock.patch("cypherpunkctl.os.setns") as setns,
+            mock.patch("cypherpunkctl.fcntl.ioctl", side_effect=PermissionError("TUNSETIFF")),
+            mock.patch("cypherpunkctl.subprocess.Popen") as spawn,
+        ):
+            with self.assertRaises(PermissionError):
+                launch_core("core", "runtime.json", APP)
+        self.assertEqual(setns.call_args_list, [mock.call(41, os.CLONE_NEWNET), mock.call(40, os.CLONE_NEWNET)])
+        self.assertEqual(close_fd.call_args_list, [mock.call(41), mock.call(40), mock.call(42)])
+        spawn.assert_not_called()
 
 
 class EnrollmentTests(unittest.TestCase):

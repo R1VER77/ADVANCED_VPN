@@ -1238,34 +1238,34 @@ def daily_limit(preferences, profile):
     return profile["daily_budget_bytes"]
 
 
-def launch_client(binary, config, ns, log=None, key_fds=None, uid=0, gid=0):
-    """Attach TUN in app namespace, return to underlay; no application gets an underlay FD."""
+def launch_core(binary, config, ns, log=None, key_fds=None, uid=0, gid=0):
+    """Attach the managed TUN as root, then launch the core unprivileged on the underlay."""
     import struct
 
-    current = os.open("/proc/self/ns/net", os.O_RDONLY | os.O_CLOEXEC)
-    app = os.open("/run/netns/" + ns, os.O_RDONLY | os.O_CLOEXEC)
-    os.setns(app, os.CLONE_NEWNET)
-    os.close(app)
-    fd = os.open("/dev/net/tun", os.O_RDWR | os.O_NONBLOCK)
-    fcntl.ioctl(fd, 0x400454CA, struct.pack("16sH", TUN.encode(), 0x1001))
-    os.setns(current, os.CLONE_NEWNET)
-    os.close(current)
-    parent = os.getpid()
-    extra = []
-    inherited = [fd]
-    for name, value in (key_fds or {}).items():
-        extra += ["--key-fd", name + "=" + str(value)]
-        inherited.append(value)
-    try:
+    with contextlib.ExitStack() as descriptors:
+        with contextlib.ExitStack() as namespace:
+            if ns is not None:
+                current = os.open("/proc/self/ns/net", os.O_RDONLY | os.O_CLOEXEC)
+                namespace.callback(os.close, current)
+                app = os.open("/run/netns/" + ns, os.O_RDONLY | os.O_CLOEXEC)
+                namespace.callback(os.close, app)
+                os.setns(app, os.CLONE_NEWNET)
+                namespace.callback(os.setns, current, os.CLONE_NEWNET)
+            fd = os.open("/dev/net/tun", os.O_RDWR | os.O_NONBLOCK | os.O_CLOEXEC)
+            descriptors.callback(os.close, fd)
+            fcntl.ioctl(fd, 0x400454CA, struct.pack("16sH", TUN.encode(), 0x1001))
+        extra = []
+        inherited = [fd]
+        for name, value in (key_fds or {}).items():
+            extra += ["--key-fd", name + "=" + str(value)]
+            inherited.append(value)
         return subprocess.Popen(
             [binary, "--config", str(config), "--tun-fd", str(fd), *extra],
             pass_fds=inherited,
-            preexec_fn=functools.partial(child_guard, parent, uid, gid),
+            preexec_fn=functools.partial(child_guard, os.getpid(), uid, gid),
             stdout=log or subprocess.DEVNULL,
             stderr=log or subprocess.DEVNULL,
         )
-    finally:
-        os.close(fd)
 
 
 def supervise(state, bin_dir, lab=False, whole=False):
@@ -1593,8 +1593,9 @@ def supervise(state, bin_dir, lab=False, whole=False):
                         stdout=log or subprocess.DEVNULL,
                         stderr=log or subprocess.DEVNULL,
                     )
-                elif name == "core" and profile["role"] == "client" and not whole:
-                    children[name] = launch_client(binary, path, APP, log, fds, uid, gid)
+                elif name == "core" and profile["role"] in ("client", "exit"):
+                    ns = APP if profile["role"] == "client" and not whole else None
+                    children[name] = launch_core(binary, path, ns, log, fds, uid, gid)
                 else:
                     args = [binary, "--config", str(path)]
                     for r, value in fds.items():
