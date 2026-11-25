@@ -120,13 +120,15 @@ jobs:
             --entrypoint /bin/sh ubuntu:22.04 /package/tools/offline_user_test.sh
       - name: Smoke-test the one-step system installation as root
         run: |
-          # Hosted runners leave /opt writable by the runner user; the installer rightly
-          # refuses that (it would let someone replace root-run code). Give this
-          # throwaway machine a normal system's /opt first, and show what it was.
-          echo "runner /opt before: $(stat -c '%U:%G %a' /opt)"
-          sudo chown root:root /opt && sudo chmod 755 /opt
           sudo apt-get update -qq
-          sudo apt-get install -y -qq nftables iproute2 kmod >/dev/null
+          sudo apt-get install -y -qq nftables iproute2 kmod dbus policykit-1 >/dev/null
+          # Hosted runners can leave installation paths writable by the runner user.
+          # Set stock ownership and modes on the disposable host before testing.
+          for dir in /opt /etc/dbus-1/system.d /usr/share/dbus-1/system-services /usr/share/polkit-1/actions; do
+            test ! -L "$dir"
+            stat -c 'runner directory before install: %n %U:%G %a' "$dir" || true
+            sudo install -d -o root -g root -m 0755 "$dir"
+          done
           sudo modprobe tun
           sudo modprobe nf_tables
           cd "$RUNNER_TEMP/pkg"
