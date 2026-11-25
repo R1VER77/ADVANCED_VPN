@@ -10,12 +10,15 @@ use crate::controller::{Controller, is_root};
 use crate::theme::Theme;
 
 pub fn prompt(label: &str) -> io::Result<Option<String>> {
+    Ok(read_prompt(label)?.filter(|value| !value.is_empty()))
+}
+
+fn read_prompt(label: &str) -> io::Result<Option<String>> {
     print!("{label}");
     io::stdout().flush()?;
     let mut value = String::new();
-    io::stdin().read_line(&mut value)?;
-    let value = value.trim();
-    Ok((!value.is_empty()).then(|| value.into()))
+    let bytes = io::stdin().read_line(&mut value)?;
+    Ok((bytes != 0).then(|| value.trim().into()))
 }
 
 fn run(ctrl: &Controller, action: &str, args: &[String]) -> Result<bool> {
@@ -23,6 +26,7 @@ fn run(ctrl: &Controller, action: &str, args: &[String]) -> Result<bool> {
 }
 
 pub fn setup(ctrl: &Controller, theme: Theme, reduced_motion: bool) -> Result<()> {
+    println!("Reading this device's setup state…");
     let info = ctrl.call("info", &[])?;
     let device = &info.value["info"];
     let enrolled = device["enrolled"].as_bool();
@@ -102,6 +106,7 @@ pub fn setup(ctrl: &Controller, theme: Theme, reduced_motion: bool) -> Result<()
             return Ok(());
         }
         args.push(format!("--out={path}"));
+        println!("Preparing the device request…");
         if run(ctrl, "request", &args)? {
             println!(
                 "Give the public request to your operator, or choose step 3 to plan your own chain."
@@ -143,8 +148,27 @@ fn install_bundle(ctrl: &Controller, replace: bool, device: &Value) -> Result<()
         args.push("--replace".into());
     }
     args.extend(["--".into(), bundle]);
+    let mode = if !replace && device["role"].as_str() == Some("client") {
+        let Some(mode) = choose_scope(true)? else {
+            return Ok(());
+        };
+        Some(mode)
+    } else {
+        None
+    };
+    println!("Verifying the operator signature and installing the enrollment…");
     if run(ctrl, "enroll", &args)? {
-        println!("The signed enrollment is installed. Press c in the VPN view to connect.");
+        println!("The signed enrollment is installed.");
+        if let Some(mode) = mode {
+            println!("Saving the traffic scope for the first connection…");
+            if !run(ctrl, "preferences", &[format!("--mode={mode}")])? {
+                println!(
+                    "The scope could not be saved. Open Settings and review Traffic scope before connecting."
+                );
+                return Ok(());
+            }
+        }
+        println!("Press c in the VPN view to connect.");
     }
     Ok(())
 }
@@ -376,6 +400,7 @@ pub fn settings(ctrl: &Controller, theme: Theme) -> Result<()> {
         println!("Open sudo cypherpunk and press p to manage VPN settings.");
         return Ok(());
     }
+    println!("Reading VPN settings and live traffic scope…");
     let info = ctrl.call("info", &[])?;
     let device = &info.value["info"];
     if device["enrolled"].as_bool() != Some(true) || device["role"].as_str() != Some("client") {
@@ -384,9 +409,12 @@ pub fn settings(ctrl: &Controller, theme: Theme) -> Result<()> {
     }
     println!("\nVPN settings");
     println!(
-        "1  Traffic scope · {}",
+        "1  Traffic scope on next connect · {}",
         device["mode"].as_str().unwrap_or("unknown")
     );
+    if let Some(scope) = device["status"]["scope"].as_str() {
+        println!("    Current session · {scope}");
+    }
     println!("2  Launch a protected application");
     let cap = device["daily_limit_bytes"]
         .as_u64()
@@ -398,23 +426,30 @@ pub fn settings(ctrl: &Controller, theme: Theme) -> Result<()> {
     let gateway = device["upstream_gateway"].as_str().unwrap_or("automatic");
     println!("4  Upstream interface · {upstream} (gateway {gateway})");
     println!("5  Kill-switch status and recovery");
+    println!("6  Check the public IPv4 of a protected app");
     println!(
         "Signed rate class · {}",
         device["rate"].as_str().unwrap_or("unknown")
     );
     let args = match prompt("Choose a setting, or press Enter to go back: ")?.as_deref() {
         Some("1") => {
-            match prompt("Protect 1 applications or 2 the whole device (Enter cancels): ")?
-                .as_deref()
-            {
-                Some("1") => vec!["--mode=applications".into()],
-                Some("2") => vec!["--mode=whole-device".into()],
-                Some(_) => {
-                    println!("Choose 1 or 2.");
-                    return Ok(());
+            let Some(mode) = choose_scope(false)? else {
+                return Ok(());
+            };
+            if mode == "applications" && device["whole_device_guard"].as_bool() == Some(true) {
+                println!(
+                    "Changing to Applications releases the whole-device kill switch. Regular apps can then use your ISP connection."
+                );
+                if prompt("After disconnecting and closing protected apps, type allow cleartext to switch, or Enter to cancel: ")?
+                    .as_deref()
+                    == Some("allow cleartext")
+                    && run(ctrl, "reset", &["--allow-cleartext".into()])?
+                {
+                    println!("Applications scope saved. Press c to connect, then launch protected apps through CYPHERPUNK.");
                 }
-                None => return Ok(()),
+                return Ok(());
             }
+            vec![format!("--mode={mode}")]
         }
         Some("2") => {
             if let Some(program) = prompt("Executable name or path (Enter cancels): ")? {
@@ -463,14 +498,85 @@ pub fn settings(ctrl: &Controller, theme: Theme) -> Result<()> {
             );
             return Ok(());
         }
+        Some("6") => return check_app_ip(ctrl, &device["status"]),
         Some(_) => {
-            println!("Choose a number from 1 through 5.");
+            println!("Choose a number from 1 through 6.");
             return Ok(());
         }
         None => return Ok(()),
     };
     if run(ctrl, "preferences", &args)? {
-        println!("Saved. The preference applies on the next VPN connection.");
+        println!("Saved. Disconnect and reconnect to apply this preference to an active session.");
+    }
+    Ok(())
+}
+
+fn choose_scope(new_device: bool) -> Result<Option<&'static str>> {
+    println!("1  Whole device · routes your existing browser and other apps through the VPN.");
+    println!("   The kill switch holds device traffic while the VPN is disconnected.");
+    println!("2  Applications · routes only apps started through CYPHERPUNK.");
+    let label = if new_device {
+        "Traffic scope [1, Whole device by default; 2, Applications; q, cancel]: "
+    } else {
+        "Choose traffic scope, or Enter to cancel: "
+    };
+    Ok(match read_prompt(label)?.as_deref() {
+        Some("1") => Some("whole-device"),
+        Some("2") => Some("applications"),
+        Some("") if new_device => Some("whole-device"),
+        None | Some("" | "q") => None,
+        Some(_) => {
+            println!("Choose 1 or 2.");
+            None
+        }
+    })
+}
+
+fn check_app_ip(ctrl: &Controller, status: &Value) -> Result<()> {
+    if status["protection"].as_str() != Some("protected") {
+        println!("Connect and wait for VPN protection before checking the public IP.");
+        return Ok(());
+    }
+    if status["scope"].as_str() != Some("applications") {
+        println!("With whole-device protection active, reload the IP check in your browser.");
+        return Ok(());
+    }
+    if prompt("Type check to send an HTTPS request through the VPN to api.ipify.org, or Enter to cancel: ")?
+        .as_deref()
+        != Some("check")
+    {
+        return Ok(());
+    }
+    println!("Checking public IPv4 through the protected app tunnel (up to 15 seconds)…");
+    let args = [
+        "--",
+        "/usr/bin/curl",
+        "--disable",
+        "--noproxy",
+        "*",
+        "-4",
+        "--fail",
+        "--silent",
+        "--show-error",
+        "--max-time",
+        "15",
+        "--max-filesize",
+        "64",
+        "https://api.ipify.org/",
+    ]
+    .map(String::from);
+    let output = ctrl
+        .command(false, "run", &args)
+        .stderr(std::process::Stdio::inherit())
+        .output()?;
+    let ip = std::str::from_utf8(&output.stdout)
+        .ok()
+        .and_then(|value| value.trim().parse::<std::net::Ipv4Addr>().ok());
+    match ip.filter(|_| output.status.success()) {
+        Some(ip) => println!("Public IPv4 seen by api.ipify.org for the protected app: {ip}"),
+        None => println!(
+            "Public IPv4 could not be verified. Press s in the VPN view to review tunnel status."
+        ),
     }
     Ok(())
 }

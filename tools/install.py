@@ -28,10 +28,36 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 from sysexec import trusted_exe  # noqa: E402  (standard library only)
+
+
+@contextlib.contextmanager
+def install_step(message):
+    """Name the active phase and keep reporting elapsed time during long I/O."""
+
+    def report(detail):
+        print(f"cypherpunk-vpn: {detail}", flush=True)
+
+    started = time.monotonic()
+    done = threading.Event()
+
+    def heartbeat():
+        while not done.wait(10):
+            report(f"{message} ({int(time.monotonic() - started)}s elapsed)")
+
+    report(message)
+    worker = threading.Thread(target=heartbeat, daemon=True)
+    worker.start()
+    try:
+        yield
+    finally:
+        done.set()
+        worker.join()
 
 
 # What a built checkout must provide; the VM harness and `cypherpunk cloud host setup` pack
@@ -232,8 +258,10 @@ def install_user(data, bin_dir, python=None, adopt_legacy=False):
             previous = store.prepare(lambda stage: clone_legacy(app, stage, python=python))
             store.adopt(previous, ["app"])
         compatibility_link(app, "current")
-        name = store.prepare(lambda stage: _build_user(data, python, stage))
-        store.activate(name, check_application)
+        with install_step("Preparing and verifying the command-line tools"):
+            name = store.prepare(lambda stage: _build_user(data, python, stage))
+        with install_step("Checking and selecting the new command-line release"):
+            store.activate(name, check_application)
         bin_dir.mkdir(parents=True, exist_ok=True)
         # Resolve once before exporting all three tools, so an activation between
         # child launches cannot mix their application/runtime paths.
@@ -416,9 +444,11 @@ def install_system(package, target, adopt_legacy=False):
         # Legacy flat directories need an explicit, inactive migration first.
         for name in sorted(names):
             compatibility_link(target / name, "current/" + name)
-        name = store.prepare(lambda stage: _build_system(package, target, stage))
-        label_system_slot(store.releases / name)
-        store.activate(name, check_application, repair_damaged=True)
+        with install_step("Copying and verifying the new release and its offline runtime"):
+            name = store.prepare(lambda stage: _build_system(package, target, stage))
+            label_system_slot(store.releases / name)
+        with install_step("Checking the installed commands and selecting the release"):
+            store.activate(name, check_application, repair_damaged=True)
     return upgraded
 
 
@@ -880,7 +910,8 @@ def main():
                 raise ValueError("no unlock key at %s" % a.unlock_key)
         if a.protect == "none" and not a.insecure_plaintext_keys:
             raise ValueError("--protect none stores private keys as plain files; it needs --insecure-plaintext-keys")
-        installation_preflight(a.protect)
+        with install_step("Checking host compatibility"):
+            installation_preflight(a.protect)
     if a.pack:
         print(pack(ROOT, a.pack, runtime=a.runtime))
         return
@@ -892,7 +923,8 @@ def main():
             return
         if os.geteuid() == 0:
             raise RuntimeError("--user installs for an ordinary user, not root")
-        installation_preflight(operator_target=data)
+        with install_step("Checking host compatibility"):
+            installation_preflight(operator_target=data)
         app = install_user(data, bin_dir, adopt_legacy=a.adopt_legacy)
         version = subprocess.run(
             [str(app / "bin/cypherpunk"), "--version"], capture_output=True, text=True
@@ -908,7 +940,8 @@ def main():
         if os.geteuid() != 0:
             raise RuntimeError("--apply requires root")
         a.out = Path(tempfile.mkdtemp(prefix="cypherpunk-vpn-stage-")) / "stage"
-    runtime = available_runtime()
+    with install_step("Verifying the offline runtime"):
+        runtime = available_runtime()
     a.out.mkdir(mode=0o700, parents=False, exist_ok=False)
     package = a.out / "opt/cypherpunk-vpn"
     (package / "bin").mkdir(parents=True)
@@ -928,7 +961,8 @@ def main():
     shutil.copytree(ROOT / "third_party", package / "third_party")
     shutil.copytree(ROOT / "deploy", package / "deploy", ignore=shutil.ignore_patterns("__pycache__"))
     if runtime is not None:
-        shutil.copytree(runtime, package / "venv", symlinks=True)
+        with install_step("Staging the offline runtime and dependencies"):
+            shutil.copytree(runtime, package / "venv", symlinks=True)
     # -E -s, not -I: ignore PYTHON* variables and the user site directory, but keep the
     # (root-owned) script directory on sys.path, which -I drops on Python 3.11+.
     # `cypherpunk` is the Rust front end. It runs `cypherpunkctl` (the privileged controller,
@@ -962,16 +996,17 @@ def main():
     apparmor = a.out / "etc/apparmor.d/local"
     apparmor.mkdir(parents=True)
     shutil.copy2(ROOT / "deploy/apparmor/usr.bin.i2pd.local", apparmor / "usr.bin.i2pd")
-    receipt = dict(
-        schema=1,
-        architecture=platform.machine(),
-        activation_performed=False,
-        files={
-            str(f.relative_to(a.out)): hashlib.sha256(f.read_bytes()).hexdigest()
-            for f in a.out.rglob("*")
-            if f.is_file()
-        },
-    )
+    with install_step("Checking the staged files and recording their checksums"):
+        receipt = dict(
+            schema=1,
+            architecture=platform.machine(),
+            activation_performed=False,
+            files={
+                str(f.relative_to(a.out)): hashlib.sha256(f.read_bytes()).hexdigest()
+                for f in a.out.rglob("*")
+                if f.is_file()
+            },
+        )
     (a.out / "INSTALLATION.json").write_text(json.dumps(receipt, indent=2) + "\n")
     if not a.apply:
         print("Staged package only; no host service, route, DNS or firewall changes.")
@@ -994,6 +1029,7 @@ def apply_system(a, package, units, apparmor, stable):
         raise RuntimeError("existing /opt/cypherpunk-vpn is not a root-owned installation; not replacing it")
     import pwd
 
+    print("cypherpunk-vpn: Preparing service accounts and the boot guard", flush=True)
     # The data plane's user, and the I2P front's router's own user (cypherpunk help front).
     for name in ["cypherpunk-vpn", "cypherpunk-vpn-i2p"]:
         try:
@@ -1026,6 +1062,7 @@ def apply_system(a, package, units, apparmor, stable):
     ):
         guard_policy.arm()
     upgraded = install_system(package, target, adopt_legacy=a.adopt_legacy)
+    print("cypherpunk-vpn: Registering service files and command launchers", flush=True)
     Path("/etc/cypherpunk-vpn").mkdir(mode=0o700, exist_ok=True)
     for source in units.glob("*.service"):
         install_stable_file(
@@ -1076,7 +1113,7 @@ def apply_system(a, package, units, apparmor, stable):
         prepare_device(target, a.role, a.protect, a.vault, a.insecure_plaintext_keys, a.unlock_key)
         return
     if a.package_managed:
-        print("Open Cypherpunk VPN from your applications menu and choose Start setup.")
+        print("Open Cypherpunk VPN or run sudo cypherpunk to view enrollment and connect.", flush=True)
         return
     print("Next: sudo cypherpunk request --role ROLE --protect MODE --out ROLE.req, or rerun with --role.")
 

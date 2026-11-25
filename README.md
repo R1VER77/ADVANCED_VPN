@@ -630,7 +630,8 @@ It then deletes the one-time KEM key. `init` keeps no device private keys, and t
 
 **Recovery:** if a device or the Nitrokey is lost, run `request` → `init` → `enroll` again. Keys are cheap to regenerate, so the tool doesn't keep backups of them.
 
-The default client protects explicitly launched applications and can coexist with an existing host VPN:
+The guided CLI setup defaults to Whole device and lets you choose Applications.
+Applications mode protects explicitly launched applications and can coexist with an existing host VPN:
 
 ```sh
 sudo /opt/cypherpunk-vpn/bin/cypherpunk run -- curl https://example.com
@@ -640,7 +641,7 @@ sudo /opt/cypherpunk-vpn/bin/cypherpunk preferences --daily-limit-mib 1024   # o
 sudo /opt/cypherpunk-vpn/bin/cypherpunk preferences --no-daily-limit         # default
 ```
 
-Whole-device mode is explicit. Test from a local console on the target OS, and first stop any conflicting VPN through its own controls:
+To select Whole device from the command line, test from a local console on the target OS and first stop any conflicting VPN through its own controls:
 
 ```sh
 sudo /opt/cypherpunk-vpn/bin/cypherpunk preferences --mode whole-device

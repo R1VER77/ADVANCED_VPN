@@ -93,7 +93,13 @@ impl Header {
                 None => "unknown".into(),
             }
         });
-        let mode = match (get("mode"), get("rate")) {
+        let state = &i["status"];
+        let scope = state["scope"]
+            .as_str()
+            .filter(|scope| matches!(*scope, "applications" | "whole-device"))
+            .map(str::to_owned)
+            .or_else(|| get("mode"));
+        let mode = match (scope, get("rate")) {
             (Some(m), Some(r)) => format!("{m} · rate {r}"),
             (Some(m), None) => m,
             _ => "—".into(),
@@ -103,7 +109,6 @@ impl Header {
             (Some(p), None) => p,
             _ => "—".into(),
         };
-        let state = &i["status"];
         let status = state
             .get("lifecycle")
             .or_else(|| state.get("state"))
@@ -225,6 +230,12 @@ impl App {
                 Span::styled(self.header.status.clone(), status_style),
             ]),
         ];
+        if self.header.mode.starts_with("applications") && self.header.status == "connected" {
+            lines.push(Line::from(Span::styled(
+                "Only apps started through CYPHERPUNK use the VPN.",
+                t.accent(),
+            )));
+        }
         lines.extend(self.header.locations.iter().map(|location| {
             Line::from(vec![
                 Span::raw("  "),
@@ -365,6 +376,7 @@ impl App {
 
 /// Run the interactive view until the user quits.
 pub fn run(ctrl: Controller, theme: Theme, reduced_motion: bool) -> Result<()> {
+    println!("Reading local enrollment and VPN status…");
     let header = ctrl
         .call("info", &[])
         .map(|o| Header::from_info(&o.value))
@@ -467,7 +479,9 @@ fn run_terminal_action(
             println!("Run sudo cypherpunk and press u, or run sudo cypherpunk unlock here.")
         }
         "unlock" => {
-            ctrl.command(false, "unlock", &[]).status()?;
+            if ctrl.command(false, "unlock", &[]).status()?.success() {
+                return Ok(());
+            }
         }
         "connect" => {
             println!("Starting the VPN service…");
@@ -475,9 +489,13 @@ fn run_terminal_action(
             for line in render(&started.cells, theme) {
                 println!("{}", crate::theme::to_ansi(&[line], theme).trim_end());
             }
-            if started.code == 0 {
-                ctrl.command(false, "unlock", &["--if-needed".into()])
-                    .status()?;
+            if started.code == 0
+                && ctrl
+                    .command(false, "unlock", &["--if-needed".into()])
+                    .status()?
+                    .success()
+            {
+                return Ok(());
             }
         }
         _ => unreachable!(),
@@ -694,5 +712,19 @@ mod tests {
         );
         assert_eq!(path.status, "connecting");
         assert!(path.guidance.unwrap().contains("end-to-end"));
+    }
+
+    #[test]
+    fn connected_header_displays_the_live_scope_while_a_preference_is_pending() {
+        let header = Header::from_info(&json!({"info": {
+            "enrolled": true, "mode": "whole-device",
+            "status": {"state": "supervising", "lifecycle": "connected",
+                       "protection": "protected", "scope": "applications"}
+        }}));
+        assert_eq!(header.mode, "applications");
+        let app = App::new(Theme::full(), true, header);
+        let rendered = screen(&app, 100, 17).join("\n");
+        assert!(rendered.contains("Only apps started through CYPHERPUNK"));
+        assert!(rendered.contains("launch an app or check its public IP"));
     }
 }

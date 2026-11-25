@@ -275,7 +275,12 @@ pub fn connection_guidance(st: &Value) -> Option<&'static str> {
             Some("Checking the tunnel. Protected traffic is held.")
         }
         _ if st["protection"].as_str() == Some("protected") => Some(match st["scope"].as_str() {
-            Some("applications") => "Protected. Use cypherpunk run to launch a protected app.",
+            Some("applications") => {
+                "VPN ready for selected apps. Press p to launch an app or check its public IP."
+            }
+            Some("whole-device") => {
+                "VPN ready for the whole device. Press s to see connection details."
+            }
             _ => "Protected. Press s to check the scope and connection.",
         }),
         _ if st["state"].as_str() == Some("blocked") => {
@@ -289,6 +294,14 @@ pub fn status_rows(st: &Value) -> Vec<Row> {
     let mut rows = Vec::new();
     if let Some(guidance) = connection_guidance(st) {
         rows.push(Row::detail(guidance));
+    }
+    match s(st, "scope").as_deref() {
+        Some("applications") => rows.push(Row::pair(
+            "traffic scope",
+            "Only apps launched through CYPHERPUNK",
+        )),
+        Some("whole-device") => rows.push(Row::pair("traffic scope", "Whole device")),
+        _ => {}
     }
     if let Some(k) = st.get("kill_switch").and_then(Value::as_bool) {
         rows.push(Row::pair(

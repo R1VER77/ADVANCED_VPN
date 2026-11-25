@@ -22,11 +22,23 @@ connection check. Traffic stays blocked until the tunnel has fresh
 protection evidence. In applications mode this applies to programs
 started through `cypherpunk run`. Disconnect keeps that guard in place.
 
+An already-open browser uses ordinary networking in Applications mode.
+To check the exit IP without opening another browser, press `p`, choose
+**Check the public IPv4 of a protected app**, and confirm the request to
+ipify. This runs curl inside the protected namespace. To route your
+existing browser through the VPN, choose **Whole device** under Traffic
+scope, then disconnect and reconnect so the new scope takes effect.
+
 In setup, you can create or export a public device request, install a
 signed bundle or replace your current bundle after disconnecting. Use the
 server planning option when you operate your own relay and exit. Return
 to setup once you have a signed bundle and a separately verified operator
 public key.
+
+On first client enrollment, guided setup offers Whole device (the default)
+and Applications. Review the scope in Settings even after setup. Switching
+from an armed whole-device guard to Applications requires disconnecting and
+explicitly allowing ordinary traffic outside the protected apps.
 
 The CLI inherits the terminal background and uses Catppuccin Mocha text accents.
 Use `--reduced-motion` for a static working indicator, and `--no-color` (or `NO_COLOR`)

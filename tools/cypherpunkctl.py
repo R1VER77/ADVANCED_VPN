@@ -1957,14 +1957,18 @@ def service_active():
     return cmd("systemctl", "is-active", "--quiet", "cypherpunk-vpn.service", check=False).returncode == 0
 
 
-def wait_for_pin_request(seconds=60, *, already_running=None):
+def wait_for_pin_request(seconds=60, *, already_running=None, progress=None):
     """`cypherpunk connect` returns once the service has started; its PIN request follows a
     moment later. Wait for it while the service is active, so `connect && unlock`
     never finds nothing and exits silently."""
     deadline = time.monotonic() + seconds
+    next_notice = deadline - seconds + 10
     while not pin_pending() and time.monotonic() < deadline and service_active():
         if already_running is not None and already_running():
             return False
+        if progress is not None and time.monotonic() >= next_notice:
+            progress("The service is still preparing the tunnel. Waiting for the Nitrokey PIN prompt.")
+            next_notice += 10
         time.sleep(0.5)
     return pin_pending()
 
@@ -2090,6 +2094,7 @@ def device_info(state):
         if protection["mode"] == "operator":
             info["locked"] = server_locked(state)
     if info["enrolled"]:
+        import guard_policy
         from saved_chains import describe_hops, inventory, labels
 
         profile = load_profile(state)
@@ -2108,6 +2113,8 @@ def device_info(state):
             upstream_gateway=preferences.get("upstream_gateway"),
             daily_limit_bytes=daily_limit(preferences, profile) if profile["role"] == "client" else None,
         )
+        if profile["role"] == "client" and state.resolve() == guard_policy.STATE:
+            info["whole_device_guard"] = guard_policy.MARKER.exists() or guard_policy.MARKER.is_symlink()
     info["status"] = status_for_display(state)
     return info
 
@@ -2947,7 +2954,7 @@ def dispatch(a):
 
         progress("Looking for the VPN service's Nitrokey PIN request…")
         already_running = (lambda: recently_supervising(a.state)) if a.if_needed else None
-        if not wait_for_pin_request(already_running=already_running):
+        if not wait_for_pin_request(already_running=already_running, progress=progress):
             if already_running is not None and already_running() and not pin_pending():
                 emit(a, "The VPN service is already unlocked.", unlocked=True, status=read_status(a.state))
                 return

@@ -27,6 +27,7 @@ if [ "$install_mode" = 1 ] && [ "$removal" = 0 ]; then
         printf '%s\n' 'The static preflight is missing; obtain the complete verified release.' >&2
         exit 1
     fi
+    printf '%s\n' 'cypherpunk-vpn: Checking host compatibility before installation.'
     if [ "$operator_only" = 1 ]; then
         "$preflight" --package "$package_dir" --target "${XDG_DATA_HOME:-$HOME/.local/share}/cypherpunk-vpn" --operator-only
     elif [ "$package_managed" = 1 ]; then
