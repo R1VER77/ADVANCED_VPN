@@ -10,4 +10,6 @@ tunnel protection.
 
 ## Usage
 
-    sudo cypherpunk unlock
+    sudo cypherpunk unlock [--if-needed]
+
+Use `--if-needed` to skip the PIN prompt if the VPN service is already unlocked.

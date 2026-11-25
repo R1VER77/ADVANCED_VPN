@@ -239,7 +239,7 @@ impl App {
         let mut spans = vec![Span::raw(" ")];
         for (i, (key, label)) in KEYS
             .iter()
-            .filter(|(k, _)| !matches!(*k, "h" | "i" | "o" | "q"))
+            .filter(|(k, _)| !matches!(*k, "h" | "s" | "i" | "o"))
             .enumerate()
         {
             if i > 0 {
@@ -548,7 +548,7 @@ mod tests {
         assert!(s[8].contains("Press a key below"));
         assert_eq!(
             s[13],
-            " c connect · u unlock · l locations · p settings · e setup · d stop · s status · ? help"
+            " c connect · u unlock · l locations · p settings · e setup · d stop · ? help · q quit"
         );
     }
 

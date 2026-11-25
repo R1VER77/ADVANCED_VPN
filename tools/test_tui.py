@@ -127,11 +127,11 @@ class InteractiveView(unittest.TestCase):
             "  ✓ trusted nft  /usr/sbin/nft",
         ]:
             self.assertIn(expected, s, text)
-        self.assertEqual(s[29], " c connect · d disconnect · h hops · s status · i info · o doctor · ? help · q quit")
+        self.assertEqual(s[29], " c connect · u unlock · l locations · p settings · e setup · d stop · ? help · q quit")
         self.assertIn("\x1b[?1049h", out, "alternate screen entered")
         self.assertIn("\x1b[?1049l", out, "alternate screen left on quit")
         self.assertIn("38;2;203;166;247", out, "Mocha Mauve title")
-        self.assertIn("48;2;30;30;46", out, "Mocha Base background")
+        self.assertNotIn("48;2;", out, "the terminal supplies the background")
 
     def test_a_device_that_is_not_enrolled_is_shown_where_to_start(self):
         out, code = self.drive(["q"], controller=UNENROLLED)
