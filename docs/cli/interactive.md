@@ -12,5 +12,6 @@ Run `cypherpunk` with no command in a terminal.
 - `h` hops, `s` status, `i` info, `o` doctor
 - `?` help, `PgUp` / `PgDn` scroll, `q` or `Esc` quit
 
+The interactive view and terminal command output use the Catppuccin Mocha palette.
 Use `--reduced-motion` for a static working indicator, and `--no-color` (or `NO_COLOR`)
 for monochrome output.

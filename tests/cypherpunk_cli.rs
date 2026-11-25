@@ -152,15 +152,15 @@ fn connect_starts_the_unit_then_shows_status() {
 }
 
 #[test]
-fn disconnect_stops_the_unit_or_signals_a_foreground_supervisor() {
+fn disconnect_checks_the_foreground_supervisor_even_after_stopping_the_unit() {
     let s = Stubs::new("disconnect");
     assert!(s.cpvpn(&["disconnect"]).status.success());
     assert_eq!(s.log("systemctl.log").trim(), "stop cypherpunk-vpn.service");
-    assert_eq!(s.log("ctl.log"), "");
+    assert_eq!(s.log("ctl.log"), "--json disconnect\n");
     fs::write(s.path("systemctl.fail"), "").unwrap();
     let o = s.cpvpn(&["disconnect"]);
     assert!(o.status.success());
-    assert_eq!(s.log("ctl.log").trim(), "--json disconnect");
+    assert_eq!(s.log("ctl.log"), "--json disconnect\n--json disconnect\n");
 }
 
 #[test]

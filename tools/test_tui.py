@@ -130,6 +130,8 @@ class InteractiveView(unittest.TestCase):
         self.assertEqual(s[29], " c connect · d disconnect · h hops · s status · i info · o doctor · ? help · q quit")
         self.assertIn("\x1b[?1049h", out, "alternate screen entered")
         self.assertIn("\x1b[?1049l", out, "alternate screen left on quit")
+        self.assertIn("38;2;203;166;247", out, "Mocha Mauve title")
+        self.assertIn("48;2;30;30;46", out, "Mocha Base background")
 
     def test_a_device_that_is_not_enrolled_is_shown_where_to_start(self):
         out, code = self.drive(["q"], controller=UNENROLLED)
@@ -160,7 +162,7 @@ class InteractiveView(unittest.TestCase):
     def test_no_color_drops_colour_codes(self):
         out, _ = self.drive(["h", "q"], colour=False)
         self.assertIn("• Chain  2-hop", screen(out))
-        for sgr in ["\x1b[31m", "\x1b[32m", "\x1b[35m", "\x1b[36m", "38;5;", "38;2;"]:
+        for sgr in ["\x1b[31m", "\x1b[32m", "\x1b[35m", "\x1b[36m", "38;5;", "38;2;", "48;2;"]:
             self.assertNotIn(sgr, out)
 
 

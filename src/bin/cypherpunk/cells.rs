@@ -572,7 +572,9 @@ mod tests {
             Theme::full(),
         );
         assert!(
-            colored.starts_with("\x1b[31m■ \x1b[0m\x1b[1;31mstatus failed"),
+            colored.starts_with(
+                "\x1b[38;2;243;139;168;48;2;30;30;46m■ \x1b[0m\x1b[1;38;2;243;139;168;48;2;30;30;46mstatus failed"
+            ),
             "{colored:?}"
         );
     }

@@ -238,6 +238,7 @@ impl App {
     /// Draw the whole screen.
     pub fn draw(&self, f: &mut Frame, now: Instant) {
         let area = f.area();
+        f.buffer_mut().set_style(area, self.theme.surface());
         let header = self.header_lines();
         let inner_width = header.iter().map(Line::width).max().unwrap_or(0) as u16 + 2;
         let box_width = (inner_width + 2).min(area.width);

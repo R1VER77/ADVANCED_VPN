@@ -1,14 +1,17 @@
-//! Colour and emphasis rules, after the Codex TUI style guide.
-//!
-//! Most text uses the terminal's default foreground. Headers are **bold**, secondary
-//! text is dim, success is green, errors are red, the brand is magenta and active
-//! controls are cyan. Blue, yellow, black, white and custom RGB foregrounds are
-//! never used, so the output stays legible on light and dark themes. The font is
-//! always the terminal's own.
+//! Catppuccin Mocha colours and terminal emphasis for the VPN CLI.
 
 use std::io::IsTerminal;
 
 use ratatui::style::{Color, Modifier, Style};
+
+// https://catppuccin.com/palette/#mocha
+const BASE: Color = Color::Rgb(30, 30, 46);
+const TEXT: Color = Color::Rgb(205, 214, 244);
+const SUBTEXT: Color = Color::Rgb(166, 173, 200);
+const MAUVE: Color = Color::Rgb(203, 166, 247);
+const TEAL: Color = Color::Rgb(148, 226, 213);
+const GREEN: Color = Color::Rgb(166, 227, 161);
+const RED: Color = Color::Rgb(243, 139, 168);
 
 /// Which escape sequences the output may contain.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -55,9 +58,18 @@ impl Theme {
         }
     }
 
-    /// Default foreground: most text.
+    /// The foreground for most text.
     pub fn text(&self) -> Style {
-        Style::new()
+        self.colored(TEXT)
+    }
+
+    /// The base foreground and background for the view and command output.
+    pub fn surface(&self) -> Style {
+        if self.color {
+            self.text().bg(BASE)
+        } else {
+            Style::new()
+        }
     }
 
     /// Headers and key names.
@@ -71,7 +83,9 @@ impl Theme {
 
     /// Secondary text: labels, continuation glyphs, footers.
     pub fn dim(&self) -> Style {
-        if self.ansi {
+        if self.color {
+            self.colored(SUBTEXT)
+        } else if self.ansi {
             Style::new().add_modifier(Modifier::DIM)
         } else {
             Style::new()
@@ -80,22 +94,22 @@ impl Theme {
 
     /// Success marks and healthy states.
     pub fn success(&self) -> Style {
-        self.colored(Color::Green)
+        self.colored(GREEN)
     }
 
     /// Errors and failing checks.
     pub fn error(&self) -> Style {
-        self.colored(Color::Red)
+        self.colored(RED)
     }
 
     /// The product name.
     pub fn brand(&self) -> Style {
-        self.colored(Color::Magenta).patch(self.bold())
+        self.colored(MAUVE).patch(self.bold())
     }
 
     /// Active controls, commands and inline code.
     pub fn accent(&self) -> Style {
-        self.colored(Color::Cyan)
+        self.colored(TEAL)
     }
 }
 
@@ -104,24 +118,23 @@ impl Theme {
 pub fn to_ansi(lines: &[ratatui::text::Line<'_>], theme: Theme) -> String {
     let mut out = String::new();
     for line in lines {
+        let line_style = theme.surface().patch(line.style);
         for span in &line.spans {
-            let style = line.style.patch(span.style);
-            let mut codes: Vec<&str> = Vec::new();
+            let style = line_style.patch(span.style);
+            let mut codes = Vec::new();
             if theme.ansi {
                 if style.add_modifier.contains(Modifier::BOLD) {
-                    codes.push("1");
+                    codes.push("1".into());
                 }
                 if style.add_modifier.contains(Modifier::DIM) {
-                    codes.push("2");
+                    codes.push("2".into());
                 }
             }
             if theme.color {
-                match style.fg {
-                    Some(Color::Red) => codes.push("31"),
-                    Some(Color::Green) => codes.push("32"),
-                    Some(Color::Magenta) => codes.push("35"),
-                    Some(Color::Cyan) => codes.push("36"),
-                    _ => {}
+                for (mode, color) in [(38, style.fg), (48, style.bg)] {
+                    if let Some(Color::Rgb(red, green, blue)) = color {
+                        codes.push(format!("{mode};2;{red};{green};{blue}"));
+                    }
                 }
             }
             if codes.is_empty() {
@@ -168,24 +181,15 @@ mod tests {
     }
 
     #[test]
-    fn full_theme_uses_only_the_allowed_palette() {
+    fn full_theme_uses_the_mocha_palette_in_ansi_output() {
         let t = Theme::full();
-        for style in [
-            t.text(),
-            t.bold(),
-            t.dim(),
-            t.success(),
-            t.error(),
-            t.brand(),
-            t.accent(),
-        ] {
-            assert!(
-                matches!(
-                    style.fg,
-                    None | Some(Color::Red | Color::Green | Color::Magenta | Color::Cyan)
-                ),
-                "{style:?}"
-            );
-        }
+        let lines = [Line::from(vec![
+            Span::styled("VPN", t.brand()),
+            Span::raw(" ready"),
+        ])];
+        assert_eq!(
+            to_ansi(&lines, t),
+            "\x1b[1;38;2;203;166;247;48;2;30;30;46mVPN\x1b[0m\x1b[38;2;205;214;244;48;2;30;30;46m ready\x1b[0m\n"
+        );
     }
 }
