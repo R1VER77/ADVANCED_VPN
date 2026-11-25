@@ -3,14 +3,22 @@ name: release
 # but only for a commit on which every `verify` run passed. The package is smoke-tested by its
 # own user installation, attested (signed SLSA build provenance, checked before
 # publishing), then published with SHA256 checksums. The notes also record the exact
-# commit and verify run.
+# commit and verify run. A dispatch on the default branch rebuilds a signed tag
+# with the current workflow definition while keeping the tag as the package source.
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Signed release tag to rebuild
+        required: true
+        type: string
 permissions:
   contents: read
 jobs:
   package:
+    if: github.event_name == 'push' || github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     # The oldest supported C library (Ubuntu 22.04, glibc 2.35), so the binaries also
     # run on Debian 12/13 and newer Ubuntu releases.
     runs-on: ubuntu-22.04
@@ -23,17 +31,32 @@ jobs:
       attestations: write
     env:
       GH_TOKEN: ${{ github.token }}
-      TAG: ${{ github.ref_name }}
+      TAG: ${{ inputs.tag || github.ref_name }}
     steps:
+      - name: Validate the tag ref
+        run: |
+          [[ "$TAG" == v[0-9]* ]]
+          git check-ref-format "refs/tags/$TAG"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: refs/tags/${{ env.TAG }}
       - name: Tag matches the crate version
         run: |
           version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)
           test "$TAG" = "v$version" || { echo "tag $TAG does not match Cargo.toml version $version"; exit 1; }
+          sha=$(git rev-parse HEAD)
+          test "$sha" = "$(git rev-parse "refs/tags/$TAG^{commit}")"
+          git -c gpg.ssh.allowedSignersFile=docs/allowed_signers verify-tag "$TAG"
+          printf 'RELEASE_SHA=%s\n' "$sha" >> "$GITHUB_ENV"
       - name: Only release a commit on which every verify run passed
         # The tag's own run must pass and no other verify run on the commit may fail
         # (a cancelled one does not block). See tools/release_gate.py.
-        run: python3 tools/release_gate.py "$GITHUB_REPOSITORY" "$GITHUB_SHA" "$TAG"
+        run: python3 tools/release_gate.py "$GITHUB_REPOSITORY" "$RELEASE_SHA" "$TAG"
+      # Use the same Python line as the Jammy CI job. Jammy's system tarfile
+      # incorrectly resolves relative symlinks in the pinned runtime archive.
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.10.22'
       - name: Build
         run: |
           rustup toolchain install 1.95.0 --profile minimal
@@ -119,26 +142,50 @@ jobs:
           sudo ./install.sh --apply --uninstall
           test ! -e /opt/cypherpunk-vpn
           sudo test -e /etc/cypherpunk-vpn/enrolled/request.json
+      - name: Record the signed source of a dispatched rebuild
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          repo="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
+          workflow="$repo/.github/workflows/release.yml"
+          jq -n --arg repo "$repo" --arg workflow "$workflow" --arg ref "$GITHUB_REF" \
+            --arg builder "${GITHUB_SERVER_URL}/${GITHUB_WORKFLOW_REF}" \
+            --arg workflow_sha "$GITHUB_WORKFLOW_SHA" --arg tag "refs/tags/$TAG" \
+            --arg source_sha "$RELEASE_SHA" --arg invocation "$repo/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT" '
+              {buildDefinition: {
+                buildType: $workflow,
+                externalParameters: {sourceRef: $tag},
+                resolvedDependencies: [
+                  {uri: ("git+" + $repo + "@" + $tag), digest: {gitCommit: $source_sha}},
+                  {uri: ("git+" + $repo + "@" + $ref), digest: {gitCommit: $workflow_sha}}
+                ]
+              }, runDetails: {builder: {id: $builder}, metadata: {invocationId: $invocation}}}' \
+            > "$RUNNER_TEMP/release-predicate.json"
       - name: Attest build provenance
         uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
         with:
           subject-path: |
             dist/*.tar.gz
             dist/*.deb
+          predicate-type: ${{ github.event_name == 'workflow_dispatch' && 'https://slsa.dev/provenance/v1' || '' }}
+          predicate-path: ${{ github.event_name == 'workflow_dispatch' && format('{0}/release-predicate.json', runner.temp) || '' }}
           # Storage records exist only for organisation-owned repositories and are not
           # needed to verify; skipping them keeps the job off artifact-metadata: write.
           create-storage-record: false
       - name: The attestation verifies before anything is published
         run: |
+          set -o pipefail
           for asset in dist/*.tar.gz dist/*.deb; do
             gh attestation verify "$asset" -R "$GITHUB_REPOSITORY" \
-              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml"
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" --format json |
+              jq -e --arg uri "git+$GITHUB_SERVER_URL/$GITHUB_REPOSITORY@refs/tags/$TAG" --arg sha "$RELEASE_SHA" '
+                any(.[]; any(.verificationResult.statement.predicate.buildDefinition.resolvedDependencies[];
+                  .uri == $uri and .digest.gitCommit == $sha))' >/dev/null
           done
       - name: Publish
         run: |
           deb_version=$(printf '%s' "${TAG#v}" | sed 's/-/~/')
           cat > notes.md <<NOTES
-          Built by GitHub Actions on Ubuntu 22.04 from commit \`$GITHUB_SHA\` (verify passed: $VERIFY_URL).
+          Built by GitHub Actions on Ubuntu 22.04 from signed tag \`$TAG\` at commit \`$RELEASE_SHA\` (verify passed: $VERIFY_URL).
 
           **The app.** \`cypherpunk-vpn_*_amd64.deb\` is the controller, its services and the
           desktop app in one file (Debian 12/13, Ubuntu 22.04/24.04, x86_64). After checking it
@@ -156,8 +203,8 @@ jobs:
           needed), or \`gh release download $TAG -R $GITHUB_REPOSITORY\`.
 
           Check where it came from: each package and the archive carry a signed build-provenance
-          attestation (Sigstore) naming this repository, its release workflow and commit
-          \`$GITHUB_SHA\`. For each downloaded artifact, run
+          attestation (Sigstore) naming this repository, its release workflow and source commit
+          \`$RELEASE_SHA\`. For each downloaded artifact, run
           \`gh attestation verify FILE -R $GITHUB_REPOSITORY --signer-workflow $GITHUB_REPOSITORY/.github/workflows/release.yml\`.
 
           Upgrading from v0.10.x requires new enrollment. Stop the previous VPN and its guard
