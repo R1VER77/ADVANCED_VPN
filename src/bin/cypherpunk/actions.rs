@@ -105,6 +105,28 @@ pub fn service_hint(stderr: &str, root: bool, user_install: bool) -> Vec<String>
 /// Run one controller action (or a service action) and turn it into cells.
 pub fn perform(ctrl: &Controller, action: &str, args: &[String]) -> Done {
     match action {
+        "credits" if is_root() => failed(
+            "Open the local mesh wallet as your regular user".into(),
+            vec!["Run cypherpunk credits in another terminal.".into()],
+        ),
+        "credits" => {
+            let outcome = crate::mesh::call(&["credits".into()]);
+            Done {
+                code: outcome.code,
+                cells: crate::mesh::credit_cells(&outcome),
+            }
+        }
+        "shared" if is_root() => failed(
+            "Open shared-access status as your regular user".into(),
+            vec!["Run cypherpunk shared status in another terminal.".into()],
+        ),
+        "shared" => {
+            let outcome = crate::mesh::call(&["shared".into(), "status".into()]);
+            Done {
+                code: outcome.code,
+                cells: crate::mesh::credit_cells(&outcome),
+            }
+        }
         "connect" => {
             // Say "not enrolled" plainly instead of letting systemd report a failed guard.
             if let Ok(o) = ctrl.call("info", &[])

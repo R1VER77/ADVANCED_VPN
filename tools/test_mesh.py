@@ -118,7 +118,7 @@ class TestQuota(unittest.TestCase):
                 json.dumps(
                     {
                         "schema": 1,
-                        "grants": [{"epoch": epoch}, {"epoch": epoch}, {"epoch": epoch - 1}],
+                        "grants": [{"epoch": epoch}, {"epoch": epoch}, {"epoch": epoch - 1}, {"epoch": epoch + 1}],
                         "spent": [{"epoch": epoch}],
                     }
                 )
@@ -128,6 +128,9 @@ class TestQuota(unittest.TestCase):
         self.assertEqual(q["earned_today"], 2)
         self.assertEqual(q["spent_today"], 1)
         self.assertEqual(q["balance"], 1)
+        self.assertEqual(q["pending_next_epoch"], 1)
+        self.assertFalse(q["public_redemption_enabled"])
+        self.assertTrue(q["next_epoch_utc"].endswith("00:00 UTC"))
         self.assertIn("closed", q["public_pool"])
 
 

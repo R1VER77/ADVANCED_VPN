@@ -54,6 +54,7 @@ esac"#,
             .env("CPVPN_CONTROLLER", self.dir.join("cypherpunkctl"))
             .env("CPVPN_SYSTEMCTL", self.dir.join("systemctl"))
             .env("CPVPN_CLOUD", self.dir.join("cpvpn-cloud"))
+            .env("CPVPN_MESH", self.dir.join("cpvpn-mesh"))
             .env("STUB", &self.dir)
             .env_remove("NO_COLOR")
             .output()
@@ -77,6 +78,24 @@ impl Drop for Stubs {
 
 fn text(o: &Output) -> String {
     String::from_utf8_lossy(&o.stdout).into_owned()
+}
+
+#[test]
+fn credits_shows_real_wallet_counts_and_a_disabled_pool() {
+    let s = Stubs::new("credits");
+    s.script(
+        "cpvpn-mesh",
+        r#"echo "$@" >> "$STUB/mesh.log"
+echo '{"ok":true,"credit_dashboard":true,"balance":12,"pending_next_epoch":3,"public_redemption_enabled":false,"rows":[{"label":"Held","value":"12"},{"label":"Pending","value":"3"},{"label":"Public pool","value":"Redemption disabled"}]}'"#,
+    );
+    let result = s.cpvpn(&["credits"]);
+    assert!(result.status.success());
+    assert!(text(&result).contains("Mesh credits  12 held · 3 pending"));
+    assert!(text(&result).contains("Redemption disabled"));
+    let plain_json = s.cpvpn(&["--json", "credits"]);
+    let value: serde_json::Value = serde_json::from_str(text(&plain_json).trim()).unwrap();
+    assert_eq!(value["pending_next_epoch"], 3);
+    assert_eq!(s.log("mesh.log"), "--json credits\n--json credits\n");
 }
 
 #[test]
@@ -225,4 +244,23 @@ fn no_escape_sequences_when_not_a_terminal_even_with_colour_allowed() {
         assert!(!text(&o).contains('\x1b'), "{args:?}");
     }
     assert!(Path::new(env!("CARGO_BIN_EXE_cypherpunk")).exists());
+}
+
+#[test]
+fn shared_subcommands_forward_to_mesh_and_show_help() {
+    let s = Stubs::new("shared");
+    let help = s.cpvpn(&["shared", "--help"]);
+    assert!(help.status.success(), "{}", text(&help));
+    assert!(text(&help).contains("Shared access (pilot)"), "{}", text(&help));
+
+    s.script(
+        "cpvpn-mesh",
+        r#"echo "$@" >> "$STUB/mesh.log"; echo '{"ok": true, "shared_dashboard": true, "shared_active_credits": 0, "shared_pending_credits": 8, "rows": [{"label": "Shared access", "value": "Disabled (pilot pending protocol review)"}]}'"#,
+    );
+    let o = s.cpvpn(&["shared"]);
+    assert!(o.status.success(), "{}", text(&o));
+    let out = text(&o);
+    assert!(out.contains("• Shared access  0 usable · 8 pending · pilot disabled"), "{out}");
+    assert!(out.contains("Disabled (pilot pending protocol review)"), "{out}");
+    assert_eq!(s.log("mesh.log").trim(), "--json shared status");
 }

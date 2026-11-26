@@ -1,7 +1,7 @@
 //! Original adapter to the unmodified MPL-2.0 GotaTun public API.
 use anyhow::{Context, Result, ensure};
 use clap::Parser;
-use cypherpunk_vpn::{config::private_read, daita::RateClass};
+use cypherpunk_vpn::{config::private_read, daita::RateClass, mesh::carrier_leases::CarrierLeases};
 use gotatun::device::{DeviceBuilder, Peer, daita::DaitaSettings};
 use serde::Deserialize;
 use std::{
@@ -54,6 +54,8 @@ struct Carrier {
     /// Mesh servers only: every admitted member. Empty/absent on the single-chain
     /// carrier, which keeps its one pinned peer.
     members: Option<Vec<CarrierMember>>,
+    /// Schema 3 shared carriers only: "entry" (`10.78.0.0/24`) or "exit" (`10.79.0.0/24`).
+    shared_role: Option<String>,
 }
 #[derive(Parser)]
 struct Args {
@@ -63,6 +65,9 @@ struct Args {
     check: bool,
     #[arg(long)]
     key_fd: Vec<String>,
+    /// Inherited supervisor channel for a shared carrier, with no public listener.
+    #[arg(long, hide = true)]
+    peer_control_fd: Option<i32>,
 }
 fn decode32(s: &str) -> Result<[u8; 32]> {
     let b = hex::decode(s)?;
@@ -94,11 +99,12 @@ fn secret(path: &Path, fd: Option<i32>, peers: usize) -> Result<Vec<u8>> {
 async fn work() -> Result<()> {
     let a = Args::parse();
     let c: Carrier = serde_json::from_slice(&private_read(&a.config, 16384)?)?;
+    let shared = c.schema == 3;
     // Schema 2: the carrier is only reached through the cloak (cypherpunk-vpn-cloak), so
     // WireGuard never appears on the wire. The client sends to its local cloak; the
     // first hop listens on 41194, which its firewall opens to loopback only.
     ensure!(
-        c.schema == 2 && c.role == "wireguard",
+        (c.schema == 2 || shared) && c.role == "wireguard",
         "wrong carrier schema"
     );
     ensure!(
@@ -143,6 +149,25 @@ async fn work() -> Result<()> {
     );
     let mesh = c.members.as_deref().unwrap_or(&[]);
     ensure!(
+        shared == a.peer_control_fd.is_some(),
+        "carrier schema and supervisor channel must agree"
+    );
+    let shared_prefix = match (shared, c.shared_role.as_deref()) {
+        (false, None) => None,
+        (true, None | Some("entry")) => Some([10, 78, 0]),
+        (true, Some("exit")) => Some([10, 79, 0]),
+        _ => anyhow::bail!("invalid shared carrier role"),
+    };
+    ensure!(
+        !shared
+            || (c.endpoint.is_none()
+                && mesh.is_empty()
+                && c.peer_public_hex.is_empty()
+                && c.allowed_ip.is_empty()
+                && c.byte_budget.is_none()),
+        "shared carrier must start empty and needs an aggregate budget controller"
+    );
+    ensure!(
         mesh.len() <= 256 && (c.endpoint.is_none() || mesh.is_empty()),
         "members belong to a server carrier (no fixed endpoint), at most 256"
     );
@@ -152,7 +177,7 @@ async fn work() -> Result<()> {
     );
     // Key material: this side's 32-byte private key, then one 32-byte preshared key per
     // admitted peer (one for the single chain, one per member in a mesh).
-    let peers_expected = mesh.len().max(1);
+    let peers_expected = if shared { 0 } else { mesh.len().max(1) };
     let keyfd = if a.key_fd.is_empty() {
         None
     } else {
@@ -164,9 +189,22 @@ async fn work() -> Result<()> {
                 .parse::<i32>()?,
         )
     };
+    ensure!(
+        !shared || keyfd.is_some(),
+        "shared carrier requires sealed server key"
+    );
+    let mut control = a
+        .peer_control_fd
+        .map(|fd| {
+            CarrierLeases::from_fd_for_prefix(
+                fd,
+                shared_prefix.context("missing shared carrier subnet")?,
+            )
+        })
+        .transpose()?;
     let b = zeroize::Zeroizing::new(secret(&c.identity.key, keyfd, peers_expected)?);
     ensure!(
-        b.len() == 32 + 32 * peers_expected && b[32..].iter().any(|&x| x != 0),
+        b.len() == 32 + 32 * peers_expected && (shared || b[32..].iter().any(|&x| x != 0)),
         "nonzero PSK per peer required"
     );
     // Bind the hardware envelope to a role-specific public descriptor.
@@ -177,7 +215,7 @@ async fn work() -> Result<()> {
         25
     });
     let mut peers = Vec::with_capacity(peers_expected);
-    if mesh.is_empty() {
+    if !shared && mesh.is_empty() {
         let pubkey = decode32(&c.peer_public_hex)?;
         let mut peer = Peer::new(gotatun::x25519::PublicKey::from(pubkey))
             .with_allowed_ip(c.allowed_ip.parse()?)
@@ -225,24 +263,23 @@ async fn work() -> Result<()> {
     // The hold queue covers about 100 ms of slots (at least 128 packets). Strict: a
     // full queue drops (TCP sees a bottleneck), it never bursts outside the slots.
     let queue = ((rate.packets_per_second() / 10.0) as usize).clamp(128, 4096);
-    let peers: Vec<Peer> = peers
-        .into_iter()
-        .map(|p| {
-            // Every peer gets its own fresh DAITA machines: they are stateful.
-            let machines = match &loaded_profile {
-                Some(profile) => cypherpunk_vpn::daita::machines_from_profile(profile),
-                None => cypherpunk_vpn::daita::machines(rate),
-            };
-            p.with_daita(DaitaSettings {
-                maybenot_machines: machines,
-                max_decoy_frac: 0.0,
-                max_delay_frac: 0.0,
-                max_delayed_packets: NonZeroUsize::new(queue).unwrap(),
-                min_delay_capacity: 0,
-                strict: true,
-            })
+    let configure_peer = |mut p: Peer| {
+        p.keepalive = keepalive;
+        // Every peer gets its own fresh DAITA machines: they are stateful.
+        let machines = match &loaded_profile {
+            Some(profile) => cypherpunk_vpn::daita::machines_from_profile(profile),
+            None => cypherpunk_vpn::daita::machines(rate),
+        };
+        p.with_daita(DaitaSettings {
+            maybenot_machines: machines,
+            max_decoy_frac: 0.0,
+            max_delay_frac: 0.0,
+            max_delayed_packets: NonZeroUsize::new(queue).unwrap(),
+            min_delay_capacity: 0,
+            strict: true,
         })
-        .collect();
+    };
+    let peers: Vec<Peer> = peers.into_iter().map(configure_peer).collect();
     if a.check {
         println!(
             "{{\"configuration_valid\":true,\"wireguard\":\"GotaTun\",\"daita\":true,\"psk\":true,\"rate\":\"{}\",\"defense_db\":{},\"cover_always_on\":{}}}",
@@ -265,7 +302,7 @@ async fn work() -> Result<()> {
         [cypherpunk_vpn::sandbox::Policy::parent_of(&c.statistics)],
         true,
     ))?;
-    let first_public = peers[0].public_key;
+    let first_public = peers.first().map(|peer| peer.public_key);
     let peer_count = peers.len();
     let mut device = DeviceBuilder::new()
         .with_default_udp()
@@ -280,18 +317,41 @@ async fn work() -> Result<()> {
         .build()
         .await?;
     if c.endpoint.is_some() {
-        device.force_handshake(&first_public).await?;
+        device
+            .force_handshake(&first_public.context("client carrier needs a peer")?)
+            .await?;
+    } else if shared {
+        device.listen_for_peers().await?;
     }
     let mut ticker = tokio::time::interval(Duration::from_secs(1));
     let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
     loop {
+        let expiry = control.as_ref().and_then(CarrierLeases::deadline);
         tokio::select! {
             _=term.recv()=>break,
             _=tokio::signal::ctrl_c()=>break,
             _=device.wait()=>anyhow::bail!("carrier ended"),
+            result = async {
+                match control.as_mut() {
+                    Some(control) => control.read_frame().await,
+                    None => std::future::pending().await,
+                }
+            } => {
+                result?;
+                control.as_mut().context("shared supervisor disappeared")?.apply(&device, configure_peer).await?;
+            }
+            _ = async {
+                match expiry {
+                    Some(deadline) => tokio::time::sleep_until(deadline).await,
+                    None => std::future::pending().await,
+                }
+            } => {
+                control.as_mut().context("shared supervisor disappeared")?.expire(&device).await?;
+            }
             _=ticker.tick()=>{
+                if let Some(control) = control.as_mut() { control.expire(&device).await?; }
                 let peers=device.peers().await;
-                anyhow::ensure!(peers.len()==peer_count,"peer disappeared");
+                anyhow::ensure!(shared || peers.len()==peer_count,"peer disappeared");
                 let mut rx_bytes=0usize;let mut tx_bytes=0usize;let mut tx_padding=0usize;let mut rx_padding=0usize;
                 let mut tx_decoy=0usize;let mut rx_decoy=0usize;let mut handshake=false;
                 for p in &peers {

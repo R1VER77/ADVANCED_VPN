@@ -1,0 +1,60 @@
+{
+  "schema": 1,
+  "scope": "two-hop schema-3 GotaTun (DAITA) shared-carrier lifecycle, entry-first/exit-through-entry pinned TLS 1.3 admission, leak/rollback/expiry verification, and CLI integration",
+  "carrier_lease_lab": {
+    "delivery_after_install": true,
+    "blocked_before_install": true,
+    "blocked_after_expiry": true,
+    "blocked_after_remove": true,
+    "stopped_on_supervisor_loss": true
+  },
+  "two_hop_gotatun_lab": {
+    "hardware": "mocked",
+    "carrier": "two-hop schema-3 GotaTun (DAITA)",
+    "before_install": {
+      "dns": false,
+      "https": false
+    },
+    "blocked_on_upstream_loss": true,
+    "after_rollback": {
+      "dns": false,
+      "https": false
+    },
+    "rolled_back_partial_peer": true,
+    "both_gotatun_peers": {
+      "dns": true,
+      "https": true
+    },
+    "distinct_exporters": true,
+    "distinct_psks": true,
+    "ipv6_blocked": true,
+    "direct_dns_blocked": true,
+    "after_disconnect": {
+      "dns": false,
+      "https": false
+    },
+    "direct_fallback_rx_packets": 0,
+    "grant_expiry_evicted_peer": true,
+    "entry_metrics": {
+      "active_leases": 0,
+      "admitted": 2,
+      "rejected": 0,
+      "disconnected": 2
+    },
+    "exit_metrics": {
+      "active_leases": 0,
+      "admitted": 1,
+      "rejected": 1,
+      "disconnected": 1
+    },
+    "aggregate_logs_hygienic": true
+  },
+  "cli_and_regressions": {
+    "rust_tests_passed": 202,
+    "rust_clippy_clean": true,
+    "python_targeted_tests_passed": 100,
+    "ruff_clean": true,
+    "shared_access_enabled_by_default": false,
+    "token_verification_disclosure": "Classical RSA-PSS verification (RFC 9578); unlinkability holds against quantum observers"
+  }
+}

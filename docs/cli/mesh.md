@@ -45,10 +45,11 @@ is no account.
     beacons show it. Until then the route only fetches the directory;
     a different key, or two signed keys from one operator, refuses it.
 
+    cypherpunk credits
     cypherpunk mesh quota
-        Contribution credits: earned relaying, spent on chains, today's
-        balance. Private-group credits only until the public pool's VOPRF
-        verifier lands.
+        Show credits held, credits pending for the next epoch, today's earned
+        and spent counts, the UTC rollover, and public-pool redemption status.
+        Run as your regular user. Use --json for wallet counts and protocol details.
 
 Changing operations show a --dry-run plan and ask before acting. The tool
 runs as you (your cloud sign-ins, your hardware token), never as root.

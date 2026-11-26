@@ -136,6 +136,12 @@ enum Cmd {
     /// Browse the community mesh, offer nodes, build chains.
     #[command(disable_help_flag = true)]
     Mesh(Rest),
+    /// See the local mesh credit balance, pending credits and pool status.
+    #[command(disable_help_flag = true)]
+    Credits(Rest),
+    /// Shared-access pilot wallet and session commands (disabled by default).
+    #[command(disable_help_flag = true)]
+    Shared(Rest),
     /// The mix lane: a mixnet client inside the protected namespace.
     #[command(disable_help_flag = true)]
     Mix(Rest),
@@ -173,6 +179,8 @@ impl Cmd {
             Cmd::Reset(r) => ("reset", r.args),
             Cmd::Cloud(r) => ("cloud", r.args),
             Cmd::Mesh(r) => ("mesh", r.args),
+            Cmd::Credits(r) => ("credits", r.args),
+            Cmd::Shared(r) => ("shared", r.args),
             Cmd::Mix(r) => ("mix", r.args),
             Cmd::Help { topic } => ("help", topic.into_iter().collect()),
         }
@@ -276,6 +284,17 @@ fn run(cli: Cli, theme: Theme) -> i32 {
         return cloud::main(&args, cli.json, theme, cli.reduced_motion);
     }
     if action == "mesh" {
+        return mesh::main(&args, cli.json, theme);
+    }
+    if action == "credits" {
+        args.insert(0, "credits".into());
+        return mesh::main(&args, cli.json, theme);
+    }
+    if action == "shared" {
+        if args.is_empty() {
+            args.push("status".into());
+        }
+        args.insert(0, "shared".into());
         return mesh::main(&args, cli.json, theme);
     }
     let ctrl = match Controller::locate(cli.state) {

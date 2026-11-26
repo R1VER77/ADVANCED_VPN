@@ -435,6 +435,92 @@
   "mix_timing_margin": {
     "candidate_profile": "timing-margin",
     "confidence_claim": "empirical trial threshold only",
+    "double_load_trial": {
+      "capture_sha256": "bc904c34f9d5dc0242b6a0a5371fbd2112b9f46c5214569632dd733c03ff63b3",
+      "client_up_kbit_per_second": 563.5,
+      "collector_sha256": "8e369a6614d7b9b4764ea8a4752b6513fcf8e8cf7865ef9ab63febff7c097b04",
+      "control_accuracy": 0.9665,
+      "control_matched_arrivals": 179,
+      "control_requests": 371,
+      "control_successful_requests": 371,
+      "latency_p90_seconds": 4.18,
+      "mean_request_interval_seconds": 15,
+      "mix": {
+        "active_senders_per_block": [
+          20,
+          20,
+          20,
+          20,
+          20
+        ],
+        "arrivals": 713,
+        "heldout_requests": 786,
+        "heldout_senders": 20,
+        "prior_top1_accuracy": 0.0463,
+        "request_count": 1616,
+        "successful_requests": 1567,
+        "top1_accuracy": 0.0323
+      },
+      "prior_blocks": [
+        {
+          "accuracy": 0.0615,
+          "events": 130
+        },
+        {
+          "accuracy": 0.061,
+          "events": 164
+        },
+        {
+          "accuracy": 0.0473,
+          "events": 148
+        },
+        {
+          "accuracy": 0.0213,
+          "events": 141
+        },
+        {
+          "accuracy": 0.0385,
+          "events": 130
+        }
+      ],
+      "scope": "fresh seed, same lab host and network as the first trial",
+      "scorer_sha256": "b0e695246cb59d52f46a213aeb6dcb35c82ab3023bdba95bbd7123353100ded3",
+      "timing_blocks": [
+        {
+          "accuracy": 0.0538,
+          "events": 130
+        },
+        {
+          "accuracy": 0.0244,
+          "events": 164
+        },
+        {
+          "accuracy": 0.0338,
+          "events": 148
+        },
+        {
+          "accuracy": 0.0213,
+          "events": 141
+        },
+        {
+          "accuracy": 0.0308,
+          "events": 130
+        }
+      ],
+      "trial": {
+        "checks": {
+          "coverage": true,
+          "fixed_profile": true,
+          "live_fetch_success": true,
+          "overall_margin": true,
+          "positive_control": true,
+          "worst_window_margin": true
+        },
+        "passed": true,
+        "seed": 20261126,
+        "started": "2026-11-25T11:09:38Z"
+      }
+    },
     "exploratory_candidate_selection": {
       "d100": {
         "accuracy": 0.0447,
@@ -489,6 +575,7 @@
       "control_accuracy": 0.9794,
       "control_matched_arrivals": 97,
       "latency_p90_seconds": 4.08,
+      "mean_request_interval_seconds": 30,
       "mix": {
         "active_senders_per_block": [
           20,

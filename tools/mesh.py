@@ -421,11 +421,15 @@ def quota_view(now: float | None = None) -> dict:
     epoch = current_epoch(now)
     fresh = [g for g in t["grants"] if g["epoch"] == epoch]
     spent = [s for s in t["spent"] if s["epoch"] == epoch]
+    pending = sum(g["epoch"] == epoch + 1 for g in t["grants"])
     return {
         "epoch": epoch,
         "earned_today": len(fresh),
         "spent_today": len(spent),
         "balance": len(fresh) - len(spent),
+        "pending_next_epoch": pending,
+        "next_epoch_utc": time.strftime("%d %b %Y · %H:%M UTC", time.gmtime((epoch + 1) * 86400)),
+        "public_redemption_enabled": False,
         "public_pool": "blind-RSA credits via tools/mesh_tokens.py (control plane); "
         "data-plane redemption stays fail-closed until vendored in Rust; "
         "classical unforgeability, unlinkability survives a quantum adversary "
@@ -1009,20 +1013,54 @@ def cmd_chain(args) -> dict:
 
 
 def cmd_quota(_args) -> dict:
-    """`cypherpunk mesh quota`: credits held and spent this epoch."""
-    q = quota_view()
+    """`cypherpunk mesh quota` / `cypherpunk credits`: compact wallet and pool dashboard."""
+    try:
+        q = quota_view()
+    except (OSError, TypeError, ValueError, KeyError):
+        return {"ok": False, "error": "Credit store unreadable", "message": "Check the local mesh credit store."}
+    import shared_cli
+
+    shared = shared_cli.shared_summary()
+    held_total = q["balance"] + shared["shared_active_credits"] if q["balance"] >= 0 else q["balance"]
+    pending_total = q["pending_next_epoch"] + shared["shared_pending_credits"]
+    pool_badge = "Public pool disabled · Self-hosted active"
     return {
         "ok": True,
+        "credit_dashboard": True,
+        "pool_badge": pool_badge,
+        "held_total": held_total,
+        "pending_total": pending_total,
         "rows": [
-            {"label": "epoch", "value": str(q["epoch"])},
-            {"label": "earned", "value": f"{q['earned_today']} credits (relaying for the mesh)"},
-            {"label": "spent", "value": f"{q['spent_today']} credits (chains through others)"},
-            {"label": "balance", "value": str(q["balance"])},
-            {"label": "public pool", "value": q["public_pool"]},
-            {"label": "private groups", "value": q["private_groups"]},
+            {"label": "Held", "value": str(held_total) if held_total >= 0 else "Unavailable · inconsistent store"},
+            {"label": "Pending", "value": str(pending_total)},
+            {"label": "Earned today", "value": f"{q['earned_today']} mesh"},
+            {"label": "Spent today", "value": f"{q['spent_today']} mesh"},
+            {
+                "label": "Shared wallet",
+                "value": f"{shared['shared_active_pairs']} usable pairs · {shared['shared_pending_pairs']} pending (Nitrokey)",
+            },
+            {"label": "Next epoch", "value": q["next_epoch_utc"]},
+            {"label": "Pool mode", "value": pool_badge},
+            {"label": "Upstream", "value": shared["upstream_state"]},
+            {"label": "Token crypto", "value": shared["token_verification"]},
+            {"label": "Identity note", "value": shared["identity_notice"]},
         ],
         **q,
+        **shared,
     }
+
+
+def cmd_shared(args) -> dict:
+    """`cypherpunk shared <import|status|connect|disconnect>`."""
+    import shared_cli
+
+    table = {
+        "import": shared_cli.cmd_import,
+        "status": shared_cli.cmd_status,
+        "connect": shared_cli.cmd_connect,
+        "disconnect": shared_cli.cmd_disconnect,
+    }
+    return table[args.shared_cmd](args)
 
 
 def main() -> int:
@@ -1071,7 +1109,19 @@ def main() -> int:
         help="this beacon's oblivious gateway key (mesh_beacon --gateway-key): its public half is signed into the descriptor",
     )
 
-    sub.add_parser("quota")
+    sub.add_parser("quota", aliases=["credits"])
+
+    sp = sub.add_parser("shared")
+    shared_sub = sp.add_subparsers(dest="shared_cmd", required=True)
+    shared_sub.add_parser("status")
+    shared_sub.add_parser("connect")
+    shared_sub.add_parser("disconnect")
+    imp = shared_sub.add_parser("import")
+    imp.add_argument("--pool", required=True)
+    imp.add_argument("--pinned-key", required=True)
+    imp.add_argument("--batch", required=True)
+    imp.add_argument("--vault")
+    imp.add_argument("--allow-current-epoch", action="store_true")
 
     args = p.parse_args()
     handlers = {
@@ -1081,6 +1131,8 @@ def main() -> int:
         "offer": cmd_offer,
         "publish": cmd_publish,
         "quota": cmd_quota,
+        "credits": cmd_quota,
+        "shared": cmd_shared,
     }
     try:
         result = handlers[args.cmd](args)

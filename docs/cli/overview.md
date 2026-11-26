@@ -42,6 +42,8 @@ Setup:
 - `enroll`: install this device's signed bundle
 - `cloud`: find free servers, create or record them, and join them into one chain (`cloud suggest`, `cloud chain`)
 - `mesh`: publish a node descriptor, verify the volunteer mesh directory, or select a multi-operator chain (`mesh descriptor`, `mesh directory`, `mesh select`)
+- `credits`: show local mesh credits, pending credits, and pool status
+- `shared`: shared-access pilot wallet and session commands (`shared import`, `shared status`, `shared connect`, `shared disconnect`; disabled by default)
 - `mix`: the mix lane, a Katzenpost mixnet client inside the protected namespace for requests that can wait seconds (`mix setup`, `mix start`, `mix fetch`)
 
 Maintenance:

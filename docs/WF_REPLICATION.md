@@ -212,6 +212,15 @@ scored 97.9% on 97 events. All 793 mix requests met the live-fetch criterion.
 The measured p90 was 4.08 seconds and client uplink averaged 559 kbit/s.
 The trial used 20 lab clients on one host and network.
 
+A second seed on the same day and host doubled the request rate from one
+request every 30 seconds per client on average to one every 15 seconds.
+It passed every check. The delay scorer reached 3.2% overall and 5.4% in
+its highest block across 713 matched held-out requests. The sender-frequency
+prior reached 4.6% overall and 6.2% in its highest block. The low-latency
+control reached 96.6% on 179 events. Of 1,616 mix requests, 1,567 (97.0%)
+met the live-fetch criterion, compared with 371/371 on the control.
+The measured p90 was 4.18 seconds and client uplink averaged 564 kbit/s.
+
 Keep production qualification open until this frozen protocol passes on
 independent days and networks with distinct workload seeds. Include busy
 and low-occupancy periods, repeat with a wider set of timing observers, and

@@ -36,6 +36,16 @@ pub const TOPICS: &[Topic] = &[
         body: include_str!("../../../docs/cli/overview.md"),
     },
     Topic {
+        name: "credits",
+        summary: "show your mesh wallet and public pool status",
+        body: include_str!("../../../docs/cli/mesh.md"),
+    },
+    Topic {
+        name: "shared",
+        summary: "shared-access pilot wallet and session commands",
+        body: include_str!("../../../docs/cli/shared.md"),
+    },
+    Topic {
         name: "status",
         summary: "runtime status written by the supervisor",
         body: include_str!("../../../docs/cli/status.md"),

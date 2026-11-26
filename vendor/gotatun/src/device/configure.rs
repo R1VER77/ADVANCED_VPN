@@ -521,6 +521,36 @@ impl<T: DeviceTransports> Device<T> {
         self.write(async |device| device.add_peer(peer)).await
     }
 
+    /// Bring up an empty, keyed device so its supervisor can admit peers later.
+    #[cfg(feature = "daita")]
+    pub async fn listen_for_peers(&self) -> Result<(), Error> {
+        Connection::set_up(self.inner.clone()).await
+    }
+
+    /// Install a DAITA peer on a running connection without reconfiguring existing peers.
+    /// The routing tables cannot see the new peer until its cover hooks start successfully.
+    #[cfg(feature = "daita")]
+    pub async fn add_live_peer(&self, peer: Peer) -> Result<bool, Error> {
+        use crate::device::peer_state::PeerState;
+        use tokio::sync::Mutex;
+
+        let mut device = self.inner.write().await;
+        let key = peer.public_key;
+        if peer.daita_settings.is_none() || device.peers.contains_key(&key) {
+            return Ok(false);
+        }
+        let Some(connection) = &device.connection else {
+            return Ok(false);
+        };
+        let pool = connection.daita_pool.clone();
+        let udp = connection.daita_udp.clone();
+        let allowed_ips = peer.allowed_ips.clone();
+        let state = Arc::new(Mutex::new(device.create_peer(peer)));
+        PeerState::maybe_start_daita(&state, pool, device.tun_rx_mtu.clone(), udp).await?;
+        device.insert_peer(key, state, allowed_ips);
+        Ok(true)
+    }
+
     /// Return all peers and peer stats for this [`Device`].
     pub async fn peers(&self) -> Vec<PeerStats> {
         self.read(async |device| device.peers().await).await

@@ -12,7 +12,7 @@ use std::process::Command;
 
 use serde_json::Value;
 
-use crate::cells::{Cell, render};
+use crate::cells::{Cell, Row, render};
 use crate::controller::{Outcome, is_root};
 use crate::theme::{Theme, to_ansi};
 
@@ -56,6 +56,63 @@ fn show(cells: &[Cell], theme: Theme) {
     let _ = std::io::stdout()
         .lock()
         .write_all(to_ansi(&render(cells, theme), theme).as_bytes());
+}
+
+/// Render the credits or shared-access view through the same theme as the rest of the CLI.
+pub fn credit_cells(outcome: &Outcome) -> Vec<Cell> {
+    let value = &outcome.value;
+    if outcome.ok() && value["shared_dashboard"] == true {
+        let headline = value["shared_active_credits"]
+            .as_u64()
+            .zip(value["shared_pending_credits"].as_u64())
+            .map(|(held, pending)| format!("{held} usable · {pending} pending · pilot disabled"))
+            .or_else(|| {
+                value["imported_credits"]
+                    .as_u64()
+                    .map(|n| format!("{n} sealed for next epoch"))
+            });
+        let rows = value["rows"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|row| Some(Row::pair(row["label"].as_str()?, row["value"].as_str()?)))
+            .collect();
+        return vec![Cell::Result {
+            title: "Shared access".into(),
+            summary: headline,
+            rows,
+        }];
+    }
+    if !outcome.ok() || value["credit_dashboard"] != true {
+        return crate::cells::from_outcome("mesh", outcome);
+    }
+    let held = value["held_total"].as_u64().or_else(|| value["balance"].as_u64());
+    let pending = value["pending_total"]
+        .as_u64()
+        .or_else(|| value["pending_next_epoch"].as_u64());
+    let headline = held.zip(pending).map(|(h, p)| {
+        let badge = value["pool_badge"]
+            .as_str()
+            .unwrap_or("Public pool disabled");
+        format!("{h} held · {p} pending · {badge}")
+    });
+    let rows = value["rows"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|row| {
+            let label = row["label"].as_str()?;
+            if headline.is_some() && matches!(label, "Held" | "Pending") {
+                return None;
+            }
+            Some(Row::pair(label, row["value"].as_str()?))
+        })
+        .collect();
+    vec![Cell::Result {
+        title: "Mesh credits".into(),
+        summary: headline,
+        rows,
+    }]
 }
 
 fn ask(question: &str) -> bool {
@@ -120,6 +177,6 @@ pub fn main(args: &[String], json: bool, theme: Theme) -> i32 {
         return if done.ok() { 0 } else { 1 };
     }
     let o = call(args);
-    show(&crate::cells::from_outcome("mesh", &o), theme);
+    show(&credit_cells(&o), theme);
     if o.ok() { 0 } else { 1 }
 }

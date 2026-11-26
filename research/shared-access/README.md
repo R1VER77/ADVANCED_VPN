@@ -41,8 +41,26 @@ The offline checkout policy tests use synthetic, already-verified shielded note 
 
 Rescore each run with `python tools/mix_holdout.py RUN --out REPORT --require-margin`. The report includes separate timing, sender-frequency, and combined estimates with the same held-out events. Use `python tools/mix_qualification.py MANIFEST --out RESULT` with a JSON array of entries such as `{"region":"us-central1","report":"trial-1.json"}`. The result keeps the timing claim closed unless the recorded captures cover the required distinct days, seeds, and regions and the observer thresholds pass. The upper estimate uses the more conservative of a one-sided Wilson estimate and a seeded whole-capture bootstrap. The estimate remains empirical and is conditional on the observer and workload.
 
+## Two-hop GotaTun carrier and onion checkout labs
+
+Build the release carrier binary and exercise both single-hop and two-hop schema-3 GotaTun (`cypherpunk-vpn-wireguard`) peer leases, entry-first then exit-through-entry TLS 1.3 admission, upstream-loss blocking, leak checks, rollback, disconnect, and grant expiry:
+
+```sh
+cargo build --release --locked --offline --bin cypherpunk-vpn-wireguard --bin cypherpunk
+unshare --user --map-root-user --net --mount .venv/bin/python research/shared-access/carrier-lease-lab.py --bin target/release/cypherpunk-vpn-wireguard
+unshare --user --map-root-user --net --mount .venv/bin/python research/shared-access/gotatun_shared_lab.py --bin target/release/cypherpunk-vpn-wireguard
+```
+
+Pass `--hardware` (or `--hardware-vault PATH`) to `gotatun_shared_lab.py` to seal and reopen the batch with a physical Nitrokey.
+
+Run the Tor v3 onion-only shielded testnet checkout and dual-watcher tests (public sales stay disabled without explicit opt-in):
+
+```sh
+.venv/bin/python -m unittest discover -s research/shared-access -p 'test_*.py'
+```
+
 ## Pilot gates still open
 
-- Wire admission into the shipped GotaTun peer lifecycle and the required upstream route. Repeat the fixture’s forwarding, rollback, and expiry checks on that path, with leak protection and physical Nitrokey operation.
-- Review the protocol and the distributed replay authority, then run the planned independent GCP trials and independent-operator validation. The archived same-day mix runs provide a regression control.
-- Implement and test shielded testnet checkout, including the independent confirmation paths. Keep paid and shared access disabled in the shipped VPN until the applicable gates pass.
+- Run the physical Nitrokey pass of `gotatun_shared_lab.py --hardware`.
+- Review the protocol and distributed replay authority, then complete GCP Day 2 (`europe-west3`, 2026-11-27 UTC) and Day 3 (`asia-southeast1`, 2026-11-28 UTC) to complement Day 1 (`docs/evidence/SHARED_ACCESS_GCP_US_20261126.json`) and evaluate `tools/mix_qualification.py`, plus independent-operator validation.
+- Complete a live on-chain Zcash shielded testnet purchase once a second independently operated testnet lightwalletd watcher and funded testnet wallet (`TAZ`) are configured. Keep paid and shared access disabled in the shipped VPN until the applicable gates pass.

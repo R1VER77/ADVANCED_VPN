@@ -161,6 +161,10 @@ pub(crate) struct DeviceState<T: DeviceTransports> {
 
 pub(crate) struct Connection<T: DeviceTransports> {
     udp: <T::UdpTransportFactory as UdpTransportFactory>::Send,
+    #[cfg(feature = "daita")]
+    daita_udp: BufferedUdpSend,
+    #[cfg(feature = "daita")]
+    daita_pool: PacketBufPool,
 
     /// The task that reads IPv4 traffic from the UDP socket.
     incoming: Task,
@@ -255,7 +259,7 @@ impl<T: DeviceTransports> Connection<T> {
             DeviceState::handle_incoming(
                 Arc::downgrade(&device_arc),
                 buffered_ip_tx.clone(),
-                buffered_udp_tx,
+                buffered_udp_tx.clone(),
                 buffered_udp_rx,
                 pool.clone(),
             )
@@ -265,6 +269,10 @@ impl<T: DeviceTransports> Connection<T> {
         debug_assert!(device.connection.is_none());
         device.connection = Some(Connection {
             udp: udp_tx,
+            #[cfg(feature = "daita")]
+            daita_udp: buffered_udp_tx,
+            #[cfg(feature = "daita")]
+            daita_pool: pool,
             incoming,
             timers,
             outgoing,
@@ -458,6 +466,15 @@ impl<T: DeviceTransports> DeviceState<T> {
         let peer = self.create_peer(peer_builder);
         let peer = Arc::new(Mutex::new(peer));
 
+        self.insert_peer(pub_key, peer, allowed_ips);
+    }
+
+    fn insert_peer(
+        &mut self,
+        pub_key: x25519::PublicKey,
+        peer: Arc<Mutex<PeerState>>,
+        allowed_ips: impl IntoIterator<Item = ipnetwork::IpNetwork>,
+    ) {
         self.peers.insert(pub_key, Arc::clone(&peer));
 
         for allowed_ip in allowed_ips {
@@ -919,6 +936,7 @@ impl<T: DeviceTransports> Connection<T> {
             incoming,
             timers,
             outgoing,
+            ..
         } = self;
         drop(udp);
 

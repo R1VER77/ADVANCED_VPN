@@ -17,6 +17,7 @@
 //! - [`descriptor`]: the signed node announcement schema (the gossip payload).
 //! - [`directory`]: the local node database and the chain-selection rules.
 //! - [`tokens`]: unlinkable contribution credits (VOPRF scaffolding).
+pub mod carrier_leases;
 pub mod descriptor;
 pub mod directory;
 pub mod identity;

@@ -1,0 +1,301 @@
+{
+  "schema": 1,
+  "capture_sha256": "b0667f866e9e884f6083b2eccf0bffc07508c53df1a1fc1d7b147056ab74c091",
+  "scope": "same-run temporal holdout; ingress send events and egress DNS in an isolated lab",
+  "cover_clients_excluded": 0,
+  "mix": {
+    "request_count": 778,
+    "heldout_requests": 413,
+    "successful_requests": 778,
+    "training_arrivals": 346,
+    "split_crossing_arrivals": 0,
+    "unmatched_or_ambiguous_dns_events": 32,
+    "heldout_senders": 20,
+    "active_senders_per_block": [
+      20,
+      20,
+      20,
+      20,
+      20
+    ],
+    "arrivals": 400,
+    "clients": 20,
+    "top1_accuracy": 0.02,
+    "chance": 0.05,
+    "mean_entropy_bits": 4.167,
+    "max_entropy_bits": 4.322,
+    "effective_anonymity_set": 17.96,
+    "timing_sensitivity": {
+      "time_blocks": [
+        {
+          "events": 71,
+          "accuracy": 0.0141,
+          "top1_hits": 1.0,
+          "senders": 20
+        },
+        {
+          "events": 76,
+          "accuracy": 0.0132,
+          "top1_hits": 1.0,
+          "senders": 20
+        },
+        {
+          "events": 83,
+          "accuracy": 0.0,
+          "top1_hits": 0.0,
+          "senders": 19
+        },
+        {
+          "events": 81,
+          "accuracy": 0.0617,
+          "top1_hits": 5.0,
+          "senders": 20
+        },
+        {
+          "events": 89,
+          "accuracy": 0.0112,
+          "top1_hits": 1.0,
+          "senders": 20
+        }
+      ],
+      "identity_permutation_exceedance": 0.9992000799920008,
+      "worst_block_permutation_exceedance": 0.8341165883411659,
+      "identity_permutations": 10000,
+      "identity_permutation_seed": 0
+    },
+    "prior_top1_accuracy": 0.05,
+    "prior_timing_sensitivity": {
+      "time_blocks": [
+        {
+          "events": 71,
+          "accuracy": 0.0141,
+          "top1_hits": 1.0,
+          "senders": 20
+        },
+        {
+          "events": 76,
+          "accuracy": 0.0263,
+          "top1_hits": 2.0,
+          "senders": 20
+        },
+        {
+          "events": 83,
+          "accuracy": 0.0723,
+          "top1_hits": 6.0,
+          "senders": 19
+        },
+        {
+          "events": 81,
+          "accuracy": 0.0494,
+          "top1_hits": 4.0,
+          "senders": 20
+        },
+        {
+          "events": 89,
+          "accuracy": 0.0787,
+          "top1_hits": 7.0,
+          "senders": 20
+        }
+      ],
+      "identity_permutation_exceedance": 0.5475452454754525,
+      "worst_block_permutation_exceedance": 0.6507349265073493,
+      "identity_permutations": 10000,
+      "identity_permutation_seed": 0
+    },
+    "combined_top1_accuracy": 0.03,
+    "combined_timing_sensitivity": {
+      "time_blocks": [
+        {
+          "events": 71,
+          "accuracy": 0.0141,
+          "top1_hits": 1.0,
+          "senders": 20
+        },
+        {
+          "events": 76,
+          "accuracy": 0.0526,
+          "top1_hits": 4.0,
+          "senders": 20
+        },
+        {
+          "events": 83,
+          "accuracy": 0.012,
+          "top1_hits": 1.0,
+          "senders": 19
+        },
+        {
+          "events": 81,
+          "accuracy": 0.0494,
+          "top1_hits": 4.0,
+          "senders": 20
+        },
+        {
+          "events": 89,
+          "accuracy": 0.0225,
+          "top1_hits": 2.0,
+          "senders": 20
+        }
+      ],
+      "identity_permutation_exceedance": 0.9867013298670133,
+      "worst_block_permutation_exceedance": 0.96000399960004,
+      "identity_permutations": 10000,
+      "identity_permutation_seed": 0
+    },
+    "p90_latency_seconds": 3.6,
+    "client_up_kbit_per_s": 559.0
+  },
+  "baseline": {
+    "request_count": 129,
+    "heldout_requests": 61,
+    "successful_requests": 129,
+    "training_arrivals": 68,
+    "split_crossing_arrivals": 0,
+    "unmatched_or_ambiguous_dns_events": 0,
+    "heldout_senders": 19,
+    "active_senders_per_block": [
+      9,
+      8,
+      9,
+      11,
+      11
+    ],
+    "arrivals": 61,
+    "clients": 20,
+    "top1_accuracy": 0.9689,
+    "chance": 0.05,
+    "mean_entropy_bits": 0.142,
+    "max_entropy_bits": 4.322,
+    "effective_anonymity_set": 1.1,
+    "timing_sensitivity": {
+      "time_blocks": [
+        {
+          "events": 13,
+          "accuracy": 0.9269,
+          "top1_hits": 12.05,
+          "senders": 9
+        },
+        {
+          "events": 9,
+          "accuracy": 1.0,
+          "top1_hits": 9.0,
+          "senders": 8
+        },
+        {
+          "events": 11,
+          "accuracy": 1.0,
+          "top1_hits": 11.0,
+          "senders": 9
+        },
+        {
+          "events": 14,
+          "accuracy": 1.0,
+          "top1_hits": 14.0,
+          "senders": 11
+        },
+        {
+          "events": 14,
+          "accuracy": 0.9321,
+          "top1_hits": 13.05,
+          "senders": 11
+        }
+      ],
+      "identity_permutation_exceedance": 9.999000099990002e-05,
+      "worst_block_permutation_exceedance": 9.999000099990002e-05,
+      "identity_permutations": 10000,
+      "identity_permutation_seed": 0
+    },
+    "prior_top1_accuracy": 0.082,
+    "prior_timing_sensitivity": {
+      "time_blocks": [
+        {
+          "events": 13,
+          "accuracy": 0.0769,
+          "top1_hits": 1.0,
+          "senders": 9
+        },
+        {
+          "events": 9,
+          "accuracy": 0.0,
+          "top1_hits": 0.0,
+          "senders": 8
+        },
+        {
+          "events": 11,
+          "accuracy": 0.0909,
+          "top1_hits": 1.0,
+          "senders": 9
+        },
+        {
+          "events": 14,
+          "accuracy": 0.1429,
+          "top1_hits": 2.0,
+          "senders": 11
+        },
+        {
+          "events": 14,
+          "accuracy": 0.0714,
+          "top1_hits": 1.0,
+          "senders": 11
+        }
+      ],
+      "identity_permutation_exceedance": 0.20007999200079993,
+      "worst_block_permutation_exceedance": 0.607039296070393,
+      "identity_permutations": 10000,
+      "identity_permutation_seed": 0
+    },
+    "combined_top1_accuracy": 0.9672,
+    "combined_timing_sensitivity": {
+      "time_blocks": [
+        {
+          "events": 13,
+          "accuracy": 0.9231,
+          "top1_hits": 12.0,
+          "senders": 9
+        },
+        {
+          "events": 9,
+          "accuracy": 1.0,
+          "top1_hits": 9.0,
+          "senders": 8
+        },
+        {
+          "events": 11,
+          "accuracy": 1.0,
+          "top1_hits": 11.0,
+          "senders": 9
+        },
+        {
+          "events": 14,
+          "accuracy": 1.0,
+          "top1_hits": 14.0,
+          "senders": 11
+        },
+        {
+          "events": 14,
+          "accuracy": 0.9286,
+          "top1_hits": 13.0,
+          "senders": 11
+        }
+      ],
+      "identity_permutation_exceedance": 9.999000099990002e-05,
+      "worst_block_permutation_exceedance": 9.999000099990002e-05,
+      "identity_permutations": 10000,
+      "identity_permutation_seed": 0
+    },
+    "p90_latency_seconds": 0.42,
+    "client_up_kbit_per_s": 0.0
+  },
+  "timing_margin_trial": {
+    "passed": true,
+    "checks": {
+      "fixed_profile": true,
+      "positive_control": true,
+      "coverage": true,
+      "live_fetch_success": true,
+      "overall_margin": true,
+      "worst_window_margin": true
+    },
+    "started": "2026-11-26T15:38:55Z",
+    "seed": 2026112602
+  }
+}

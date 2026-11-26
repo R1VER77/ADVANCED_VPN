@@ -1,0 +1,45 @@
+{
+  "schema": 1,
+  "scope": "Tor v3 onion-only shielded Zcash testnet checkout service, dual independent watcher adapters, and RFC 9578 blind batch minting (public sales disabled)",
+  "unit_tests_passed": 7,
+  "public_sales_enabled": false,
+  "loopback_only_bind_enforced": true,
+  "tor_v3_onion_created": true,
+  "live_onion_checkout_passed": true,
+  "blind_tokens_verified_and_redeemed": 8,
+  "order_and_txid_excluded_from_client_batch": true,
+  "negative_checks": {
+    "disabled_without_opt_in": true,
+    "non_loopback_bind_rejected": true,
+    "txid_reuse_rejected": true,
+    "watcher_disagreement_reorg_rejected": true,
+    "transparent_and_mainnet_rejected": true,
+    "paid_denylist_retained_after_prune": true
+  },
+  "live_testnet_watcher_probes_over_tor": [
+    {
+      "host": "testnet.zec.rocks",
+      "port": 443,
+      "reachable": true,
+      "tls_version": "TLSv1.3",
+      "alpn": "h2"
+    },
+    {
+      "host": "lightwalletd.testnet.electriccoin.co",
+      "port": 9067,
+      "reachable": false,
+      "error": "timed out"
+    },
+    {
+      "host": "testnet.lightwalletd.com",
+      "port": 9067,
+      "reachable": false,
+      "error": "Tor SOCKS5 connect failed (code 4)"
+    }
+  ],
+  "live_onchain_testnet_purchase_complete": false,
+  "open_prerequisites": [
+    "second independently operated reachable Zcash testnet lightwalletd endpoint",
+    "funded Zcash testnet (TAZ) Orchard wallet to broadcast and confirm a live 10-block transaction"
+  ]
+}

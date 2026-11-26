@@ -361,6 +361,7 @@ def main():
             "127.0.0.1 localhost\n" + "".join("%s %s\n" % (MIX_IP, n) for n in names)
         )
         Path("/etc/netns/mix/resolv.conf").write_text("nameserver 9.9.9.9\n")
+        Path("/etc/netns/mix/nsswitch.conf").write_text("hosts: files dns\n")
         for k in range(n_all):
             ns = "c%d" % k
             sh("ip", "netns", "add", ns)
