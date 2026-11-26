@@ -45,12 +45,19 @@ class ChainWatch:
         if waited < (DOWN_GRACE if self.ever else START_GRACE):
             return {}
         since = self.down_since if self.ever else self.started
-        detail = (
-            "no answer through the chain since %s. A server may be stopped (a free tier reclaims idle ones), "
-            "locked after a reboot, out of credits or unreachable; traffic stays blocked meanwhile" % _clock(since)
-        )
+        stale = verdict.get("stale", {})
+        if "probe" in stale and "cloak" not in stale and "carrier" not in stale:
+            detail = "exit DNS check unanswered since %s. The first hop and carrier still report in" % _clock(since)
+        else:
+            detail = (
+                "no answer through the chain since %s. A server may be stopped (a free tier reclaims idle ones), "
+                "locked after a reboot, out of credits or unreachable; traffic stays blocked meanwhile" % _clock(since)
+            )
         if not self.announced:
-            self.notify("VPN chain not answering", detail[0].upper() + detail[1:] + ".\nNext: " + NEXT)
+            self.notify(
+                "VPN chain not answering",
+                detail[0].upper() + detail[1:] + ".\nFor ordinary internet access, open sudo cypherpunk and press k.",
+            )
             self.announced = True
         return dict(detail=detail, next=NEXT)
 

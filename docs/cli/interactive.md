@@ -14,6 +14,9 @@ Nitrokey unlock, open it with `sudo cypherpunk`.
 - `l` locations and saved signed chains, `p` VPN settings
 - `h` hops, `s` status, `i` info, `o` doctor
 - `?` help, `PgUp` / `PgDn` scroll, `q` or `Esc` quit
+- `/` search commands. Type a prefix, use Tab to complete, and press Enter to run.
+- `k` or `/killswitch-disarm` opens internet recovery. The confirmation stops the VPN
+  and permits ordinary internet access through your ISP. Close protected apps first.
 
 On an enrolled Nitrokey client, `c` from the privileged view starts the
 service and opens the terminal PIN prompt if the service requests one.

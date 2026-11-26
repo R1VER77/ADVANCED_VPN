@@ -25,6 +25,37 @@ fn run(ctrl: &Controller, action: &str, args: &[String]) -> Result<bool> {
     Ok(ctrl.command(false, action, args).status()?.success())
 }
 
+pub fn disarm(ctrl: &Controller, theme: Theme) -> Result<()> {
+    if !is_root() {
+        println!("Open sudo cypherpunk and press k to recover internet access.");
+        println!(
+            "From a shell, run sudo cypherpunk disconnect, then sudo cypherpunk killswitch-disarm --allow-cleartext."
+        );
+        return Ok(());
+    }
+    println!("Disarm the kill switch");
+    println!(
+        "This stops the VPN and restores ordinary internet access. Apps can then send traffic through your ISP."
+    );
+    println!("Close protected apps before continuing.");
+    if prompt("Type allow cleartext to proceed, or press Enter to cancel: ")?.as_deref()
+        != Some("allow cleartext")
+    {
+        return Ok(());
+    }
+    println!("Stopping the VPN…");
+    let stopped = crate::actions::perform(ctrl, "disconnect", &[]);
+    print!(
+        "{}",
+        crate::theme::to_ansi(&crate::cells::render(&stopped.cells, theme), theme)
+    );
+    if stopped.code == 0 {
+        println!("Restoring ordinary internet access…");
+        run(ctrl, "reset", &["--allow-cleartext".into()])?;
+    }
+    Ok(())
+}
+
 pub fn setup(ctrl: &Controller, theme: Theme, reduced_motion: bool) -> Result<()> {
     println!("Reading this device's setup state…");
     let info = ctrl.call("info", &[])?;

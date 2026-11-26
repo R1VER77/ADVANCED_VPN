@@ -51,6 +51,8 @@ const SPINNER: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "�
 
 /// Keys shown in the footer, in order.
 pub const KEYS: &[(&str, &str)] = &[
+    ("/", "commands"),
+    ("k", "kill switch"),
     ("c", "connect"),
     ("u", "unlock"),
     ("l", "locations"),
@@ -64,6 +66,29 @@ pub const KEYS: &[(&str, &str)] = &[
     ("?", "help"),
     ("q", "quit"),
 ];
+
+const SLASH_COMMANDS: &[(&str, &str)] = &[
+    ("killswitch-disarm", "restore ordinary internet access"),
+    ("status", "show current protection and tunnel checks"),
+    ("connect", "start the VPN"),
+    ("disconnect", "stop the VPN and keep the kill switch"),
+    ("unlock", "answer the Nitrokey PIN prompt"),
+    ("settings", "change protection scope and other preferences"),
+    ("locations", "view and select saved routes"),
+    ("hops", "show the enrolled route"),
+    ("setup", "set up or enroll this device"),
+    ("doctor", "check this device"),
+    ("info", "show enrollment and preferences"),
+    ("help", "list keyboard shortcuts"),
+    ("quit", "leave the VPN view"),
+];
+
+fn matching_commands(prefix: &str) -> impl Iterator<Item = (&'static str, &'static str)> {
+    SLASH_COMMANDS
+        .iter()
+        .copied()
+        .filter(move |(name, _)| name.starts_with(prefix))
+}
 
 /// What the header box shows.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -159,6 +184,7 @@ pub struct App {
     pub scroll: usize,
     /// Set when the user quits.
     pub quit: bool,
+    command: Option<String>,
     started: Instant,
 }
 
@@ -173,6 +199,7 @@ impl App {
             busy: None,
             scroll: 0,
             quit: false,
+            command: None,
             started: Instant::now(),
         }
     }
@@ -250,7 +277,7 @@ impl App {
         let mut spans = vec![Span::raw(" ")];
         for (i, (key, label)) in KEYS
             .iter()
-            .filter(|(k, _)| !matches!(*k, "h" | "s" | "i" | "o"))
+            .filter(|(k, _)| matches!(*k, "/" | "k" | "c" | "d" | "p" | "e" | "q"))
             .enumerate()
         {
             if i > 0 {
@@ -267,6 +294,9 @@ impl App {
 
     fn status_line(&self, now: Instant) -> Line<'static> {
         let t = self.theme;
+        if let Some(command) = &self.command {
+            return Line::from(Span::styled(format!(" /{command}"), t.accent()));
+        }
         match &self.busy {
             Some(b) => {
                 let frame = if self.reduced_motion {
@@ -316,21 +346,40 @@ impl App {
             },
         );
         let mut lines = vec![Line::default()];
-        if self.history.is_empty() {
+        if let Some(command) = &self.command {
+            for (name, description) in matching_commands(command).take(6) {
+                lines.push(Line::from(vec![
+                    Span::styled(format!("  /{name}  "), self.theme.bold()),
+                    Span::styled(description, self.theme.dim()),
+                ]));
+            }
+            if lines.len() == 1 {
+                lines.push(Line::from("  No matching command."));
+            }
+        } else if self.history.is_empty() {
             lines.push(Line::from(Span::styled(
                 "  Press a key below. Every action is also a command: cypherpunk help",
                 self.theme.dim(),
             )));
         }
-        lines.extend(render(&self.history, self.theme));
+        if self.command.is_none() {
+            lines.extend(render(&self.history, self.theme));
+        }
         let height = history.height as usize;
-        let end = lines
-            .len()
-            .saturating_sub(self.scroll.min(lines.len().saturating_sub(height)));
+        let end = lines.len().saturating_sub(if self.command.is_some() {
+            0
+        } else {
+            self.scroll.min(lines.len().saturating_sub(height))
+        });
         let start = end.saturating_sub(height);
         f.render_widget(Paragraph::new(lines[start..end].to_vec()), history);
         f.render_widget(Paragraph::new(self.status_line(now)), status);
-        f.render_widget(Paragraph::new(self.footer()), footer);
+        let shortcuts = if self.command.is_some() {
+            Line::from(" Enter run · Tab complete · Esc cancel")
+        } else {
+            self.footer()
+        };
+        f.render_widget(Paragraph::new(shortcuts), footer);
     }
 
     /// The action a key starts, if any.
@@ -346,8 +395,40 @@ impl App {
             KeyCode::Char('s') => Some("status"),
             KeyCode::Char('i') => Some("info"),
             KeyCode::Char('o') => Some("doctor"),
+            KeyCode::Char('k') => Some("killswitch-disarm"),
             _ => None,
         }
+    }
+
+    fn command_key(&mut self, key: &KeyEvent) -> Option<&'static str> {
+        let command = self.command.as_mut()?;
+        match key.code {
+            KeyCode::Esc => self.command = None,
+            KeyCode::Backspace => {
+                command.pop();
+            }
+            KeyCode::Tab => {
+                let first = matching_commands(command).next();
+                if let Some((name, _)) = first {
+                    *command = name.into();
+                }
+            }
+            KeyCode::Enter => {
+                // Do not execute a partial match. Tab previews the exact command first.
+                let action = matching_commands(command)
+                    .find(|(name, _)| *name == command.as_str())
+                    .map(|(name, _)| name);
+                if action.is_some() {
+                    self.command = None;
+                }
+                return action;
+            }
+            KeyCode::Char(c) if command.len() < 64 && (c.is_ascii_lowercase() || c == '-') => {
+                command.push(c)
+            }
+            _ => {}
+        }
+        None
     }
 
     /// Handle a key that does not start an action.
@@ -388,6 +469,7 @@ pub fn run(ctrl: Controller, theme: Theme, reduced_motion: bool) -> Result<()> {
     let (tx, rx): (Sender<Finished>, Receiver<Finished>) = channel();
     let (header_tx, header_rx) = channel();
     let mut refreshing = false;
+    let mut revision = 0;
     let mut next_refresh = Instant::now() + Duration::from_secs(2);
     let mut terminal = ratatui::try_init()?;
     let result = (|| -> Result<()> {
@@ -395,12 +477,17 @@ pub fn run(ctrl: Controller, theme: Theme, reduced_motion: bool) -> Result<()> {
             terminal.draw(|f| app.draw(f, Instant::now()))?;
             if let Ok((refresh, done)) = rx.try_recv() {
                 app.finish(done);
-                if refresh && let Ok(o) = ctrl.call("info", &[]) {
-                    app.header = Header::from_info(&o.value);
+                if refresh {
+                    revision += 1;
+                    if let Ok(o) = ctrl.call("info", &[]) {
+                        app.header = Header::from_info(&o.value);
+                    }
                 }
             }
-            if let Ok(header) = header_rx.try_recv() {
-                if let Some(header) = header {
+            if let Ok((observed_revision, header)) = header_rx.try_recv() {
+                if observed_revision == revision
+                    && let Some(header) = header
+                {
                     app.header = header;
                 }
                 refreshing = false;
@@ -414,7 +501,7 @@ pub fn run(ctrl: Controller, theme: Theme, reduced_motion: bool) -> Result<()> {
                         .call("info", &[])
                         .ok()
                         .map(|o| Header::from_info(&o.value));
-                    let _ = header_tx.send(header);
+                    let _ = header_tx.send((revision, header));
                 });
             }
             if !event::poll(Duration::from_millis(80))? {
@@ -426,7 +513,27 @@ pub fn run(ctrl: Controller, theme: Theme, reduced_motion: bool) -> Result<()> {
             if key.kind != KeyEventKind::Press {
                 continue;
             }
-            match App::action_for(&key) {
+            if !app.busy() && key.code == KeyCode::Char('/') && app.command.is_none() {
+                app.command = Some(String::new());
+                continue;
+            }
+            let action = if app.command.is_some() {
+                match app.command_key(&key) {
+                    Some("quit") => {
+                        app.quit = true;
+                        continue;
+                    }
+                    Some("help") => {
+                        app.key(&KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE));
+                        continue;
+                    }
+                    Some(action) => Some(action),
+                    None => continue,
+                }
+            } else {
+                App::action_for(&key)
+            };
+            match action {
                 Some(_) if key.modifiers.contains(KeyModifiers::CONTROL) => app.key(&key),
                 Some(action) if !app.busy() && terminal_action(action, &app.header) => {
                     ratatui::try_restore()?;
@@ -437,6 +544,7 @@ pub fn run(ctrl: Controller, theme: Theme, reduced_motion: bool) -> Result<()> {
                     let result = run_terminal_action(&ctrl, action, theme, reduced_motion);
                     terminal = ratatui::try_init()?;
                     result?;
+                    revision += 1;
                     if let Ok(o) = ctrl.call("info", &[]) {
                         app.header = Header::from_info(&o.value);
                     }
@@ -461,8 +569,10 @@ pub fn run(ctrl: Controller, theme: Theme, reduced_motion: bool) -> Result<()> {
 }
 
 fn terminal_action(action: &str, header: &Header) -> bool {
-    matches!(action, "setup" | "unlock" | "locations" | "settings")
-        || (action == "connect" && is_root() && header.protection.starts_with("nitrokey"))
+    matches!(
+        action,
+        "setup" | "unlock" | "locations" | "settings" | "killswitch-disarm"
+    ) || (action == "connect" && is_root() && header.protection.starts_with("nitrokey"))
 }
 
 fn run_terminal_action(
@@ -475,6 +585,7 @@ fn run_terminal_action(
         "setup" => guided::setup(ctrl, theme, reduced_motion)?,
         "locations" => guided::locations(ctrl)?,
         "settings" => guided::settings(ctrl, theme)?,
+        "killswitch-disarm" => guided::disarm(ctrl, theme)?,
         "unlock" if !is_root() => {
             println!("Run sudo cypherpunk and press u, or run sudo cypherpunk unlock here.")
         }
@@ -566,7 +677,7 @@ mod tests {
         assert!(s[8].contains("Press a key below"));
         assert_eq!(
             s[13],
-            " c connect · u unlock · l locations · p settings · e setup · d stop · ? help · q quit"
+            " / commands · k kill switch · c connect · p settings · e setup · d stop · q quit"
         );
     }
 
@@ -711,7 +822,7 @@ mod tests {
             json!({"state": "supervising", "lifecycle": "connecting", "stale": {"probe": null}}),
         );
         assert_eq!(path.status, "connecting");
-        assert!(path.guidance.unwrap().contains("end-to-end"));
+        assert!(path.guidance.unwrap().contains("Exit DNS check"));
     }
 
     #[test]

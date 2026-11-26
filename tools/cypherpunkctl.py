@@ -431,8 +431,14 @@ def ensure_network(profile, state, whole=False, service_uid=0, upstream=None, up
     n = profile["network"]
     rt = runtime_dir(state)
     snapshot = restore_dir(state, profile) / "network-before.json"
-    if not snapshot.exists():
-        save(snapshot, dict(default=json.loads(cmd("ip", "-j", "route", "show", "default").stdout), whole_device=whole))
+    before = read_json_private(snapshot)
+    if before is None or (whole and not before["whole_device"]):
+        routes = json.loads(cmd("ip", "-j", "route", "show", "default").stdout)
+        # An older client could already have switched from Applications to Whole
+        # device. Keep its original routes if the VPN has replaced the default.
+        if before is not None and any(route.get("dev") == TUN for route in routes):
+            routes = before["default"]
+        save(snapshot, dict(default=routes, whole_device=whole))
     if role == "client":
         front = profile.get("front")
         if front and upstream:
@@ -870,7 +876,10 @@ def verdict_fields(evidence, probe, rt, supervising, now=None):
         except (OSError, ValueError):
             seen[name] = (None, None)
     evidence.observe(now, *seen["cloak"], *seen["carrier"], probe.ok_at if probe else None)
-    return evidence.verdict(now, supervising=supervising, kill_switch=True)
+    verdict = evidence.verdict(now, supervising=supervising, kill_switch=True)
+    if probe and probe.diagnostics is not None:
+        verdict["path_check"] = probe.diagnostics
+    return verdict
 
 
 def carrier_rx(state):
@@ -1820,7 +1829,15 @@ def reset(state, lab=False):
         if (keep / "network-before.json").exists()
         else dict(default=[], whole_device=False)
     )
-    if before["whole_device"]:
+    resolver_backup = keep / "resolv.before"
+    if (
+        before["whole_device"]
+        or resolver_backup.exists()
+        or (
+            profile["role"] == "client"
+            and any(route.get("dev") == TUN for route in json.loads(cmd("ip", "-j", "route", "show", "default").stdout))
+        )
+    ):
         # Remove VPN default first while its firewall still blocks direct traffic.
         cmd("ip", "route", "del", "default", "dev", TUN, check=False)
         for route in before["default"]:
@@ -1831,8 +1848,8 @@ def reset(state, lab=False):
             if "metric" in route:
                 args += ["metric", str(route["metric"])]
             cmd(*args)
-        if (keep / "resolv.before").exists():
-            Path("/etc/resolv.conf").resolve().write_bytes(read_private(keep / "resolv.before"))
+        if resolver_backup.exists():
+            Path("/etc/resolv.conf").resolve().write_bytes(read_private(resolver_backup))
     if not lab:
         import guard_policy
 
@@ -1851,6 +1868,8 @@ def reset(state, lab=False):
         cmd("/usr/sbin/nft", "delete", "table", "inet", name, check=False)
     cmd("ip", "rule", "del", "priority", str(FRONT_ROUTES), check=False)
     cmd("ip", "route", "flush", "table", str(FRONT_ROUTES), check=False)
+    resolver_backup.unlink(missing_ok=True)
+    (keep / "network-before.json").unlink(missing_ok=True)
     save(rt / "status.json", dict(schema=1, state="unlocked", kill_switch=False, explicit_cleartext_permission=True))
 
 
@@ -3006,7 +3025,9 @@ def dispatch(a):
         text = "\n".join(("ok   " if c["ok"] else "FAIL ") + c["check"] + ": " + c["detail"] for c in checks)
         emit(a, text, checks=checks, healthy=all(c["ok"] for c in checks))
     elif a.action == "reset":
-        reset(a.state.resolve(), a.lab)
+        root_guard(a.lab)
+        with supervisor_locks(a.state.resolve()):
+            reset(a.state.resolve(), a.lab)
         emit(a, "Guard removed; cleartext networking restored.")
     elif a.action == "mix":
         mix_command(a)

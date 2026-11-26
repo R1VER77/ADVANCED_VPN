@@ -143,7 +143,7 @@ pub fn perform(ctrl: &Controller, action: &str, args: &[String]) -> Done {
                 Ok(()) => {
                     stopped = true;
                     rows.push(Row::detail(
-                        "service stopped; the kill switch stays in place (cypherpunk help reset)",
+                        "Service stopped. The kill switch stays armed. Press k or use /killswitch-disarm to restore ordinary access.",
                     ));
                 }
                 Err(h) => rows.extend(h.iter().cloned().map(Row::detail)),

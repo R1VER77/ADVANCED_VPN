@@ -1,7 +1,8 @@
 # cypherpunk disconnect
 
 Stop the VPN service. The kill switch stays in place, so nothing leaks in cleartext
-afterwards. To remove the kill switch, see `cypherpunk help reset`.
+afterwards. To restore ordinary internet access, press `k` in the interactive
+view or use `sudo cypherpunk killswitch-disarm --allow-cleartext`.
 
 ## Usage
 

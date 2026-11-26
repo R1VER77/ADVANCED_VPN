@@ -128,7 +128,7 @@ enum Cmd {
     #[command(disable_help_flag = true)]
     StateKey(Rest),
     /// Remove the kill switch (--allow-cleartext).
-    #[command(disable_help_flag = true)]
+    #[command(disable_help_flag = true, visible_alias = "killswitch-disarm")]
     Reset(Rest),
     /// Create, inspect and remove the chain's cloud servers.
     #[command(disable_help_flag = true)]
@@ -259,7 +259,15 @@ fn run(cli: Cli, theme: Theme) -> i32 {
     };
     let (action, mut args) = command.split();
     if action == "help" {
-        return help(args.first().map(String::as_str), theme);
+        let topic = args.first().map(String::as_str);
+        return help(
+            if topic == Some("killswitch-disarm") {
+                Some("reset")
+            } else {
+                topic
+            },
+            theme,
+        );
     }
     if args.iter().any(|a| a == "-h" || a == "--help") {
         return help(Some(action), theme);

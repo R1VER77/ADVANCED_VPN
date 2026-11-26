@@ -4,6 +4,16 @@ User-visible changes per release, newest first. Defects that affected security, 
 availability or a published claim are in [docs/INCIDENTS.md](docs/INCIDENTS.md). Every
 measured figure in the docs names the version it was measured on.
 
+## v0.11.1
+
+- Added a searchable command menu and a direct kill-switch recovery action.
+- Restored the pre-VPN routes and DNS after switching from Applications to
+  Whole device and then disarming the guard.
+- Kept the exit's local DNS path probe independent of occupied upstream DNS
+  slots. Status shows missed checks and the duration of the latest attempt.
+- Added hop locations, saved signed routes, traffic scope selection and
+  installation progress to the terminal client.
+
 ## v0.11.0 (22 Nov 2026)
 
 - **Breaking: the project is cypherpunk_vpn everywhere, as a clean break**

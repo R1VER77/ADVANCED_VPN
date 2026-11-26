@@ -303,6 +303,15 @@ fn nxdomain_response(query: &[u8], q_end: usize) -> Vec<u8> {
     out
 }
 
+/// RFC 6761 reserves .invalid. Reply on the exit without using an upstream slot.
+fn reserved_name_answer(query: &[u8]) -> Option<Vec<u8>> {
+    if !(12..=4096).contains(&query.len()) || query[2] & 0x80 != 0 {
+        return None;
+    }
+    let (name, end) = parse_question(query).ok()?;
+    (name == "invalid" || name.ends_with(".invalid")).then(|| nxdomain_response(query, end))
+}
+
 /// TLS to the upstream resolver: TLS 1.3 with the hybrid post-quantum group
 /// X25519MLKEM768 as the only key exchange. An upstream that cannot do it gets no query
 /// (DNS fails closed), so no lookup ever crosses the exit's last leg under classical
@@ -410,17 +419,14 @@ impl Resolver {
             b.len() >= 12 && b.len() <= 4096 && b[2] & 0x80 == 0,
             "bad DNS request"
         );
-        if let Ok((qname, q_end)) = parse_question(b) {
-            // RFC 6761 §6.4: names under .invalid never resolve, so a resolver answers
-            // them itself. Never forwarding them also keeps the client's path probe
-            // (tools/protection.py) inside the chain, unseen by the upstream resolver.
-            if qname == "invalid" || qname.ends_with(".invalid") {
-                return Ok(nxdomain_response(b, q_end));
-            }
-            if self.blocklist.is_blocked(&qname) {
-                self.blocked.fetch_add(1, Ordering::Relaxed);
-                return Ok(nxdomain_response(b, q_end));
-            }
+        if let Some(answer) = reserved_name_answer(b) {
+            return Ok(answer);
+        }
+        if let Ok((qname, q_end)) = parse_question(b)
+            && self.blocklist.is_blocked(&qname)
+        {
+            self.blocked.fetch_add(1, Ordering::Relaxed);
+            return Ok(nxdomain_response(b, q_end));
         }
         let answer = self.ask(b).await?;
         self.count.fetch_add(1, Ordering::Relaxed);
@@ -513,6 +519,11 @@ async fn work() -> Result<()> {
             received=udp.recv_from(&mut buffer)=>{
                 let(n,peer)=received?;
                 if !from_client(peer.ip()) || n>4096 || !budget.admit(n){continue;}
+                // Slow upstream DNS must not starve local end-to-end probes.
+                if let Some(answer) = reserved_name_answer(&buffer[..n]) {
+                    let _ = udp.send_to(&answer, peer).await;
+                    continue;
+                }
                 let Ok(permit)=resolver.slots.clone().try_acquire_owned() else {continue};
                 let r=resolver.clone();let u=udp.clone();let query=buffer[..n].to_vec();
                 tokio::spawn(async move {let _permit=permit;
@@ -831,6 +842,7 @@ mod tests {
         {
             let q = make_query([3, i as u8], name);
             let a = r.query(&q).await.unwrap();
+            assert_eq!(reserved_name_answer(&q), Some(a.clone()));
             assert_eq!(&a[..2], &q[..2], "{name}: the same id");
             assert_eq!(a[3] & 0x0f, 3, "{name}: NXDOMAIN");
         }
@@ -841,9 +853,9 @@ mod tests {
         );
         assert_eq!(accepted.load(Ordering::Relaxed), 0);
         // A name that merely contains "invalid" is an ordinary name.
-        r.query(&make_query([5, 6], "invalid.example.org"))
-            .await
-            .unwrap();
+        let ordinary = make_query([5, 6], "invalid.example.org");
+        assert!(reserved_name_answer(&ordinary).is_none());
+        r.query(&ordinary).await.unwrap();
         assert_eq!(r.connects.load(Ordering::Relaxed), 1);
     }
 

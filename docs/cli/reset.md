@@ -5,6 +5,11 @@ Remove the kill switch and restore cleartext networking. Disconnect first.
 ## Usage
 
     sudo cypherpunk reset --allow-cleartext
+    sudo cypherpunk killswitch-disarm --allow-cleartext
+
+In the interactive view, press `k` or enter `/killswitch-disarm`. After
+confirmation, the view stops the VPN and disarms the guard. Close any
+protected apps before disarming.
 
 ## Options
 

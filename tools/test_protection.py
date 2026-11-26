@@ -155,9 +155,10 @@ class StatusFields(unittest.TestCase):
 
         self.write("cloak", dict(connected=True))
         self.write("carrier", dict(handshake=True))
-        probe = type("P", (), {"ok_at": 998.0})()
+        probe = type("P", (), {"ok_at": 998.0, "diagnostics": {"consecutive_failures": 0, "last_attempt_ms": 22}})()
         v = cypherpunkctl.verdict_fields(p.Evidence(), probe, self.rt, supervising=True, now=1000.0)
         self.assertEqual((v["lifecycle"], v["protection"]), ("connected", "protected"))
+        self.assertEqual(v["path_check"], {"consecutive_failures": 0, "last_attempt_ms": 22})
 
     def test_a_stale_or_missing_file_or_no_probe_is_blocked(self):
         import cypherpunkctl
@@ -175,7 +176,7 @@ class StatusFields(unittest.TestCase):
                 if cloak is not None:
                     self.write("cloak", cloak, cage)
                 self.write("carrier", carrier, kage)
-                probe = type("P", (), {"ok_at": probe_at})()
+                probe = type("P", (), {"ok_at": probe_at, "diagnostics": None})()
                 v = cypherpunkctl.verdict_fields(p.Evidence(), probe, self.rt, supervising=True, now=1000.0)
                 self.assertEqual(v["protection"], "blocked")
 

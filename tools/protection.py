@@ -59,6 +59,7 @@ class PathProbe(threading.Thread):
             clock,
         )
         self.ok_at = None
+        self.diagnostics = None
         self.stop = threading.Event()
 
     def once(self, sock):
@@ -89,7 +90,14 @@ class PathProbe(threading.Thread):
             while not self.stop.is_set():
                 # After a lost probe, try again soon: one lost packet during a busy page
                 # load should not age the evidence towards a false "reconnecting".
-                self.stop.wait(self.every if self.once(sock) else PROBE_RETRY)
+                began = time.monotonic()
+                success = self.once(sock)
+                failures = self.diagnostics["consecutive_failures"] if self.diagnostics else 0
+                self.diagnostics = dict(
+                    consecutive_failures=0 if success else failures + 1,
+                    last_attempt_ms=round((time.monotonic() - began) * 1000),
+                )
+                self.stop.wait(self.every if success else PROBE_RETRY)
 
 
 class Evidence:

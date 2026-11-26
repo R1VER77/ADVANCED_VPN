@@ -127,7 +127,7 @@ class InteractiveView(unittest.TestCase):
             "  ✓ trusted nft  /usr/sbin/nft",
         ]:
             self.assertIn(expected, s, text)
-        self.assertEqual(s[29], " c connect · u unlock · l locations · p settings · e setup · d stop · ? help · q quit")
+        self.assertEqual(s[29], " / commands · k kill switch · c connect · p settings · e setup · d stop · q quit")
         self.assertIn("\x1b[?1049h", out, "alternate screen entered")
         self.assertIn("\x1b[?1049l", out, "alternate screen left on quit")
         self.assertIn("38;2;203;166;247", out, "Mocha Mauve title")
@@ -151,7 +151,15 @@ class InteractiveView(unittest.TestCase):
     def test_help_key_lists_every_key(self):
         s = screen(self.drive(["?", "q"])[0])
         self.assertIn("• Keys  every action is also a command", s)
-        self.assertIn("  └ c          connect", s)
+        self.assertIn("  └ /          commands", s)
+        self.assertIn("    k          kill switch", s)
+        self.assertIn("    c          connect", s)
+
+    def test_slash_command_completes_and_opens_recovery(self):
+        out, code = self.drive(["/kill", "\t", "\r", "\n", "q"])
+        self.assertEqual(code, 0)
+        self.assertIn("killswitch-disarm", out)
+        self.assertIn("Open sudo cypherpunk and press k to recover internet access", out)
 
     def test_working_indicator_is_static_with_reduced_motion(self):
         out, _ = self.drive(["h", "q"])

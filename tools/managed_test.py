@@ -15,7 +15,6 @@ import sys
 import time
 
 from managed_profile import lab_setup, HardwareOperator
-import shutil
 from provision import authority, leaf, put
 from cryptography.hazmat.primitives import serialization
 
@@ -243,9 +242,6 @@ def main():
     for b in bundles:
         members = zipfile.ZipFile(ops / b).namelist()
         assert not any(m.endswith(("-key.der", "-key.bin")) for m in members), ("private key in bundle", b, members)
-    # The whole-device run reuses this device's enrolled identity (same machine).
-    if not a.hardware_vault:
-        shutil.copytree(state / "client", state / "whole")
     run("mount", "--make-rprivate", "/")
     xdg = os.environ.get("XDG_RUNTIME_DIR")
     if a.hardware_vault and xdg:
@@ -818,8 +814,10 @@ def main():
         assert refused.returncode != 0, "connected without its upstream"
         assert seen()["direct"] == 0
         ctl("preferences", "--no-upstream")
-        # Separate enrollment for a true whole-device firewall test in this disposable netns.
-        whole = manager("client", "whole", True)
+        # Switch the same enrollment from Applications to Whole device.
+        before_dns = isolated.read_bytes()
+        assert not json.loads((state / "client" / "network-before.json").read_text())["whole_device"]
+        whole = manager("client", "client", True)
         end = time.monotonic() + 25
         while time.monotonic() < end:
             r = run("ip", "netns", "exec", "av-client", "ping", "-n", "-c", "1", "-W", "1", "10.77.0.1", check=False)
@@ -850,11 +848,13 @@ def main():
             sys.executable,
             str(ROOT / "tools/cypherpunkctl.py"),
             "--state",
-            str(state / "whole"),
+            str(state / "client"),
             "--lab",
             "reset",
             "--allow-cleartext",
         )
+        assert isolated.read_bytes() == before_dns, "whole-device disarm did not restore ordinary DNS"
+        assert not (state / "client" / "network-before.json").exists()
         run("ip", "netns", "exec", "av-client", "ping", "-n", "-c", "1", "-W", "1", "203.0.113.2")
         # Positive control: with the protection explicitly off, the STUN server does see
         # the client's own address, so the checks above could have failed.
@@ -942,7 +942,7 @@ def main():
         print(json.dumps(result), flush=True)
     finally:
         # Reap supervised descendants before removing their namespaces.
-        for role in ["client", "relay", "exit", "whole"]:
+        for role in ["client", "relay", "exit"]:
             path = runtime_dir(state / role) / "status.json"
             if path.exists():
                 for child in json.loads(path.read_text()).get("children", {}).values():

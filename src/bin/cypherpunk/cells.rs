@@ -256,6 +256,9 @@ pub fn connection_guidance(st: &Value) -> Option<&'static str> {
         Some("not running") => {
             return Some("VPN stopped. Press c to connect or e to set up a chain.");
         }
+        Some("unlocked") => {
+            return Some("Kill switch disarmed. Ordinary internet access is allowed.");
+        }
         Some("capped") => {
             return Some("The traffic limit is keeping the VPN blocked. Press s for details.");
         }
@@ -269,7 +272,7 @@ pub fn connection_guidance(st: &Value) -> Option<&'static str> {
             Some("Waiting for the WireGuard handshake through the chain.")
         }
         Some("connecting" | "reconnecting") if st["stale"].get("probe").is_some() => {
-            Some("Waiting for the end-to-end check through the exit.")
+            Some("Exit DNS check pending. Press s for attempts or k for internet recovery.")
         }
         Some("connecting" | "reconnecting") => {
             Some("Checking the tunnel. Protected traffic is held.")
@@ -284,7 +287,7 @@ pub fn connection_guidance(st: &Value) -> Option<&'static str> {
             _ => "Protected. Press s to check the scope and connection.",
         }),
         _ if st["state"].as_str() == Some("blocked") => {
-            Some("VPN traffic is held by the kill switch. Press s for details or e for setup.")
+            Some("Kill switch holding traffic. Press k for internet recovery or s for status.")
         }
         _ => None,
     }
@@ -294,6 +297,16 @@ pub fn status_rows(st: &Value) -> Vec<Row> {
     let mut rows = Vec::new();
     if let Some(guidance) = connection_guidance(st) {
         rows.push(Row::detail(guidance));
+    }
+    if let Some(misses) = st["path_check"]["consecutive_failures"].as_u64()
+        && let Some(ms) = st["path_check"]["last_attempt_ms"].as_u64()
+    {
+        let detail = if misses == 0 {
+            format!("answered in {ms} ms")
+        } else {
+            format!("{misses} unanswered in a row · last attempt {ms} ms")
+        };
+        rows.push(Row::pair("exit DNS check", detail));
     }
     match s(st, "scope").as_deref() {
         Some("applications") => rows.push(Row::pair(

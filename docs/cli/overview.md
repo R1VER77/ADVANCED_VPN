@@ -50,6 +50,9 @@ Maintenance:
 - `guard`: re-apply the boot-time kill switch
 - `reset --allow-cleartext`: remove the kill switch
 
+Use `/killswitch-disarm` or press `k` in the interactive view for guided
+internet recovery. The shell alias is `killswitch-disarm --allow-cleartext`.
+
 ## Help topics
 
 `cypherpunk help COMMAND` shows a command's page. These concept topics are also available:
