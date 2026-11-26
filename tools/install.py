@@ -40,17 +40,20 @@ from sysexec import trusted_exe  # noqa: E402  (standard library only)
 def install_step(message):
     """Name the active phase and keep reporting elapsed time during long I/O."""
 
-    def report(detail):
-        print(f"cypherpunk-vpn: {detail}", flush=True)
+    def report(mark, detail, color):
+        colored = sys.stdout.isatty() and os.environ.get("TERM") != "dumb" and "NO_COLOR" not in os.environ
+        if colored:
+            mark = f"\x1b[38;2;{color}m{mark}\x1b[0m"
+        print(f"  {mark}  {detail}", flush=True)
 
     started = time.monotonic()
     done = threading.Event()
 
     def heartbeat():
         while not done.wait(10):
-            report(f"{message} ({int(time.monotonic() - started)}s elapsed)")
+            report("◌", f"{message} · {int(time.monotonic() - started)}s elapsed", "148;226;213")
 
-    report(message)
+    report("◌", message, "148;226;213")
     worker = threading.Thread(target=heartbeat, daemon=True)
     worker.start()
     try:
@@ -58,6 +61,7 @@ def install_step(message):
     finally:
         done.set()
         worker.join()
+    report("✓", message, "166;227;161")
 
 
 # What a built checkout must provide; the VM harness and `cypherpunk cloud host setup` pack
@@ -1029,73 +1033,73 @@ def apply_system(a, package, units, apparmor, stable):
         raise RuntimeError("existing /opt/cypherpunk-vpn is not a root-owned installation; not replacing it")
     import pwd
 
-    print("cypherpunk-vpn: Preparing service accounts and the boot guard", flush=True)
-    # The data plane's user, and the I2P front's router's own user (cypherpunk help front).
-    for name in ["cypherpunk-vpn", "cypherpunk-vpn-i2p"]:
-        try:
-            pwd.getpwnam(name)
-        except KeyError:
-            subprocess.run(
-                [trusted_exe("useradd"), "--system", "--no-create-home", "--shell", "/usr/sbin/nologin", name],
-                check=True,
+    with install_step("Preparing service accounts and the boot guard"):
+        # The data plane's user, and the I2P front's router's own user (cypherpunk help front).
+        for name in ["cypherpunk-vpn", "cypherpunk-vpn-i2p"]:
+            try:
+                pwd.getpwnam(name)
+            except KeyError:
+                subprocess.run(
+                    [trusted_exe("useradd"), "--system", "--no-create-home", "--shell", "/usr/sbin/nologin", name],
+                    check=True,
+                )
+        install_stable_file(stable / "cypherpunk-vpn-bootguard", Path("/usr/libexec/cypherpunk-vpn-bootguard"))
+        history = json.loads((ROOT / "deploy/installation-history.json").read_text())
+        if history.get("schema") != 1:
+            raise ValueError("unrecognized installation ownership history")
+        pins = history["owned_unit_sha256"]
+        # Make boot protection independent before changing any application path.
+        # Known signed-version hashes permit exact adoption, never foreign units.
+        guard_unit = Path("/etc/systemd/system/cypherpunk-vpn-guard.service")
+        install_stable_file(units / guard_unit.name, guard_unit, mode=0o644, known_hashes=pins.get(guard_unit.name, ()))
+        subprocess.run([trusted_exe("systemctl"), "daemon-reload"], check=True, timeout=15)
+        import guard_policy
+
+        preferences = guard_policy.STATE / "preferences.json"
+        if (
+            guard_policy.MARKER.exists()
+            or guard_policy.MARKER.is_symlink()
+            or (
+                (preferences.exists() or preferences.is_symlink())
+                and guard_policy.lockdown_enabled(json.loads(guard_policy.read_private(preferences)))
             )
-    install_stable_file(stable / "cypherpunk-vpn-bootguard", Path("/usr/libexec/cypherpunk-vpn-bootguard"))
-    history = json.loads((ROOT / "deploy/installation-history.json").read_text())
-    if history.get("schema") != 1:
-        raise ValueError("unrecognized installation ownership history")
-    pins = history["owned_unit_sha256"]
-    # Make boot protection independent before changing any application path.
-    # Known signed-version hashes permit exact adoption, never foreign units.
-    guard_unit = Path("/etc/systemd/system/cypherpunk-vpn-guard.service")
-    install_stable_file(units / guard_unit.name, guard_unit, mode=0o644, known_hashes=pins.get(guard_unit.name, ()))
-    subprocess.run([trusted_exe("systemctl"), "daemon-reload"], check=True, timeout=15)
-    import guard_policy
-
-    preferences = guard_policy.STATE / "preferences.json"
-    if (
-        guard_policy.MARKER.exists()
-        or guard_policy.MARKER.is_symlink()
-        or (
-            (preferences.exists() or preferences.is_symlink())
-            and json.loads(guard_policy.read_private(preferences)).get("mode") == "whole-device"
-        )
-    ):
-        guard_policy.arm()
+        ):
+            guard_policy.arm()
     upgraded = install_system(package, target, adopt_legacy=a.adopt_legacy)
-    print("cypherpunk-vpn: Registering service files and command launchers", flush=True)
-    Path("/etc/cypherpunk-vpn").mkdir(mode=0o700, exist_ok=True)
-    for source in units.glob("*.service"):
-        install_stable_file(
-            source, Path("/etc/systemd/system") / source.name, mode=0o644, known_hashes=pins.get(source.name, ())
-        )
-    for relative in (
-        "etc/dbus-1/system.d/org.cypherpunk_vpn.Controller1.conf",
-        "usr/share/dbus-1/system-services/org.cypherpunk_vpn.Controller1.service",
-        "usr/share/polkit-1/actions/org.cypherpunk_vpn.policy",
-    ):
-        install_stable_file(a.out / relative, Path("/") / relative, mode=0o644)
-    subprocess.run([trusted_exe("systemctl"), "daemon-reload"], check=True)
-    # The I2P front's router runs from the service's RAM directory: let the packaged
-    # i2pd AppArmor profile read it (its `local/` include is meant for exactly this).
-    if Path("/etc/apparmor.d").is_dir():
-        local = Path("/etc/apparmor.d/local")
-        local.mkdir(mode=0o755, exist_ok=True)
-        install_apparmor_fragment(apparmor / "usr.bin.i2pd", local / "usr.bin.i2pd")
-        profile = Path("/etc/apparmor.d/usr.bin.i2pd")
-        if profile.exists():
-            subprocess.run([trusted_exe("apparmor_parser"), "-r", str(profile)], check=False)
-    linked = link_commands(target, Path("/usr/bin") if a.package_managed else Path("/usr/local/bin"))
-    if a.package_managed:
-        from keyguard import atomic, read_private
-        from release_slots import checked_directory
+    with install_step("Registering service files and command launchers"):
+        Path("/etc/cypherpunk-vpn").mkdir(mode=0o700, exist_ok=True)
+        for source in units.glob("*.service"):
+            install_stable_file(
+                source, Path("/etc/systemd/system") / source.name, mode=0o644, known_hashes=pins.get(source.name, ())
+            )
+        for relative in (
+            "etc/dbus-1/system.d/org.cypherpunk_vpn.Controller1.conf",
+            "usr/share/dbus-1/system-services/org.cypherpunk_vpn.Controller1.service",
+            "usr/share/polkit-1/actions/org.cypherpunk_vpn.policy",
+        ):
+            install_stable_file(a.out / relative, Path("/") / relative, mode=0o644)
+        subprocess.run([trusted_exe("systemctl"), "daemon-reload"], check=True)
+        # The I2P front's router runs from the service's RAM directory: let the packaged
+        # i2pd AppArmor profile read it (its `local/` include is meant for exactly this).
+        if Path("/etc/apparmor.d").is_dir():
+            local = Path("/etc/apparmor.d/local")
+            local.mkdir(mode=0o755, exist_ok=True)
+            install_apparmor_fragment(apparmor / "usr.bin.i2pd", local / "usr.bin.i2pd")
+            profile = Path("/etc/apparmor.d/usr.bin.i2pd")
+            if profile.exists():
+                subprocess.run([trusted_exe("apparmor_parser"), "-r", str(profile)], check=False)
+        linked = link_commands(target, Path("/usr/bin") if a.package_managed else Path("/usr/local/bin"))
+        if a.package_managed:
+            from keyguard import atomic, read_private
+            from release_slots import checked_directory
 
-        PACKAGE_OWNER.parent.mkdir(mode=0o700, exist_ok=True)
-        checked_directory(PACKAGE_OWNER.parent)
-        if PACKAGE_OWNER.exists() or PACKAGE_OWNER.is_symlink():
-            if read_private(PACKAGE_OWNER) != PACKAGE_OWNER_BYTES:
-                raise ValueError("foreign package ownership marker")
-        else:
-            atomic(PACKAGE_OWNER, PACKAGE_OWNER_BYTES)
+            PACKAGE_OWNER.parent.mkdir(mode=0o700, exist_ok=True)
+            checked_directory(PACKAGE_OWNER.parent)
+            if PACKAGE_OWNER.exists() or PACKAGE_OWNER.is_symlink():
+                if read_private(PACKAGE_OWNER) != PACKAGE_OWNER_BYTES:
+                    raise ValueError("foreign package ownership marker")
+            else:
+                atomic(PACKAGE_OWNER, PACKAGE_OWNER_BYTES)
     print(
         ("Upgraded" if upgraded else "Installed")
         + " /opt/cypherpunk-vpn without activation"

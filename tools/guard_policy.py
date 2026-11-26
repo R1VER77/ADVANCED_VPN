@@ -27,6 +27,14 @@ STATE = Path("/etc/cypherpunk-vpn/enrolled")
 UNITS = Path("/etc/systemd/system")
 
 
+def lockdown_enabled(preferences):
+    """Keep existing whole-device boot protection until the user changes it."""
+    return (
+        os.path.lexists(MARKER)
+        or preferences.get("lockdown", preferences.get("mode", "applications") != "applications") is not False
+    )
+
+
 def protected_directory(path):
     """Private policy or system-unit directories must be real and root-owned."""
     meta = path.lstat()
@@ -82,7 +90,7 @@ def arm(apply=False, state=STATE):
 
 
 def disarm(state=STATE):
-    """Called only by the controller's explicit reset --allow-cleartext path."""
+    """Remove persistent boot protection. Runtime filtering is managed separately."""
     if os.geteuid() != 0:
         raise PermissionError("persistent guard requires root")
     if Path(state).resolve() != STATE:

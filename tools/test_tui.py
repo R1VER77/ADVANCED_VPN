@@ -34,7 +34,7 @@ def screen(stream, rows=30, cols=100):
     grid = [[" "] * cols for _ in range(rows)]
     y = x = 0
     last = None
-    for m in re.finditer(r"\x1b\[([?0-9;]*)([A-Za-z])|([^\x1b])", stream):
+    for m in re.finditer(r"\x1b\[([?0-9;]*)[ -/]*([A-Za-z])|([^\x1b])", stream):
         params, final, ch = m.groups()
         if ch is not None:
             if ch == "\r":
@@ -127,7 +127,9 @@ class InteractiveView(unittest.TestCase):
             "  ✓ trusted nft  /usr/sbin/nft",
         ]:
             self.assertIn(expected, s, text)
-        self.assertEqual(s[29], " / commands · k kill switch · c connect · p settings · e setup · d stop · q quit")
+        self.assertEqual(
+            s[29], " / commands · k kill switch · m scope · c connect · p settings · e setup · d stop · q quit"
+        )
         self.assertIn("\x1b[?1049h", out, "alternate screen entered")
         self.assertIn("\x1b[?1049l", out, "alternate screen left on quit")
         self.assertIn("38;2;203;166;247", out, "Mocha Mauve title")
@@ -155,11 +157,13 @@ class InteractiveView(unittest.TestCase):
         self.assertIn("    k          kill switch", s)
         self.assertIn("    c          connect", s)
 
-    def test_slash_command_completes_and_opens_recovery(self):
-        out, code = self.drive(["/kill", "\t", "\r", "\n", "q"])
+    def test_enter_opens_the_highlighted_slash_command(self):
+        out, code = self.drive(["/kill", "\r", "\n", "q"])
         self.assertEqual(code, 0)
         self.assertIn("killswitch-disarm", out)
-        self.assertIn("Open sudo cypherpunk and press k to recover internet access", out)
+        self.assertIn("Open sudo cypherpunk and choose /killswitch-disarm to recover internet access", out)
+        self.assertIn("\x1b[5 q", out, "the terminal requests a blinking bar cursor")
+        self.assertIn("\x1b[?25h", out, "the cursor is visible when the input is active")
 
     def test_working_indicator_is_static_with_reduced_motion(self):
         out, _ = self.drive(["h", "q"])

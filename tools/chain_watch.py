@@ -56,7 +56,7 @@ class ChainWatch:
         if not self.announced:
             self.notify(
                 "VPN chain not answering",
-                detail[0].upper() + detail[1:] + ".\nFor ordinary internet access, open sudo cypherpunk and press k.",
+                detail[0].upper() + detail[1:] + ".\nFor recovery, open sudo cypherpunk and use /killswitch-disarm.",
             )
             self.announced = True
         return dict(detail=detail, next=NEXT)

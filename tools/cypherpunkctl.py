@@ -1326,7 +1326,8 @@ def _supervise(state, bin_dir, lab, whole, rt):
     if whole and not lab:
         import guard_policy
 
-        guard_policy.arm(apply=True, state=state)
+        if guard_policy.lockdown_enabled(early):
+            guard_policy.arm(apply=True, state=state)
     ensure_network(
         profile,
         state,
@@ -1803,7 +1804,7 @@ def run_app(state, argv, uid, gid, lab=False):
     os.execvp(argv[0], argv)
 
 
-def reset(state, lab=False):
+def reset(state, lab=False, clear_lockdown=True):
     """Remove the kill switch and restore the saved routes; refuses while the supervisor or protected apps run."""
     root_guard(lab)
     if not lab:
@@ -1819,7 +1820,7 @@ def reset(state, lab=False):
         value = json.loads(read_private(info))
         if identity_of(value["pid"]) == value["identity"]:
             raise RuntimeError("disconnect the live controller before explicitly unlocking")
-    if (rt / "namespace-owned.json").exists():
+    if clear_lockdown and (rt / "namespace-owned.json").exists():
         if cmd("ip", "netns", "pids", APP, check=False).stdout.strip():
             raise RuntimeError("protected applications still running; refusing to dismantle their guard")
         cmd("ip", "netns", "del", APP, check=False)
@@ -1855,10 +1856,11 @@ def reset(state, lab=False):
 
         if Path(state).resolve() != guard_policy.STATE:
             raise ValueError("a different state cannot disarm the installed device's guard")
-        preferences = read_json_private(state / "preferences.json", {})
-        preferences["mode"] = "applications"
-        save(state / "preferences.json", preferences)
-        guard_policy.disarm(state)
+        if clear_lockdown:
+            guard_policy.disarm(state)
+            preferences = read_json_private(state / "preferences.json", {})
+            preferences["lockdown"] = False
+            save(state / "preferences.json", preferences)
     for name in [WG, TUN]:
         if link_exists(name):
             row = json.loads(cmd("ip", "-j", "link", "show", "dev", name).stdout)[0]
@@ -2130,10 +2132,12 @@ def device_info(state):
             mode=preferences.get("mode", "applications"),
             upstream_interface=preferences.get("upstream_interface"),
             upstream_gateway=preferences.get("upstream_gateway"),
+            protected_apps=preferences.get("protected_apps", []),
             daily_limit_bytes=daily_limit(preferences, profile) if profile["role"] == "client" else None,
         )
         if profile["role"] == "client" and state.resolve() == guard_policy.STATE:
             info["whole_device_guard"] = guard_policy.MARKER.exists() or guard_policy.MARKER.is_symlink()
+            info["lockdown"] = guard_policy.lockdown_enabled(preferences)
     info["status"] = status_for_display(state)
     return info
 
@@ -2505,7 +2509,8 @@ def build_parser():
     c = s.add_parser("connect", help="run the supervisor in the foreground (used by cypherpunk-vpn.service)")
     c.add_argument("--whole-device", action="store_true", help="route the whole device for this run")
     c.add_argument("--app-only", action="store_true", help="protect only `run` applications for this run")
-    s.add_parser("disconnect", help="stop the supervisor; the kill switch stays in place")
+    disconnect = s.add_parser("disconnect", help="stop the supervisor and apply the Lockdown setting")
+    disconnect.add_argument("--keep-guard", action="store_true", help="retain runtime protection for a planned restart")
     s.add_parser("status", help="runtime status written by the supervisor")
     s.add_parser("info", help="non-secret summary: role, chain, protection, preferences, status")
     s.add_parser("hops", help="the enrolled chain, hop by hop")
@@ -2530,6 +2535,13 @@ def build_parser():
     s.add_parser("guard", help="(re)apply the boot-time kill switch (used by cypherpunk-vpn-guard.service)")
     pref = s.add_parser("preferences", help="change saved connection preferences")
     pref.add_argument("--mode", choices=["applications", "whole-device"], help="what the tunnel protects by default")
+    pref.add_argument("--lockdown", choices=["on", "off"], help="block ordinary traffic while the VPN is disconnected")
+    pref.add_argument(
+        "--keep-guard", action="store_true", help="retain runtime protection when turning Lockdown off for a restart"
+    )
+    apps = pref.add_mutually_exclusive_group()
+    apps.add_argument("--protect-app", metavar="EXECUTABLE", help="save an application for protected launch")
+    apps.add_argument("--forget-app", metavar="EXECUTABLE", help="remove an application from protected launch")
     cap = pref.add_mutually_exclusive_group()
     cap.add_argument("--daily-limit-mib", type=int, help="fail-closed daily cap, 1..10240 MiB (client only)")
     cap.add_argument("--no-daily-limit", action="store_true", help="remove the daily cap (default)")
@@ -2659,7 +2671,9 @@ def main():
 
     scope = contextlib.nullcontext() if a.action in ("connect", "run") else one_pin()
     with scope:
-        if a.action in ("request", "enroll", "preferences", "reset", "chains") or (a.action == "setup" and a.apply):
+        if a.action in ("request", "enroll", "preferences", "disconnect", "reset", "chains") or (
+            a.action == "setup" and a.apply
+        ):
             from controller_mutation import locked
 
             with locked(a.state):
@@ -2911,7 +2925,24 @@ def dispatch(a):
         # Live regression (bug 8): `disconnect` reported success whenever the service
         # was inactive, but never stopped a supervisor running in the foreground
         # (`connect --foreground`). Stop whatever is actually running, and confirm.
-        stopped = stop_supervisor(a.state)
+        state = a.state.resolve()
+        stopped = stop_supervisor(state)
+        if not a.lab and not a.keep_guard:
+            import guard_policy
+
+            if state == guard_policy.STATE and (state / "profile.json").exists():
+                with supervisor_locks(state):
+                    preferences = read_json_private(state / "preferences.json", {})
+                    if load_profile(state)["role"] == "client" and not guard_policy.lockdown_enabled(preferences):
+                        before = read_json_private(state / "network-before.json", {})
+                        if (
+                            preferences.get("mode") == "whole-device"
+                            or before.get("whole_device")
+                            or (state / "resolv.before").exists()
+                        ):
+                            reset(state, clear_lockdown=False)
+                        emit(a, "VPN disconnected. Ordinary internet access is allowed.", stopped=stopped)
+                        return
         emit(
             a,
             "Supervisor stopped; the kill switch stays in place."
@@ -2926,12 +2957,67 @@ def dispatch(a):
     elif a.action == "preferences":
         root_guard(a.lab)
         old = json.loads(read_private(a.state / "preferences.json")) if (a.state / "preferences.json").exists() else {}
+        if a.keep_guard and a.lockdown != "off":
+            raise ValueError("--keep-guard requires --lockdown off")
+        if a.lockdown is not None:
+            import guard_policy
+
+            state = a.state.resolve()
+            if load_profile(state)["role"] != "client":
+                raise ValueError("Lockdown is available for clients only")
+            if (
+                a.mode
+                or a.daily_limit_mib is not None
+                or a.no_daily_limit
+                or a.upstream_interface
+                or a.upstream_gateway
+                or a.no_upstream
+                or a.protect_app is not None
+                or a.forget_app is not None
+            ):
+                raise ValueError("Change Lockdown separately from other preferences")
+            with supervisor_locks(state):
+                if a.lockdown == "on":
+                    if not a.lab:
+                        guard_policy.arm(apply=True, state=state)
+                    old.update(mode="whole-device", lockdown=True)
+                else:
+                    if not a.lab:
+                        if a.keep_guard:
+                            guard_policy.disarm(state)
+                        else:
+                            reset(state)
+                    old["lockdown"] = False
+                save(state / "preferences.json", old)
+            emit(a, "Lockdown enabled." if a.lockdown == "on" else "Lockdown disabled.", preferences=old)
+            return
         if a.mode:
-            if a.mode == "whole-device" and not a.lab:
+            if not a.lab:
                 import guard_policy
 
-                guard_policy.arm(state=a.state)
+                old.setdefault("lockdown", guard_policy.lockdown_enabled(old))
+                if a.mode == "applications" and old["lockdown"]:
+                    raise ValueError("Turn off Lockdown before selecting application-only protection")
             old["mode"] = a.mode
+        if a.protect_app is not None or a.forget_app is not None:
+            if load_profile(a.state)["role"] != "client":
+                raise ValueError("Protected applications are available for clients only")
+            saved_apps = old.get("protected_apps", [])
+            executable = a.protect_app if a.protect_app is not None else a.forget_app
+            if (
+                not executable
+                or len(executable) > 4096
+                or not executable.isprintable()
+                or not (Path(executable).is_absolute() or re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.+-]*", executable))
+            ):
+                raise ValueError("Enter an executable name or an absolute path")
+            if a.protect_app is not None and executable not in saved_apps:
+                if len(saved_apps) >= 32:
+                    raise ValueError("Save at most 32 protected applications")
+                saved_apps.append(executable)
+            elif a.forget_app is not None and executable in saved_apps:
+                saved_apps.remove(executable)
+            old["protected_apps"] = saved_apps
         # A "defense" key left by an older release is ignored: every chain runs the stream.
         old.pop("defense", None)
         if a.daily_limit_mib is not None:
@@ -2957,7 +3043,9 @@ def dispatch(a):
         root_guard(a.lab)
         profile = load_profile(a.state)
         pref = json.loads(read_private(a.state / "preferences.json")) if (a.state / "preferences.json").exists() else {}
-        if profile["role"] == "client" and pref.get("mode") == "whole-device":
+        import guard_policy
+
+        if profile["role"] == "client" and guard_policy.lockdown_enabled(pref):
             try:
                 uid, _ = service_identity(a.lab)
             except KeyError:

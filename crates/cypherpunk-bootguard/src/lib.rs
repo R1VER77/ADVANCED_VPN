@@ -25,10 +25,14 @@ pub fn required(
     match preferences {
         Ok(None) => false,
         Ok(Some(bytes)) => match serde_json::from_slice::<serde_json::Value>(bytes) {
-            Ok(serde_json::Value::Object(value)) => match value.get("mode") {
-                None => false,
-                Some(serde_json::Value::String(mode)) if mode == "applications" => false,
-                _ => true,
+            Ok(serde_json::Value::Object(value)) => match value.get("lockdown") {
+                Some(serde_json::Value::Bool(enabled)) => *enabled,
+                Some(_) => true,
+                None => match value.get("mode") {
+                    None => false,
+                    Some(serde_json::Value::String(mode)) if mode == "applications" => false,
+                    _ => true,
+                },
             },
             _ => true,
         },
@@ -71,6 +75,15 @@ mod tests {
         assert!(!required(false, Ok(None)));
         assert!(!required(false, Ok(Some(b"{}"))));
         assert!(!required(false, Ok(Some(b"{\"mode\":\"applications\"}"))));
+    }
+
+    #[test]
+    fn explicit_lockdown_overrides_the_legacy_mode_but_cannot_override_the_marker() {
+        let off = b"{\"mode\":\"whole-device\",\"lockdown\":false}";
+        assert!(!required(false, Ok(Some(off))));
+        assert!(required(true, Ok(Some(off))));
+        assert!(required(false, Ok(Some(b"{\"lockdown\":true}"))));
+        assert!(required(false, Ok(Some(b"{\"lockdown\":\"off\"}"))));
     }
 
     #[test]

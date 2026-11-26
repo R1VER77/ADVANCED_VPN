@@ -17,7 +17,7 @@ const available = ref(false)
 const now = ref(Date.now() / 1000)
 const working = ref(false)
 const dialog = ref<HTMLElement | null>(null)
-const scope = ref<'applications' | 'whole-device'>('applications')
+const scope = ref<'applications' | 'whole-device'>('whole-device')
 let polling = false
 let timer = 0
 let opener: HTMLElement | null = null
@@ -121,7 +121,9 @@ onUnmounted(() => window.clearInterval(timer))
             <button class="btn" :disabled="working || activeOperation" @click="preview(protectedNow ? { action: 'disconnect' } : { action: 'connect', scope })">{{ protectedNow ? 'Disconnect' : 'Connect' }}</button>
             <button v-if="status.state === 'locked'" class="btn secondary" :disabled="working || activeOperation" @click="preview({ action: 'unlock' })">Open trusted unlock prompt</button>
           </div>
-          <label v-if="fresh && status?.enrolled && !protectedNow" class="mode">Connect scope<select v-model="scope"><option value="applications">VPN applications only</option><option value="whole-device">Whole device</option></select></label>
+          <label v-if="fresh && status?.enrolled && !protectedNow" class="mode">Connect scope
+            <select v-model="scope"><option value="whole-device">Whole device</option><option value="applications">Applications</option></select>
+          </label>
           <p class="hint">Unlocking uses your device or a trusted system dialog.</p>
         </div>
 

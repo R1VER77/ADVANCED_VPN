@@ -27,13 +27,17 @@ if [ "$install_mode" = 1 ] && [ "$removal" = 0 ]; then
         printf '%s\n' 'The static preflight is missing; obtain the complete verified release.' >&2
         exit 1
     fi
-    printf '%s\n' 'cypherpunk-vpn: Checking host compatibility before installation.'
+    printf '%s\n' '  ◌  Checking package and system requirements'
     if [ "$operator_only" = 1 ]; then
         "$preflight" --package "$package_dir" --target "${XDG_DATA_HOME:-$HOME/.local/share}/cypherpunk-vpn" --operator-only
     elif [ "$package_managed" = 1 ]; then
         # Inside apt: one line when the checks pass, the full report only when they do not.
         if report=$("$preflight" --package "$package_dir" --target /opt --protect "$protection"); then
-            printf '%s\n' 'cypherpunk-vpn: host checks passed.'
+            if [ -t 1 ] && [ "${TERM:-dumb}" != dumb ] && [ -z "${NO_COLOR+x}" ]; then
+                printf '\033[38;2;166;227;161m✓\033[0m  %s\n' 'Package and system requirements passed'
+            else
+                printf '%s\n' '  ✓  Package and system requirements passed'
+            fi
         else
             printf '%s\n' "$report" >&2
             exit 1

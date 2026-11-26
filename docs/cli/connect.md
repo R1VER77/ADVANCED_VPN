@@ -13,7 +13,7 @@ Start the VPN service (`cypherpunk-vpn.service`) and show its status.
 - `--whole-device`: with `--foreground`, route the whole device for this run.
 - `--app-only`: with `--foreground`, protect only `cypherpunk run` programs for this run.
 
-Without `--foreground`, the mode comes from `cypherpunk preferences --mode`.
+Connect uses the saved traffic scope and enables the automatic kill switch for the session. Whole device is the default for new guided setups.
 
 ## What it changes
 

@@ -3,7 +3,7 @@
 use std::process::Command;
 
 use crate::cells::{Cell, Row, from_outcome};
-use crate::controller::{Controller, SERVICE, systemctl};
+use crate::controller::{Controller, SERVICE, is_root, systemctl};
 
 /// The result of one action: an exit status and the cells to show.
 pub struct Done {
@@ -109,12 +109,14 @@ pub fn perform(ctrl: &Controller, action: &str, args: &[String]) -> Done {
             // Say "not enrolled" plainly instead of letting systemd report a failed guard.
             if let Ok(o) = ctrl.call("info", &[])
                 && o.ok()
-                && o.value["info"]["enrolled"] == serde_json::Value::Bool(false)
             {
-                return failed(
-                    "connect failed: this device is not enrolled yet".into(),
-                    not_enrolled_steps(o.value["info"].get("role").is_some()),
-                );
+                let info = &o.value["info"];
+                if info["enrolled"].as_bool() == Some(false) {
+                    return failed(
+                        "connect failed: this device is not enrolled yet".into(),
+                        not_enrolled_steps(info.get("role").is_some()),
+                    );
+                }
             }
             if let Err(h) = service("start") {
                 return failed("connect failed".into(), h);
@@ -137,28 +139,26 @@ pub fn perform(ctrl: &Controller, action: &str, args: &[String]) -> Done {
             // live for this state (and reports "not running" as success).
             let via_service = service("stop");
             let fg = ctrl.call("disconnect", args);
-            let mut stopped = false;
             let mut rows: Vec<Row> = Vec::new();
             match &via_service {
                 Ok(()) => {
-                    stopped = true;
-                    rows.push(Row::detail(
-                        "Service stopped. The kill switch stays armed. Press k or use /killswitch-disarm to restore ordinary access.",
-                    ));
+                    rows.push(Row::detail("VPN service stopped."));
                 }
                 Err(h) => rows.extend(h.iter().cloned().map(Row::detail)),
             }
             match &fg {
                 Ok(o) if o.ok() => {
-                    stopped = true;
                     if let Some(m) = o.value.get("message").and_then(|m| m.as_str()) {
                         rows.push(Row::detail(m.to_string()));
                     }
                 }
-                // The controller refused (a user without root cannot run it, and
-                // polkit may already have stopped the service): fine when the
-                // service path worked, fatal when neither did.
-                _ if via_service.is_ok() => {}
+                // A non-root caller may stop the unit through polkit but the
+                // root controller still has to apply the disconnect policy.
+                _ if via_service.is_ok() && !is_root() => {
+                    return failed("VPN service stopped".into(), vec![
+                        "Run sudo cypherpunk disconnect to finish applying your Lockdown setting.".into(),
+                    ]);
+                }
                 Ok(o) => {
                     return Done {
                         code: o.code.max(1),
@@ -171,12 +171,6 @@ pub fn perform(ctrl: &Controller, action: &str, args: &[String]) -> Done {
                         vec![format!("{e:#}"), "cypherpunk doctor".into()],
                     );
                 }
-            }
-            if !stopped {
-                return failed(
-                    "disconnect failed".into(),
-                    vec!["neither the service nor a supervisor could be stopped".into()],
-                );
             }
             Done {
                 code: 0,

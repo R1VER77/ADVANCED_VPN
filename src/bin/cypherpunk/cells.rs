@@ -272,14 +272,14 @@ pub fn connection_guidance(st: &Value) -> Option<&'static str> {
             Some("Waiting for the WireGuard handshake through the chain.")
         }
         Some("connecting" | "reconnecting") if st["stale"].get("probe").is_some() => {
-            Some("Exit DNS check pending. Press s for attempts or k for internet recovery.")
+            Some("Exit DNS check pending. Press s for attempts or k for Lockdown.")
         }
         Some("connecting" | "reconnecting") => {
             Some("Checking the tunnel. Protected traffic is held.")
         }
         _ if st["protection"].as_str() == Some("protected") => Some(match st["scope"].as_str() {
             Some("applications") => {
-                "VPN ready for selected apps. Press p to launch an app or check its public IP."
+                "Applications mode. Use /applications to launch protected apps or m to change scope."
             }
             Some("whole-device") => {
                 "VPN ready for the whole device. Press s to see connection details."
@@ -287,7 +287,7 @@ pub fn connection_guidance(st: &Value) -> Option<&'static str> {
             _ => "Protected. Press s to check the scope and connection.",
         }),
         _ if st["state"].as_str() == Some("blocked") => {
-            Some("Kill switch holding traffic. Press k for internet recovery or s for status.")
+            Some("Kill switch holding traffic. Press k for Lockdown or s for status.")
         }
         _ => None,
     }

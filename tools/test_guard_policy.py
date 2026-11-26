@@ -5,6 +5,8 @@ provided separately by bootguard_vm.py, never by these unit tests.
 """
 
 import os
+import contextlib
+import json
 from pathlib import Path
 import subprocess
 import tempfile
@@ -12,6 +14,7 @@ import unittest
 from unittest import mock
 
 import guard_policy as policy
+import cypherpunkctl
 
 
 class PersistentGuard(unittest.TestCase):
@@ -92,3 +95,72 @@ class PersistentGuard(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "state"):
                 function(state=self.root / "other-state")
         self.assertFalse(self.marker.exists())
+
+    def test_disconnect_only_restores_ordinary_networking_with_lockdown_off(self):
+        self.state.mkdir(parents=True)
+        (self.state / "profile.json").touch()
+        prefs = self.state / "preferences.json"
+        for lockdown, keep_guard in ((True, False), (False, True), (False, False)):
+            with (
+                self.subTest(lockdown=lockdown, keep_guard=keep_guard),
+                mock.patch.object(cypherpunkctl, "stop_supervisor", return_value=True),
+                mock.patch.object(cypherpunkctl, "supervisor_locks", side_effect=lambda _: contextlib.nullcontext()),
+                mock.patch.object(cypherpunkctl, "load_profile", return_value={"role": "client"}),
+                mock.patch.object(cypherpunkctl, "reset") as reset,
+                mock.patch.object(cypherpunkctl, "emit"),
+            ):
+                prefs.write_text(json.dumps(dict(mode="whole-device", lockdown=lockdown)))
+                prefs.chmod(0o600)
+                argv = ["--state", str(self.state), "disconnect"]
+                if keep_guard:
+                    argv.append("--keep-guard")
+                with mock.patch.object(cypherpunkctl, "read_private", side_effect=lambda path: path.read_bytes()):
+                    cypherpunkctl.dispatch(cypherpunkctl.build_parser().parse_args(argv))
+                if lockdown or keep_guard:
+                    reset.assert_not_called()
+                else:
+                    reset.assert_called_once_with(self.state, clear_lockdown=False)
+
+    def test_lockdown_off_for_reconnect_preserves_runtime_guard(self):
+        self.state.mkdir(parents=True)
+        args = cypherpunkctl.build_parser().parse_args(
+            ["--state", str(self.state), "preferences", "--lockdown", "off", "--keep-guard"]
+        )
+        with (
+            mock.patch.object(cypherpunkctl, "load_profile", return_value={"role": "client"}),
+            mock.patch.object(cypherpunkctl, "supervisor_locks", side_effect=lambda _: contextlib.nullcontext()),
+            mock.patch.object(cypherpunkctl, "reset") as reset,
+            mock.patch.object(cypherpunkctl, "save") as save,
+            mock.patch.object(cypherpunkctl, "emit"),
+            mock.patch.object(policy, "disarm") as disarm,
+        ):
+            cypherpunkctl.dispatch(args)
+        disarm.assert_called_once_with(self.state)
+        reset.assert_not_called()
+        save.assert_called_once_with(self.state / "preferences.json", {"lockdown": False})
+
+    def test_saved_applications_are_literal_and_do_not_change_scope(self):
+        self.state.mkdir(parents=True)
+        prefs = self.state / "preferences.json"
+        prefs.write_text('{"mode":"applications","lockdown":false}')
+        prefs.chmod(0o600)
+        parser = cypherpunkctl.build_parser()
+        with (
+            mock.patch.object(cypherpunkctl, "load_profile", return_value={"role": "client"}),
+            mock.patch.object(cypherpunkctl, "emit"),
+            mock.patch.object(cypherpunkctl, "read_private", side_effect=lambda path: path.read_bytes()),
+        ):
+            for option, expected in [
+                ("--protect-app=/usr/bin/firefox", ["/usr/bin/firefox"]),
+                ("--protect-app=/usr/bin/firefox", ["/usr/bin/firefox"]),
+                ("--forget-app=/usr/bin/firefox", []),
+            ]:
+                cypherpunkctl.dispatch(parser.parse_args(["--state", str(self.state), "preferences", option]))
+                self.assertEqual(
+                    json.loads(prefs.read_text()),
+                    {
+                        "mode": "applications",
+                        "lockdown": False,
+                        "protected_apps": expected,
+                    },
+                )

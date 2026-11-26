@@ -10,38 +10,30 @@ Nitrokey unlock, open it with `sudo cypherpunk`.
 ## Keys
 
 - `c` connect, `u` answer a pending Nitrokey prompt, `d` disconnect
+- `Ctrl+Shift+Tab` or `m` switches traffic scope. Use `/scope` if your terminal intercepts the shortcut.
+- `/applications` saves and launches protected applications.
 - `e` set up this device or change its enrolled chain
 - `l` locations and saved signed chains, `p` VPN settings
 - `h` hops, `s` status, `i` info, `o` doctor
 - `?` help, `PgUp` / `PgDn` scroll, `q` or `Esc` quit
-- `/` search commands. Type a prefix, use Tab to complete, and press Enter to run.
-- `k` or `/killswitch-disarm` opens internet recovery. The confirmation stops the VPN
-  and permits ordinary internet access through your ISP. Close protected apps first.
+- `/` search commands. Type a prefix and press Enter to run the highlighted match. Use arrow keys to move the highlight and Tab to complete.
+- `k` or `/lockdown` reviews Lockdown. Changing it during a connection offers to
+  reconnect through the protected restart flow.
+- `/killswitch-disarm` restores ordinary internet access after confirmation.
 
-On an enrolled Nitrokey client, `c` from the privileged view starts the
-service and opens the terminal PIN prompt if the service requests one.
-The PIN is hidden. After unlocking, the live status names the next
-connection check. Traffic stays blocked until the tunnel has fresh
-protection evidence. In applications mode this applies to programs
-started through `cypherpunk run`. Disconnect keeps that guard in place.
-
-An already-open browser uses ordinary networking in Applications mode.
-To check the exit IP without opening another browser, press `p`, choose
-**Check the public IPv4 of a protected app**, and confirm the request to
-ipify. This runs curl inside the protected namespace. To route your
-existing browser through the VPN, choose **Whole device** under Traffic
-scope, then disconnect and reconnect so the new scope takes effect.
+Whole device is the default for new setups. In Applications mode, launch
+selected programs through `/applications`. Apps opened normally use the
+ordinary connection. In Whole device mode, all apps use the VPN. The automatic
+kill switch protects the selected scope throughout the session. When you
+deliberately disconnect,
+Lockdown controls whether ordinary internet access resumes or remains blocked.
+The Nitrokey PIN prompt hides input and returns to live connection status after unlock.
 
 In setup, you can create or export a public device request, install a
 signed bundle or replace your current bundle after disconnecting. Use the
 server planning option when you operate your own relay and exit. Return
 to setup once you have a signed bundle and a separately verified operator
 public key.
-
-On first client enrollment, guided setup offers Whole device (the default)
-and Applications. Review the scope in Settings even after setup. Switching
-from an armed whole-device guard to Applications requires disconnecting and
-explicitly allowing ordinary traffic outside the protected apps.
 
 The CLI inherits the terminal background and uses Catppuccin Mocha text accents.
 Use `--reduced-motion` for a static working indicator, and `--no-color` (or `NO_COLOR`)

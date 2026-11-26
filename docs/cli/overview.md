@@ -50,8 +50,8 @@ Maintenance:
 - `guard`: re-apply the boot-time kill switch
 - `reset --allow-cleartext`: remove the kill switch
 
-Use `/killswitch-disarm` or press `k` in the interactive view for guided
-internet recovery. The shell alias is `killswitch-disarm --allow-cleartext`.
+Use `/killswitch-disarm` in the interactive view for guided internet recovery,
+or press `k` to review Lockdown. The shell alias is `killswitch-disarm --allow-cleartext`.
 
 ## Help topics
 

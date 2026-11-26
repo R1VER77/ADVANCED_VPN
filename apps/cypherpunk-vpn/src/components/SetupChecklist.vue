@@ -29,7 +29,7 @@ const mode = ref<'own' | 'join'>('own')
 const order = ref<string[]>([])
 const hops = ref(2)
 const hours = ref(8)
-const scope = ref<'applications' | 'whole-device'>('applications')
+const scope = ref<'applications' | 'whole-device'>('whole-device')
 const build = ref<{ running: boolean; plan: string[]; step: number; note: string; installing: boolean; failed: boolean } | null>(null)
 // A route server whose cloud sign-in ran out: the build stops before the key is asked for anything.
 const signedOut = ref<{ server: string; profile: string } | null>(null)
@@ -338,8 +338,8 @@ onUnmounted(() => window.clearInterval(timer))
 
             <!-- Connect -->
             <div v-if="s.id === 'connect' && current === 'connect'" class="detail">
-              <label class="row">Protect
-                <select v-model="scope"><option value="applications">VPN applications only</option><option value="whole-device">Whole device</option></select>
+              <label class="row">Connect scope
+                <select v-model="scope"><option value="whole-device">Whole device</option><option value="applications">Applications</option></select>
               </label>
               <button class="btn small" :disabled="busy" @click="connect">Connect</button>
             </div>

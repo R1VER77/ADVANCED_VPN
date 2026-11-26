@@ -3,6 +3,7 @@
 use std::io::{self, Write};
 
 use anyhow::Result;
+use ratatui::text::{Line, Span};
 use serde_json::Value;
 
 use crate::cloud;
@@ -27,13 +28,13 @@ fn run(ctrl: &Controller, action: &str, args: &[String]) -> Result<bool> {
 
 pub fn disarm(ctrl: &Controller, theme: Theme) -> Result<()> {
     if !is_root() {
-        println!("Open sudo cypherpunk and press k to recover internet access.");
+        println!("Open sudo cypherpunk and choose /killswitch-disarm to recover internet access.");
         println!(
             "From a shell, run sudo cypherpunk disconnect, then sudo cypherpunk killswitch-disarm --allow-cleartext."
         );
         return Ok(());
     }
-    println!("Disarm the kill switch");
+    heading(theme, "Restore internet access");
     println!(
         "This stops the VPN and restores ordinary internet access. Apps can then send traffic through your ISP."
     );
@@ -44,7 +45,7 @@ pub fn disarm(ctrl: &Controller, theme: Theme) -> Result<()> {
         return Ok(());
     }
     println!("Stopping the VPN…");
-    let stopped = crate::actions::perform(ctrl, "disconnect", &[]);
+    let stopped = crate::actions::perform(ctrl, "disconnect", &["--keep-guard".into()]);
     print!(
         "{}",
         crate::theme::to_ansi(&crate::cells::render(&stopped.cells, theme), theme)
@@ -72,17 +73,22 @@ pub fn setup(ctrl: &Controller, theme: Theme, reduced_motion: bool) -> Result<()
     } else {
         "Install a signed enrollment bundle"
     };
-    println!("\nVPN setup\n");
+    heading(theme, "VPN setup");
     if enrolled == Some(true) {
         println!(
             "This device has a signed chain. You can keep it or install a replacement bundle."
         );
     }
-    println!("1  {request_label}");
-    println!("2  {enroll_label}");
-    println!("3  Plan servers for your own chain");
-    println!("4  Check this device and its next setup step");
-    println!("5  Understand blocked traffic and the kill switch");
+    row(theme, "1", request_label, "");
+    row(theme, "2", enroll_label, "");
+    row(theme, "3", "Plan servers for your own chain", "");
+    row(theme, "4", "Check this device and its next setup step", "");
+    row(
+        theme,
+        "5",
+        "Understand blocked traffic and the kill switch",
+        "",
+    );
     let Some(choice) = prompt("Choose a step, or press Enter to go back: ")? else {
         return Ok(());
     };
@@ -98,15 +104,11 @@ pub fn setup(ctrl: &Controller, theme: Theme, reduced_motion: bool) -> Result<()
         println!(
             "\nBlocked means the kill switch is holding protected traffic while the VPN cannot verify the path."
         );
-        println!(
-            "In applications mode it covers apps started with cypherpunk run. In whole-device mode it covers the device's traffic."
-        );
+        println!("The automatic kill switch protects the whole device during a VPN session.");
         println!(
             "Unlocking opens the device keys. Traffic is released when tunnel protection is verified."
         );
-        println!(
-            "Disconnect keeps the guard in place. To deliberately allow cleartext traffic, review cypherpunk help reset."
-        );
+        println!("Lockdown keeps the guard in place after Disconnect. Press k to review it.");
         return Ok(());
     }
     if !matches!(choice.as_str(), "1" | "2") {
@@ -179,25 +181,14 @@ fn install_bundle(ctrl: &Controller, replace: bool, device: &Value) -> Result<()
         args.push("--replace".into());
     }
     args.extend(["--".into(), bundle]);
-    let mode = if !replace && device["role"].as_str() == Some("client") {
-        let Some(mode) = choose_scope(true)? else {
-            return Ok(());
-        };
-        Some(mode)
-    } else {
-        None
-    };
     println!("Verifying the operator signature and installing the enrollment…");
     if run(ctrl, "enroll", &args)? {
         println!("The signed enrollment is installed.");
-        if let Some(mode) = mode {
-            println!("Saving the traffic scope for the first connection…");
-            if !run(ctrl, "preferences", &[format!("--mode={mode}")])? {
-                println!(
-                    "The scope could not be saved. Open Settings and review Traffic scope before connecting."
-                );
-                return Ok(());
-            }
+        if !replace
+            && device["role"].as_str() == Some("client")
+            && !run(ctrl, "preferences", &["--mode=whole-device".into()])?
+        {
+            return Ok(());
         }
         println!("Press c in the VPN view to connect.");
     }
@@ -287,7 +278,7 @@ fn list(ctrl: &Controller) -> Result<Option<Value>> {
     Ok(None)
 }
 
-pub fn locations(ctrl: &Controller) -> Result<()> {
+pub fn locations(ctrl: &Controller, theme: Theme) -> Result<()> {
     if !is_root() {
         println!("Open sudo cypherpunk and press l to manage signed chains.");
         return Ok(());
@@ -297,7 +288,8 @@ pub fn locations(ctrl: &Controller) -> Result<()> {
         let Some(data) = list(ctrl)? else {
             return Ok(());
         };
-        println!("\nLocations\nCurrent enrollment");
+        heading(theme, "Locations");
+        println!("  Current enrollment");
         print_route(&data["current"]);
         if let Some((role, query)) = &filter {
             println!("Saved chains matching {role} / {query}");
@@ -329,10 +321,10 @@ pub fn locations(ctrl: &Controller) -> Result<()> {
         if !shown {
             println!("No matching saved chains. Import a bundle or change the filter.");
         }
-        println!("1  Import a signed bundle");
-        println!("2  Filter by country or city");
-        println!("3  Select a saved chain");
-        println!("4  Set a local hop location");
+        row(theme, "1", "Import a signed bundle", "");
+        row(theme, "2", "Filter by country or city", "");
+        row(theme, "3", "Select a saved chain", "");
+        row(theme, "4", "Set a local hop location", "");
         match prompt("Choose an action, or press Enter to go back: ")?.as_deref() {
             Some("1") => {
                 if let Some(name) =
@@ -405,7 +397,7 @@ fn select_saved(ctrl: &Controller, listing: &Value, name: String) -> Result<()> 
     }
     println!("Route to select");
     print_route(&row["hops"]);
-    println!("Disconnect first. The kill switch stays in place. Connect again when ready.");
+    println!("Disconnect first. Lockdown determines whether ordinary internet access resumes.");
     let mut args = vec!["select".into(), name];
     if listing["active_saved"].as_bool() != Some(true) {
         println!(
@@ -426,188 +418,379 @@ fn select_saved(ctrl: &Controller, listing: &Value, name: String) -> Result<()> 
     Ok(())
 }
 
+fn heading(theme: Theme, title: &str) {
+    println!();
+    print!(
+        "{}",
+        crate::theme::to_ansi(&[Line::styled(title, theme.brand())], theme)
+    );
+}
+
+fn row(theme: Theme, key: &str, label: &str, value: &str) {
+    let line = Line::from(vec![
+        Span::styled(format!("  {key:>2}  "), theme.accent()),
+        Span::raw(format!("{label:<23}")),
+        Span::styled(value, theme.dim()),
+    ]);
+    print!("{}", crate::theme::to_ansi(&[line], theme));
+}
+
+fn menu_prompt(theme: Theme, label: &str) -> io::Result<Option<String>> {
+    let rendered = crate::theme::to_ansi(&[Line::styled(label, theme.accent())], theme);
+    prompt(rendered.trim_end_matches('\n'))
+}
+
+pub fn connect(ctrl: &Controller, theme: Theme) -> Result<bool> {
+    let outcome = ctrl.call("info", &[])?;
+    let info = &outcome.value["info"];
+    row(
+        theme,
+        "◌",
+        "Starting VPN",
+        scope_label(info["mode"].as_str()),
+    );
+    let done = crate::actions::perform(ctrl, "connect", &[]);
+    print!(
+        "{}",
+        crate::theme::to_ansi(&crate::cells::render(&done.cells, theme), theme)
+    );
+    if done.code != 0 {
+        return Ok(false);
+    }
+    if info["protection"].as_str() == Some("nitrokey") {
+        return run(ctrl, "unlock", &["--if-needed".into()]);
+    }
+    Ok(true)
+}
+
+fn scope_label(mode: Option<&str>) -> &str {
+    if mode == Some("applications") {
+        "Applications"
+    } else {
+        "Whole device"
+    }
+}
+
+pub fn switch_scope(ctrl: &Controller, theme: Theme) -> Result<()> {
+    if !is_root() {
+        println!("Open sudo cypherpunk to change scope.");
+        return Ok(());
+    }
+    let response = ctrl.call("info", &[])?;
+    let device = &response.value["info"];
+    if device["role"].as_str() != Some("client") || device["enrolled"].as_bool() != Some(true) {
+        println!("Set up an enrolled client before changing scope.");
+        return Ok(());
+    }
+    let next = if device["mode"].as_str() == Some("applications") {
+        "whole-device"
+    } else {
+        "applications"
+    };
+    let disable_lockdown = next == "applications" && device["lockdown"].as_bool() == Some(true);
+    let live = &device["status"];
+    let running = matches!(
+        live["state"].as_str(),
+        Some("supervising" | "waiting for the Nitrokey PIN")
+    ) || live["children"].is_object();
+    heading(theme, "Traffic scope");
+    row(theme, "→", "Switch to", scope_label(Some(next)));
+    if next == "applications" {
+        println!(
+            "      Only apps launched from /applications use the VPN. Other apps use your normal connection."
+        );
+    }
+    if disable_lockdown {
+        println!(
+            "      This switch turns off Lockdown. Close any open protected apps before proceeding."
+        );
+    }
+    let question = if running {
+        "  Switch and reconnect now? [y/N] "
+    } else {
+        "  Save this scope for the next connection? [y/N] "
+    };
+    if menu_prompt(theme, question)?.as_deref() != Some("y") {
+        return Ok(());
+    }
+    if running || next == "applications" {
+        // Keeping the whole-device firewall when entering Applications would
+        // block ordinary apps. The confirmed policy change may release it.
+        let keep_guard = ["--keep-guard".into()];
+        let args = if next == "whole-device" || disable_lockdown {
+            &keep_guard[..]
+        } else {
+            &[]
+        };
+        let stopped = crate::actions::perform(ctrl, "disconnect", args);
+        print!(
+            "{}",
+            crate::theme::to_ansi(&crate::cells::render(&stopped.cells, theme), theme)
+        );
+        if stopped.code != 0 {
+            return Ok(());
+        }
+    }
+    if disable_lockdown && !run(ctrl, "preferences", &["--lockdown=off".into()])? {
+        return Ok(());
+    }
+    if run(ctrl, "preferences", &[format!("--mode={next}")])? && running {
+        connect(ctrl, theme)?;
+    }
+    Ok(())
+}
+
+pub fn applications(ctrl: &Controller, theme: Theme) -> Result<()> {
+    if !is_root() {
+        println!("Open sudo cypherpunk to manage protected applications.");
+        return Ok(());
+    }
+    loop {
+        let response = ctrl.call("info", &[])?;
+        let device = &response.value["info"];
+        if device["role"].as_str() != Some("client") || device["enrolled"].as_bool() != Some(true) {
+            println!("Set up an enrolled client before choosing protected applications.");
+            return Ok(());
+        }
+        let apps: Vec<_> = device["protected_apps"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .collect();
+        heading(theme, "Protected applications");
+        println!(
+            "      Applications mode protects launches from this list. Apps opened normally use your regular connection."
+        );
+        for (index, executable) in apps.iter().enumerate() {
+            row(theme, &(index + 1).to_string(), executable, "");
+        }
+        println!("      a add · r remove · number launch · Enter back");
+        let Some(choice) = menu_prompt(theme, "  Choose an application or action: ")? else {
+            return Ok(());
+        };
+        if choice == "a" {
+            if let Some(executable) = menu_prompt(theme, "  Executable name or absolute path: ")? {
+                run(
+                    ctrl,
+                    "preferences",
+                    &[format!("--protect-app={executable}")],
+                )?;
+            }
+            continue;
+        }
+        let removing = choice == "r";
+        let selection = if removing {
+            menu_prompt(theme, "  Number to remove: ")?
+        } else {
+            Some(choice)
+        };
+        let Some(executable) = selection
+            .as_deref()
+            .and_then(|number| number.parse::<usize>().ok())
+            .and_then(|index| index.checked_sub(1))
+            .and_then(|index| apps.get(index))
+        else {
+            println!("      Choose a number from the list.");
+            continue;
+        };
+        if removing {
+            run(ctrl, "preferences", &[format!("--forget-app={executable}")])?;
+            continue;
+        }
+        if device["status"]["scope"].as_str() != Some("applications")
+            || device["status"]["protection"].as_str() != Some("protected")
+        {
+            println!(
+                "      Connect in Applications mode and wait for protection before launching."
+            );
+            continue;
+        }
+        println!(
+            "      Close any ordinary instance first. The launcher opens a new process inside the VPN."
+        );
+        let mut argv = vec!["--".into(), (*executable).into()];
+        while let Some(argument) =
+            menu_prompt(theme, "  Add one argument, or press Enter to launch: ")?
+        {
+            argv.push(argument);
+        }
+        println!("      Waiting for the application to exit. Its traffic is isolated by the VPN.");
+        run(ctrl, "run", &argv)?;
+    }
+}
+
+pub fn lockdown(ctrl: &Controller, theme: Theme) -> Result<()> {
+    if !is_root() {
+        println!("Open sudo cypherpunk to change Lockdown.");
+        return Ok(());
+    }
+    row(theme, "◌", "Reading Lockdown", "");
+    let info = ctrl.call("info", &[])?;
+    let device = &info.value["info"];
+    if device["lockdown"].as_bool().is_none() {
+        println!("Set up an enrolled client before changing Lockdown.");
+        return Ok(());
+    }
+    let enabled = device["lockdown"].as_bool() == Some(true);
+    let next = if enabled { "off" } else { "on" };
+    let status = &device["status"];
+    let running = matches!(
+        status["state"].as_str(),
+        Some("supervising" | "waiting for the Nitrokey PIN")
+    ) || status["children"].is_object();
+    heading(theme, "Network protection");
+    row(
+        theme,
+        "✓",
+        "Automatic kill switch",
+        "On while connecting, connected or reconnecting",
+    );
+    row(theme, "1", "Lockdown", if enabled { "On" } else { "Off" });
+    println!("      Lockdown blocks ordinary internet access after Disconnect and at startup.");
+    if menu_prompt(theme, "  Press 1 to change Lockdown, or Enter to go back: ")?.as_deref()
+        != Some("1")
+    {
+        return Ok(());
+    }
+    if enabled {
+        println!("      Turning Lockdown off permits ISP traffic while the VPN is disconnected.");
+    }
+    let verb = if running { "reconnect" } else { "apply" };
+    println!(
+        "      Turn Lockdown {next}{}?",
+        if running { " and reconnect now" } else { "" }
+    );
+    if menu_prompt(
+        theme,
+        &format!("  Type {verb} to continue, or Enter to cancel: "),
+    )?
+    .as_deref()
+        != Some(verb)
+    {
+        return Ok(());
+    }
+    if running {
+        let stopped = crate::actions::perform(ctrl, "disconnect", &["--keep-guard".into()]);
+        print!(
+            "{}",
+            crate::theme::to_ansi(&crate::cells::render(&stopped.cells, theme), theme)
+        );
+        if stopped.code != 0 {
+            return Ok(());
+        }
+    }
+    let mut args = vec![format!("--lockdown={next}")];
+    if running && enabled {
+        args.push("--keep-guard".into());
+    }
+    if run(ctrl, "preferences", &args)? && running {
+        connect(ctrl, theme)?;
+    }
+    Ok(())
+}
+
 pub fn settings(ctrl: &Controller, theme: Theme) -> Result<()> {
     if !is_root() {
         println!("Open sudo cypherpunk and press p to manage VPN settings.");
         return Ok(());
     }
-    println!("Reading VPN settings and live traffic scope…");
+    row(theme, "◌", "Reading VPN settings", "");
     let info = ctrl.call("info", &[])?;
     let device = &info.value["info"];
     if device["enrolled"].as_bool() != Some(true) || device["role"].as_str() != Some("client") {
         println!("Set up an enrolled client with e before changing VPN settings.");
         return Ok(());
     }
-    println!("\nVPN settings");
-    println!(
-        "1  Traffic scope on next connect · {}",
-        device["mode"].as_str().unwrap_or("unknown")
+    heading(theme, "VPN settings");
+    row(
+        theme,
+        "4",
+        "Traffic scope",
+        scope_label(device["mode"].as_str()),
     );
-    if let Some(scope) = device["status"]["scope"].as_str() {
-        println!("    Current session · {scope}");
-    }
-    println!("2  Launch a protected application");
+    row(
+        theme,
+        "5",
+        "Protected applications",
+        "Choose which apps to launch through the VPN",
+    );
+    row(
+        theme,
+        "",
+        "Automatic kill switch",
+        "Always on during a VPN session",
+    );
+    row(
+        theme,
+        "1",
+        "Lockdown",
+        if device["lockdown"].as_bool() == Some(true) {
+            "On"
+        } else {
+            "Off"
+        },
+    );
     let cap = device["daily_limit_bytes"]
         .as_u64()
-        .map_or_else(|| "none".into(), |n| format!("{} MiB", n / 1_048_576));
-    println!("3  Daily traffic cap · {cap}");
-    let upstream = device["upstream_interface"]
-        .as_str()
-        .unwrap_or("default route");
-    let gateway = device["upstream_gateway"].as_str().unwrap_or("automatic");
-    println!("4  Upstream interface · {upstream} (gateway {gateway})");
-    println!("5  Kill-switch status and recovery");
-    println!("6  Check the public IPv4 of a protected app");
-    println!(
-        "Signed rate class · {}",
-        device["rate"].as_str().unwrap_or("unknown")
+        .map_or_else(|| "None".into(), |n| format!("{} MiB", n / 1_048_576));
+    row(theme, "2", "Daily traffic cap", &cap);
+    row(
+        theme,
+        "3",
+        "Upstream interface",
+        device["upstream_interface"]
+            .as_str()
+            .unwrap_or("Default route"),
     );
-    let args = match prompt("Choose a setting, or press Enter to go back: ")?.as_deref() {
-        Some("1") => {
-            let Some(mode) = choose_scope(false)? else {
-                return Ok(());
-            };
-            if mode == "applications" && device["whole_device_guard"].as_bool() == Some(true) {
-                println!(
-                    "Changing to Applications releases the whole-device kill switch. Regular apps can then use your ISP connection."
-                );
-                if prompt("After disconnecting and closing protected apps, type allow cleartext to switch, or Enter to cancel: ")?
-                    .as_deref()
-                    == Some("allow cleartext")
-                    && run(ctrl, "reset", &["--allow-cleartext".into()])?
-                {
-                    println!("Applications scope saved. Press c to connect, then launch protected apps through CYPHERPUNK.");
-                }
-                return Ok(());
-            }
-            vec![format!("--mode={mode}")]
-        }
-        Some("2") => {
-            if let Some(program) = prompt("Executable name or path (Enter cancels): ")? {
-                let mut argv = vec!["--".into(), program];
-                while let Some(arg) = prompt("Next argument, or Enter to launch: ")? {
-                    argv.push(arg);
-                }
-                println!("The VPN view returns after the application exits.");
-                run(ctrl, "run", &argv)?;
-            }
-            return Ok(());
-        }
-        Some("3") => {
-            match prompt("Daily cap in MiB (1–10240), none to remove it, or Enter to cancel: ")? {
-                Some(cap) if cap == "none" => vec!["--no-daily-limit".into()],
+    row(
+        theme,
+        "",
+        "Signed rate class",
+        device["rate"].as_str().unwrap_or("Unknown"),
+    );
+    println!();
+    let args =
+        match menu_prompt(theme, "  Choose a setting, or press Enter to go back: ")?.as_deref() {
+            Some("1") => return lockdown(ctrl, theme),
+            Some("4") => return switch_scope(ctrl, theme),
+            Some("5") => return applications(ctrl, theme),
+            Some("2") => match menu_prompt(
+                theme,
+                "  Daily cap in MiB (1–10240), none to remove, or Enter to cancel: ",
+            )?
+            .as_deref()
+            {
+                Some("none") => vec!["--no-daily-limit".into()],
                 Some(cap) => vec![format!("--daily-limit-mib={cap}")],
                 None => return Ok(()),
-            }
-        }
-        Some("4") => {
-            match prompt("Interface name, default to use normal routing, or Enter to cancel: ")? {
-                Some(interface) if interface == "default" => vec!["--no-upstream".into()],
+            },
+            Some("3") => match menu_prompt(
+                theme,
+                "  Interface name, default to use normal routing, or Enter to cancel: ",
+            )?
+            .as_deref()
+            {
+                Some("default") => vec!["--no-upstream".into()],
                 Some(interface) => {
                     let mut args = vec![format!("--upstream-interface={interface}")];
                     if let Some(gateway) =
-                        prompt("Gateway address, or Enter to use the interface's current route: ")?
+                        menu_prompt(theme, "  Gateway address, or Enter for automatic: ")?
                     {
                         args.push(format!("--upstream-gateway={gateway}"));
                     }
                     args
                 }
                 None => return Ok(()),
+            },
+            Some(_) => {
+                println!("  Choose 1 through 5.");
+                return Ok(());
             }
-        }
-        Some("5") => {
-            let done = crate::actions::perform(ctrl, "status", &[]);
-            print!(
-                "{}",
-                crate::theme::to_ansi(&crate::cells::render(&done.cells, theme), theme)
-            );
-            println!(
-                "The kill switch holds protected traffic until the tunnel is verified. Disconnect keeps it in place."
-            );
-            println!(
-                "For deliberate cleartext recovery, disconnect, close protected apps, and review cypherpunk help reset."
-            );
-            return Ok(());
-        }
-        Some("6") => return check_app_ip(ctrl, &device["status"]),
-        Some(_) => {
-            println!("Choose a number from 1 through 6.");
-            return Ok(());
-        }
-        None => return Ok(()),
-    };
+            None => return Ok(()),
+        };
     if run(ctrl, "preferences", &args)? {
-        println!("Saved. Disconnect and reconnect to apply this preference to an active session.");
-    }
-    Ok(())
-}
-
-fn choose_scope(new_device: bool) -> Result<Option<&'static str>> {
-    println!("1  Whole device · routes your existing browser and other apps through the VPN.");
-    println!("   The kill switch holds device traffic while the VPN is disconnected.");
-    println!("2  Applications · routes only apps started through CYPHERPUNK.");
-    let label = if new_device {
-        "Traffic scope [1, Whole device by default; 2, Applications; q, cancel]: "
-    } else {
-        "Choose traffic scope, or Enter to cancel: "
-    };
-    Ok(match read_prompt(label)?.as_deref() {
-        Some("1") => Some("whole-device"),
-        Some("2") => Some("applications"),
-        Some("") if new_device => Some("whole-device"),
-        None | Some("" | "q") => None,
-        Some(_) => {
-            println!("Choose 1 or 2.");
-            None
-        }
-    })
-}
-
-fn check_app_ip(ctrl: &Controller, status: &Value) -> Result<()> {
-    if status["protection"].as_str() != Some("protected") {
-        println!("Connect and wait for VPN protection before checking the public IP.");
-        return Ok(());
-    }
-    if status["scope"].as_str() != Some("applications") {
-        println!("With whole-device protection active, reload the IP check in your browser.");
-        return Ok(());
-    }
-    if prompt("Type check to send an HTTPS request through the VPN to api.ipify.org, or Enter to cancel: ")?
-        .as_deref()
-        != Some("check")
-    {
-        return Ok(());
-    }
-    println!("Checking public IPv4 through the protected app tunnel (up to 15 seconds)…");
-    let args = [
-        "--",
-        "/usr/bin/curl",
-        "--disable",
-        "--noproxy",
-        "*",
-        "-4",
-        "--fail",
-        "--silent",
-        "--show-error",
-        "--max-time",
-        "15",
-        "--max-filesize",
-        "64",
-        "https://api.ipify.org/",
-    ]
-    .map(String::from);
-    let output = ctrl
-        .command(false, "run", &args)
-        .stderr(std::process::Stdio::inherit())
-        .output()?;
-    let ip = std::str::from_utf8(&output.stdout)
-        .ok()
-        .and_then(|value| value.trim().parse::<std::net::Ipv4Addr>().ok());
-    match ip.filter(|_| output.status.success()) {
-        Some(ip) => println!("Public IPv4 seen by api.ipify.org for the protected app: {ip}"),
-        None => println!(
-            "Public IPv4 could not be verified. Press s in the VPN view to review tunnel status."
-        ),
+        println!("  Saved. Changes apply on the next connection.");
     }
     Ok(())
 }

@@ -271,9 +271,19 @@ class Adapter:
                 "Start the existing verified controller service; hardware authentication stays in a trusted prompt.",
             ]
         elif name == "disconnect":
+            import guard_policy
+
+            preferences = cypherpunkctl.read_json_private(STATE / "preferences.json", {})
+            lockdown = guard_policy.lockdown_enabled(preferences)
+            public_inputs["lockdown"] = lockdown
             summary, effects = (
-                "Disconnect and retain protection",
-                ["Stop the current supervisor and its owned transports.", "Keep existing traffic guards in place."],
+                "Disconnect VPN",
+                [
+                    "Stop the current supervisor and its owned transports.",
+                    "Lockdown keeps internet access blocked."
+                    if lockdown
+                    else "Ordinary internet access resumes through your ISP.",
+                ],
             )
         elif name in ("create_operator_keys", "request_exit", "sign_route"):
             # The setup wizard's create-branch writes (tools/controller_create_join.py):

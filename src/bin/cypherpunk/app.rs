@@ -53,6 +53,7 @@ const SPINNER: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "�
 pub const KEYS: &[(&str, &str)] = &[
     ("/", "commands"),
     ("k", "kill switch"),
+    ("m", "scope"),
     ("c", "connect"),
     ("u", "unlock"),
     ("l", "locations"),
@@ -69,6 +70,12 @@ pub const KEYS: &[(&str, &str)] = &[
 
 const SLASH_COMMANDS: &[(&str, &str)] = &[
     ("killswitch-disarm", "restore ordinary internet access"),
+    ("lockdown", "review or change protection after disconnect"),
+    (
+        "scope",
+        "switch between whole-device and application protection",
+    ),
+    ("applications", "select and launch protected applications"),
     ("status", "show current protection and tunnel checks"),
     ("connect", "start the VPN"),
     ("disconnect", "stop the VPN and keep the kill switch"),
@@ -90,6 +97,14 @@ fn matching_commands(prefix: &str) -> impl Iterator<Item = (&'static str, &'stat
         .filter(move |(name, _)| name.starts_with(prefix))
 }
 
+fn scope_shortcut(key: &KeyEvent) -> bool {
+    (key.code == KeyCode::BackTab && key.modifiers.contains(KeyModifiers::CONTROL))
+        || (key.code == KeyCode::Tab
+            && key
+                .modifiers
+                .contains(KeyModifiers::CONTROL | KeyModifiers::SHIFT))
+}
+
 /// What the header box shows.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Header {
@@ -102,6 +117,7 @@ pub struct Header {
     /// The supervisor state.
     pub status: String,
     pub locations: Vec<String>,
+    pub lockdown: Option<bool>,
     /// The next milestone or action associated with the current status.
     pub guidance: Option<&'static str>,
 }
@@ -160,6 +176,7 @@ impl Header {
             protection,
             status,
             locations,
+            lockdown: i["lockdown"].as_bool(),
             guidance,
         }
     }
@@ -185,6 +202,7 @@ pub struct App {
     /// Set when the user quits.
     pub quit: bool,
     command: Option<String>,
+    selected_command: usize,
     started: Instant,
 }
 
@@ -200,6 +218,7 @@ impl App {
             scroll: 0,
             quit: false,
             command: None,
+            selected_command: 0,
             started: Instant::now(),
         }
     }
@@ -263,6 +282,16 @@ impl App {
                 t.accent(),
             )));
         }
+        if let Some(enabled) = self.header.lockdown {
+            lines.push(Line::from(vec![
+                label("lockdown:"),
+                Span::styled(
+                    if enabled { "on" } else { "off" },
+                    if enabled { t.success() } else { t.dim() },
+                ),
+                Span::styled(" · k to change", t.dim()),
+            ]));
+        }
         lines.extend(self.header.locations.iter().map(|location| {
             Line::from(vec![
                 Span::raw("  "),
@@ -277,7 +306,7 @@ impl App {
         let mut spans = vec![Span::raw(" ")];
         for (i, (key, label)) in KEYS
             .iter()
-            .filter(|(k, _)| matches!(*k, "/" | "k" | "c" | "d" | "p" | "e" | "q"))
+            .filter(|(k, _)| matches!(*k, "/" | "k" | "m" | "c" | "d" | "p" | "e" | "q"))
             .enumerate()
         {
             if i > 0 {
@@ -347,9 +376,22 @@ impl App {
         );
         let mut lines = vec![Line::default()];
         if let Some(command) = &self.command {
-            for (name, description) in matching_commands(command).take(6) {
+            let visible = (history.height as usize).clamp(1, 6);
+            for (index, (name, description)) in matching_commands(command)
+                .enumerate()
+                .skip(self.selected_command.saturating_sub(visible - 1))
+                .take(visible)
+            {
+                let selected = index == self.selected_command;
                 lines.push(Line::from(vec![
-                    Span::styled(format!("  /{name}  "), self.theme.bold()),
+                    Span::styled(
+                        format!(" {} /{name}  ", if selected { "›" } else { " " }),
+                        if selected {
+                            self.theme.accent().patch(self.theme.bold())
+                        } else {
+                            self.theme.text()
+                        },
+                    ),
                     Span::styled(description, self.theme.dim()),
                 ]));
             }
@@ -373,9 +415,21 @@ impl App {
         });
         let start = end.saturating_sub(height);
         f.render_widget(Paragraph::new(lines[start..end].to_vec()), history);
-        f.render_widget(Paragraph::new(self.status_line(now)), status);
+        let prompt = self.status_line(now);
+        let mut horizontal = 0;
+        if !self.busy() && status.width > 0 && status.height > 0 {
+            let end = prompt.width().min(u16::MAX as usize) as u16;
+            if self.command.is_some() {
+                horizontal = end.saturating_sub(status.width.saturating_sub(1));
+            }
+            f.set_cursor_position((
+                status.x + (end - horizontal).min(status.width - 1),
+                status.y,
+            ));
+        }
+        f.render_widget(Paragraph::new(prompt).scroll((0, horizontal)), status);
         let shortcuts = if self.command.is_some() {
-            Line::from(" Enter run · Tab complete · Esc cancel")
+            Line::from(" ↑↓ select · Enter run · Tab complete · Esc cancel")
         } else {
             self.footer()
         };
@@ -384,6 +438,9 @@ impl App {
 
     /// The action a key starts, if any.
     pub fn action_for(key: &KeyEvent) -> Option<&'static str> {
+        if scope_shortcut(key) {
+            return Some("scope");
+        }
         match key.code {
             KeyCode::Char('c') => Some("connect"),
             KeyCode::Char('u') => Some("unlock"),
@@ -395,7 +452,8 @@ impl App {
             KeyCode::Char('s') => Some("status"),
             KeyCode::Char('i') => Some("info"),
             KeyCode::Char('o') => Some("doctor"),
-            KeyCode::Char('k') => Some("killswitch-disarm"),
+            KeyCode::Char('k') => Some("lockdown"),
+            KeyCode::Char('m') => Some("scope"),
             _ => None,
         }
     }
@@ -406,17 +464,23 @@ impl App {
             KeyCode::Esc => self.command = None,
             KeyCode::Backspace => {
                 command.pop();
+                self.selected_command = 0;
+            }
+            KeyCode::Up => self.selected_command = self.selected_command.saturating_sub(1),
+            KeyCode::Down => {
+                self.selected_command = (self.selected_command + 1)
+                    .min(matching_commands(command).count().saturating_sub(1));
             }
             KeyCode::Tab => {
-                let first = matching_commands(command).next();
-                if let Some((name, _)) = first {
+                let selected = matching_commands(command).nth(self.selected_command);
+                if let Some((name, _)) = selected {
                     *command = name.into();
+                    self.selected_command = 0;
                 }
             }
             KeyCode::Enter => {
-                // Do not execute a partial match. Tab previews the exact command first.
                 let action = matching_commands(command)
-                    .find(|(name, _)| *name == command.as_str())
+                    .nth(self.selected_command)
                     .map(|(name, _)| name);
                 if action.is_some() {
                     self.command = None;
@@ -424,7 +488,8 @@ impl App {
                 return action;
             }
             KeyCode::Char(c) if command.len() < 64 && (c.is_ascii_lowercase() || c == '-') => {
-                command.push(c)
+                command.push(c);
+                self.selected_command = 0;
             }
             _ => {}
         }
@@ -457,22 +522,19 @@ impl App {
 
 /// Run the interactive view until the user quits.
 pub fn run(ctrl: Controller, theme: Theme, reduced_motion: bool) -> Result<()> {
-    println!("Reading local enrollment and VPN status…");
-    let header = ctrl
-        .call("info", &[])
-        .map(|o| Header::from_info(&o.value))
-        .unwrap_or_default();
+    let mut header = Header::from_info(&Value::Null);
+    header.guidance = Some("Reading local enrollment and VPN status…");
     let mut app = App::new(theme, reduced_motion, header);
-    if app.header.chain == "not enrolled" {
-        app.history.push(get_started());
-    }
+    let mut first_refresh = true;
     let (tx, rx): (Sender<Finished>, Receiver<Finished>) = channel();
     let (header_tx, header_rx) = channel();
     let mut refreshing = false;
     let mut revision = 0;
-    let mut next_refresh = Instant::now() + Duration::from_secs(2);
+    let mut next_refresh = Instant::now();
     let mut terminal = ratatui::try_init()?;
     let result = (|| -> Result<()> {
+        use ratatui::crossterm::cursor::{SetCursorStyle, Show};
+        ratatui::crossterm::execute!(std::io::stdout(), SetCursorStyle::BlinkingBar)?;
         while !app.quit {
             terminal.draw(|f| app.draw(f, Instant::now()))?;
             if let Ok((refresh, done)) = rx.try_recv() {
@@ -489,6 +551,10 @@ pub fn run(ctrl: Controller, theme: Theme, reduced_motion: bool) -> Result<()> {
                     && let Some(header) = header
                 {
                     app.header = header;
+                    if first_refresh && app.header.chain == "not enrolled" {
+                        app.history.push(get_started());
+                    }
+                    first_refresh = false;
                 }
                 refreshing = false;
             }
@@ -515,9 +581,18 @@ pub fn run(ctrl: Controller, theme: Theme, reduced_motion: bool) -> Result<()> {
             }
             if !app.busy() && key.code == KeyCode::Char('/') && app.command.is_none() {
                 app.command = Some(String::new());
+                app.selected_command = 0;
                 continue;
             }
-            let action = if app.command.is_some() {
+            if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+                app.key(&key);
+                continue;
+            }
+            let shortcut = App::action_for(&key);
+            let action = if scope_shortcut(&key) {
+                app.command = None;
+                shortcut
+            } else if app.command.is_some() {
                 match app.command_key(&key) {
                     Some("quit") => {
                         app.quit = true;
@@ -531,15 +606,20 @@ pub fn run(ctrl: Controller, theme: Theme, reduced_motion: bool) -> Result<()> {
                     None => continue,
                 }
             } else {
-                App::action_for(&key)
+                shortcut
             };
             match action {
-                Some(_) if key.modifiers.contains(KeyModifiers::CONTROL) => app.key(&key),
-                Some(action) if !app.busy() && terminal_action(action, &app.header) => {
+                Some(_)
+                    if key.modifiers.contains(KeyModifiers::CONTROL) && !scope_shortcut(&key) =>
+                {
+                    app.key(&key)
+                }
+                Some(action) if !app.busy() && terminal_action(action) => {
                     ratatui::try_restore()?;
                     ratatui::crossterm::execute!(
                         std::io::stdout(),
-                        ratatui::crossterm::cursor::Show
+                        SetCursorStyle::BlinkingBar,
+                        Show
                     )?;
                     let result = run_terminal_action(&ctrl, action, theme, reduced_motion);
                     terminal = ratatui::try_init()?;
@@ -565,14 +645,27 @@ pub fn run(ctrl: Controller, theme: Theme, reduced_motion: bool) -> Result<()> {
         Ok(())
     })();
     ratatui::restore();
-    result
+    let cursor = ratatui::crossterm::execute!(
+        std::io::stdout(),
+        ratatui::crossterm::cursor::SetCursorStyle::DefaultUserShape
+    );
+    result?;
+    cursor?;
+    Ok(())
 }
 
-fn terminal_action(action: &str, header: &Header) -> bool {
+fn terminal_action(action: &str) -> bool {
     matches!(
         action,
-        "setup" | "unlock" | "locations" | "settings" | "killswitch-disarm"
-    ) || (action == "connect" && is_root() && header.protection.starts_with("nitrokey"))
+        "setup"
+            | "unlock"
+            | "locations"
+            | "settings"
+            | "killswitch-disarm"
+            | "lockdown"
+            | "scope"
+            | "applications"
+    ) || (action == "connect" && is_root())
 }
 
 fn run_terminal_action(
@@ -583,8 +676,11 @@ fn run_terminal_action(
 ) -> Result<()> {
     match action {
         "setup" => guided::setup(ctrl, theme, reduced_motion)?,
-        "locations" => guided::locations(ctrl)?,
+        "locations" => guided::locations(ctrl, theme)?,
         "settings" => guided::settings(ctrl, theme)?,
+        "lockdown" => guided::lockdown(ctrl, theme)?,
+        "scope" => guided::switch_scope(ctrl, theme)?,
+        "applications" => guided::applications(ctrl, theme)?,
         "killswitch-disarm" => guided::disarm(ctrl, theme)?,
         "unlock" if !is_root() => {
             println!("Run sudo cypherpunk and press u, or run sudo cypherpunk unlock here.")
@@ -594,21 +690,8 @@ fn run_terminal_action(
                 return Ok(());
             }
         }
-        "connect" => {
-            println!("Starting the VPN service…");
-            let started = perform(ctrl, "connect", &[]);
-            for line in render(&started.cells, theme) {
-                println!("{}", crate::theme::to_ansi(&[line], theme).trim_end());
-            }
-            if started.code == 0
-                && ctrl
-                    .command(false, "unlock", &["--if-needed".into()])
-                    .status()?
-                    .success()
-            {
-                return Ok(());
-            }
-        }
+        "connect" if guided::connect(ctrl, theme)? => return Ok(()),
+        "connect" => {}
         _ => unreachable!(),
     }
     guided::prompt("\nPress Enter to return to the VPN view. ")?;
@@ -677,7 +760,7 @@ mod tests {
         assert!(s[8].contains("Press a key below"));
         assert_eq!(
             s[13],
-            " / commands · k kill switch · c connect · p settings · e setup · d stop · q quit"
+            " / commands · k kill switch · m scope · c connect · p settings · e setup · d stop · q quit"
         );
     }
 
@@ -741,6 +824,23 @@ mod tests {
         assert!(matches!(&app.history[0], Cell::Result { title, .. } if title == "Keys"));
         app.key(&k('q'));
         assert!(app.quit);
+    }
+
+    #[test]
+    fn enter_runs_a_unique_prefix_and_arrow_keys_choose_among_matches() {
+        let mut app = App::new(Theme::plain(), true, Header::default());
+        app.command = Some("sett".into());
+        assert_eq!(app.command_key(&KeyCode::Enter.into()), Some("settings"));
+        app.command = Some("s".into());
+        app.command_key(&KeyCode::Down.into());
+        assert_eq!(app.command_key(&KeyCode::Enter.into()), Some("status"));
+        assert_eq!(
+            App::action_for(&KeyEvent::new(
+                KeyCode::BackTab,
+                KeyModifiers::CONTROL | KeyModifiers::SHIFT
+            )),
+            Some("scope")
+        );
     }
 
     #[test]
@@ -836,6 +936,6 @@ mod tests {
         let app = App::new(Theme::full(), true, header);
         let rendered = screen(&app, 100, 17).join("\n");
         assert!(rendered.contains("Only apps started through CYPHERPUNK"));
-        assert!(rendered.contains("launch an app or check its public IP"));
+        assert!(rendered.contains("launch protected apps or m to change scope"));
     }
 }
