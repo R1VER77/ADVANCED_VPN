@@ -1,0 +1,56 @@
+{
+  "schema": 1,
+  "scope": "isolated shared admission and nested kernel WireGuard fixture; separate shipped managed GotaTun regressions",
+  "shared_fixture": {
+    "verified_redemptions": 8,
+    "fresh_tls_identities": 8,
+    "fresh_carrier_keys": 8,
+    "hardware": "mocked",
+    "transport": "pinned loopback TLS 1.3",
+    "unique_tls_exporters": 8,
+    "wireguard": {
+      "before_install": {
+        "dns": false,
+        "https": false
+      },
+      "after_rollback": {
+        "dns": false,
+        "https": false
+      },
+      "both_peers": {
+        "dns": true,
+        "https": true
+      },
+      "after_grant_expiry": {
+        "dns": false,
+        "https": false
+      },
+      "rolled_back_partial_peer": true
+    }
+  },
+  "managed_transport_regressions": {
+    "udp": {
+      "dns_tls_verified": true,
+      "dns_bypass_rejected": true,
+      "ipv6_leak_rejected": true,
+      "webrtc_stun_reflects_exit_only": true,
+      "upstream_entry_first_hop_sees_only_upstream": true,
+      "upstream_entry_fails_closed_when_upstream_drops": true,
+      "whole_device_guard_blocks_working_fallback_route": true
+    },
+    "tcp": {
+      "dns_tls_verified": true,
+      "dns_bypass_rejected": true,
+      "ipv6_leak_rejected": true,
+      "webrtc_stun_reflects_exit_only": true,
+      "upstream_entry_first_hop_sees_only_upstream": true,
+      "upstream_entry_fails_closed_when_upstream_drops": true,
+      "whole_device_guard_blocks_working_fallback_route": true
+    }
+  },
+  "physical_wallet": {
+    "passed": false,
+    "stage": "disposable enrollment",
+    "result": "CTAP USER_ACTION_TIMEOUT"
+  }
+}

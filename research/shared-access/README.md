@@ -1,6 +1,6 @@
 # Shared-access pilot lab
 
-The lab exercises sponsored blind credits, signed shared-pool selection, wallet sealing, and role-specific admission. It generates fresh TLS authentication and WireGuard public keys for each admission. The PIN and touch step uses a hardware-secret fixture. The TLS connections run on loopback, and the admission code is disconnected from the shipped VPN data plane.
+The lab exercises sponsored blind credits, signed shared-pool selection, wallet sealing, and role-specific admission. It generates fresh authentication and WireGuard keys for each admission. Admission TLS connections run on loopback. The optional carrier fixture installs the admitted keys into two nested Linux WireGuard devices and exercises DNS and HTTPS against an isolated exit. The shipped GotaTun VPN has a separate peer lifecycle.
 
 The issuer fixture uses Cloudflare’s Privacy Pass TypeScript library. The Python verifier checks the RFC 9578 token with OpenSSL-backed RSA-PSS, a pinned issuer key, and a role- and epoch-specific challenge. ML-DSA binds the authentication key holder to the token, the expected hop, a TLS exporter, and the proposed carrier key. The carrier must still prove possession through its own handshake when peer installation is implemented. The pilot token’s unforgeability is classical. [RFC 9578](https://www.rfc-editor.org/rfc/rfc9578.html) · [Privacy Pass TypeScript library](https://github.com/cloudflare/privacypass-ts)
 
@@ -19,7 +19,23 @@ PYTHONPATH=tools .venv/bin/python -m unittest test_shared_admission test_mix_hol
 unshare --user --map-root-user --net sh -c 'ip link set lo up && .venv/bin/python research/shared-access/browser-lab.py'
 ```
 
+To run the forwarding fixture, use fresh network and mount namespaces:
+
+```sh
+unshare --user --map-root-user --net --mount sh -c '
+  ip link set lo up && exec .venv/bin/python research/shared-access/verify-lab-batch.py "$1" --wireguard
+' shared-access "$lab_dir/issue-lab-batch.mjs"
+```
+
+The fixture checks that DNS and authenticated HTTPS fail before installation, succeed once both peers are installed, and fail again after simulating grant expiry. Its relay permits only the encrypted inner UDP carrier. A deliberately interrupted installation must leave all four peer slots empty. For a physical wallet test, run the original command with `--hardware` from the desktop. It requests a PIN and three touches for a disposable non-resident credential, sealing the batch, and opening a pair. A current dedicated test vault can be passed with `--hardware-vault` to skip creating the credential.
+
 The lab reports counts and booleans only. The browser fixture uses separate temporary Chromium profiles, and captures only a test page on loopback. The local observer can see cookies and a small browser settings vector.
+
+The offline checkout policy tests use synthetic, already-verified shielded note observations. They cover two-source agreement, the ten-confirmation threshold, reorg disagreement, mainnet and transparent payment refusal, replay protection, atomic retries, and retention of the paid transaction denylist after cleanup. It still needs the Tor service, real proof-validating watcher adapters, and a completed testnet purchase.
+
+```sh
+.venv/bin/python -m unittest discover -s research/shared-access -p 'test_*.py'
+```
 
 ## Timing qualification
 
@@ -27,6 +43,6 @@ Rescore each run with `python tools/mix_holdout.py RUN --out REPORT --require-ma
 
 ## Pilot gates still open
 
-- Wire admission into the VPN peer lifecycle and the required upstream route. Verify protected DNS and HTTPS, IPv4 and IPv6 leak protection, partial-install rollback, expiry, and physical Nitrokey operation on the complete path.
+- Wire admission into the shipped GotaTun peer lifecycle and the required upstream route. Repeat the fixture’s forwarding, rollback, and expiry checks on that path, with leak protection and physical Nitrokey operation.
 - Review the protocol and the distributed replay authority, then run the planned independent GCP trials and independent-operator validation. The archived same-day mix runs provide a regression control.
 - Implement and test shielded testnet checkout, including the independent confirmation paths. Keep paid and shared access disabled in the shipped VPN until the applicable gates pass.

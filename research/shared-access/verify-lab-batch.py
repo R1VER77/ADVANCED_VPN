@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Run sponsored blind issuance, local sealing and per-hop admission in a disposable lab."""
 
+import argparse
 import json
 from datetime import datetime, timedelta, timezone
 import hashlib
@@ -20,6 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools"))
 
 from shared_admission import Cohort, EPOCH_SECONDS, ROLES, ReplayLedger, admit, binding_message  # noqa: E402
 from shared_wallet import CreditWallet, PAIRS_PER_BATCH  # noqa: E402
+import keyguard  # noqa: E402
 
 
 def lab_tls_identity(role):
@@ -54,10 +56,21 @@ def lab_tls_identity(role):
 
 def main():
     """Run the lab and print aggregate results without exposing credits or private keys."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("issuer", nargs="?", type=Path, default=Path(__file__).with_name("issue-lab-batch.mjs"))
+    parser.add_argument("--wireguard", action="store_true", help="exercise nested carriers in fresh namespaces")
+    hardware_options = parser.add_mutually_exclusive_group()
+    hardware_options.add_argument(
+        "--hardware", action="store_true", help="create a disposable non-resident Nitrokey credential"
+    )
+    hardware_options.add_argument(
+        "--hardware-vault", type=Path, help="use an existing test Nitrokey vault for one pair"
+    )
+    args = parser.parse_args()
     node = shutil.which("node")
     if node is None:
         raise RuntimeError("Node 24 is required for the independent Privacy Pass issuer")
-    script = Path(sys.argv[1] if len(sys.argv) > 1 else Path(__file__).with_name("issue-lab-batch.mjs")).resolve()
+    script = args.issuer.resolve()
     hop_ids, servers = zip(*(lab_tls_identity(role) for role in ROLES), strict=True)
     output = subprocess.check_output(  # noqa: S603 - local lab issuer
         [node, str(script)], input=json.dumps(dict(zip(ROLES, servers, strict=True))).encode(), timeout=30
@@ -68,25 +81,47 @@ def main():
     pairs = [tuple(bytes.fromhex(token) for token in pair) for pair in batch["pairs"]]
     now = batch["epoch"] * EPOCH_SECONDS
     session_keys, carrier_keys, exporters = set(), set(), set()
+    first_carriers, first_expiries = [], []
+    physical = args.hardware or args.hardware_vault is not None
     with tempfile.TemporaryDirectory(prefix="cpvpn-admission-") as temp:
         directory = Path(temp)
         ledgers = [ReplayLedger(directory / f"{role}.sqlite", role) for role in ROLES]
         for ledger in ledgers:
             ledger.initialize()
-        wallet = CreditWallet(directory / "wallet.json", directory / "vault", *cohorts)
+        wallet = CreditWallet(directory / "wallet.json", args.hardware_vault or directory / "vault", *cohorts)
         # The memory-only fixture stands in for hardware_assertion. It creates no real PIN requests.
         meta = {"credential": "Y3JlZGVudGlhbA==", "salt": "c2FsdA=="}
-        with patch("keyguard.hardware_secret", return_value=(secrets.token_bytes(32), meta)):
+        count = 1 if physical else PAIRS_PER_BATCH
+        hardware = (
+            keyguard.one_pin()
+            if physical
+            else patch("keyguard.hardware_secret", return_value=(secrets.token_bytes(32), meta))
+        )
+        with hardware:
+            if args.hardware:
+                print(
+                    "Creating a disposable Nitrokey credential. Enter the PIN and touch when it flashes.",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                keyguard.enroll(wallet.vault)
+            if physical:
+                print("Sealing the sponsored credits. Touch the Nitrokey when it flashes.", file=sys.stderr, flush=True)
             wallet.import_batch(pairs)
-            for channel_pair in batch["channels"]:
+            for index, channel_pair in enumerate(batch["channels"][:count]):
+                if physical:
+                    print(
+                        "Opening the sealed credits. Touch the Nitrokey when it flashes.", file=sys.stderr, flush=True
+                    )
                 for cohort, ledger, token, hop_id, channel in zip(
                     cohorts, ledgers, wallet.take_pair(now), hop_ids, channel_pair, strict=True
                 ):
                     identity = mldsa.MLDSA65PrivateKey.generate()
-                    carrier = x25519.X25519PrivateKey.generate().public_key().public_bytes_raw()
+                    private = x25519.X25519PrivateKey.generate()
+                    carrier = private.public_key().public_bytes_raw()
                     client_exporter, server_exporter = map(bytes.fromhex, channel)
                     proof = identity.sign(binding_message(cohort, token, hop_id, client_exporter, carrier))
-                    admit(
+                    expires = admit(
                         cohort,
                         ledger,
                         token,
@@ -104,21 +139,25 @@ def main():
                     )
                     carrier_keys.add(carrier)
                     exporters.add(server_exporter)
-    expected = PAIRS_PER_BATCH * len(ROLES)
+                    if index == 0:
+                        first_carriers.append(private)
+                        first_expiries.append(expires)
+    expected = count * len(ROLES)
     if any(len(values) != expected for values in (session_keys, carrier_keys, exporters)):
         raise RuntimeError("lab reused a session key or channel")
-    print(
-        json.dumps(
-            dict(
-                verified_redemptions=expected,
-                fresh_tls_identities=len(session_keys),
-                fresh_carrier_keys=len(carrier_keys),
-                hardware="mocked",
-                transport="pinned loopback TLS 1.3; no live tunnel",
-                unique_tls_exporters=len(exporters),
-            )
-        )
+    result = dict(
+        verified_redemptions=expected,
+        fresh_tls_identities=len(session_keys),
+        fresh_carrier_keys=len(carrier_keys),
+        hardware="physical Nitrokey" if physical else "mocked",
+        transport="pinned loopback TLS 1.3",
+        unique_tls_exporters=len(exporters),
     )
+    if args.wireguard:
+        from wireguard_lab import run_wireguard
+
+        result["wireguard"] = run_wireguard(first_carriers, first_expiries, now, servers[1])
+    print(json.dumps(result))
 
 
 if __name__ == "__main__":
