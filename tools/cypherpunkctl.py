@@ -1955,22 +1955,12 @@ def emit(args, message, **data):
 # (keyguard.pinentry runs systemd-ask-password --id=cypherpunk-vpn:fido2-pin).
 ASK_DIR = Path("/run/systemd/ask-password")
 PIN_REQUEST_ID = "cypherpunk-vpn:fido2-pin"
+SERVICE_STATE = Path("/etc/cypherpunk-vpn/enrolled")
 
 
 def pin_pending(ask_dir=None):
     """Whether the VPN service is waiting for its Nitrokey PIN right now."""
-    d = ASK_DIR if ask_dir is None else ask_dir
-    try:
-        files = sorted(d.glob("ask.*"))
-    except OSError:
-        return False
-    for f in files:
-        try:
-            if "Id=" + PIN_REQUEST_ID in f.read_text(errors="replace").splitlines():
-                return True
-        except OSError:
-            continue
-    return False
+    return pending_pin_request(ask_dir) is not None
 
 
 def service_active():
@@ -2010,8 +2000,11 @@ def pending_pin_request(ask_dir=None):
             continue
         if fields.get("Id") != PIN_REQUEST_ID or not fields.get("Socket"):
             continue
-        not_after = int(fields.get("NotAfter", "0") or 0)
-        if not_after and not_after < now_us:
+        try:
+            not_after = int(fields.get("NotAfter", "0") or 0)
+        except ValueError:
+            continue
+        if not_after and not_after <= now_us:
             continue
         return Path(fields["Socket"]), f
     return None
@@ -2075,7 +2068,7 @@ def recently_supervising(state):
 
 def status_for_display(state):
     """Prefer a live PIN request over status left by an earlier supervisor."""
-    if pin_pending():
+    if state == SERVICE_STATE and pin_pending():
         return dict(state="waiting for the Nitrokey PIN", next="sudo cypherpunk unlock")
     status = read_status(state) or dict(state="not running")
     if status.get("state") == "supervising" and not recently_supervising(state):
@@ -2347,7 +2340,7 @@ def build_parser():
     p.add_argument(
         "--state",
         type=Path,
-        default=Path("/etc/cypherpunk-vpn/enrolled"),
+        default=SERVICE_STATE,
         help="enrollment directory (root-owned, mode 0700)",
     )
     p.add_argument(

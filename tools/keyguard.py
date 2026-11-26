@@ -72,6 +72,8 @@ def atomic(path, data):
 
 
 ASK_PASSWORD = "/usr/bin/systemd-ask-password"
+SERVICE_PIN_TIMEOUT_SECONDS = 300
+ASSERTION_TIMEOUT_SECONDS = 90
 PINENTRY = "/usr/bin/pinentry-gnome3"
 PIN_PROMPT = "Cypherpunk VPN: type your Nitrokey FIDO2 PIN (hidden), then press Enter. Touch the key when it flashes."
 _PROMPT_CALLER = contextvars.ContextVar("cypherpunk_authenticated_prompt_caller", default=None)
@@ -176,6 +178,16 @@ def terminal_pinentry():
     return value
 
 
+def uses_systemd_pin_agent():
+    """Whether a service can fall back to a systemd password request."""
+    return (
+        _PROMPT_CALLER.get() is None
+        and not sys.stdin.isatty()
+        and bool(os.environ.get("INVOCATION_ID"))
+        and Path(ASK_PASSWORD).exists()
+    )
+
+
 def _ask_pin():
     """PIN source, in order: a desktop dialog (pinentry-gnome3) on the session of the
     person at this keyboard, also under sudo; a terminal (no-echo prompt with a
@@ -186,8 +198,6 @@ def _ask_pin():
 
     Desktop apps also run inside systemd scopes (INVOCATION_ID is set there), so
     the desktop check must come before the service check."""
-    import sys
-
     session = desktop_session()
     if session and Path(PINENTRY).exists():
         try:
@@ -198,19 +208,19 @@ def _ask_pin():
         raise RuntimeError("trusted desktop prompt unavailable; use the local terminal unlock command")
     if sys.stdin.isatty():
         return terminal_pinentry()
-    if os.environ.get("INVOCATION_ID") and Path(ASK_PASSWORD).exists():
+    if uses_systemd_pin_agent():
         # No --keyname/--accept-cached: the PIN is never cached in the kernel keyring.
         r = subprocess.run(
             [
                 ASK_PASSWORD,
-                "--timeout=300",
+                f"--timeout={SERVICE_PIN_TIMEOUT_SECONDS}",
                 "--id=cypherpunk-vpn:fido2-pin",
                 "--icon=security-high",
                 "--echo=no",
                 PIN_PROMPT,
             ],
             capture_output=True,
-            timeout=330,
+            timeout=SERVICE_PIN_TIMEOUT_SECONDS + 30,
         )
         value = r.stdout[:-1] if r.stdout.endswith(b"\n") else r.stdout
         if r.returncode or not value:
@@ -601,12 +611,14 @@ def hardware_assertion(vault, message=None, salt2=None):
                 "hmacGetSecret": dict(salt1=unb64(meta["salt"]), **({} if salt2 is None else {"salt2": salt2}))
             },
         )
-        if _PROMPT_CANCEL.get() is None:
-            response = c.get_assertion(replace(options.public_key, timeout=90000)).get_response(0)
-        else:
-            response = c.get_assertion(
-                replace(options.public_key, timeout=90000), event=_PROMPT_CANCEL.get()
-            ).get_response(0)
+        # python-fido2 starts this timer before invoking the PIN callback. Include
+        # the service agent's wait so a still-visible prompt can lead to a touch.
+        timeout = ASSERTION_TIMEOUT_SECONDS
+        if uses_systemd_pin_agent():
+            timeout += SERVICE_PIN_TIMEOUT_SECONDS
+        response = c.get_assertion(
+            replace(options.public_key, timeout=timeout * 1000), event=_PROMPT_CANCEL.get()
+        ).get_response(0)
         s.authenticate_complete(state, [credential], response)
         assertion = dict(
             authenticator_data=b64(bytes(response.response.authenticator_data)),

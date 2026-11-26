@@ -23,6 +23,17 @@ ASK = "[Ask]\nPID=1234\nSocket=/run/systemd/ask-password/sck.1\nAcceptCached=0\n
 
 
 class PinPendingTests(unittest.TestCase):
+    def test_an_expired_or_malformed_request_is_not_pending(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            ask = ASK.format(id=cypherpunkctl.PIN_REQUEST_ID)
+            (d / "ask.expired").write_text(ask.replace("NotAfter=0", "NotAfter=1"))
+            (d / "ask.malformed").write_text(ask.replace("NotAfter=0", "NotAfter=invalid"))
+            (d / "ask.no-socket").write_text(ask.replace("Socket=/run/systemd/ask-password/sck.1\n", ""))
+            self.assertFalse(cypherpunkctl.pin_pending(d))
+            (d / "ask.valid").write_text(ask)
+            self.assertTrue(cypherpunkctl.pin_pending(d))
+
     def test_only_the_services_pin_request_counts(self):
         with tempfile.TemporaryDirectory() as d:
             d = Path(d)
@@ -95,16 +106,22 @@ class StatusWordingTests(unittest.TestCase):
             ask.mkdir()
             (ask / "ask.vpn").write_text(ASK.format(id="cypherpunk-vpn:fido2-pin"))
             code = (
-                "import sys, runpy; from pathlib import Path\n"
+                "import sys; from pathlib import Path\n"
                 "sys.path.insert(0, %r)\n"
                 "import cypherpunkctl; cypherpunkctl.ASK_DIR = Path(%r)\n"
+                "cypherpunkctl.SERVICE_STATE = Path(%r)\n"
                 "cypherpunkctl.runtime_dir = lambda state, create=True: Path(%r)\n"
                 "sys.argv = ['cypherpunkctl', '--json', '--state', %r, 'status']\n"
                 "cypherpunkctl.main()\n"
-            ) % (str(CTL.parent), str(ask), str(d / "rt"), str(d / "state"))
+            ) % (str(CTL.parent), str(ask), str(d / "state"), str(d / "rt"), str(d / "state"))
             r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=60)
             status = json.loads(r.stdout.strip().splitlines()[-1])["status"]
             self.assertEqual(status, {"state": "waiting for the Nitrokey PIN", "next": "sudo cypherpunk unlock"})
+            with (
+                mock.patch.object(cypherpunkctl, "ASK_DIR", ask),
+                mock.patch.object(cypherpunkctl, "read_status", return_value=None),
+            ):
+                self.assertEqual(cypherpunkctl.status_for_display(d / "other"), {"state": "not running"})
             (ask / "ask.vpn").unlink()
             r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=60)
             self.assertEqual(json.loads(r.stdout.strip().splitlines()[-1])["status"], {"state": "not running"})
@@ -216,11 +233,12 @@ class AnswerTests(unittest.TestCase):
                 "import sys; from pathlib import Path\n"
                 "sys.path.insert(0, %r)\n"
                 "import cypherpunkctl; cypherpunkctl.ASK_DIR = Path(%r)\n"
+                "cypherpunkctl.SERVICE_STATE = Path(%r)\n"
                 "cypherpunkctl.runtime_dir = lambda state, create=True: Path(%r)\n"
                 "cypherpunkctl.read_private = lambda p, *a: Path(p).read_bytes()\n"
                 "sys.argv = ['cypherpunkctl', '--json', '--state', %r, 'status']\n"
                 "cypherpunkctl.main()\n"
-            ) % (str(CTL.parent), str(ask), str(rt), str(d / "state"))
+            ) % (str(CTL.parent), str(ask), str(d / "state"), str(rt), str(d / "state"))
             run = lambda: json.loads(  # noqa: E731
                 subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=60)
                 .stdout.strip()

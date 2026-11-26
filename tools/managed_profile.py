@@ -25,7 +25,7 @@ from cryptography.hazmat.primitives.asymmetric import ec, ed25519, x25519, mldsa
 MLDSA65_PUBLIC = 1952
 
 from provision import put, RATE_BYTES, RATE_PACKETS
-from keyguard import read_private
+from keyguard import ASSERTION_TIMEOUT_SECONDS, SERVICE_PIN_TIMEOUT_SECONDS, read_private
 
 
 def canonical(v):
@@ -2278,11 +2278,11 @@ def sign_session(config, root, carry=(), runner=None):
         with os.fdopen(write_end, "wb") as w:
             w.write(json.dumps(request).encode())
         try:
-            out, _ = p.communicate(timeout=300)
+            out, _ = p.communicate(timeout=SERVICE_PIN_TIMEOUT_SECONDS + ASSERTION_TIMEOUT_SECONDS + 30)
         except subprocess.TimeoutExpired:
             p.kill()
             p.communicate()
-            raise RuntimeError("session not signed: no touch within 5 minutes") from None
+            raise RuntimeError("session not signed: Nitrokey authorization timed out") from None
         r = subprocess.CompletedProcess(p.args, p.returncode, out, b"")
         if r.returncode != 0:
             try:

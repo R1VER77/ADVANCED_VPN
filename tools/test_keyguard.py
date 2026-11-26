@@ -279,6 +279,37 @@ class PinDialogTests(unittest.TestCase):
         self.assertEqual(calls[0][1]["env"]["DISPLAY"], ":0")
 
 
+class HardwareAssertionTimeoutTests(unittest.TestCase):
+    def test_service_assertion_allows_time_for_the_pin_and_touch(self):
+        from types import SimpleNamespace
+        from unittest import mock
+
+        import keyguard
+        from fido2.webauthn import PublicKeyCredentialRequestOptions
+
+        options = PublicKeyCredentialRequestOptions(challenge=b"challenge")
+        device = mock.Mock()
+        client = mock.Mock()
+        client.get_assertion.side_effect = RuntimeError("stop at assertion")
+        with (
+            mock.patch.object(
+                keyguard,
+                "read_private",
+                return_value=b'{"schema":1,"rp":"cypherpunk-vpn.local","credential":"","salt":""}',
+            ),
+            mock.patch("fido2.webauthn.AttestedCredentialData"),
+            mock.patch("fido2.server.Fido2Server") as server,
+            mock.patch.object(keyguard, "client", return_value=(device, client)),
+            mock.patch.object(keyguard, "uses_systemd_pin_agent", side_effect=[True, False]),
+        ):
+            server.return_value.authenticate_begin.return_value = SimpleNamespace(public_key=options), None
+            for timeout in (390000, 90000):
+                with self.assertRaisesRegex(RuntimeError, "stop at assertion"):
+                    keyguard.hardware_assertion(Path("vault"))
+                self.assertEqual(client.get_assertion.call_args.args[0].timeout, timeout)
+        self.assertEqual(device.close.call_count, 2)
+
+
 class OnePinPerCommand(unittest.TestCase):
     """Owner, 22 Nov 2026: an operation needing the key more than once asks for the PIN once
     (a chain build's second prompt failed after the first was answered). Held in memory

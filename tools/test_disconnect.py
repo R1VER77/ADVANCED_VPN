@@ -121,9 +121,11 @@ class DisconnectActionTests(unittest.TestCase):
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("disconnect", seen)
 
-    def test_a_refused_controller_is_fine_when_the_service_stopped(self):
-        # A user without root: polkit stopped the service, the controller cannot run.
+    def test_stopping_the_service_does_not_confirm_lockdown_policy(self):
+        # Polkit may stop the unit, but applying the Lockdown setting needs root.
         refusing = 'echo \'{"ok": false, "error": "RuntimeError", "message": "no root"}\'; exit 1'
-        r, _ = self.run_cypherpunk("exit 0", refusing)
-        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertIn("Disconnected", r.stdout)
+        r, seen = self.run_cypherpunk("exit 0", refusing)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("disconnect", seen)
+        self.assertIn("VPN service stopped", r.stdout)
+        self.assertIn("sudo cypherpunk disconnect", r.stdout)
