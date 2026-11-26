@@ -193,6 +193,69 @@ def main():
         results["phases"]["whole_device_guard_restored"] = probes(False)
         command("ip", "netns", "exec", NAMES[0], "/usr/sbin/nft", "delete", "table", "inet", "cypherpunk_vpn")
         results["phases"]["positive_control_after_removal"] = probes(True)
+
+        # With the real upstream rule in place, a direct fallback route must
+        # never deliver either admission TCP or carrier UDP to the entry.
+        for protocol in ("tcp", "udp"):
+            command(
+                "ip",
+                "netns",
+                "exec",
+                NAMES[1],
+                "/usr/sbin/nft",
+                "add",
+                "rule",
+                "inet",
+                "guard_witness",
+                "input",
+                protocol,
+                "dport",
+                "41194",
+                "counter",
+                "comment",
+                json.dumps(protocol),
+            )
+
+        def upstream_attempts(expected):
+            counts = {}
+            for protocol, kind in (("tcp", "SOCK_STREAM"), ("udp", "SOCK_DGRAM")):
+                before = witnessed(protocol)
+                command(
+                    "ip",
+                    "netns",
+                    "exec",
+                    NAMES[0],
+                    "/usr/bin/python3",
+                    "-c",
+                    "import socket, sys; s=socket.socket(socket.AF_INET, getattr(socket, sys.argv[1])); "
+                    "s.settimeout(.3); dst=('192.0.2.2',41194); "
+                    "s.connect_ex(dst) if sys.argv[1]=='SOCK_STREAM' else s.sendto(b'lab',dst)",
+                    kind,
+                    check=False,
+                )
+                counts[protocol] = witnessed(protocol) - before
+                if (counts[protocol] > 0) != expected:
+                    raise RuntimeError(f"unexpected upstream {protocol} witness count {counts[protocol]}")
+            return counts
+
+        with mock.patch.object(
+            cypherpunkctl,
+            "nft",
+            side_effect=lambda body: command(
+                "ip",
+                "netns",
+                "exec",
+                NAMES[0],
+                "/usr/sbin/nft",
+                "-f",
+                "-",
+                input=body,
+            ),
+        ):
+            cypherpunkctl.upstream_firewall("192.0.2.2:41194", "rwan")
+            results["phases"]["configured_upstream_only"] = upstream_attempts(True)
+            cypherpunkctl.upstream_firewall("192.0.2.2:41194", "upstream-absent")
+            results["phases"]["missing_upstream_rejects_direct_fallback"] = upstream_attempts(False)
         results["status"] = "passed"
     except BaseException:
         results["status"] = "failed"

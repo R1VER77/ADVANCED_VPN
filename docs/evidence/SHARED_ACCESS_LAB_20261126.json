@@ -1,0 +1,154 @@
+{
+  "schema": 1,
+  "scope": "Shared admission lab checks and retrospective scoring of two same-day local timing-margin captures",
+  "admission_lab": {
+    "verified_blind_redemptions": 8,
+    "fresh_tls_authentication_keys": 8,
+    "fresh_carrier_keys": 8,
+    "unique_tls_1_3_exporters": 8,
+    "hardware": "mocked",
+    "live_vpn_route": false
+  },
+  "upstream_guard_fixture": {
+    "scope": "existing per-endpoint IPv4 nftables policy in isolated namespaces",
+    "configured_entry_packets": {
+      "tcp": 1,
+      "udp": 1
+    },
+    "packets_when_configured_upstream_absent": {
+      "tcp": 0,
+      "udp": 0
+    }
+  },
+  "browser_fixture": {
+    "same_profile_cookie_matched": true,
+    "separate_profile_cookie_differs": true,
+    "browser_settings_match_across_profiles": true
+  },
+  "archived_runs": [
+    {
+      "capture_sha256": "22246d57d32fd65fc51fa40f13036ba162d7e7be79800bc6176a6e3a7149404e",
+      "started": "2026-11-25T09:17:46Z",
+      "seed": 20261125,
+      "attempts": 793,
+      "heldout_matches": 395,
+      "chance": 0.05,
+      "live_fetch_success": 1.0,
+      "p90_latency_seconds": 4.08,
+      "client_up_kbit_per_s": 559.3,
+      "positive_control_top1": 0.9794,
+      "observers": {
+        "timing_sensitivity": {
+          "top1": 0.03291139240506329,
+          "block_top1": [
+            0.044,
+            0.0423,
+            0.025,
+            0.0164,
+            0.0326
+          ]
+        },
+        "prior_timing_sensitivity": {
+          "top1": 0.04810126582278481,
+          "block_top1": [
+            0.0659,
+            0.0423,
+            0.05,
+            0.0328,
+            0.0435
+          ]
+        },
+        "combined_timing_sensitivity": {
+          "top1": 0.027848101265822784,
+          "block_top1": [
+            0.044,
+            0.0141,
+            0.025,
+            0.0164,
+            0.0326
+          ]
+        }
+      }
+    },
+    {
+      "capture_sha256": "bc904c34f9d5dc0242b6a0a5371fbd2112b9f46c5214569632dd733c03ff63b3",
+      "started": "2026-11-25T11:09:38Z",
+      "seed": 20261126,
+      "attempts": 1616,
+      "heldout_matches": 713,
+      "chance": 0.05,
+      "live_fetch_success": 0.9696782178217822,
+      "p90_latency_seconds": 4.18,
+      "client_up_kbit_per_s": 563.5,
+      "positive_control_top1": 0.9665,
+      "observers": {
+        "timing_sensitivity": {
+          "top1": 0.03225806451612903,
+          "block_top1": [
+            0.0538,
+            0.0244,
+            0.0338,
+            0.0213,
+            0.0308
+          ]
+        },
+        "prior_timing_sensitivity": {
+          "top1": 0.04628330995792426,
+          "block_top1": [
+            0.0615,
+            0.061,
+            0.0473,
+            0.0213,
+            0.0385
+          ]
+        },
+        "combined_timing_sensitivity": {
+          "top1": 0.043478260869565216,
+          "block_top1": [
+            0.0692,
+            0.0427,
+            0.0541,
+            0.0213,
+            0.0308
+          ]
+        }
+      }
+    }
+  ],
+  "replication_gate": {
+    "schema": 1,
+    "scope": "timing-margin mix pilot; GCP remains one provider",
+    "trials": 2,
+    "checks": {
+      "three_days": false,
+      "distinct_seeds": true,
+      "gcp_regions": false,
+      "720_requests_each": true,
+      "single_trial_gates": true
+    },
+    "observers": {
+      "timing_sensitivity": {
+        "top1": 0.032490974729241874,
+        "events": 1108,
+        "upper_95": 0.042454136315260405,
+        "each_block_at_most_8_percent": true,
+        "passed": true
+      },
+      "prior_timing_sensitivity": {
+        "top1": 0.04693140794223827,
+        "events": 1108,
+        "upper_95": 0.058531313448590236,
+        "each_block_at_most_8_percent": true,
+        "passed": true
+      },
+      "combined_timing_sensitivity": {
+        "top1": 0.03790613718411552,
+        "events": 1108,
+        "upper_95": 0.04852393132795591,
+        "each_block_at_most_8_percent": true,
+        "passed": true
+      }
+    },
+    "passed": false
+  }
+}

@@ -55,8 +55,13 @@ def timing_sensitivity(arrivals, scores, start, stop, clients, permutations=10_0
             weights[block][truth][guess] += 1 / len(tied)
 
     block_scores = [
-        dict(events=len(block), accuracy=gpa.summary(block, clients)["top1_accuracy"] if block else None)
-        for block in blocks
+        dict(
+            events=len(block),
+            accuracy=gpa.summary(block, clients)["top1_accuracy"] if block else None,
+            top1_hits=sum(matrix[sender][sender] for sender in range(clients)),
+            senders=len({truth for _, truth, _ in block}),
+        )
+        for block, matrix in zip(blocks, weights, strict=True)
     ]
     populated = [(matrix, len(block)) for matrix, block in zip(weights, blocks, strict=True) if block]
     observed_hits = [sum(matrix[sender][sender] for sender in range(clients)) for matrix, _ in populated]
@@ -109,6 +114,7 @@ def score_phase(phase, rows, capture, start, stop, clients, cover_clients=0):
     counts = Counter(client for _, client in training)
     prior_sender = max(sends, key=counts.__getitem__)
     prior = [([prior_sender], client, 0.0) for _, client in test]
+    combined = gpa.attack(sends, test, model, prior={client: counts[client] + 1 for client in sends})
     checkpoints = [split + index * (stop - split) / 5 for index in range(6)]
     checkpoints[-1] = stop
     return dict(
@@ -127,6 +133,8 @@ def score_phase(phase, rows, capture, start, stop, clients, cover_clients=0):
         timing_sensitivity=timing_sensitivity(test, scores, split, stop, clients),
         prior_top1_accuracy=gpa.summary(prior, clients)["top1_accuracy"],
         prior_timing_sensitivity=timing_sensitivity(test, prior, split, stop, clients),
+        combined_top1_accuracy=gpa.summary(combined, clients)["top1_accuracy"],
+        combined_timing_sensitivity=timing_sensitivity(test, combined, split, stop, clients),
     )
 
 
@@ -193,6 +201,9 @@ def main():
         mix=score_phase("mix", mix, capture, mix_start, mix_stop, clients, cover),
         baseline=score_phase("baseline", baseline, capture, baseline_start, baseline_stop, clients, cover),
     )
+    for phase in ("mix", "baseline"):
+        result[phase]["p90_latency_seconds"] = paper[phase]["latency_seconds"]["p90"]
+        result[phase]["client_up_kbit_per_s"] = paper[phase]["client_up_kbit_per_s"]
     if paper.get("profile") == TIMING_MARGIN_PROFILE or args.require_margin:
         checks = margin_checks(paper, result["mix"], result["baseline"])
         result["timing_margin_trial"] = dict(

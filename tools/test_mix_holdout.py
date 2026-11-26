@@ -2,7 +2,9 @@
 
 import unittest
 
+import gpa
 from mix_holdout import align, margin_checks, score_phase, timing_sensitivity
+from mix_qualification import OBSERVERS, qualify
 
 
 class MixHoldoutTests(unittest.TestCase):
@@ -76,3 +78,45 @@ class MixHoldoutTests(unittest.TestCase):
         self.assertFalse(margin_checks(paper, mix, baseline)["fixed_profile"])
         mix["chance"] = 0.1
         self.assertFalse(margin_checks(paper, mix, baseline)["overall_margin"])
+
+    def test_combined_observer_uses_the_training_prior_when_timing_ties(self):
+        sends = {0: [1.0], 1: [1.0]}
+        model = gpa.DelayModel([0.25])
+        self.assertEqual(gpa.attack(sends, [(1.25, 1)], model)[0][0], [0, 1])
+        self.assertEqual(gpa.attack(sends, [(1.25, 1)], model, prior={0: 1, 1: 4})[0][0], [1])
+
+    @staticmethod
+    def trials():
+        return [
+            dict(
+                region=region,
+                report=dict(
+                    capture_sha256=str(day),
+                    timing_margin_trial=dict(seed=day, started=f"2026-11-{day:02}T12:00:00+00:00", passed=True),
+                    mix=dict(
+                        request_count=720,
+                        arrivals=360,
+                        **{
+                            observer: {"time_blocks": [dict(top1_hits=4, events=72) for _ in range(5)]}
+                            for observer in OBSERVERS
+                        },
+                    ),
+                ),
+            )
+            for day, region in enumerate(("us-central1", "europe-west3", "asia-southeast1"), start=1)
+        ]
+
+    def test_qualification_requires_replication_and_every_observer_passes(self):
+        trials = self.trials()
+        self.assertTrue(qualify(trials)["passed"])
+        self.assertFalse(qualify(trials[:1])["passed"])
+        blocks = trials[0]["report"]["mix"]["combined_timing_sensitivity"]["time_blocks"]
+        blocks[0]["top1_hits"] = 7
+        failed = qualify(trials)
+        self.assertTrue(failed["observers"]["timing_sensitivity"]["passed"])
+        self.assertFalse(failed["passed"])
+
+    def test_duplicate_capture_cannot_count_as_independent_evidence(self):
+        trial = self.trials()[0]
+        with self.assertRaisesRegex(ValueError, "duplicate capture"):
+            qualify([trial, trial])

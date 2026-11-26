@@ -4,7 +4,7 @@
 
 - The first hop's network stack always sees the address its packets come from. Encryption cannot change that, and neither can zero-knowledge proofs: Bulletproofs are range proofs and have nothing to say about packet headers.
 - Later hops see only the previous hop's address.
-- The exit sees destinations, but not you.
+- The exit sees destinations and connection timing. A managed-profile exit can also recognize the client credential pinned at enrollment.
 
 ## Hiding your address from the first hop
 
@@ -33,16 +33,16 @@ AWS project on 2026-11-09; OCI's are from its documentation.
 | The server's memory and disk | the hypervisor; disks are encrypted with provider-managed keys | while it runs | Keys and runtime state are in RAM only and nothing about traffic is written to disk. No confidential-computing (SEV-SNP) instance type exists in the project's AWS Region, so memory is not hidden from the provider. |
 | Legal requests | the provider, under its jurisdiction | — | Use providers under different jurisdictions for the entry and the exit. |
 
-So no single provider can tie your address to your destinations, but each can see its
-own hop. That limits what each hop observes; it is not anonymity. The exit's provider knows
-who rents the exit (billing identity, stable credentials) and sees its traffic, so in a
-single-owner deployment exit activity can be tied to the owner. Hiding among other people
-needs shared exits run by independent operators, unlinkable admission and a stated
-collusion model: the mesh's design, not built yet. That is the limit of any VPN on rented
-machines.
+Providers can observe metadata at each hop they host. A provider with visibility at both
+ends can attempt to correlate the traffic. The exit's provider knows who rents the exit
+and can see exit traffic, so a single-owner deployment can link that activity to the
+operator. Shared access needs independent operators, unlinkable admission, and a stated
+collusion model. The [shared-access lab](../../research/shared-access/README.md) tests
+admission components locally. The shipped client still uses managed enrollment.
 
 ## Identity
 
-This is a single-owner system, so every relay already knows the traffic is yours.
-Anonymous credentials (blind tokens) would hide which of your devices connects, not
-your address. They are not needed for one user.
+In the single-owner setup, the relays know their peer configuration. Blind credits could
+remove the persistent device identifier in shared access. The first network operator
+would still see the connection's source address. Websites and applications can also link
+sessions through logins, cookies, and browser fingerprints.

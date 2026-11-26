@@ -42,22 +42,25 @@ class DelayModel:
         return self.density[int(d / self.width * self.bins)]
 
 
-def attack(sends, arrivals, model):
+def attack(sends, arrivals, model, prior=None):
     """`sends`: client -> sorted send times; `arrivals`: [(time, true client)].
-    Returns per-arrival (guess, truth, posterior entropy in bits)."""
+    Returns per-arrival (guess, truth, posterior entropy in bits). A supplied
+    prior gives the observer's relative sender frequencies from training only."""
     out = []
     clients = sorted(sends)
+    weights = dict.fromkeys(clients, 1) if prior is None else prior
     for t, truth in arrivals:
         scores = {}
         for c in clients:
             times = sends[c]
             lo = bisect.bisect_left(times, t - model.width)
             hi = bisect.bisect_right(times, t)
-            scores[c] = sum(model.pdf(t - s) for s in times[lo:hi])
+            scores[c] = weights[c] * sum(model.pdf(t - s) for s in times[lo:hi])
         total = sum(scores.values())
         if total <= 0:
-            # Nothing explains it: every client is equally likely.
-            post = {c: 1 / len(clients) for c in clients}
+            # No discrimination from timing: use only the training frequencies.
+            prior_total = sum(weights.values())
+            post = {c: weights[c] / prior_total for c in clients}
         else:
             post = {c: v / total for c, v in scores.items()}
         best = max(post.values())
