@@ -61,6 +61,5 @@ Run the Tor v3 onion-only shielded testnet checkout and dual-watcher tests (publ
 
 ## Pilot gates still open
 
-- Run the physical Nitrokey pass of `gotatun_shared_lab.py --hardware`.
 - Review the protocol and distributed replay authority, then complete GCP Day 2 (`europe-west3`, 2026-11-27 UTC) and Day 3 (`asia-southeast1`, 2026-11-28 UTC) to complement Day 1 (`docs/evidence/SHARED_ACCESS_GCP_US_20261126.json`) and evaluate `tools/mix_qualification.py`, plus independent-operator validation.
 - Complete a live on-chain Zcash shielded testnet purchase once a second independently operated testnet lightwalletd watcher and funded testnet wallet (`TAZ`) are configured. Keep paid and shared access disabled in the shipped VPN until the applicable gates pass.

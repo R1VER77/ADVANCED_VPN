@@ -553,8 +553,6 @@ def main():
     if {link["ifname"] for link in json.loads(cmd("ip", "-j", "link").stdout)} != {"lo"}:
         raise RuntimeError("fresh network namespace required")
     os.umask(0o077)
-    cmd("mount", "--make-rprivate", "/")
-    cmd("mount", "-t", "tmpfs", "tmpfs", "/run")
 
     now = int(time.time())
     epoch = now // EPOCH_SECONDS
@@ -578,6 +576,10 @@ def main():
                 if physical:
                     print("Opening sealed credit pair with Nitrokey (touch)...", file=sys.stderr, flush=True)
                 opened_pairs.append(wallet.take_pair(now))
+
+        # Isolate /run/netns after hardware PIN/touch so desktop pinentry can reach /run/user/<uid>.
+        cmd("mount", "--make-rprivate", "/")
+        cmd("mount", "-t", "tmpfs", "tmpfs", "/run")
 
         e_cert, e_key, e_hop = make_tls(root, "entry")
         x_cert, x_key, x_hop = make_tls(root, "exit")

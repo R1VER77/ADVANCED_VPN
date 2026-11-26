@@ -49,6 +49,49 @@
     },
     "aggregate_logs_hygienic": true
   },
+  "two_hop_gotatun_lab_physical_nitrokey": {
+    "hardware": "physical Nitrokey",
+    "carrier": "two-hop schema-3 GotaTun (DAITA)",
+    "disposable_credential_enrolled": true,
+    "batch_sealed_and_reopened": true,
+    "before_install": {
+      "dns": false,
+      "https": false
+    },
+    "blocked_on_upstream_loss": true,
+    "after_rollback": {
+      "dns": false,
+      "https": false
+    },
+    "rolled_back_partial_peer": true,
+    "both_gotatun_peers": {
+      "dns": true,
+      "https": true
+    },
+    "distinct_exporters": true,
+    "distinct_psks": true,
+    "ipv6_blocked": true,
+    "direct_dns_blocked": true,
+    "after_disconnect": {
+      "dns": false,
+      "https": false
+    },
+    "direct_fallback_rx_packets": 0,
+    "grant_expiry_evicted_peer": true,
+    "entry_metrics": {
+      "active_leases": 0,
+      "admitted": 2,
+      "rejected": 0,
+      "disconnected": 2
+    },
+    "exit_metrics": {
+      "active_leases": 0,
+      "admitted": 1,
+      "rejected": 1,
+      "disconnected": 1
+    },
+    "aggregate_logs_hygienic": true
+  },
   "cli_and_regressions": {
     "rust_tests_passed": 202,
     "rust_clippy_clean": true,
