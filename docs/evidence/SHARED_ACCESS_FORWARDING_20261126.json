@@ -49,8 +49,16 @@
     }
   },
   "physical_wallet": {
-    "passed": false,
-    "stage": "disposable enrollment",
-    "result": "CTAP USER_ACTION_TIMEOUT"
+    "passed": true,
+    "initial_failure": "CTAP USER_ACTION_TIMEOUT during disposable enrollment",
+    "hardware": "physical Nitrokey",
+    "disposable_credential_enrolled": true,
+    "batch_sealed_and_reopened": true,
+    "verified_redemptions": 2,
+    "unique_tls_exporters": 2,
+    "nested_wireguard_dns_and_https_verified": true,
+    "partial_peer_install_rolled_back": true,
+    "dns_and_https_blocked_after_simulated_grant_expiry": true,
+    "issuer_sjcl_version": "1.0.9"
   }
 }
