@@ -780,7 +780,7 @@ def front_binary(lab):
     return path
 
 
-def prepare_front(profile, key_handles, uid, gid, lab=False):
+def prepare_front(profile, key_handles, uid, gid, lab=False, version=None):
     """The I2P router's RAM directory (owned by its user): router and tunnel files, and on
     the entry its destination's private keys. Lab only: $CPVPN_LAB_I2P names a private test
     network (JSON: netid, reseed zip, this node's address)."""
@@ -797,15 +797,15 @@ def prepare_front(profile, key_handles, uid, gid, lab=False):
     )
     front = profile["front"]
     if profile["role"] == "client":
-        conf = i2p.router_conf(d, verbose=lab, testnet=testnet)
-        tunnels = i2p.tunnels_conf(front)
+        conf = i2p.router_conf(d, verbose=lab, testnet=testnet, version=version)
+        tunnels = i2p.tunnels_conf(front, version=version)
     else:
         host = profile["network"]["relay_endpoint"].rsplit(":", 1)[0]
-        conf = i2p.router_conf(d, host=host, port=front["router_port"], verbose=lab, testnet=testnet)
+        conf = i2p.router_conf(d, host=host, port=front["router_port"], verbose=lab, testnet=testnet, version=version)
         keys = fd_bytes(key_handles["i2p"])
         i2p.private_identity(keys)
         owned_public(d / "front.dat", keys, uid, gid)
-        tunnels = i2p.tunnels_conf(front, d / "front.dat", d)
+        tunnels = i2p.tunnels_conf(front, d / "front.dat", d, version=version)
     owned_public(d / "i2pd.conf", conf.encode(), uid, gid)
     owned_public(d / "tunnels.conf", tunnels.encode(), uid, gid)
     return d

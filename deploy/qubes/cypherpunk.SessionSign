@@ -1,0 +1,7 @@
+#!/bin/sh
+# Qubes OS qrexec RPC service for hardware-bound Cypherpunk VPN session signing.
+# Install inside the vault VM at /etc/qubes-rpc/cypherpunk.SessionSign (mode 0755).
+# Reads one JSON request on stdin, runs the hardened short-lived session_signer.py
+# with the FIDO2 hardware key attached to this vault VM, and writes one JSON reply.
+set -eu
+exec /opt/cypherpunk-vpn/venv/bin/python /opt/cypherpunk-vpn/tools/session_signer.py

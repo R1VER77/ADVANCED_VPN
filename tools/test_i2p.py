@@ -99,6 +99,26 @@ class ConfigTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             i2p.front_firewall("192.0.2.66; flush ruleset")
 
+    def test_hybrid_pq_ntcp2_and_leaseset_adoption_by_version(self):
+        front = dict(kind="i2p", destination="a" * 52 + ".b32.i2p", hops=2)
+        # 2.56: classical baseline; require_pq fails closed.
+        self.assertNotIn("version = 4", i2p.router_conf(None, version=(2, 56, 0)))
+        self.assertIn("i2cp.leaseSetEncType = 4\n", i2p.tunnels_conf(front, version=(2, 56, 0)))
+        with self.assertRaises(ValueError):
+            i2p.router_conf(None, version=(2, 56, 0), require_pq=True)
+        with self.assertRaises(ValueError):
+            i2p.tunnels_conf(front, version=(2, 56, 0), require_pq=True)
+        # 2.58: hybrid ML-KEM LeaseSet enabled; NTCP2 v4 still requires 2.59.
+        self.assertNotIn("version = 4", i2p.router_conf(None, version=(2, 58, 0)))
+        self.assertIn("i2cp.leaseSetEncType = 6,4\n", i2p.tunnels_conf(front, version=(2, 58, 0)))
+        self.assertIn("i2cp.leaseSetEncType = 6\n", i2p.tunnels_conf(front, version=(2, 58, 0), require_pq=True))
+        with self.assertRaises(ValueError):
+            i2p.router_conf(None, version=(2, 58, 0), require_pq=True)
+        # 2.59+: both hybrid ML-KEM NTCP2 (version = 4) and ML-KEM LeaseSet (type 6) enabled.
+        conf59 = i2p.router_conf(None, version=(2, 59, 0), require_pq=True)
+        self.assertIn("[ntcp2]\nenabled = true\npublished = false\nversion = 4\n", conf59)
+        self.assertIn("i2cp.leaseSetEncType = 6\n", i2p.tunnels_conf(front, version=(2, 59, 0), require_pq=True))
+
 
 class ProfileTests(unittest.TestCase):
     @classmethod

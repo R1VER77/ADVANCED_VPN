@@ -1,0 +1,4 @@
+# Qubes OS RPC policy (install in dom0 at /etc/qubes/policy.d/50-cypherpunk-vpn.policy).
+# Prompts dom0 user confirmation on every session-signing call from the VPN VM to the vault VM.
+cypherpunk.SessionSign * sys-vpn vault ask default_target=vault
+cypherpunk.SessionSign * @anyvm @anyvm deny

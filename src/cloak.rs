@@ -283,7 +283,11 @@ pub fn transport() -> Arc<TransportConfig> {
 /// at once, on quinn's timing instead of the grid (docs/evidence/KERNEL_PACING.json,
 /// counters). A window above `u32::MAX` also turns quinn's own pacing off.
 fn clocked_transport() -> Arc<TransportConfig> {
-    transport_with(Arc::new(FixedWindow))
+    // On a clocked stream, full-size datagrams leave at 50-16,000 pps in both directions
+    // and piggyback QUIC ACKs automatically. Raising the standalone ACK threshold suppresses
+    // unpadded ACK-only upstream bursts (WF leak vector), while shortening max_ack_delay to
+    // 25 ms speeds up loss recovery without hurting wire flatness.
+    transport_with_ack(Arc::new(FixedWindow), 256, Duration::from_millis(25))
 }
 
 /// A congestion "controller" that never limits: the wire clock does.
@@ -329,9 +333,17 @@ impl quinn::congestion::ControllerFactory for FixedWindow {
 fn transport_with(
     cc: Arc<dyn quinn::congestion::ControllerFactory + Send + Sync>,
 ) -> Arc<TransportConfig> {
+    transport_with_ack(cc, 64, Duration::from_millis(100))
+}
+
+fn transport_with_ack(
+    cc: Arc<dyn quinn::congestion::ControllerFactory + Send + Sync>,
+    ack_threshold: u32,
+    max_ack_delay: Duration,
+) -> Arc<TransportConfig> {
     let mut ack = quinn::AckFrequencyConfig::default();
-    ack.ack_eliciting_threshold(VarInt::from_u32(64))
-        .max_ack_delay(Some(Duration::from_millis(100)));
+    ack.ack_eliciting_threshold(VarInt::from_u32(ack_threshold))
+        .max_ack_delay(Some(max_ack_delay));
     let mut t = TransportConfig::default();
     t.max_concurrent_bidi_streams(VarInt::from_u32(100))
         .max_concurrent_uni_streams(VarInt::from_u32(4))
@@ -843,8 +855,9 @@ pub async fn serve_clocked(
                 // per slot (a reply, or a decoy).
                 Some(sc) => tokio::spawn(async move {
                     let queue: Arc<Mutex<std::collections::VecDeque<Bytes>>> = Arc::default();
-                    // Bounded: at most a second of the carrier's own rate waits for the clock.
-                    let cap = (sc.clock.packets_per_second as usize).max(64);
+                    // Bounded to ~150 ms of stream capacity to avoid stale-packet bufferbloat
+                    // while absorbing short browser/QUIC bursts.
+                    let cap = wire_clock_queue_cap(sc.clock.packets_per_second);
                     let (q_in, s_in, c_in) = (queue.clone(), stats_down.clone(), conn_down.clone());
                     let receive = async move {
                         let mut buf = vec![0u8; 2048];
@@ -867,7 +880,11 @@ pub async fn serve_clocked(
                         let (step, ahead) =
                             (sc.clock.step_ns(), sc.clock.lookahead.as_nanos() as u64);
                         let mut grid = None;
+                        let mut timer =
+                            tokio::time::interval(wire_clock_wake_interval(sc.clock.lookahead));
+                        timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
                         loop {
+                            timer.tick().await;
                             feed_step(
                                 &conn_down,
                                 step,
@@ -877,7 +894,6 @@ pub async fn serve_clocked(
                                 &sc.slots,
                                 &stats_down,
                             );
-                            tokio::time::sleep(Duration::from_millis(2)).await;
                         }
                     };
                     tokio::join!(receive, tick);
@@ -1132,8 +1148,8 @@ async fn connect_clocked(
             stats.clone(),
             queue.clone(),
         );
-        // Bounded: at most a second of the carrier's own rate waits for the clock.
-        let cap = clock.map_or(0, |c| c.packets_per_second as usize).max(64);
+        // Bounded to ~150 ms of stream capacity to eliminate 1-second FIFO bufferbloat.
+        let cap = clock.map_or(0, |c| wire_clock_queue_cap(c.packets_per_second));
         tokio::spawn(async move {
             let mut buf = vec![0u8; 2048];
             loop {
@@ -1190,7 +1206,9 @@ async fn connect_clocked(
         } else if let Ok(Ok(c)) =
             tokio::time::timeout(QUIC_FALLBACK_TIMEOUT, endpoint.connect(remote, &name)?).await
         {
-            if session(&c, &key, &udp, wireguard, &current, &held, &stats)
+            let clock_q =
+                clock.map(|cl| (queue.as_ref(), wire_clock_queue_cap(cl.packets_per_second)));
+            if session(&c, &key, &udp, wireguard, &current, &held, clock_q, &stats)
                 .await
                 .is_err()
             {
@@ -1236,16 +1254,22 @@ pub struct WireClock {
 }
 
 impl WireClock {
-    /// From `CPVPN_WIRE_CLOCK_PPS` (the carrier's packets per second) and
-    /// `CPVPN_WIRE_CLOCK_MS` (look-ahead, default 30 ms); `None` when unset or invalid.
+    /// From `CPVPN_WIRE_CLOCK_PPS` (the carrier's packets per second),
+    /// `CPVPN_WIRE_CLOCK_MS` (look-ahead, default 30 ms), and optional
+    /// `CPVPN_WIRE_CLOCK_HEADROOM` (default 1.05, range 1.01–1.25); `None` when unset or invalid.
     pub fn from_env() -> Option<Self> {
         let pps: f64 = std::env::var("CPVPN_WIRE_CLOCK_PPS").ok()?.parse().ok()?;
         let ms: u64 = std::env::var("CPVPN_WIRE_CLOCK_MS")
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(30);
+        let headroom: f64 = std::env::var("CPVPN_WIRE_CLOCK_HEADROOM")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .filter(|v: &f64| v.is_finite() && (1.01..=1.25).contains(v))
+            .unwrap_or(WIRE_CLOCK_HEADROOM);
         (pps.is_finite() && pps > 0.0 && (1..=500).contains(&ms)).then_some(Self {
-            packets_per_second: pps * WIRE_CLOCK_HEADROOM,
+            packets_per_second: pps * headroom,
             lookahead: Duration::from_millis(ms),
         })
     }
@@ -1255,9 +1279,20 @@ impl WireClock {
     }
 }
 
-/// The wire clock runs this much faster than the carrier, so WireGuard's queue drains
-/// and catch-up bursts are absorbed; spare slots carry decoys.
-const WIRE_CLOCK_HEADROOM: f64 = 1.02;
+/// The wire clock runs 5% faster than the carrier so bursts drain 2.5x faster than 1.02
+/// while keeping the wire 100% constant-rate (spare slots carry identical full-size decoys).
+const WIRE_CLOCK_HEADROOM: f64 = 1.05;
+
+/// Feeder queue budget in seconds (~150 ms) to absorb short bursts without 1 s bufferbloat.
+const WIRE_CLOCK_QUEUE_SECONDS: f64 = 0.15;
+
+fn wire_clock_queue_cap(packets_per_second: f64) -> usize {
+    ((packets_per_second * WIRE_CLOCK_QUEUE_SECONDS).ceil() as usize).max(64)
+}
+
+fn wire_clock_wake_interval(lookahead: Duration) -> Duration {
+    (lookahead / 4).clamp(Duration::from_micros(500), Duration::from_millis(2))
+}
 
 /// A decoy: a full-size datagram whose first byte is no WireGuard message type, so the
 /// first hop's WireGuard drops it silently (`try_into_wg`); full size so QUIC never packs
@@ -1396,6 +1431,16 @@ impl quinn::AsyncUdpSocket for PacedSocket {
                 }
                 None => self.stats.clock.record(now, |b| b.unslotted += 1),
             }
+        } else if let Some(&at) = self
+            .slots
+            .lock()
+            .unwrap()
+            .get(&t.destination)
+            .and_then(|q| q.front())
+        {
+            // Align rare standalone control/ACK packets during an active clocked session to
+            // the grid's next slot so they cannot fire at arrival-driven microsecond offsets.
+            return self.send_at(t, at);
         }
         self.inner.try_send(t)
     }
@@ -1492,7 +1537,10 @@ async fn feed(
 ) {
     let (step, ahead) = (clock.step_ns(), clock.lookahead.as_nanos() as u64);
     let mut grid: Option<(u64, u64)> = None; // (t0, next k) of the current session
+    let mut timer = tokio::time::interval(wire_clock_wake_interval(clock.lookahead));
+    timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
+        timer.tick().await;
         let sink = current.lock().unwrap().clone();
         match sink {
             Some(ClientSink::Quic(c)) => {
@@ -1505,7 +1553,6 @@ async fn feed(
                 slots.lock().unwrap().clear();
             }
         }
-        tokio::time::sleep(Duration::from_millis(2)).await;
     }
 }
 
@@ -1578,6 +1625,7 @@ impl Held {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn session(
     c: &Connection,
     key: &[u8; TOKEN_LEN],
@@ -1585,6 +1633,7 @@ async fn session(
     wireguard: SocketAddr,
     current: &Mutex<Option<ClientSink>>,
     held: &Mutex<Held>,
+    clock_queue: Option<(&Mutex<std::collections::VecDeque<Bytes>>, usize)>,
     stats: &Stats,
 ) -> Result<()> {
     ensure!(
@@ -1603,11 +1652,22 @@ async fn session(
     tokio::time::timeout(AUTH_WINDOW, confirm_server(c, key))
         .await
         .context("server key confirmation timed out")??;
-    // The proof stream is reliable and ordered before nothing else: the server reads
-    // datagrams only once it has the proof, and keeps early ones in its receive buffer.
-    for d in held.lock().unwrap().take() {
-        if c.send_datagram(d).is_ok() {
-            add(&stats.sent);
+    // When the wire clock is active, enqueue held datagrams for the feeder instead of sending
+    // them directly so session start/reconnect never emits an unslotted burst on the wire.
+    if let Some((queue, cap)) = clock_queue {
+        let mut q = queue.lock().unwrap();
+        for d in held.lock().unwrap().take() {
+            if q.len() >= cap {
+                q.pop_front();
+                add(&stats.dropped);
+            }
+            q.push_back(d);
+        }
+    } else {
+        for d in held.lock().unwrap().take() {
+            if c.send_datagram(d).is_ok() {
+                add(&stats.sent);
+            }
         }
     }
     *current.lock().unwrap() = Some(ClientSink::Quic(c.clone()));
@@ -2840,7 +2900,7 @@ mod tests {
             .unwrap()
             .push(Bytes::from_static(b"must-not-leak"));
         let stats = Stats::default();
-        let result = session(&c, &key, &udp, wireguard, &current, &held, &stats).await;
+        let result = session(&c, &key, &udp, wireguard, &current, &held, None, &stats).await;
         assert!(result.is_err());
         assert!(!stats.connected.load(Ordering::Relaxed));
         assert_eq!(stats.sessions.load(Ordering::Relaxed), 0);
@@ -3045,7 +3105,8 @@ mod tests {
                 udp.local_addr().unwrap(),
                 &current,
                 &held,
-                &stats
+                None,
+                &stats,
             )
             .await
             .is_err()
@@ -3053,5 +3114,25 @@ mod tests {
         assert!(!stats.connected.load(Ordering::Relaxed));
         assert!(current.lock().unwrap().is_none());
         fake.await.unwrap();
+    }
+
+    #[test]
+    fn wire_clock_queue_cap_and_wake_interval_prevent_bufferbloat_and_relay5_skips() {
+        // 4,000 pps fast class: 150 ms queue cap = 600 slots (vs 4,000 old 1 s bloat), floor 64.
+        assert_eq!(wire_clock_queue_cap(4000.0), 600);
+        assert_eq!(wire_clock_queue_cap(50.0), 64);
+        // Adaptive wake interval: 5 ms lookahead wakes every 1.25 ms; 30 ms clamps to 2 ms; 1 ms clamps to 0.5 ms.
+        assert_eq!(
+            wire_clock_wake_interval(Duration::from_millis(5)),
+            Duration::from_micros(1250)
+        );
+        assert_eq!(
+            wire_clock_wake_interval(Duration::from_millis(30)),
+            Duration::from_millis(2)
+        );
+        assert_eq!(
+            wire_clock_wake_interval(Duration::from_millis(1)),
+            Duration::from_micros(500)
+        );
     }
 }

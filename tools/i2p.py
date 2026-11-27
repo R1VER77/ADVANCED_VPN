@@ -39,8 +39,23 @@ PORT_RANGE = (9111, 30777)
 B32 = re.compile(r"[a-z2-7]{52}\.b32\.i2p")
 SIG_EDDSA = 7  # Ed25519
 CRYPTO_ECIES_X25519 = 4
+# Hybrid ML-KEM-768 + X25519 end-to-end LeaseSet encryption (i2pd >= 2.58, OpenSSL 3.5+)
+# and hybrid ML-KEM NTCP2 router-to-router links (i2pd >= 2.59).
+CRYPTO_ECIES_MLKEM768_X25519 = 6
+I2PD_PQ_LEASESET_MIN = (2, 58, 0)
+I2PD_PQ_NTCP2_MIN = (2, 59, 0)
 IDENTITY_LEN = 256 + 128 + 3 + 4  # keys, then a key certificate naming both key types
 PRIVATE_LEN = IDENTITY_LEN + 32 + 32  # + X25519 private key + Ed25519 seed
+
+
+def pq_capabilities(version: tuple[int, int, int] | None) -> dict[str, bool]:
+    """Return hybrid post-quantum features supported by an i2pd (major, minor, patch) version."""
+    if version is None:
+        return {"hybrid_leaseset": False, "hybrid_ntcp2": False}
+    return {
+        "hybrid_leaseset": version >= I2PD_PQ_LEASESET_MIN,
+        "hybrid_ntcp2": version >= I2PD_PQ_NTCP2_MIN,
+    }
 
 
 def destination_keys():
@@ -121,13 +136,15 @@ def valid_front(front, role):
     return front
 
 
-def router_conf(datadir, host=None, port=None, verbose=False, testnet=None):
+def router_conf(datadir, host=None, port=None, verbose=False, testnet=None, *, version=None, require_pq=False):
     """i2pd's configuration: only the router and the tunnels file; every proxy, console and
     control port off; no transit (the entry's quota and the client's link carry only this
-    chain); no log unless `verbose` (lab: to stdout). `host` is the router's public address
-    (the entry's), `testnet` a private network for the lab: netid, reseed zip, this
-    node's address, and for the lab's own routers floodfill and transit."""
+    chain); no log unless `verbose` (lab: to stdout). Enables hybrid ML-KEM NTCP2 (`version = 4`)
+    automatically on i2pd >= 2.59 (and fails closed if `require_pq=True` on older versions)."""
     del datadir  # i2pd gets it on its command line
+    caps = pq_capabilities(version)
+    if require_pq and not caps["hybrid_ntcp2"]:
+        raise ValueError("hybrid PQ NTCP2 requires i2pd 2.59.0 or newer")
     lines = [
         "ipv4 = true",
         "ipv6 = false",
@@ -158,7 +175,10 @@ def router_conf(datadir, host=None, port=None, verbose=False, testnet=None):
     published = "false" if hidden else "true"
     # It also speaks only NTCP2: SSU2's peer test asks a third router to send a probe
     # straight to the tester's address, and that router could be the entry.
-    lines += ["[ntcp2]", "enabled = true", "published = " + published]
+    ntcp2_lines = ["[ntcp2]", "enabled = true", "published = " + published]
+    if caps["hybrid_ntcp2"]:
+        ntcp2_lines.append("version = 4")
+    lines += ntcp2_lines
     lines += ["[ssu2]", "enabled = %s" % ("false" if hidden else "true"), "published = " + published]
     lines += ["[trust]", "hidden = %s" % ("true" if hidden else "false")]
     for section in ["upnp", "http", "httpproxy", "socksproxy", "sam", "bob", "i2cp", "i2pcontrol", "addressbook"]:
@@ -173,10 +193,19 @@ def router_conf(datadir, host=None, port=None, verbose=False, testnet=None):
     return "\n".join(lines) + "\n"
 
 
-def tunnels_conf(front, keys=None, datadir=None):
-    """i2pd's tunnels file: the client's tunnel to the entry, or the entry's server tunnel
-    (its destination's private keys at `keys`; i2pd reads that path relative to `datadir`)."""
-    common = "i2cp.leaseSetType = 3\ni2cp.leaseSetEncType = 4\ninbound.quantity = 2\noutbound.quantity = 2\n"
+def tunnels_conf(front, keys=None, datadir=None, *, version=None, require_pq=False):
+    """i2pd's tunnels file: enables hybrid ML-KEM-768+X25519 LeaseSet encryption (type 6)
+    automatically on i2pd >= 2.58, or enforces type 6 strictly when `require_pq=True`."""
+    caps = pq_capabilities(version)
+    if require_pq and not caps["hybrid_leaseset"]:
+        raise ValueError("hybrid PQ LeaseSet encryption requires i2pd 2.58.0 or newer")
+    if require_pq:
+        enc_type = str(CRYPTO_ECIES_MLKEM768_X25519)
+    elif caps["hybrid_leaseset"]:
+        enc_type = f"{CRYPTO_ECIES_MLKEM768_X25519},{CRYPTO_ECIES_X25519}"
+    else:
+        enc_type = str(CRYPTO_ECIES_X25519)
+    common = f"i2cp.leaseSetType = 3\ni2cp.leaseSetEncType = {enc_type}\ninbound.quantity = 2\noutbound.quantity = 2\n"
     if "destination" in front:
         h = int(front["hops"])
         host, port = CLIENT_TUNNEL.rsplit(":", 1)
