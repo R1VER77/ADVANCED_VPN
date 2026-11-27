@@ -9,38 +9,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
-name = "cypherpunk-vpn"
-version = "0.11.1"
-dependencies = [
- "anyhow",
- "cpvpn-mix-lane",
- "aws-lc-rs",
- "bytes",
- "clap",
- "enum-map",
- "gotatun",
- "hex",
- "hmac",
- "landlock",
- "libc",
- "maybenot",
- "maybenot-machines",
- "quinn",
- "rand 0.9.5",
- "ratatui",
- "rustls",
- "seccompiler",
- "serde",
- "serde_json",
- "sha2",
- "tokio",
- "tokio-rustls",
- "webpki-roots",
- "x509-parser",
- "zeroize",
-]
-
-[[package]]
 name = "aead"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -206,23 +174,6 @@ name = "autocfg"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
-
-[[package]]
-name = "cpvpn-mix-lane"
-version = "0.1.0"
-dependencies = [
- "blake3",
- "chacha20 0.9.1",
- "chacha20poly1305",
- "hkdf",
- "ml-kem",
- "sha2",
- "x25519-dalek",
-]
-
-[[package]]
-name = "cpvpn-pq-sphinx"
-version = "0.2.0"
 
 [[package]]
 name = "aws-lc-rs"
@@ -548,6 +499,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "cpvpn-mix-lane"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "chacha20 0.9.1",
+ "chacha20poly1305",
+ "hkdf",
+ "ml-kem",
+ "sha2",
+ "x25519-dalek",
+]
+
+[[package]]
+name = "cpvpn-pq-sphinx"
+version = "0.2.0"
+
+[[package]]
 name = "crc32fast"
 version = "1.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -651,6 +619,39 @@ dependencies = [
  "libc",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "cypherpunk-vpn"
+version = "0.11.1"
+dependencies = [
+ "anyhow",
+ "aws-lc-rs",
+ "bytes",
+ "clap",
+ "cpvpn-mix-lane",
+ "enum-map",
+ "gotatun",
+ "hex",
+ "hmac",
+ "landlock",
+ "libc",
+ "maybenot",
+ "maybenot-machines",
+ "quinn",
+ "rand 0.9.5",
+ "ratatui",
+ "rustls",
+ "seccompiler",
+ "serde",
+ "serde_json",
+ "sha2",
+ "sha3",
+ "tokio",
+ "tokio-rustls",
+ "webpki-roots",
+ "x509-parser",
+ "zeroize",
 ]
 
 [[package]]

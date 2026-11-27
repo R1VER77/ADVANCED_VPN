@@ -212,6 +212,256 @@ class TestSigningVmAndHardwareCarrier(unittest.TestCase):
         )
         self.assertEqual(tkey.ecdh(peer_pub), expected_ecdh)
 
+    def test_managed_profile_sign_session_dispatches_to_unix_signing_vm(self):
+        import managed_profile
+
+        now = int(time.time())
+        with tempfile.TemporaryDirectory() as td:
+            sock_path = Path(td) / "vault.sock"
+
+            def fake_vault(req):
+                return {
+                    "leaves": {k: (b"\xef" * 64).hex() for k in req["lanes"]},
+                    "carry": {k: (b"\x12" * 32).hex() for k in req["carry"]},
+                    "not_before": now - 30,
+                    "not_after": now + 1800,
+                }
+
+            t = threading.Thread(target=signing_vm.serve_unix_socket_once, args=(sock_path, fake_vault), daemon=True)
+            t.start()
+            deadline = time.monotonic() + 5
+            while not sock_path.exists() and time.monotonic() < deadline:
+                time.sleep(0.02)
+            res = managed_profile.sign_session(
+                {"outer": True, "inner": True},
+                Path(td),
+                carry=("wireguard",),
+                signing_vm_spec=f"unix:{sock_path}",
+            )
+            t.join(timeout=3)
+            self.assertEqual(set(res["leaves"]), {"outer", "inner"})
+            self.assertEqual(res["carry"]["wireguard"], b"\x12" * 32)
+            with self.assertRaisesRegex(ValueError, "unsupported CPVPN_SIGNING_VM"):
+                managed_profile.sign_session({"outer": True}, Path(td), signing_vm_spec="http://evil")
+
+
+class TestPhase1And3Hardening(unittest.TestCase):
+    def test_server_egress_nts_and_strict_nts_rules(self):
+        import server_egress
+
+        profile = {"role": "exit", "network": {"relay_endpoint": "198.51.100.1:443"}}
+        cfg = {"core": {"listen": "198.51.100.2:4444"}}
+        default = server_egress.egress_rules(profile, cfg, 1000)
+        self.assertIn("udp dport 123 accept", default)
+        self.assertNotIn("tcp dport 4460", default)
+
+        nts = server_egress.egress_rules(profile, cfg, 1000, nts=True)
+        self.assertIn("tcp dport 4460 accept", nts)
+        self.assertIn("udp dport 123 accept", nts)
+
+        strict_pinned = server_egress.egress_rules(
+            profile,
+            cfg,
+            1000,
+            nts=True,
+            strict_nts=True,
+            nts_servers=("162.159.200.1", "2606:4700:f1::1"),
+        )
+        self.assertIn("ip daddr { 162.159.200.1 } tcp dport 4460 accept", strict_pinned)
+        self.assertIn("ip daddr { 162.159.200.1 } udp dport 123 accept", strict_pinned)
+        self.assertIn("ip6 daddr { 2606:4700:f1::1 } tcp dport 4460 accept", strict_pinned)
+        self.assertNotIn("\n  udp dport 123 accept\n", strict_pinned)
+
+        with self.assertRaisesRegex(ValueError, "strict_nts requires nts=True"):
+            server_egress.egress_rules(profile, cfg, 1000, nts=False, strict_nts=True)
+
+    def test_endpoint_hygiene_detects_unencrypted_swap_hibernation_and_coredumps(self):
+        import cypherpunkctl
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            swaps = root / "swaps"
+            cmdline = root / "cmdline"
+            core = root / "core_pattern"
+
+            # Clean host: zram swap, no resume=, core_pattern=|/bin/false.
+            swaps.write_text("Filename\tType\tSize\tUsed\tPriority\n/dev/zram0\tpartition\t1024\t0\t100\n")
+            cmdline.write_text("BOOT_IMAGE=/vmlinuz root=UUID=1234 ro quiet\n")
+            core.write_text("|/bin/false\n")
+            clean = dict((name, ok) for name, ok, _ in cypherpunkctl.endpoint_hygiene(swaps, cmdline, core))
+            self.assertTrue(all(clean.values()), clean)
+
+            # Risky host: raw /swapfile, resume=/dev/nvme0n1p3, apport coredump pipe.
+            swaps.write_text("Filename\tType\tSize\tUsed\tPriority\n/swapfile\tfile\t1024\t0\t-2\n")
+            cmdline.write_text("BOOT_IMAGE=/vmlinuz resume=/dev/nvme0n1p3 ro\n")
+            core.write_text("|/usr/share/apport/apport %p %s\n")
+            risky = dict((name, ok) for name, ok, _ in cypherpunkctl.endpoint_hygiene(swaps, cmdline, core))
+            self.assertFalse(risky["endpoint swap encryption"])
+            self.assertFalse(risky["endpoint hibernation disabled"])
+            self.assertFalse(risky["endpoint core dumps suppressed"])
+
+    def test_tor_namespace_guard_and_ephemeral_browser_profile_wipe(self):
+        import tor_lab
+
+        rules = tor_lab.tor_namespace_nft_rules(tunnel_iface="cpvpn0", tor_uid=115, dns_server="10.79.0.1")
+        self.assertIn('meta skuid 115 oifname "cpvpn0" counter name tor_tunnel_packets accept', rules)
+        self.assertIn('meta skuid 115 oifname != "cpvpn0" counter name tor_direct_drops drop', rules)
+        self.assertIn('oifname "cpvpn0" ip daddr 10.79.0.1 udp dport 53 accept', rules)
+        with self.assertRaises(ValueError):
+            tor_lab.tor_namespace_nft_rules(tunnel_iface="cpvpn0; flush")
+
+        with tempfile.TemporaryDirectory() as td:
+            with tor_lab.EphemeralBrowserProfile("firefox", base_dir=Path(td), socks_proxy="127.0.0.1:9050") as prof:
+                root_path = prof.root
+                self.assertIsNotNone(root_path)
+                prefs = (prof.profile_dir / "user.js").read_text()
+                self.assertIn('privacy.resistFingerprinting", true', prefs)
+                self.assertIn('network.proxy.socks_remote_dns", true', prefs)
+                env = prof.env({"PATH": "/usr/bin", "MOZ_CRASHREPORTER_URL": "https://leak.example"})
+                self.assertNotIn("MOZ_CRASHREPORTER_URL", env)
+                self.assertTrue(env["HOME"].startswith(str(root_path)))
+                argv = prof.argv("/usr/bin/firefox", "https://example.org")
+                self.assertIn("--no-remote", argv)
+                (prof.profile_dir / "cookies.sqlite").write_bytes(b"SECRET_SESSION_COOKIE")
+            self.assertFalse(root_path.exists())
+
+    def test_credit_wallet_and_shared_cli_seal_and_verify_pq_stamps_with_witness_quorum(self):
+        from argparse import Namespace
+        import base64
+        import json
+        from unittest import mock
+
+        from cryptography.hazmat.primitives.asymmetric import mldsa
+        import mesh
+        from shared_admission import AdmissionError, EPOCH_SECONDS
+        import shared_cli
+        from shared_pool import DIRECTORY_DOMAIN, witness_payload
+        from shared_pq import HybridPqIdentity, PqEpochStamper, issue_checkout_ticket
+        from test_shared_session import make_issuer_and_tokens
+
+        now = int(time.time())
+        next_epoch = (now // EPOCH_SECONDS) + 1
+        spki, _, pairs = make_issuer_and_tokens(next_epoch, count=4)
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            attester = HybridPqIdentity()
+            stamper = PqEpochStamper(root / "stamper.sqlite", attester.public)
+            stamper.initialize()
+            pool_key = mldsa.MLDSA65PrivateKey.generate()
+            w1 = mldsa.MLDSA65PrivateKey.generate()
+            nodes = []
+            for role, prov, country, op_name in (("entry", "gcp", "US", "op-a"), ("exit", "host", "CH", "op-b")):
+                op_key = mldsa.MLDSA65PrivateKey.generate()
+                op_pub = op_key.public_key().public_bytes_raw()
+                nodes.append(
+                    mesh.sign_descriptor(
+                        {
+                            "schema": 1,
+                            "node_public_key": base64.b64encode(op_pub).decode(),
+                            "node_id": mesh.member_id(op_pub),
+                            "operator": op_name,
+                            "provider": prov,
+                            "country": country,
+                            "roles": [role],
+                            "published": now - 60,
+                            "expires": (next_epoch + 1) * EPOCH_SECONDS,
+                        },
+                        op_key,
+                    )
+                )
+            manifest = {
+                "schema": 1,
+                "pool": "pool.vpn.test",
+                "issuer": "issuer.vpn.test",
+                "issuer_spki": base64.b64encode(spki).decode(),
+                "pq_stamper_public": stamper.public.to_dict(),
+                "epoch": next_epoch,
+                "nodes": nodes,
+            }
+            manifest["witnesses"] = {"w1": base64.b64encode(w1.sign(witness_payload(manifest))).decode()}
+            manifest["signature"] = base64.b64encode(
+                pool_key.sign(DIRECTORY_DOMAIN + mesh.canonical(manifest))
+            ).decode()
+
+            from shared_pool import SharedPool
+
+            pool = SharedPool.verify(
+                manifest, pool_key.public_key(), now, witness_keys={"w1": w1.public_key()}, witness_quorum=1
+            )
+            entry_c, exit_c = pool.cohorts
+            pq_stamps = []
+            for e_tok, x_tok in pairs:
+                e_st = stamper.stamp(entry_c, e_tok, issue_checkout_ticket(attester, next_epoch), now=now)
+                x_st = stamper.stamp(exit_c, x_tok, issue_checkout_ticket(attester, next_epoch), now=now)
+                pq_stamps.append([e_st, x_st])
+
+            pool_file = root / "pool.json"
+            pool_file.write_text(json.dumps(manifest))
+            witness_file = root / "witnesses.json"
+            witness_file.write_text(json.dumps({"w1": base64.b64encode(w1.public_key().public_bytes_raw()).decode()}))
+            unstamped_file = root / "unstamped.json"
+            unstamped_file.write_text(json.dumps({"pairs": [[a.hex(), b.hex()] for a, b in pairs]}))
+            stamped_file = root / "stamped.json"
+            stamped_file.write_text(
+                json.dumps({"pairs": [[a.hex(), b.hex()] for a, b in pairs], "pq_stamps": pq_stamps})
+            )
+            pinned_b64 = base64.b64encode(pool_key.public_key().public_bytes_raw()).decode()
+            fake_secret = (b"\x55" * 32, {"credential": "00" * 16, "salt": "11" * 32})
+
+            with (
+                mock.patch.dict(os.environ, {"CPVPN_SHARED_DIR": str(root / "shared")}),
+                mock.patch("keyguard.hardware_secret", return_value=fake_secret),
+            ):
+                # Unstamped batch into a PQ-stamped pool MUST fail closed.
+                bad = shared_cli.cmd_import(
+                    Namespace(
+                        pool=str(pool_file),
+                        batch=str(unstamped_file),
+                        pinned_key=pinned_b64,
+                        witness_keys=str(witness_file),
+                        witness_quorum=1,
+                        vault=str(root / "v"),
+                        now=now,
+                    )
+                )
+                self.assertFalse(bad["ok"])
+                self.assertIn("PQ stamps", bad["message"])
+
+                # Valid multi-family PQ stamped batch + witness quorum succeeds and seals fixed-size wallet!
+                good = shared_cli.cmd_import(
+                    Namespace(
+                        pool=str(pool_file),
+                        batch=str(stamped_file),
+                        pinned_key=pinned_b64,
+                        witness_keys=str(witness_file),
+                        witness_quorum=1,
+                        vault=str(root / "v"),
+                        now=now,
+                    )
+                )
+                self.assertTrue(good["ok"], good)
+                self.assertTrue(good["pq_stamped"])
+                self.assertIn("ML-DSA-87", good["token_verification"])
+
+                # Taking a stamped pair returns both token pair and verified multi-family PQ stamps.
+                from shared_wallet import CreditWallet
+
+                w = CreditWallet(
+                    root / "shared" / f"batch-pool.vpn.test-{next_epoch}.json",
+                    root / "v",
+                    entry_c,
+                    exit_c,
+                )
+                taken_pair, taken_stamps = w.take_stamped_pair(next_epoch * EPOCH_SECONDS + 10)
+                self.assertEqual(len(taken_pair), 2)
+                self.assertEqual(len(taken_stamps), 2)
+                self.assertIn("mldsa87", taken_stamps[0])
+                # Attempting re-import cannot resurrect spent credits.
+                with self.assertRaises(AdmissionError):
+                    w.import_batch(pairs, pq_stamps=pq_stamps)
+            attester.wipe()
+            stamper.identity.wipe()
+
 
 if __name__ == "__main__":
     unittest.main()

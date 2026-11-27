@@ -1112,6 +1112,43 @@ async fn connect_clocked(
     front: bool,
     clock: Option<WireClock>,
 ) -> Result<()> {
+    connect_clocked_policy(
+        local,
+        wireguard,
+        remote,
+        cover_name,
+        spki_sha256,
+        key,
+        stats,
+        front,
+        clock,
+        WireClock::allow_tcp_fallback_from_env(),
+    )
+    .await
+}
+
+/// Whether TCP fallback is permitted when QUIC fails to connect.
+/// When the constant-rate wire clock is enabled, TCP fallback is refused by default so an
+/// active network attacker cannot force a silent downgrade off the SO_TXTIME QUIC clock by
+/// dropping UDP 443 (`CPVPN_WIRE_CLOCK_ALLOW_TCP_FALLBACK=1` opts in to clocked TCP pacing).
+fn should_allow_tcp_fallback(clock: Option<WireClock>, allow_tcp_fallback: bool) -> bool {
+    clock.is_none() || allow_tcp_fallback
+}
+
+/// [`connect_clocked`] with an explicit TCP fallback policy (for fail-closed tests).
+#[allow(clippy::too_many_arguments)]
+async fn connect_clocked_policy(
+    local: SocketAddr,
+    wireguard: SocketAddr,
+    remote: SocketAddr,
+    cover_name: Option<String>,
+    spki_sha256: [u8; 32],
+    key: [u8; TOKEN_LEN],
+    stats: Arc<Stats>,
+    front: bool,
+    clock: Option<WireClock>,
+    allow_tcp_fallback: bool,
+) -> Result<()> {
     let udp = Arc::new(UdpSocket::bind(local).await?);
     // The wire clock (experimental): only on QUIC, never with an I2P front (streams).
     let clock = clock.filter(|_| !front);
@@ -1200,6 +1237,7 @@ async fn connect_clocked(
                 &current,
                 &held,
                 &stats,
+                None,
                 FRONT_WINDOW,
             )
             .await;
@@ -1214,7 +1252,7 @@ async fn connect_clocked(
             {
                 c.close(VarInt::from_u32(0), b"");
             }
-        } else {
+        } else if should_allow_tcp_fallback(clock, allow_tcp_fallback) {
             let _ = tcp_session(
                 &tls_connector,
                 Some(&endpoint),
@@ -1226,6 +1264,7 @@ async fn connect_clocked(
                 &current,
                 &held,
                 &stats,
+                clock,
                 AUTH_WINDOW,
             )
             .await;
@@ -1276,6 +1315,16 @@ impl WireClock {
 
     fn step_ns(&self) -> u64 {
         (1e9 / self.packets_per_second) as u64
+    }
+
+    /// Opt-in escape hatch (`CPVPN_WIRE_CLOCK_ALLOW_TCP_FALLBACK=1`) permitting TCP fallback
+    /// when the wire clock is enabled. Default `false` (fail-closed) so dropping UDP 443
+    /// cannot downgrade a clocked client off SO_TXTIME QUIC.
+    pub fn allow_tcp_fallback_from_env() -> bool {
+        std::env::var("CPVPN_WIRE_CLOCK_ALLOW_TCP_FALLBACK")
+            .ok()
+            .as_deref()
+            == Some("1")
     }
 }
 
@@ -1694,6 +1743,7 @@ async fn tcp_session(
     current: &Mutex<Option<ClientSink>>,
     held: &Mutex<Held>,
     stats: &Stats,
+    clock: Option<WireClock>,
     window: Duration,
 ) -> Result<()> {
     let tcp = tokio::time::timeout(window, TcpStream::connect(remote)).await??;
@@ -1738,12 +1788,34 @@ async fn tcp_session(
     add(&stats.tcp_sessions);
     let (mut reader, mut writer) = tokio::io::split(tls);
     let uplink = tokio::spawn(async move {
-        while let Some(d) = rx.recv().await {
-            let Ok(cell) = pack_cell(&d) else {
-                continue;
-            };
-            if writer.write_all(&cell).await.is_err() {
-                break;
+        if let Some(cl) = clock {
+            // Constant-rate TCP cell pacing: emit one fixed TCP_CELL_LEN cell per tick
+            // (a queued real datagram or a zero-length decoy cell discarded by serve_tcp).
+            let mut tick = tokio::time::interval(Duration::from_nanos(cl.step_ns().max(100_000)));
+            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            let decoy_cell = [0u8; TCP_CELL_LEN];
+            loop {
+                tick.tick().await;
+                let cell = match rx.try_recv() {
+                    Ok(d) => match pack_cell(&d) {
+                        Ok(c) => c,
+                        Err(_) => decoy_cell,
+                    },
+                    Err(mpsc::error::TryRecvError::Empty) => decoy_cell,
+                    Err(mpsc::error::TryRecvError::Disconnected) => break,
+                };
+                if writer.write_all(&cell).await.is_err() {
+                    break;
+                }
+            }
+        } else {
+            while let Some(d) = rx.recv().await {
+                let Ok(cell) = pack_cell(&d) else {
+                    continue;
+                };
+                if writer.write_all(&cell).await.is_err() {
+                    break;
+                }
             }
         }
     });
@@ -3025,6 +3097,7 @@ mod tests {
                 &current,
                 &held,
                 &stats,
+                None,
                 Duration::from_secs(2),
             ),
         )
@@ -3134,5 +3207,79 @@ mod tests {
             wire_clock_wake_interval(Duration::from_millis(1)),
             Duration::from_micros(500)
         );
+    }
+
+    #[test]
+    fn wire_clock_refuses_tcp_fallback_by_default_and_allows_explicit_opt_in() {
+        let clock = WireClock {
+            packets_per_second: 100.0,
+            lookahead: Duration::from_millis(20),
+        };
+        assert!(!should_allow_tcp_fallback(Some(clock), false));
+        assert!(should_allow_tcp_fallback(Some(clock), true));
+        assert!(should_allow_tcp_fallback(None, false));
+    }
+
+    #[tokio::test]
+    async fn clocked_tcp_session_emits_constant_rate_decoy_cells_when_idle() {
+        let (cert, k, pin) = test_cert();
+        let acceptor = TlsAcceptor::from(tls_server_config(cert, k).unwrap());
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let key = [0x42u8; TOKEN_LEN];
+
+        let server_task = tokio::spawn(async move {
+            let (tcp, _) = listener.accept().await.unwrap();
+            let mut tls = acceptor.accept(tcp).await.unwrap();
+            let _req = read_http_header(&mut tls).await.unwrap();
+            let conf = tls_server_proof(tls.get_ref().1, &key).unwrap();
+            let resp = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nETag: \"{}\"\r\n\r\n",
+                hex::encode(conf)
+            );
+            tls.write_all(resp.as_bytes()).await.unwrap();
+            let mut decoys = 0usize;
+            let mut cell = [0u8; TCP_CELL_LEN];
+            for _ in 0..5 {
+                tokio::time::timeout(Duration::from_secs(2), tls.read_exact(&mut cell))
+                    .await
+                    .unwrap()
+                    .unwrap();
+                let n = u16::from_be_bytes([cell[0], cell[1]]) as usize;
+                assert_eq!(n, 0, "idle clocked TCP cell must be a zero-length decoy");
+                decoys += 1;
+            }
+            decoys
+        });
+
+        let connector = TlsConnector::from(tls_client_config(pin, true).unwrap());
+        let udp = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let current = Mutex::new(None);
+        let held = Mutex::new(Held::default());
+        let stats = Stats::default();
+        let clock = WireClock {
+            packets_per_second: 50.0,
+            lookahead: Duration::from_millis(20),
+        };
+        let _ = tokio::time::timeout(
+            Duration::from_millis(400),
+            tcp_session(
+                &connector,
+                None,
+                addr,
+                "cover.example",
+                &key,
+                &udp,
+                udp.local_addr().unwrap(),
+                &current,
+                &held,
+                &stats,
+                Some(clock),
+                AUTH_WINDOW,
+            ),
+        )
+        .await;
+        let decoys = server_task.await.unwrap();
+        assert_eq!(decoys, 5);
     }
 }

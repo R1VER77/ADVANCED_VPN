@@ -2240,12 +2240,13 @@ def authorize_session(config, root, now=None):
 SIGNER = Path(__file__).resolve().parent / "session_signer.py"
 
 
-def sign_session(config, root, carry=(), runner=None):
+def sign_session(config, root, carry=(), runner=None, signing_vm_spec=None):
     """Phase 2 (docs/HARDWARE_BOUND_SESSIONS.md): fresh ML-DSA-65 session keys for this
-    device's layers, certified by tools/session_signer.py, a separate short-lived process
-    that alone unseals the long-term identities, after the hardware key's touch and PIN.
-    Returns dict(keys={lane: session key PKCS#8}, leaves={lane: DER}, carry={name: bytes},
-    not_before, not_after). `runner` replaces the subprocess in tests."""
+    device's layers, certified by tools/session_signer.py (or an isolated split signing VM
+    configured via `CPVPN_SIGNING_VM=qrexec:<vault-vm>` or `unix:<socket-path>`), a separate
+    short-lived boundary that alone unseals the long-term identities after the hardware key's
+    touch and PIN. Returns dict(keys={lane: session key PKCS#8}, leaves={lane: DER},
+    carry={name: bytes}, not_before, not_after). `runner` replaces the subprocess in tests."""
     import subprocess
     import sys
 
@@ -2261,7 +2262,23 @@ def sign_session(config, root, carry=(), runner=None):
         },
         carry=list(carry),
     )
-    if runner is None:
+    vm_spec = signing_vm_spec if signing_vm_spec is not None else os.environ.get("CPVPN_SIGNING_VM", "").strip()
+    if runner is None and vm_spec:
+        import signing_vm
+
+        vm_timeout = SERVICE_PIN_TIMEOUT_SECONDS + ASSERTION_TIMEOUT_SECONDS + 30
+        if vm_spec.startswith("qrexec:"):
+            transport = signing_vm.QrexecTransport(vm_spec.removeprefix("qrexec:"), timeout=vm_timeout)
+        elif vm_spec.startswith("unix:"):
+            transport = signing_vm.UnixSocketVmTransport(Path(vm_spec.removeprefix("unix:")), timeout=vm_timeout)
+        else:
+            raise ValueError("unsupported CPVPN_SIGNING_VM transport: expected qrexec:<vm> or unix:<path>")
+        reply = transport.request(
+            request["state"],
+            request["lanes"],
+            carry=tuple(request["carry"]),
+        )
+    elif runner is None:
         # The request goes on a pipe of its own; stdin and stderr stay the caller's, so the
         # signer can ask for the PIN on the terminal and say "touch the key" where it is
         # seen (live laptop, 20 Nov 2026: with the request on stdin it found no terminal and

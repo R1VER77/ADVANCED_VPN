@@ -1,0 +1,107 @@
+// shared_pq_credits.spthy — Tamarin model of split-authority composite PQ credits:
+// RFC 9578 RSA blind token + PqEpochStamper multi-family stamp (ML-DSA-87 +
+// SLH-DSA-SHA2-128f + Ed25519) + atomic single-spend replay ledger.
+// Companion to tools/shared_pq.py, tools/shared_admission.py, tools/shared_wallet.py.
+//
+// Each cryptographic family verification is modeled as an explicit sequential transition,
+// matching HybridPqPublicKey.verify + verify_token in code.
+//
+// LEMMAS (all verified; mutants in tools/tamarin_check.py must be falsified):
+// 0. executable                     honest issuance, PQ stamping, and admission complete.
+// 1. composite_credit_unforgeable   server admits only honestly issued+stamped credits unless
+//                                   RSA AND ML-DSA-87 AND SLH-DSA AND Ed25519 are ALL broken.
+// 2. single_spend_atomic            each credit token is admitted at most once.
+
+theory shared_pq_credits
+begin
+
+builtins: hashing, signing
+
+restriction Equality:
+  "All x y #i. Eq(x, y) @i ==> x = y"
+
+restriction OneIssuer:
+  "All #i #j. IssuerSetup() @i & IssuerSetup() @j ==> #i = #j"
+
+restriction OneStamper:
+  "All #i #j. StamperSetup() @i & StamperSetup() @j ==> #i = #j"
+
+restriction SpentSet:
+  "All t #i. NotSpent(t) @i ==> not (Ex #j. Spent(t) @j & #j < #i)"
+
+rule setup_issuer:
+  [ Fr(~iss_rsa) ]
+  --[ IssuerSetup() ]->
+  [ !IssuerKey(~iss_rsa), !IssuerPub(pk(~iss_rsa)), Out(pk(~iss_rsa)) ]
+
+rule setup_stamper:
+  [ Fr(~st_mldsa), Fr(~st_slhdsa), Fr(~st_ed) ]
+  --[ StamperSetup() ]->
+  [ !StamperKey(~st_mldsa, ~st_slhdsa, ~st_ed),
+    !StamperPub(pk(~st_mldsa), pk(~st_slhdsa), pk(~st_ed)),
+    Out(<pk(~st_mldsa), pk(~st_slhdsa), pk(~st_ed)>) ]
+
+rule break_issuer_rsa:
+  [ !IssuerKey(ir) ] --[ IssuerRsaBroken() ]-> [ Out(ir) ]
+
+rule break_stamper_mldsa:
+  [ !StamperKey(tm, ts, te) ] --[ StamperMlDsaBroken() ]-> [ Out(tm) ]
+
+rule break_stamper_slhdsa:
+  [ !StamperKey(tm, ts, te) ] --[ StamperSlhDsaBroken() ]-> [ Out(ts) ]
+
+rule break_stamper_ed:
+  [ !StamperKey(tm, ts, te) ] --[ StamperEd25519Broken() ]-> [ Out(te) ]
+
+rule issue_and_stamp_credit:
+  let rsa_sig = sign(<'rsa-credit', ~tok>, ir)
+      st_msg  = h(<'pq-stamp', ~tok, rsa_sig>)
+      st_sig1 = sign(st_msg, tm)
+      st_sig2 = sign(st_msg, ts)
+      st_sig3 = sign(st_msg, te)
+  in
+  [ !IssuerKey(ir), !StamperKey(tm, ts, te), Fr(~tok) ]
+  --[ CreditMinted(~tok) ]->
+  [ Out(<~tok, rsa_sig, st_sig1, st_sig2, st_sig3>) ]
+
+// Sequential 4-family composite verification + atomic spent-set admission.
+rule admit_step1_rsa:
+  [ !IssuerPub(ipk), In(<tok, rsa_sig, st1, st2, st3>) ]
+  --[ Eq(verify(rsa_sig, <'rsa-credit', tok>, ipk), true) ]->
+  [ St_A1(tok, h(<'pq-stamp', tok, rsa_sig>), st1, st2, st3) ]
+
+rule admit_step2_mldsa:
+  [ St_A1(tok, st_msg, st1, st2, st3), !StamperPub(tp1, tp2, tp3) ]
+  --[ Eq(verify(st1, st_msg, tp1), true) ]->
+  [ St_A2(tok, st_msg, st2, st3) ]
+
+rule admit_step3_slhdsa:
+  [ St_A2(tok, st_msg, st2, st3), !StamperPub(tp1, tp2, tp3) ]
+  --[ Eq(verify(st2, st_msg, tp2), true) ]->
+  [ St_A3(tok, st_msg, st3) ]
+
+rule admit_step4_ed25519_and_spend:
+  [ St_A3(tok, st_msg, st3), !StamperPub(tp1, tp2, tp3) ]
+  --[ Eq(verify(st3, st_msg, tp3), true),
+      NotSpent(tok),
+      Spent(tok),
+      ServerAdmitted(tok) ]->
+  []
+
+lemma executable:
+  exists-trace
+  "Ex tok #i #j. CreditMinted(tok) @i & ServerAdmitted(tok) @j & #i < #j"
+
+lemma composite_credit_unforgeable:
+  "All tok #i.
+     ServerAdmitted(tok) @i ==>
+       (Ex #j. CreditMinted(tok) @j & #j < #i)
+       | ((Ex #r. IssuerRsaBroken() @r)
+          & (Ex #a. StamperMlDsaBroken() @a)
+          & (Ex #b. StamperSlhDsaBroken() @b)
+          & (Ex #c. StamperEd25519Broken() @c))"
+
+lemma single_spend_atomic:
+  "All tok #i #j. ServerAdmitted(tok) @i & ServerAdmitted(tok) @j ==> #i = #j"
+
+end

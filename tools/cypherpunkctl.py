@@ -1406,7 +1406,7 @@ def _supervise(state, bin_dir, lab, whole, rt):
     front_dir = front_exe = None
     if "front" in cfg:
         front_exe = front_binary(lab)
-        front_dir = prepare_front(profile, key_handles, front_uid, front_gid, lab)
+        front_dir = prepare_front(profile, key_handles, front_uid, front_gid, lab, version=i2pd_version(front_exe))
     for name in [n for n in cfg if n in BINARIES]:
         binary = bin_dir / BINARIES[name]
         fds = {r: v for r, v in key_handles.items() if r in CHILD_KEYS.get(name, [])}
@@ -2192,6 +2192,76 @@ def firmware_coprocessor(sysfs=Path("/sys"), cpuinfo=Path("/proc/cpuinfo")):
     return "no x86 management coprocessor found"
 
 
+def endpoint_hygiene(
+    swaps_path=Path("/proc/swaps"),
+    cmdline_path=Path("/proc/cmdline"),
+    core_pattern_path=Path("/proc/sys/kernel/core_pattern"),
+):
+    """Read-only endpoint hygiene checks for swap encryption, hibernation, and core dumps."""
+    findings = []
+    # 1. Unencrypted swap can persist RAM secrets (session keys, decrypted pages) to disk.
+    try:
+        swap_lines = [line.strip() for line in Path(swaps_path).read_text().splitlines()[1:] if line.strip()]
+    except OSError:
+        findings.append(("endpoint swap encryption", True, "/proc/swaps unreadable (skipped)"))
+    else:
+        if not swap_lines:
+            findings.append(("endpoint swap encryption", True, "no active swap"))
+        else:
+            devices = [line.split()[0] for line in swap_lines]
+            unsafe = [
+                dev
+                for dev in devices
+                if not (dev.startswith("/dev/dm-") or dev.startswith("/dev/mapper/") or dev.startswith("/dev/zram"))
+            ]
+            if unsafe:
+                findings.append(
+                    (
+                        "endpoint swap encryption",
+                        False,
+                        "unencrypted swap active (%s): disable swap or use dm-crypt/zram" % ", ".join(unsafe),
+                    )
+                )
+            else:
+                findings.append(
+                    ("endpoint swap encryption", True, "encrypted or RAM-backed swap (%s)" % ", ".join(devices))
+                )
+    # 2. Hibernation writes full RAM images to disk.
+    try:
+        cmdline_tokens = Path(cmdline_path).read_text().split()
+    except OSError:
+        findings.append(("endpoint hibernation disabled", True, "/proc/cmdline unreadable (skipped)"))
+    else:
+        resume = [tok for tok in cmdline_tokens if tok.startswith("resume=")]
+        if resume:
+            findings.append(
+                (
+                    "endpoint hibernation disabled",
+                    False,
+                    "hibernation configured on kernel cmdline (%s): RAM keys may persist to disk" % resume[0],
+                )
+            )
+        else:
+            findings.append(("endpoint hibernation disabled", True, "no resume= target in /proc/cmdline"))
+    # 3. Kernel core dumps can capture process memory on crashes.
+    try:
+        pattern = Path(core_pattern_path).read_text().strip()
+    except OSError:
+        findings.append(("endpoint core dumps suppressed", True, "core_pattern unreadable (skipped)"))
+    else:
+        if pattern in ("|/bin/false", "|/usr/bin/false", "/dev/null"):
+            findings.append(("endpoint core dumps suppressed", True, "core_pattern=%s" % pattern))
+        else:
+            findings.append(
+                (
+                    "endpoint core dumps suppressed",
+                    False,
+                    "core_pattern=%s (set sysctl kernel.core_pattern=|/bin/false to suppress dumps)" % pattern,
+                )
+            )
+    return findings
+
+
 def doctor(state, check_egress=False):
     """Self-checks: (name, ok, detail) for installation, keys, firewall, resolver and units."""
     checks = []
@@ -2228,6 +2298,8 @@ def doctor(state, check_egress=False):
     except ImportError:
         check("post-quantum crypto library", False, "install the hash-locked environment")
     check("management coprocessor (informational)", True, firmware_coprocessor())
+    for hygiene_name, hygiene_ok, hygiene_detail in endpoint_hygiene():
+        check(hygiene_name, hygiene_ok, hygiene_detail)
     try:
         info = device_info(state)
     except (OSError, ValueError, PermissionError) as e:

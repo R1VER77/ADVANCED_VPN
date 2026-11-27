@@ -15,6 +15,7 @@ from shared_wallet import CreditWallet, PAIRS_PER_BATCH
 
 
 CRYPTO_DISCLOSURE = "Classical RSA-PSS verification (RFC 9578); unlinkability holds against quantum observers"
+PQ_STAMPED_DISCLOSURE = "Composite RFC 9578 RSA-PSS + ML-DSA-87 + SLH-DSA-SHA2-128f + Ed25519 (multi-family PQ)"
 IDENTITY_NOTICE = "Logins, cookies, and browser fingerprints can still link sessions across fresh VPN credits"
 UPSTREAM_NOTICE = "Upstream operator sees your source address; admission and VPN traffic block if upstream drops"
 
@@ -85,6 +86,11 @@ def shared_summary(now: float | None = None) -> dict:
         batches = []
     active_pairs = sum(int(b.get("remaining_pairs", 0)) for b in batches if b.get("epoch") == current)
     pending_pairs = sum(int(b.get("remaining_pairs", 0)) for b in batches if b.get("epoch") == current + 1)
+    pq_stamped_pairs = sum(
+        int(b.get("remaining_pairs", 0))
+        for b in batches
+        if b.get("epoch") in (current, current + 1) and b.get("pq_stamped")
+    )
     upstream = configured_upstream()
     upstream_up = bool(upstream and upstream_is_ready(upstream))
     if upstream is None:
@@ -97,15 +103,27 @@ def shared_summary(now: float | None = None) -> dict:
         "shared_access_enabled": False,
         "shared_active_pairs": active_pairs,
         "shared_pending_pairs": pending_pairs,
+        "shared_pq_stamped_pairs": pq_stamped_pairs,
         "shared_active_credits": active_pairs * 2,
         "shared_pending_credits": pending_pairs * 2,
         "upstream_interface": upstream,
         "upstream_ready": upstream_up,
         "upstream_state": upstream_state,
-        "token_verification": CRYPTO_DISCLOSURE,
+        "token_verification": PQ_STAMPED_DISCLOSURE
+        if (pq_stamped_pairs > 0 and pq_stamped_pairs == active_pairs + pending_pairs)
+        else CRYPTO_DISCLOSURE,
         "identity_notice": IDENTITY_NOTICE,
         "upstream_notice": UPSTREAM_NOTICE,
     }
+
+
+def _load_witness_keys(raw: str | dict | None) -> dict[str, mldsa.MLDSA65PublicKey] | None:
+    if raw is None:
+        return None
+    mapping = json.loads(Path(raw).read_text()) if isinstance(raw, (str, Path)) else raw
+    if not isinstance(mapping, dict) or not mapping:
+        raise AdmissionError("witness keys file must be a non-empty JSON object")
+    return {str(wid): _load_pinned_key(str(val)) for wid, val in mapping.items()}
 
 
 def _load_pinned_key(raw: str) -> mldsa.MLDSA65PublicKey:
@@ -134,13 +152,22 @@ def cmd_import(args) -> dict:
     try:
         manifest = json.loads(Path(args.pool).read_text())
         pinned = _load_pinned_key(args.pinned_key)
-        pool = SharedPool.verify(manifest, pinned, now)
+        witness_keys = _load_witness_keys(getattr(args, "witness_keys", None))
+        witness_quorum = int(getattr(args, "witness_quorum", 0) or 0)
+        pool = SharedPool.verify(
+            manifest,
+            pinned,
+            now,
+            witness_keys=witness_keys,
+            witness_quorum=witness_quorum,
+        )
         entry_cohort, exit_cohort = pool.cohorts
         if not getattr(args, "allow_current_epoch", False) and entry_cohort.epoch != current_epoch + 1:
             raise AdmissionError("imported shared credits must activate in the next UTC epoch")
         raw_batch = json.loads(Path(args.batch).read_text())
-        # Keep sponsor and order identifiers at issuance: read only the blind token pairs.
+        # Keep sponsor and order identifiers at issuance: read only the blind token pairs (and optional PQ stamps).
         raw_pairs = raw_batch["pairs"] if isinstance(raw_batch, dict) else raw_batch
+        raw_stamps = raw_batch.get("pq_stamps") if isinstance(raw_batch, dict) else None
         if not isinstance(raw_pairs, list) or len(raw_pairs) != PAIRS_PER_BATCH:
             raise AdmissionError("shared credit batch must contain exactly 4 entry/exit pairs")
         pairs = [tuple(bytes.fromhex(tok) for tok in pair) for pair in raw_pairs]
@@ -151,7 +178,8 @@ def cmd_import(args) -> dict:
         wallet_path = root / wallet_name
         vault_path = Path(args.vault) if getattr(args, "vault", None) else (root / "nitrokey.vault")
         wallet = CreditWallet(wallet_path, vault_path, entry_cohort, exit_cohort)
-        wallet.import_batch(pairs)
+        wallet.import_batch(pairs, pq_stamps=raw_stamps)
+        pq_stamped = raw_stamps is not None
         index = load_index()
         index["batches"].append(
             {
@@ -160,12 +188,15 @@ def cmd_import(args) -> dict:
                 "epoch": entry_cohort.epoch,
                 "remaining_pairs": PAIRS_PER_BATCH,
                 "wallet": wallet_name,
+                "pq_stamped": pq_stamped,
+                "witness_quorum": witness_quorum,
             }
         )
         save_index(index)
     except (AdmissionError, KeyError, OSError, TypeError, ValueError) as err:
         return {"ok": False, "error": "SharedImportFailed", "message": str(err)}
     activates = time.strftime("%d %b %Y · %H:%M UTC", time.gmtime(entry_cohort.epoch * EPOCH_SECONDS))
+    disclosure = PQ_STAMPED_DISCLOSURE if pq_stamped else CRYPTO_DISCLOSURE
     return {
         "ok": True,
         "shared_dashboard": True,
@@ -173,8 +204,10 @@ def cmd_import(args) -> dict:
         "epoch": entry_cohort.epoch,
         "imported_pairs": PAIRS_PER_BATCH,
         "imported_credits": PAIRS_PER_BATCH * 2,
+        "pq_stamped": pq_stamped,
+        "witness_quorum": witness_quorum,
         "activates_utc": activates,
-        "token_verification": CRYPTO_DISCLOSURE,
+        "token_verification": disclosure,
         "rows": [
             {"label": "Pool", "value": entry_cohort.pool_name},
             {
@@ -182,7 +215,7 @@ def cmd_import(args) -> dict:
                 "value": f"{PAIRS_PER_BATCH} pairs ({PAIRS_PER_BATCH * 2} credits) · Nitrokey protected",
             },
             {"label": "Activates", "value": activates},
-            {"label": "Token crypto", "value": CRYPTO_DISCLOSURE},
+            {"label": "Token crypto", "value": disclosure},
             {"label": "Public pool", "value": "Disabled pending protocol review"},
         ],
     }

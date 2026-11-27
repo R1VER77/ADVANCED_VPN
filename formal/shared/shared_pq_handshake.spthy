@@ -1,0 +1,131 @@
+// shared_pq_handshake.spthy — Tamarin model of the shared-access multi-family PQ
+// admission handshake: Triple-KEX (X25519 + X448 + ML-KEM-1024) + pinned 3-family
+// server authentication (ML-DSA-87 + SLH-DSA-SHA2-128f + Ed25519).
+// Companion to tools/shared_pq.py and tools/shared_session.py.
+//
+// Each signature family check is modeled as an explicit sequential transition
+// (matching HybridPqPublicKey.verify in tools/shared_pq.py), keeping Tamarin's
+// finite-variant expansion linear rather than exponential.
+//
+// LEMMAS (all verified; mutants in tools/tamarin_check.py must be falsified):
+// 0. executable                honest Triple-KEX + 3-family server authentication completes.
+// 1. triple_kex_secrecy        derived PSK leaks only if X25519, X448, AND ML-KEM-1024 break.
+// 2. multi_family_server_auth  client accepts handshake only from honest server unless
+//                              ML-DSA-87, SLH-DSA, AND Ed25519 are ALL broken.
+
+theory shared_pq_handshake
+begin
+
+builtins: hashing, signing, asymmetric-encryption, diffie-hellman
+
+restriction Equality:
+  "All x y #i. Eq(x, y) @i ==> x = y"
+
+restriction OneServer:
+  "All #i #j. ServerSetup() @i & ServerSetup() @j ==> #i = #j"
+
+rule setup_server:
+  [ Fr(~srv_mldsa), Fr(~srv_slhdsa), Fr(~srv_ed) ]
+  --[ ServerSetup() ]->
+  [ !SrvKey(~srv_mldsa, ~srv_slhdsa, ~srv_ed),
+    !SrvPub(pk(~srv_mldsa), pk(~srv_slhdsa), pk(~srv_ed)),
+    Out(<pk(~srv_mldsa), pk(~srv_slhdsa), pk(~srv_ed)>) ]
+
+rule break_srv_mldsa:
+  [ !SrvKey(sm, ss, se) ] --[ SrvMlDsaBroken() ]-> [ Out(sm) ]
+
+rule break_srv_slhdsa:
+  [ !SrvKey(sm, ss, se) ] --[ SrvSlhDsaBroken() ]-> [ Out(ss) ]
+
+rule break_srv_ed:
+  [ !SrvKey(sm, ss, se) ] --[ SrvEd25519Broken() ]-> [ Out(se) ]
+
+rule client_hello:
+  [ Fr(~sid), Fr(~cx1), Fr(~cx2), Fr(~ckem) ]
+  --[ ClientHello(~sid, 'g'^~cx1, pk(~cx2), pk(~ckem)) ]->
+  [ St_C0(~sid, ~cx1, ~cx2, ~ckem),
+    !ClientEph(~sid, ~cx1, ~cx2, ~ckem),
+    Out(<~sid, 'g'^~cx1, pk(~cx2), pk(~ckem)>) ]
+
+rule break_kex_x25519:
+  [ !ClientEph(sid, cx1, cx2, ckem) ] --[ KexX25519Broken(sid) ]-> [ Out(cx1) ]
+
+rule break_kex_x448:
+  [ !ClientEph(sid, cx1, cx2, ckem) ] --[ KexX448Broken(sid) ]-> [ Out(cx2) ]
+
+rule break_kex_mlkem1024:
+  [ !ClientEph(sid, cx1, cx2, ckem) ] --[ KexMlKemBroken(sid) ]-> [ Out(ckem) ]
+
+rule server_hello:
+  let ct2 = aenc(~x448_ss, cx2_pk)
+      ct3 = aenc(~kem_ss, ckem_pk)
+      th  = h(<'hs-v2', sid, gx1, cx2_pk, ckem_pk, 'g'^~sx1, ct2, ct3>)
+      s1  = sign(th, sm)
+      s2  = sign(th, ss)
+      s3  = sign(th, se)
+      psk = h(<'dual-kdf', gx1^~sx1, ~x448_ss, ~kem_ss, th>)
+  in
+  [ !SrvKey(sm, ss, se), In(<sid, gx1, cx2_pk, ckem_pk>), Fr(~sx1), Fr(~x448_ss), Fr(~kem_ss) ]
+  --[ ServerSigned(sid, th), ServerResponded(sid, th, psk) ]->
+  [ Out(<sid, 'g'^~sx1, ct2, ct3, s1, s2, s3>) ]
+
+// Sequential 3-family pinned server authentication BEFORE Triple-KEX PSK derivation
+// (matching tools/shared_session.py: authenticate server over transcript first, then derive PSK).
+rule client_recv_hello:
+  let th = h(<'hs-v2', sid, 'g'^cx1, pk(cx2), pk(ckem), sy1, ct2, ct3>)
+  in
+  [ St_C0(sid, cx1, cx2, ckem),
+    In(<sid, sy1, ct2, ct3, s1, s2, s3>) ]
+  -->
+  [ St_C1(sid, cx1, cx2, ckem, sy1, ct2, ct3, th, s1, s2, s3) ]
+
+rule client_check_mldsa:
+  [ St_C1(sid, cx1, cx2, ckem, sy1, ct2, ct3, th, s1, s2, s3), !SrvPub(sp1, sp2, sp3) ]
+  --[ Eq(verify(s1, th, sp1), true) ]->
+  [ St_C2(sid, cx1, cx2, ckem, sy1, ct2, ct3, th, s2, s3) ]
+
+rule client_check_slhdsa:
+  [ St_C2(sid, cx1, cx2, ckem, sy1, ct2, ct3, th, s2, s3), !SrvPub(sp1, sp2, sp3) ]
+  --[ Eq(verify(s2, th, sp2), true) ]->
+  [ St_C3(sid, cx1, cx2, ckem, sy1, ct2, ct3, th, s3) ]
+
+rule client_check_ed25519:
+  [ St_C3(sid, cx1, cx2, ckem, sy1, ct2, ct3, th, s3), !SrvPub(sp1, sp2, sp3) ]
+  --[ Eq(verify(s3, th, sp3), true),
+      ClientVerifiedServer(sid, th) ]->
+  [ St_C4(sid, cx1, cx2, ckem, sy1, ct2, ct3, th) ]
+
+rule client_derive_kex:
+  let ct2 = aenc(x448_ss, pk(cx2))
+      ct3 = aenc(kem_ss, pk(ckem))
+      psk = h(<'dual-kdf', sy1^cx1, x448_ss, kem_ss, th>)
+  in
+  [ St_C4(sid, cx1, cx2, ckem, sy1, ct2, ct3, th) ]
+  --[ ClientAuthenticatedServer(sid, th, psk) ]->
+  []
+
+lemma executable:
+  exists-trace
+  "Ex sid th psk #i #j.
+     ServerResponded(sid, th, psk) @i
+     & ClientAuthenticatedServer(sid, th, psk) @j
+     & #i < #j"
+
+lemma triple_kex_secrecy:
+  "All sid th psk #i #j #c.
+     ServerResponded(sid, th, psk) @i
+     & ClientAuthenticatedServer(sid, th, psk) @c
+     & K(psk) @j ==>
+       (Ex #a. KexX25519Broken(sid) @a)
+       & (Ex #b. KexX448Broken(sid) @b)
+       & (Ex #d. KexMlKemBroken(sid) @d)"
+
+lemma multi_family_server_auth:
+  "All sid th #i.
+     ClientVerifiedServer(sid, th) @i ==>
+       (Ex #j. ServerSigned(sid, th) @j & #j < #i)
+       | ((Ex #a. SrvMlDsaBroken() @a)
+          & (Ex #b. SrvSlhDsaBroken() @b)
+          & (Ex #c. SrvEd25519Broken() @c))"
+
+end

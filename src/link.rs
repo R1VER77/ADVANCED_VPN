@@ -82,8 +82,12 @@ const RETIRE_GRACE: Duration = Duration::from_secs(5);
 /// Length-field flag: the cell carries a handshake message, not a packet.
 const CONTROL: u16 = 0x8000;
 /// Handshake message kinds.
+/// v1 (OFFER/ANSWER): X25519 + ML-KEM-768 + HKDF-SHA256 (legacy compatibility).
+/// v2 (OFFER_V2/ANSWER_V2): X25519 + ML-KEM-1024 + dual HKDF-SHA-512 XOR HKDF-SHA3-512.
 const OFFER: u8 = 1;
 const ANSWER: u8 = 2;
+const OFFER_V2: u8 = 3;
+const ANSWER_V2: u8 = 4;
 /// Bytes before a handshake fragment: kind, part, parts.
 const FRAGMENT_HEADER: usize = 3;
 /// How often an unanswered offer is sent again (cells are unreliable).
@@ -407,7 +411,209 @@ fn session_keys(psk: &[u8; 32], offer: &[u8], answer: &[u8], secrets: &[u8]) -> 
     Ok(keys)
 }
 
-/// The sender's half of one key exchange: its ephemeral keys and the offer it sent.
+/// RFC 5869 HKDF-Extract + single-block HKDF-Expand with HMAC-SHA-512.
+fn hkdf_sha512_32(
+    salt: &[u8],
+    ikm: &[u8],
+    info_parts: &[&[u8]],
+) -> Result<zeroize::Zeroizing<[u8; 32]>> {
+    use hmac::{Hmac, Mac};
+    type H = Hmac<sha2::Sha512>;
+    let mut extract = <H as Mac>::new_from_slice(salt).map_err(|_| anyhow::anyhow!("hkdf salt"))?;
+    extract.update(ikm);
+    let mut prk = zeroize::Zeroizing::new([0u8; 64]);
+    prk.copy_from_slice(&extract.finalize().into_bytes());
+    let mut expand =
+        <H as Mac>::new_from_slice(&prk[..]).map_err(|_| anyhow::anyhow!("hkdf prk"))?;
+    for part in info_parts {
+        expand.update(part);
+    }
+    expand.update(&[1u8]);
+    let mut block = zeroize::Zeroizing::new([0u8; 64]);
+    block.copy_from_slice(&expand.finalize().into_bytes());
+    let mut out = zeroize::Zeroizing::new([0u8; 32]);
+    out.copy_from_slice(&block[..32]);
+    Ok(out)
+}
+
+/// RFC 5869 HKDF-Extract + single-block HKDF-Expand with HMAC-SHA3-512 (Keccak sponge).
+fn hkdf_sha3_512_32(
+    salt: &[u8],
+    ikm: &[u8],
+    info_parts: &[&[u8]],
+) -> Result<zeroize::Zeroizing<[u8; 32]>> {
+    use hmac::{Hmac, Mac};
+    type H = Hmac<sha3::Sha3_512>;
+    let mut extract = <H as Mac>::new_from_slice(salt).map_err(|_| anyhow::anyhow!("hkdf salt"))?;
+    extract.update(ikm);
+    let mut prk = zeroize::Zeroizing::new([0u8; 64]);
+    prk.copy_from_slice(&extract.finalize().into_bytes());
+    let mut expand =
+        <H as Mac>::new_from_slice(&prk[..]).map_err(|_| anyhow::anyhow!("hkdf prk"))?;
+    for part in info_parts {
+        expand.update(part);
+    }
+    expand.update(&[1u8]);
+    let mut block = zeroize::Zeroizing::new([0u8; 64]);
+    block.copy_from_slice(&expand.finalize().into_bytes());
+    let mut out = zeroize::Zeroizing::new([0u8; 32]);
+    out.copy_from_slice(&block[..32]);
+    Ok(out)
+}
+
+/// Dual-PRF KDF combiner: HKDF-SHA-512 XOR HKDF-SHA3-512.
+/// Preserves key confidentiality as long as either Merkle-Damgård SHA-512 OR Keccak SHA3-512
+/// remains a secure PRF.
+fn dual_hkdf_expand_32(
+    salt: &[u8],
+    ikm: &[u8],
+    info_parts: &[&[u8]],
+    out: &mut [u8; 32],
+) -> Result<()> {
+    let leg_sha2 = hkdf_sha512_32(salt, ikm, info_parts)?;
+    let leg_sha3 = hkdf_sha3_512_32(salt, ikm, info_parts)?;
+    for i in 0..32 {
+        out[i] = leg_sha2[i] ^ leg_sha3[i];
+    }
+    Ok(())
+}
+
+/// Link v2 next-session keys: dual transcript hash (SHA-512 || SHA3-512) fed into
+/// dual-PRF HKDF-SHA-512 XOR HKDF-SHA3-512 over PSK + X25519 + ML-KEM-1024 shared secrets.
+fn session_keys_v2(psk: &[u8; 32], offer: &[u8], answer: &[u8], secrets: &[u8]) -> Result<Keys> {
+    use sha2::Digest;
+    let mut h2 = sha2::Sha512::new();
+    h2.update(b"cypherpunk-vpn/link/v3/handshake");
+    h2.update((offer.len() as u32).to_be_bytes());
+    h2.update(offer);
+    h2.update(answer);
+    let d2 = h2.finalize();
+
+    let mut h3 = sha3::Sha3_512::new();
+    h3.update(b"cypherpunk-vpn/link/v3/handshake");
+    h3.update((offer.len() as u32).to_be_bytes());
+    h3.update(offer);
+    h3.update(answer);
+    let d3 = h3.finalize();
+
+    let mut th = [0u8; 128];
+    th[..64].copy_from_slice(&d2);
+    th[64..].copy_from_slice(&d3);
+
+    let mut keys = ([0u8; 32], [0u8; 32]);
+    for (dir, out) in [(Dir::Forward, &mut keys.0), (Dir::Reverse, &mut keys.1)] {
+        dual_hkdf_expand_32(
+            psk,
+            secrets,
+            &[b"cypherpunk-vpn/link/v3/", dir.info(), &th],
+            out,
+        )?;
+    }
+    Ok(keys)
+}
+
+/// Link v2 initiator: ephemeral X25519 + NIST Level-5 ML-KEM-1024 + dual-PRF KDF.
+struct InitiatorV2 {
+    next: [u8; SESSION_ID],
+    x25519: aws_lc_rs::agreement::EphemeralPrivateKey,
+    mlkem: aws_lc_rs::kem::DecapsulationKey,
+    offer: Vec<u8>,
+}
+
+impl InitiatorV2 {
+    fn new() -> Result<Self> {
+        use aws_lc_rs::{agreement, kem};
+        let rng = SystemRandom::new();
+        let mut next = [0u8; SESSION_ID];
+        rng.fill(&mut next)
+            .map_err(|_| anyhow::anyhow!("no randomness"))?;
+        let x25519 = agreement::EphemeralPrivateKey::generate(&agreement::X25519, &rng)
+            .map_err(|_| anyhow::anyhow!("x25519 keygen"))?;
+        let mlkem = kem::DecapsulationKey::generate(&kem::ML_KEM_1024)
+            .map_err(|_| anyhow::anyhow!("ml-kem-1024 keygen"))?;
+        let mut offer = next.to_vec();
+        offer.extend_from_slice(
+            x25519
+                .compute_public_key()
+                .map_err(|_| anyhow::anyhow!("x25519"))?
+                .as_ref(),
+        );
+        offer.extend_from_slice(
+            mlkem
+                .encapsulation_key()
+                .map_err(|_| anyhow::anyhow!("ml-kem-1024"))?
+                .key_bytes()
+                .map_err(|_| anyhow::anyhow!("ml-kem-1024"))?
+                .as_ref(),
+        );
+        Ok(InitiatorV2 {
+            next,
+            x25519,
+            mlkem,
+            offer,
+        })
+    }
+
+    fn finish(self, psk: &[u8; 32], answer: &[u8]) -> Result<Keys> {
+        use aws_lc_rs::{agreement, kem};
+        ensure!(
+            answer.len() > SESSION_ID + 32 && answer[..SESSION_ID] == self.next,
+            "answer to another offer"
+        );
+        let peer = agreement::UnparsedPublicKey::new(
+            &agreement::X25519,
+            &answer[SESSION_ID..SESSION_ID + 32],
+        );
+        let mut secrets = zeroize::Zeroizing::new(agreement::agree_ephemeral(
+            self.x25519,
+            peer,
+            anyhow::anyhow!("x25519"),
+            |k| Ok(k.to_vec()),
+        )?);
+        let ct = kem::Ciphertext::from(&answer[SESSION_ID + 32..]);
+        let k = self
+            .mlkem
+            .decapsulate(ct)
+            .map_err(|_| anyhow::anyhow!("ml-kem-1024 decapsulation"))?;
+        secrets.extend_from_slice(k.as_ref());
+        session_keys_v2(psk, &self.offer, answer, &secrets)
+    }
+}
+
+/// Link v2 responder: ephemeral X25519 + ML-KEM-1024 encapsulation + dual-PRF KDF.
+fn respond_v2(psk: &[u8; 32], offer: &[u8]) -> Result<(Vec<u8>, Keys)> {
+    use aws_lc_rs::{agreement, kem};
+    ensure!(offer.len() > SESSION_ID + 32, "short v2 offer");
+    let rng = SystemRandom::new();
+    let mine = agreement::EphemeralPrivateKey::generate(&agreement::X25519, &rng)
+        .map_err(|_| anyhow::anyhow!("x25519 keygen"))?;
+    let mut answer = offer[..SESSION_ID].to_vec();
+    answer.extend_from_slice(
+        mine.compute_public_key()
+            .map_err(|_| anyhow::anyhow!("x25519"))?
+            .as_ref(),
+    );
+    let peer =
+        agreement::UnparsedPublicKey::new(&agreement::X25519, &offer[SESSION_ID..SESSION_ID + 32]);
+    let mut secrets = zeroize::Zeroizing::new(agreement::agree_ephemeral(
+        mine,
+        peer,
+        anyhow::anyhow!("x25519"),
+        |k| Ok(k.to_vec()),
+    )?);
+    let ek = kem::EncapsulationKey::new(&kem::ML_KEM_1024, &offer[SESSION_ID + 32..])
+        .map_err(|_| anyhow::anyhow!("bad ml-kem-1024 key"))?;
+    let (ct, k) = ek
+        .encapsulate()
+        .map_err(|_| anyhow::anyhow!("ml-kem-1024 encapsulation"))?;
+    answer.extend_from_slice(ct.as_ref());
+    secrets.extend_from_slice(k.as_ref());
+    let keys = session_keys_v2(psk, offer, &answer, &secrets)?;
+    Ok((answer, keys))
+}
+
+/// The sender's half of one v1 key exchange: its ephemeral keys and the offer it sent.
+#[cfg_attr(not(test), allow(dead_code))]
 struct Initiator {
     next: [u8; SESSION_ID],
     x25519: aws_lc_rs::agreement::EphemeralPrivateKey,
@@ -415,6 +621,7 @@ struct Initiator {
     offer: Vec<u8>,
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 impl Initiator {
     /// Fresh ephemeral keys; the offer = next session id || X25519 public || ML-KEM-768
     /// encapsulation key.
@@ -779,7 +986,7 @@ impl EgressCore {
         self.heard
             .store(self.born.elapsed().as_millis() as u64, Ordering::SeqCst);
         if o.control {
-            if let Some((ANSWER, msg)) = assembler.feed(&o.payload) {
+            if let Some((ANSWER | ANSWER_V2, msg)) = assembler.feed(&o.payload) {
                 let _ = self.answers.try_send(msg);
             }
         } else if !o.payload.is_empty() && o.rekeyed {
@@ -815,9 +1022,9 @@ fn egress_parts(
     });
     let handshake = tokio::spawn(async move {
         loop {
-            let Ok(me) = Initiator::new() else { return };
+            let Ok(me) = InitiatorV2::new() else { return };
             let next = me.next;
-            let frags = fragments(OFFER, &me.offer, cell);
+            let frags = fragments(OFFER_V2, &me.offer, cell);
             let answer = loop {
                 lane.push_control(frags.clone());
                 match tokio::time::timeout(OFFER_EVERY, answered.recv()).await {
@@ -1027,18 +1234,25 @@ fn admit(
         let _ = peer.lane.rekey(*next, &key);
     }
     if o.control {
-        if let Some((OFFER, offer)) = peer.assembler.feed(&o.payload) {
+        if let Some((kind @ (OFFER | OFFER_V2), offer)) = peer.assembler.feed(&o.payload) {
+            let answer_kind = if kind == OFFER_V2 { ANSWER_V2 } else { ANSWER };
             match &peer.answered {
                 // The same offer again: our answer was lost; resend it unchanged.
                 Some((next, answer, _)) if offer.get(..SESSION_ID) == Some(&next[..]) => {
-                    peer.lane.push_control(fragments(ANSWER, answer, cell));
+                    peer.lane.push_control(fragments(answer_kind, answer, cell));
                 }
                 _ => {
-                    if let Ok((answer, (fwd, rev))) = respond(&psks[o.index], &offer) {
+                    let res = if kind == OFFER_V2 {
+                        respond_v2(&psks[o.index], &offer)
+                    } else {
+                        respond(&psks[o.index], &offer)
+                    };
+                    if let Ok((answer, (fwd, rev))) = res {
                         let fwd = zeroize::Zeroizing::new(fwd);
                         let next: [u8; SESSION_ID] = answer[..SESSION_ID].try_into().expect("id");
                         opener.add_session(next, o.index, &fwd, Some(o.id));
-                        peer.lane.push_control(fragments(ANSWER, &answer, cell));
+                        peer.lane
+                            .push_control(fragments(answer_kind, &answer, cell));
                         peer.answered = Some((next, answer, Some(zeroize::Zeroizing::new(rev))));
                     }
                 }
@@ -1887,22 +2101,26 @@ mod forward_secrecy_tests {
                 .iter()
                 .filter(|a| a[..SESSION_ID] == offer[..SESSION_ID])
             {
-                let (kf, kr) = session_keys(&psk(), offer, answer, &[]).unwrap();
-                let id: [u8; SESSION_ID] = offer[..SESSION_ID].try_into().unwrap();
-                let (mut f, mut r) = (
-                    Opener::new(vec![], Dir::Forward),
-                    Opener::new(vec![], Dir::Reverse),
-                );
-                f.add_session(id, 0, &kf, None);
-                r.add_session(id, 0, &kr, None);
-                packets += fwd
-                    .iter()
-                    .filter(|c| f.open(c, CELL).is_some_and(|(_, p)| !p.is_empty()))
-                    .count();
-                packets += rev
-                    .iter()
-                    .filter(|c| r.open(c, CELL).is_some_and(|(_, p)| !p.is_empty()))
-                    .count();
+                for (kf, kr) in [
+                    session_keys(&psk(), offer, answer, &[]).unwrap(),
+                    session_keys_v2(&psk(), offer, answer, &[]).unwrap(),
+                ] {
+                    let id: [u8; SESSION_ID] = offer[..SESSION_ID].try_into().unwrap();
+                    let (mut f, mut r) = (
+                        Opener::new(vec![], Dir::Forward),
+                        Opener::new(vec![], Dir::Reverse),
+                    );
+                    f.add_session(id, 0, &kf, None);
+                    r.add_session(id, 0, &kr, None);
+                    packets += fwd
+                        .iter()
+                        .filter(|c| f.open(c, CELL).is_some_and(|(_, p)| !p.is_empty()))
+                        .count();
+                    packets += rev
+                        .iter()
+                        .filter(|c| r.open(c, CELL).is_some_and(|(_, p)| !p.is_empty()))
+                        .count();
+                }
             }
         }
         (packets, handshake)
@@ -1974,6 +2192,36 @@ mod forward_secrecy_tests {
             ids.len()
         );
         assert_eq!(attack_with_psk(&fwd, &rev).0, 0);
+    }
+
+    #[test]
+    fn link_v2_mlkem1024_dual_hkdf_agrees_binds_transcript_and_keeps_v1_compat() {
+        let key = psk();
+        // v2: X25519 (32 B) + ML-KEM-1024 (1568 B) + dual HKDF-SHA-512 XOR HKDF-SHA3-512.
+        let init_v2 = InitiatorV2::new().unwrap();
+        assert_eq!(init_v2.offer.len(), SESSION_ID + 32 + 1568);
+        let (answer_v2, resp_keys) = respond_v2(&key, &init_v2.offer).unwrap();
+        assert_eq!(answer_v2.len(), SESSION_ID + 32 + 1568);
+        let init_keys = init_v2.finish(&key, &answer_v2).unwrap();
+        assert_eq!(init_keys, resp_keys);
+        assert_ne!(init_keys.0, init_keys.1);
+
+        // Dual-PRF combiner output differs from either individual hash leg.
+        let mut combined = [0u8; 32];
+        dual_hkdf_expand_32(&key, b"secrets", &[b"info"], &mut combined).unwrap();
+        let leg2 = hkdf_sha512_32(&key, b"secrets", &[b"info"]).unwrap();
+        let leg3 = hkdf_sha3_512_32(&key, b"secrets", &[b"info"]).unwrap();
+        assert_ne!(combined, *leg2);
+        assert_ne!(combined, *leg3);
+        for i in 0..32 {
+            assert_eq!(combined[i], leg2[i] ^ leg3[i]);
+        }
+
+        // Legacy v1 (X25519 + ML-KEM-768) still interoperates cleanly.
+        let init_v1 = Initiator::new().unwrap();
+        let (answer_v1, resp_v1) = respond(&key, &init_v1.offer).unwrap();
+        let init_v1_keys = init_v1.finish(&key, &answer_v1).unwrap();
+        assert_eq!(init_v1_keys, resp_v1);
     }
 }
 

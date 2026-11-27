@@ -27,6 +27,8 @@ forwarded traffic, and so does its meter (an nftables counter), so the other wor
 neither use up the cap nor get cut off by it.
 """
 
+import ipaddress
+
 EGRESS_TABLE = "cypherpunk_vpn_egress"
 QUOTA_TABLE = "cypherpunk_vpn_quota"
 INTERNAL = ("lo", "cpvpn0", "cpwg0")
@@ -57,10 +59,49 @@ def ports(profile, cfg):
     return sorted(found)
 
 
-def egress_rules(profile, cfg, service_uid, extra_uids=(), maintenance=False, lab_transit=False, maintenance_uids=()):
+def _time_sync_rules(nts: bool, strict_nts: bool, nts_servers) -> str:
+    """Outbound time-sync rules: cleartext NTP by default, or RFC 8915 NTS (TCP 4460 + UDP 123)."""
+    if strict_nts and not nts:
+        raise ValueError("strict_nts requires nts=True")
+    if not nts:
+        return "  udp dport 123 accept\n"
+    servers = [ipaddress.ip_address(str(addr)) for addr in nts_servers]
+    if strict_nts and servers:
+        v4 = [str(ip) for ip in servers if ip.version == 4]
+        v6 = [str(ip) for ip in servers if ip.version == 6]
+        lines = []
+        if v4:
+            s4 = _set(v4)
+            lines.append(f"  ip daddr {s4} tcp dport 4460 accept\n")
+            lines.append(f"  ip daddr {s4} udp dport 123 accept\n")
+        if v6:
+            s6 = _set(v6)
+            lines.append(f"  ip6 daddr {s6} tcp dport 4460 accept\n")
+            lines.append(f"  ip6 daddr {s6} udp dport 123 accept\n")
+        return "".join(lines)
+    if strict_nts:
+        # NTS-KE only when no pinned NTS NTP pool IPs are configured: forbids unauthenticated UDP 123.
+        return "  tcp dport 4460 accept\n"
+    return "  tcp dport 4460 accept\n  udp dport 123 accept\n"
+
+
+def egress_rules(
+    profile,
+    cfg,
+    service_uid,
+    extra_uids=(),
+    maintenance=False,
+    lab_transit=False,
+    maintenance_uids=(),
+    nts=False,
+    strict_nts=False,
+    nts_servers=(),
+):
     """The `cypherpunk_vpn_egress` table for a dedicated server. `lab_transit` (namespace labs
     only, `cypherpunkctl --lab`): the namespace doubles as the lab's internet router, so plain
-    transit between its non-tunnel interfaces is forwarded; never on a real server."""
+    transit between its non-tunnel interfaces is forwarded; never on a real server.
+    When `nts=True`, permits RFC 8915 NTS key establishment (TCP 4460); with `strict_nts=True`
+    and `nts_servers`, restricts both NTS-KE and authenticated NTP (UDP 123) to pinned servers."""
     uids = [int(service_uid)] + [int(u) for u in extra_uids]
     if any(u <= 0 for u in uids[:1]):
         raise ValueError("the data plane must run as its own unprivileged user")
@@ -96,7 +137,7 @@ def egress_rules(profile, cfg, service_uid, extra_uids=(), maintenance=False, la
         + out_users
         + "  udp sport 68 udp dport 67 accept\n"
         + "  udp sport 546 udp dport 547 accept\n"
-        + "  udp dport 123 accept\n"
+        + _time_sync_rules(nts, strict_nts, nts_servers)
         + "  ip daddr 169.254.169.254 tcp dport { 80, 443 } accept\n"
         + "  ip6 daddr fd00:ec2::254 tcp dport 80 accept\n"
         + "  icmp type { %s } accept\n" % ICMP_OUT

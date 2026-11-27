@@ -119,6 +119,16 @@ class ConfigTests(unittest.TestCase):
         self.assertIn("[ntcp2]\nenabled = true\npublished = false\nversion = 4\n", conf59)
         self.assertIn("i2cp.leaseSetEncType = 6\n", i2p.tunnels_conf(front, version=(2, 59, 0), require_pq=True))
 
+    def test_cypherpunkctl_wires_detected_i2pd_version_into_prepare_front(self):
+        import inspect
+
+        import cypherpunkctl
+
+        src = inspect.getsource(cypherpunkctl)
+        self.assertIn(
+            "prepare_front(profile, key_handles, front_uid, front_gid, lab, version=i2pd_version(front_exe))", src
+        )
+
 
 class ProfileTests(unittest.TestCase):
     @classmethod

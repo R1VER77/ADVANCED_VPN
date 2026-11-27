@@ -82,11 +82,24 @@ MODELS = {
         "executable",
         "global_xor_reveals_pad",
     ],
+    "formal/shared/shared_pq_handshake.spthy": [
+        "executable",
+        "triple_kex_secrecy",
+        "multi_family_server_auth",
+    ],
+    "formal/shared/shared_pq_credits.spthy": [
+        "executable",
+        "composite_credit_unforgeable",
+        "single_spend_atomic",
+    ],
 }
 
 # Tamarin's derivation check gives up after 5 s by default and --quit-on-warning then aborts;
 # these models need longer (0 = no limit) for it to finish, and it does pass.
-DERIVCHECK_TIMEOUT = {"formal/kem_seal/kem_seal.spthy": 0}
+DERIVCHECK_TIMEOUT = {
+    "formal/kem_seal/kem_seal.spthy": 0,
+    "formal/shared/shared_pq_handshake.spthy": 0,
+}
 
 # Broken variants the prover must falsify, so a lemma cannot pass by being vacuous or
 # by not depending on what it is meant to protect: (model, [(text, replacement)], lemma).
@@ -269,6 +282,45 @@ MUTANTS = [
         "crates/cpvpn-mix-lane/tamarin/pq_sphinx_reblind.spthy",
         [("[ Out(<aenc(~k1, pk1), ~e2 XOR h(<~k1, 'pad2'>)>) ]", "[ Out(<aenc(~k1, pk1), ~e2>) ]")],
         "element_hidden",
+    ),
+    # Shared-access multi-family PQ handshake & composite-credit mutants: dropping any KEX leg,
+    # any server or stamper signature family, or atomic spend enforcement must falsify its lemma.
+    (
+        "formal/shared/shared_pq_handshake.spthy",
+        [
+            ("psk = h(<'dual-kdf', gx1^~sx1, ~x448_ss, ~kem_ss, th>)", "psk = h(<'dual-kdf', gx1^~sx1, ~kem_ss, th>)"),
+            (
+                "psk = h(<'dual-kdf', sy1^cx1, x448_ss, kem_ss, th>)",
+                "psk = h(<'dual-kdf', sy1^cx1, kem_ss, th>)",
+            ),
+        ],
+        "triple_kex_secrecy",
+    ),
+    (
+        "formal/shared/shared_pq_handshake.spthy",
+        [
+            ("psk = h(<'dual-kdf', gx1^~sx1, ~x448_ss, ~kem_ss, th>)", "psk = h(<'dual-kdf', gx1^~sx1, ~x448_ss, th>)"),
+            (
+                "psk = h(<'dual-kdf', sy1^cx1, x448_ss, kem_ss, th>)",
+                "psk = h(<'dual-kdf', sy1^cx1, x448_ss, th>)",
+            ),
+        ],
+        "triple_kex_secrecy",
+    ),
+    (
+        "formal/shared/shared_pq_handshake.spthy",
+        [("  --[ Eq(verify(s2, th, sp2), true) ]->\n", "  -->\n")],
+        "multi_family_server_auth",
+    ),
+    (
+        "formal/shared/shared_pq_credits.spthy",
+        [("  --[ Eq(verify(st2, st_msg, tp2), true) ]->\n", "  -->\n")],
+        "composite_credit_unforgeable",
+    ),
+    (
+        "formal/shared/shared_pq_credits.spthy",
+        [("      NotSpent(tok),\n", "")],
+        "single_spend_atomic",
     ),
 ]
 

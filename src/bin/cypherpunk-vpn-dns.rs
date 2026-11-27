@@ -30,6 +30,13 @@ use tokio::{
 };
 use tokio_rustls::TlsConnector;
 
+#[derive(Deserialize, Clone, Debug)]
+#[serde(deny_unknown_fields)]
+struct UpstreamSpec {
+    addr: SocketAddr,
+    server_name: String,
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Config {
@@ -41,6 +48,10 @@ struct Config {
     client_network: Option<String>,
     upstream: SocketAddr,
     server_name: String,
+    /// Optional additional DoT upstreams (all enforce X25519MLKEM768) for per-query
+    /// randomized distribution so no single public resolver sees the complete query graph.
+    #[serde(default)]
+    upstreams: Vec<UpstreamSpec>,
     test_ca: Option<PathBuf>,
     /// Optional signed domain blocklist file (one domain per line; `#` comments ignored).
     #[serde(default)]
@@ -355,43 +366,28 @@ async fn exchange(tls: &mut Upstream, b: &[u8]) -> Result<Vec<u8>> {
     Ok(answer)
 }
 
-struct Resolver {
-    /// `None`: the upstream is this exit's own recursive resolver on loopback.
-    tls: Option<TlsConnector>,
+struct UpstreamTarget {
     addr: SocketAddr,
     name: ServerName<'static>,
-    slots: Arc<Semaphore>,
-    blocklist: Blocklist,
-    count: AtomicU64,
-    blocked: AtomicU64,
     /// Idle connections and when each went idle.
     idle: std::sync::Mutex<Vec<(Upstream, std::time::Instant)>>,
-    /// Upstream TLS handshakes made (the pool's effect, for tests and stats).
-    connects: AtomicU64,
 }
-impl Resolver {
-    async fn connect(&self) -> Result<Upstream> {
-        ensure!(
-            self.tls.is_some() || self.addr.ip().is_loopback(),
-            "plain DNS only to loopback"
-        );
-        let stream = timeout(Duration::from_secs(3), TcpStream::connect(self.addr)).await??;
-        self.connects.fetch_add(1, Ordering::Relaxed);
-        let Some(tls) = &self.tls else {
-            return Ok(Box::new(stream));
-        };
-        let tls = timeout(
-            Duration::from_secs(3),
-            tls.connect(self.name.clone(), stream),
-        )
-        .await??;
-        Ok(Box::new(tls))
+
+impl UpstreamTarget {
+    fn new(addr: SocketAddr, name: ServerName<'static>) -> Self {
+        Self {
+            addr,
+            name,
+            idle: std::sync::Mutex::new(Vec::new()),
+        }
     }
+
     fn take_idle(&self) -> Option<Upstream> {
         let mut idle = self.idle.lock().ok()?;
         idle.retain(|(_, since)| since.elapsed() < IDLE);
         idle.pop().map(|(c, _)| c)
     }
+
     fn put_idle(&self, c: Upstream) {
         if let Ok(mut idle) = self.idle.lock()
             && idle.len() < POOL
@@ -399,20 +395,72 @@ impl Resolver {
             idle.push((c, std::time::Instant::now()));
         }
     }
-    /// The answer to `b` from the upstream: on an idle connection when one is left, else
-    /// (or when the upstream has closed it meanwhile) on a fresh one. Queries are
-    /// idempotent, so one retry on a new connection is safe.
-    async fn ask(&self, b: &[u8]) -> Result<Vec<u8>> {
-        if let Some(mut c) = self.take_idle()
+}
+
+struct Resolver {
+    /// `None`: the upstream is this exit's own recursive resolver on loopback.
+    tls: Option<TlsConnector>,
+    targets: Vec<UpstreamTarget>,
+    slots: Arc<Semaphore>,
+    blocklist: Blocklist,
+    count: AtomicU64,
+    blocked: AtomicU64,
+    /// Upstream TLS handshakes made (the pool's effect, for tests and stats).
+    connects: AtomicU64,
+}
+impl Resolver {
+    async fn connect_target(&self, target: &UpstreamTarget) -> Result<Upstream> {
+        ensure!(
+            self.tls.is_some() || target.addr.ip().is_loopback(),
+            "plain DNS only to loopback"
+        );
+        let stream = timeout(Duration::from_secs(3), TcpStream::connect(target.addr)).await??;
+        self.connects.fetch_add(1, Ordering::Relaxed);
+        let Some(tls) = &self.tls else {
+            return Ok(Box::new(stream));
+        };
+        let tls = timeout(
+            Duration::from_secs(3),
+            tls.connect(target.name.clone(), stream),
+        )
+        .await??;
+        Ok(Box::new(tls))
+    }
+
+    async fn ask_target(&self, target: &UpstreamTarget, b: &[u8]) -> Result<Vec<u8>> {
+        if let Some(mut c) = target.take_idle()
             && let Ok(Ok(answer)) = timeout(Duration::from_secs(3), exchange(&mut c, b)).await
         {
-            self.put_idle(c);
+            target.put_idle(c);
             return Ok(answer);
         }
-        let mut c = self.connect().await?;
+        let mut c = self.connect_target(target).await?;
         let answer = timeout(Duration::from_secs(3), exchange(&mut c, b)).await??;
-        self.put_idle(c);
+        target.put_idle(c);
         Ok(answer)
+    }
+
+    /// The answer to `b` from the upstream pool: selects a starting upstream uniformly at
+    /// random per query (when multiple DoT upstreams are configured) to prevent single-operator
+    /// DNS profile concentration, failing over to remaining upstreams if the first errors.
+    /// Every upstream enforces X25519MLKEM768.
+    async fn ask(&self, b: &[u8]) -> Result<Vec<u8>> {
+        ensure!(!self.targets.is_empty(), "no DNS upstreams configured");
+        let n = self.targets.len();
+        let start = if n > 1 {
+            (rand::random::<u64>() as usize) % n
+        } else {
+            0
+        };
+        let mut last_err = None;
+        for offset in 0..n {
+            let target = &self.targets[(start + offset) % n];
+            match self.ask_target(target, b).await {
+                Ok(answer) => return Ok(answer),
+                Err(e) => last_err = Some(e),
+            }
+        }
+        Err(last_err.unwrap_or_else(|| anyhow::anyhow!("all DNS upstreams failed")))
     }
     async fn query(&self, b: &[u8]) -> Result<Vec<u8>> {
         ensure!(
@@ -478,16 +526,34 @@ async fn work() -> Result<()> {
     } else {
         roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
     }
+    let mut targets = vec![UpstreamTarget::new(
+        c.upstream,
+        ServerName::try_from(c.server_name.clone())?,
+    )];
+    let mut seen = vec![(c.upstream, c.server_name)];
+    for extra in c.upstreams {
+        ensure!(
+            extra.addr.port() != 0 && (!c.recursive || extra.addr.ip().is_loopback()),
+            "invalid extra DNS upstream"
+        );
+        let key = (extra.addr, extra.server_name.clone());
+        if !seen.contains(&key) {
+            targets.push(UpstreamTarget::new(
+                extra.addr,
+                ServerName::try_from(extra.server_name)?,
+            ));
+            seen.push(key);
+        }
+    }
+    let upstream_count = targets.len();
     let resolver = Arc::new(Resolver {
         tls: if c.recursive {
             None
         } else {
             Some(TlsConnector::from(Arc::new(upstream_tls(roots)?)))
         },
-        addr: c.upstream,
-        name: ServerName::try_from(c.server_name)?,
+        targets,
         slots: Arc::new(Semaphore::new(16)),
-        idle: std::sync::Mutex::new(Vec::new()),
         connects: AtomicU64::new(0),
         blocklist,
         count: AtomicU64::new(0),
@@ -495,8 +561,8 @@ async fn work() -> Result<()> {
     });
     if a.check {
         println!(
-            "{{\"configuration_valid\":true,\"upstream_tls\":{},\"recursive\":{}}}",
-            !c.recursive, c.recursive
+            "{{\"configuration_valid\":true,\"upstream_tls\":{},\"recursive\":{},\"upstream_count\":{}}}",
+            !c.recursive, c.recursive, upstream_count
         );
         return Ok(());
     }
@@ -760,19 +826,24 @@ mod tests {
     }
 
     fn resolver_to(addr: SocketAddr) -> Resolver {
+        resolver_to_many(&[addr])
+    }
+
+    fn resolver_to_many(addrs: &[SocketAddr]) -> Resolver {
         let mut roots = rustls::RootCertStore::empty();
         roots
             .add(CertificateDer::from(hex::decode(TEST_CA).unwrap()))
             .unwrap();
         Resolver {
             tls: Some(TlsConnector::from(Arc::new(upstream_tls(roots).unwrap()))),
-            addr,
-            name: ServerName::try_from("dns.test").unwrap(),
+            targets: addrs
+                .iter()
+                .map(|&a| UpstreamTarget::new(a, ServerName::try_from("dns.test").unwrap()))
+                .collect(),
             slots: Arc::new(Semaphore::new(1)),
             blocklist: Blocklist::from_lines("", &[]).unwrap(),
             count: AtomicU64::new(0),
             blocked: AtomicU64::new(0),
-            idle: std::sync::Mutex::new(Vec::new()),
             connects: AtomicU64::new(0),
         }
     }
@@ -781,13 +852,14 @@ mod tests {
     fn recursive_to(addr: SocketAddr) -> Resolver {
         Resolver {
             tls: None,
-            addr,
-            name: ServerName::try_from("localhost").unwrap(),
+            targets: vec![UpstreamTarget::new(
+                addr,
+                ServerName::try_from("localhost").unwrap(),
+            )],
             slots: Arc::new(Semaphore::new(1)),
             blocklist: Blocklist::from_lines("", &[]).unwrap(),
             count: AtomicU64::new(0),
             blocked: AtomicU64::new(0),
-            idle: std::sync::Mutex::new(Vec::new()),
             connects: AtomicU64::new(0),
         }
     }
@@ -886,24 +958,40 @@ mod tests {
     async fn the_upstream_must_offer_hybrid_post_quantum_tls() {
         use rustls::crypto::aws_lc_rs::kx_group;
         for (group, answered) in [(kx_group::X25519MLKEM768, true), (kx_group::X25519, false)] {
-            let mut roots = rustls::RootCertStore::empty();
-            roots
-                .add(CertificateDer::from(hex::decode(TEST_CA).unwrap()))
-                .unwrap();
-            let resolver = Resolver {
-                tls: Some(TlsConnector::from(Arc::new(upstream_tls(roots).unwrap()))),
-                addr: upstream(group).await,
-                name: ServerName::try_from("dns.test").unwrap(),
-                slots: Arc::new(Semaphore::new(1)),
-                idle: std::sync::Mutex::new(Vec::new()),
-                connects: AtomicU64::new(0),
-                blocklist: Blocklist::from_lines("", &[]).unwrap(),
-                count: AtomicU64::new(0),
-                blocked: AtomicU64::new(0),
-            };
+            let resolver = resolver_to(upstream(group).await);
             let r = resolver.query(&make_query([7, 9], "example.org")).await;
             assert_eq!(r.is_ok(), answered, "{:?}: {r:?}", group.name());
         }
+    }
+
+    #[tokio::test]
+    async fn multi_upstream_distributes_queries_and_refuses_classical_peers() {
+        use rustls::crypto::aws_lc_rs::kx_group;
+        // 1. Two independent hybrid-PQ DoT upstreams both receive queries over randomized selection.
+        let (addr1, acc1) = upstream_serving(kx_group::X25519MLKEM768, false).await;
+        let (addr2, acc2) = upstream_serving(kx_group::X25519MLKEM768, false).await;
+        let r = resolver_to_many(&[addr1, addr2]);
+        for i in 0..32u8 {
+            r.query(&make_query([10, i], "example.org")).await.unwrap();
+        }
+        assert!(
+            acc1.load(Ordering::Relaxed) >= 1 && acc2.load(Ordering::Relaxed) >= 1,
+            "queries should distribute across both PQ DoT upstreams"
+        );
+
+        // 2. If one upstream is classical-only X25519, queries fail over to the PQ upstream
+        //    and never complete over classical TLS.
+        let (pq_addr, pq_acc) = upstream_serving(kx_group::X25519MLKEM768, false).await;
+        let (cl_addr, _) = upstream_serving(kx_group::X25519, false).await;
+        let mixed = resolver_to_many(&[cl_addr, pq_addr]);
+        for i in 0..8u8 {
+            let ans = mixed
+                .query(&make_query([11, i], "example.net"))
+                .await
+                .unwrap();
+            assert_eq!(&ans[..2], &[11, i]);
+        }
+        assert!(pq_acc.load(Ordering::Relaxed) >= 1);
     }
 
     #[test]
