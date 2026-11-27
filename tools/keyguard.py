@@ -696,8 +696,76 @@ def verify_assertion(public_b64, message, assertion):
     public.verify(bytes(auth) + client_data.hash, unb64(assertion["signature"]))
 
 
-# Hybrid X25519 + ML-KEM-768 public-key encryption (both secrets feed HKDF).
+# Hybrid X25519 + ML-KEM-768 public-key encryption (schema=1, legacy compatible).
 KEM_PUBLIC = 32 + 1184
+# Triple-KEX v2 (schema=2): X25519 (32 B) + X448 (56 B) + ML-KEM-1024 (1,568 B) + dual HKDF.
+KEM_V2_PUBLIC = 32 + 56 + 1568
+KEM_V2_PRIVATE = 32 + 56 + 64
+
+
+def kem_keypair_v2():
+    """A triple-family hybrid X25519 + X448 + ML-KEM-1024 key pair: (152-byte private, 1,656-byte public)."""
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import mlkem, x25519, x448
+
+    a = x25519.X25519PrivateKey.generate()
+    b = x448.X448PrivateKey.generate()
+    c = mlkem.MLKEM1024PrivateKey.generate()
+    raw = serialization.Encoding.Raw
+    private = (
+        a.private_bytes(raw, serialization.PrivateFormat.Raw, serialization.NoEncryption())
+        + b.private_bytes(raw, serialization.PrivateFormat.Raw, serialization.NoEncryption())
+        + c.private_bytes_raw()
+    )
+    public = (
+        a.public_key().public_bytes(raw, serialization.PublicFormat.Raw)
+        + b.public_key().public_bytes(raw, serialization.PublicFormat.Raw)
+        + c.public_key().public_bytes(raw, serialization.PublicFormat.Raw)
+    )
+    return private, public
+
+
+def _kem_key_v2(x25519_ss, x448_ss, pq_ss, context, eph_x25519, eph_x448, ct, recipient):
+    transcript = context + b"|" + eph_x25519 + eph_x448 + ct + recipient
+    dual_digest = hashlib.sha512(transcript).digest() + hashlib.sha3_512(transcript).digest()
+    salt_sha2 = hashlib.sha512(b"cypherpunk-vpn/hybrid-kem/v2/sha2|" + dual_digest).digest()
+    salt_sha3 = hashlib.sha3_512(b"cypherpunk-vpn/hybrid-kem/v2/sha3|" + dual_digest).digest()
+    info = b"cypherpunk-vpn/hybrid-kem/v2|" + dual_digest
+    ikm = bytearray(x25519_ss + x448_ss + pq_ss)
+    try:
+        raw_ikm = bytes(ikm)
+        leg_sha2 = HKDF(algorithm=hashes.SHA512(), length=32, salt=salt_sha2, info=info).derive(raw_ikm)
+        leg_sha3 = HKDF(algorithm=hashes.SHA3_512(), length=32, salt=salt_sha3, info=info).derive(raw_ikm)
+        return bytes(x ^ y for x, y in zip(leg_sha2, leg_sha3, strict=True))
+    finally:
+        ikm[:] = bytes(len(ikm))
+
+
+def kem_seal_v2(recipient, plaintext, context):
+    """Encrypt `plaintext` to a v2 triple-family key (X25519 + X448 + ML-KEM-1024 + dual HKDF)."""
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import mlkem, x25519, x448
+
+    if len(recipient) != KEM_V2_PUBLIC:
+        raise ValueError("wrong v2 recipient key")
+    raw = serialization.Encoding.Raw
+    e1 = x25519.X25519PrivateKey.generate()
+    e2 = x448.X448PrivateKey.generate()
+    eph1 = e1.public_key().public_bytes(raw, serialization.PublicFormat.Raw)
+    eph2 = e2.public_key().public_bytes(raw, serialization.PublicFormat.Raw)
+    ss1 = e1.exchange(x25519.X25519PublicKey.from_public_bytes(recipient[:32]))
+    ss2 = e2.exchange(x448.X448PublicKey.from_public_bytes(recipient[32:88]))
+    pq_ss, ct = mlkem.MLKEM1024PublicKey.from_public_bytes(recipient[88:]).encapsulate()
+    nonce = os.urandom(12)
+    key = _kem_key_v2(ss1, ss2, pq_ss, context, eph1, eph2, ct, recipient)
+    return dict(
+        schema=2,
+        ephemeral_x25519=b64(eph1),
+        ephemeral_x448=b64(eph2),
+        mlkem1024=b64(ct),
+        nonce=b64(nonce),
+        ciphertext=b64(AESGCM(key).encrypt(nonce, plaintext, context)),
+    )
 
 
 def kem_keypair():
@@ -749,15 +817,41 @@ def kem_seal(recipient, plaintext, context):
 
 
 def kem_open(private, value, context):
-    """Decrypt a hybrid envelope with the private key; fails on any context or key mismatch."""
+    """Decrypt a hybrid envelope (schema=1 or schema=2) with the private key; fails closed on mismatch."""
     from cryptography.hazmat.primitives import serialization
-    from cryptography.hazmat.primitives.asymmetric import mlkem, x25519
+    from cryptography.hazmat.primitives.asymmetric import mlkem, x25519, x448
 
-    if value.get("schema") != 1 or len(private) != 96:
+    raw = serialization.Encoding.Raw
+    schema = value.get("schema")
+    if schema == 2:
+        if len(private) != KEM_V2_PRIVATE:
+            raise ValueError("wrong hybrid envelope")
+        a = x25519.X25519PrivateKey.from_private_bytes(private[:32])
+        b = x448.X448PrivateKey.from_private_bytes(private[32:88])
+        c = mlkem.MLKEM1024PrivateKey.from_seed_bytes(private[88:])
+        recipient = (
+            a.public_key().public_bytes(raw, serialization.PublicFormat.Raw)
+            + b.public_key().public_bytes(raw, serialization.PublicFormat.Raw)
+            + c.public_key().public_bytes(raw, serialization.PublicFormat.Raw)
+        )
+        eph1 = unb64(value["ephemeral_x25519"])
+        eph2 = unb64(value["ephemeral_x448"])
+        ct = unb64(value["mlkem1024"])
+        key = _kem_key_v2(
+            a.exchange(x25519.X25519PublicKey.from_public_bytes(eph1)),
+            b.exchange(x448.X448PublicKey.from_public_bytes(eph2)),
+            c.decapsulate(ct),
+            context,
+            eph1,
+            eph2,
+            ct,
+            recipient,
+        )
+        return AESGCM(key).decrypt(unb64(value["nonce"]), unb64(value["ciphertext"]), context)
+    if schema != 1 or len(private) != 96:
         raise ValueError("wrong hybrid envelope")
     a = x25519.X25519PrivateKey.from_private_bytes(private[:32])
     b = mlkem.MLKEM768PrivateKey.from_seed_bytes(private[32:])
-    raw = serialization.Encoding.Raw
     recipient = a.public_key().public_bytes(raw, serialization.PublicFormat.Raw) + b.public_key().public_bytes(
         raw, serialization.PublicFormat.Raw
     )

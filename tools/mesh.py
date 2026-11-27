@@ -1120,6 +1120,10 @@ def main() -> int:
     imp.add_argument("--pool", required=True)
     imp.add_argument("--pinned-key", required=True)
     imp.add_argument("--batch", required=True)
+    imp.add_argument("--witness-keys", help="JSON map of pinned witness IDs to base64 ML-DSA-65 public keys")
+    imp.add_argument(
+        "--witness-quorum", type=int, default=0, help="minimum witness signatures required on pool manifest"
+    )
     imp.add_argument("--vault")
     imp.add_argument("--allow-current-epoch", action="store_true")
 

@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "date_utc": "2026-11-27T04:45:38Z",
+  "provider": "Hetzner Cloud",
+  "location": "fsn1",
+  "server_type": "cx23",
+  "operator_scope": "multi-provider single-operator technical validation; NOT independent third-party operator",
+  "kernel": "6.12.118+deb13-cloud-amd64",
+  "os": "Debian GNU/Linux 13 (trixie)",
+  "nts_egress_nft_valid": true,
+  "d021_tor_leak_direction": {
+    "ok": true,
+    "probes_sent": 5,
+    "tunnel_received": 5,
+    "direct_wan_received": 0,
+    "direct_send_errors": 5,
+    "nft_tunnel_counter_packets": 5,
+    "nft_direct_drop_counter_packets": 8,
+    "nft_table_present": true
+  },
+  "pq_multi_dot_check": {
+    "configuration_valid": true,
+    "upstream_tls": true,
+    "recursive": false,
+    "upstream_count": 2
+  },
+  "pq_multi_dot_live_queries_ok": 6,
+  "pq_multi_dot_live_queries_sent": 6,
+  "passed": true
+}

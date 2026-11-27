@@ -18,6 +18,7 @@ sys.path.insert(0, str(REPO_ROOT / "tools"))
 
 from checkout_policy import BATCH_SIZE, CheckoutError, CheckoutLedger, Order, REQUIRED_CONFIRMATIONS  # noqa: E402
 from shared_admission import Cohort, EPOCH_SECONDS, ROLES, verify_token  # noqa: E402
+from shared_pq import HybridPqIdentity, PqEpochStamper, issue_checkout_ticket  # noqa: E402
 from zcash_watchers import http_json_request  # noqa: E402
 
 
@@ -138,6 +139,7 @@ class CheckoutService:
         bind_host: str = "127.0.0.1",
         bind_port: int = 0,
         enable_testnet_pilot: bool = False,
+        pq_attester: HybridPqIdentity | None = None,
         now_fn=time.time,
     ):
         if not enable_testnet_pilot:
@@ -153,6 +155,7 @@ class CheckoutService:
         self.watchers = tuple(watchers)
         self.price_zat = price_zat
         self.order_ttl = order_ttl
+        self.pq_attester = pq_attester
         self.now_fn = now_fn
         self.ledger = CheckoutLedger(ledger_path, self.issuer_key_id)
         if not ledger_path.exists():
@@ -172,10 +175,12 @@ class CheckoutService:
             self.ledger.prune(now)
 
     def retire_epoch(self):
-        """Destroy the epoch's blind-signing private key and pending order receivers (forward privacy)."""
+        """Destroy the epoch's blind-signing private key, PQ attester key, and pending order receivers."""
         with self._lock:
             self.issuer_keys.pop("privateKeyPkcs8", None)
             self._orders.clear()
+            if self.pq_attester is not None:
+                self.pq_attester.wipe()
 
     def _mint(self, requests: tuple[bytes, ...]) -> tuple[bytes, ...]:
         private_key = self.issuer_keys.get("privateKeyPkcs8")
@@ -282,7 +287,13 @@ class CheckoutService:
                             service._mint,
                             now=now,
                         )
-                        self._send(200, {"ok": True, "responses": [r.hex() for r in responses]})
+                        payload = {"ok": True, "responses": [r.hex() for r in responses]}
+                        if service.pq_attester is not None:
+                            next_epoch = now // EPOCH_SECONDS + 1
+                            payload["pq_tickets"] = [
+                                issue_checkout_ticket(service.pq_attester, next_epoch) for _ in responses
+                            ]
+                        self._send(200, payload)
                     else:
                         self._send(404, {"ok": False, "error": "not found"})
                 except (CheckoutError, KeyError, ValueError) as err:
@@ -311,6 +322,8 @@ def purchase_blind_batch(
     socks_proxy: tuple[str, int] | None = None,
     allow_loopback_test: bool = False,
     pinned_issuer_spki: bytes | None = None,
+    stamper: PqEpochStamper | None = None,
+    stamper_now: int | None = None,
 ) -> dict:
     """Execute a blind testnet checkout and return a verified batch with zero order/payment metadata."""
     if not host.endswith(".onion") and not (allow_loopback_test and host == "127.0.0.1"):
@@ -384,6 +397,7 @@ def purchase_blind_batch(
         if proc.returncode != 0 or not pairs_line:
             raise CheckoutError(f"blind unblinding failed: {proc.stderr.read()}")
         pairs_hex = json.loads(pairs_line)["pairs"]
+        pq_tickets = issue_resp.get("pq_tickets")
     finally:
         if proc.poll() is None:
             with suppress(Exception):
@@ -398,19 +412,38 @@ def purchase_blind_batch(
     # Verify every unblinded token locally against the pinned issuer SPKI and next-epoch cohort.
     spki = bytes.fromhex(health["issuer_spki"])
     epoch = int(health["next_epoch"])
-    cohorts = tuple(Cohort(health["issuer_name"], health["pool_name"], role, epoch, spki) for role in ROLES)
+    stamper_pub = stamper.public if stamper is not None else None
+    cohorts = tuple(
+        Cohort(health["issuer_name"], health["pool_name"], role, epoch, spki, stamper_pub) for role in ROLES
+    )
     for pair in pairs_hex:
         for tok_hex, cohort in zip(pair, cohorts, strict=True):
             verify_token(bytes.fromhex(tok_hex), cohort.challenge, spki)
 
-    # Return ONLY the verified blind batch; keep order_id and txid out of client credit storage.
-    return {
+    result = {
         "issuer_name": health["issuer_name"],
         "pool_name": health["pool_name"],
         "epoch": epoch,
         "issuer_spki": health["issuer_spki"],
         "pairs": pairs_hex,
     }
+    if stamper is not None:
+        if not isinstance(pq_tickets, list) or len(pq_tickets) != len(pairs_hex) * len(ROLES):
+            raise CheckoutError("checkout did not supply required PQ tickets for split-authority stamping")
+        now_ts = int(time.time()) if stamper_now is None else int(stamper_now)
+        pq_stamps = []
+        idx = 0
+        for pair in pairs_hex:
+            pair_stamps = []
+            for tok_hex, cohort in zip(pair, cohorts, strict=True):
+                stamp = stamper.stamp(cohort, bytes.fromhex(tok_hex), pq_tickets[idx], now=now_ts)
+                pair_stamps.append(stamp)
+                idx += 1
+            pq_stamps.append(pair_stamps)
+        result["pq_stamps"] = pq_stamps
+
+    # Return ONLY the verified blind batch (and optional PQ stamps); never retain order_id, txid, or ticket_id.
+    return result
 
 
 def prepare_signer_dir(target: Path) -> Path:

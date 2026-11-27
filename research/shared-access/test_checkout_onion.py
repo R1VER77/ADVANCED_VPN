@@ -396,6 +396,97 @@ class TestOnionCheckout(unittest.TestCase):
         with self.assertRaisesRegex(CheckoutError, "payment confirmation unavailable"):
             confirmed(order, txid, (w_main, w2))
 
+    def test_composite_pq_stamped_blind_checkout_end_to_end(self):
+        """CheckoutService + pq_attester -> PqEpochStamper -> composite PQ admission succeeds."""
+        from shared_pq import HybridPqIdentity, PqEpochStamper
+
+        ivk = os.urandom(32)
+        records_a, records_b = {}, {}
+        srv_a = MockWatcherServer(ivk, records_a)
+        srv_b = MockWatcherServer(ivk, records_b)
+        watcher_a = make_http_watcher(operator="op-alpha", url=srv_a.url, ivk=ivk)
+        watcher_b = make_http_watcher(operator="op-beta", url=srv_b.url, ivk=ivk)
+        fixed_now = 20 * EPOCH_SECONDS + 100
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            attester = HybridPqIdentity()
+            stamper = PqEpochStamper(root / "stamper.sqlite", attester.public)
+            stamper.initialize()
+            service = CheckoutService(
+                ledger_path=root / "checkout.sqlite",
+                issuer_name="issuer.vpn.test",
+                pool_name="pool.vpn.test",
+                issuer_keys=self.issuer_keys,
+                signer_script=self.signer,
+                watchers=(watcher_a, watcher_b),
+                enable_testnet_pilot=True,
+                pq_attester=attester,
+                now_fn=lambda: fixed_now,
+            )
+            service.start()
+            try:
+                txid = os.urandom(32)
+                bhash = os.urandom(32)
+
+                def pay_confirmed(order_resp):
+                    rec = {
+                        "network": "testnet",
+                        "pool": "orchard",
+                        "txid": txid.hex(),
+                        "block_hash": bhash.hex(),
+                        "height": 2_900_100,
+                        "tip_height": 2_900_112,
+                        "receiver": order_resp["receiver"],
+                        "amount": order_resp["price_zat"],
+                    }
+                    records_a[(txid.hex(), order_resp["receiver"])] = rec
+                    records_b[(txid.hex(), order_resp["receiver"])] = rec
+                    return txid
+
+                batch = purchase_blind_batch(
+                    host="127.0.0.1",
+                    port=service.port,
+                    signer_script=self.signer,
+                    pay_fn=pay_confirmed,
+                    allow_loopback_test=True,
+                    pinned_issuer_spki=bytes.fromhex(self.issuer_keys["issuerSpki"]),
+                    stamper=stamper,
+                    stamper_now=fixed_now,
+                )
+                self.assertEqual(set(batch), {"issuer_name", "pool_name", "epoch", "issuer_spki", "pairs", "pq_stamps"})
+                self.assertEqual(len(batch["pq_stamps"]), 4)
+                spki = bytes.fromhex(batch["issuer_spki"])
+                cohorts = tuple(
+                    Cohort("issuer.vpn.test", "pool.vpn.test", role, 21, spki, stamper.public) for role in ROLES
+                )
+                ledgers = [ReplayLedger(root / f"{role}.sqlite", role) for role in ROLES]
+                for ledger in ledgers:
+                    ledger.initialize()
+                for pair, stamp_pair in zip(batch["pairs"], batch["pq_stamps"], strict=True):
+                    for tok_hex, stamp, cohort, ledger in zip(pair, stamp_pair, cohorts, ledgers, strict=True):
+                        token = bytes.fromhex(tok_hex)
+                        sk = mldsa.MLDSA65PrivateKey.generate()
+                        hop, chan, ckey = os.urandom(32), os.urandom(32), os.urandom(32)
+                        proof = sk.sign(binding_message(cohort, token, hop, chan, ckey))
+                        expiry = admit(
+                            cohort,
+                            ledger,
+                            token,
+                            21 * EPOCH_SECONDS,
+                            hop_key_id=hop,
+                            channel_binding=chan,
+                            carrier_key=ckey,
+                            session_key=sk.public_key(),
+                            proof=proof,
+                            pq_stamp=stamp,
+                        )
+                        self.assertGreater(expiry, 21 * EPOCH_SECONDS)
+            finally:
+                service.stop()
+                stamper.identity.wipe()
+                srv_a.stop()
+                srv_b.stop()
+
 
 if __name__ == "__main__":
     unittest.main()

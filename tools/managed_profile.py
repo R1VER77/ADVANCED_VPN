@@ -148,6 +148,22 @@ def valid_cover_name(name):
     return name
 
 
+# Public hybrid-PQ DNS-over-TLS upstreams verified live with X25519MLKEM768.
+DEFAULT_PQ_DOT_UPSTREAMS = (
+    {"addr": "1.1.1.1:853", "server_name": "one.one.one.one"},
+    {"addr": "8.8.8.8:853", "server_name": "dns.google"},
+)
+
+
+def _validate_dns_upstream(addr: str, server_name: str, *, recursive: bool = False):
+    host, port = addr.rsplit(":", 1)
+    ip = ipaddress.ip_address(host.strip("[]"))
+    if recursive and not ip.is_loopback:
+        raise ValueError("a recursive exit asks only loopback resolvers")
+    if not 1 <= int(port) <= 65535 or not re.fullmatch("[A-Za-z0-9.-]{1,253}", server_name):
+        raise ValueError("DNS upstream rejected")
+
+
 def profile_validate(p):
     """Validate a profile's exact schema and every value that reaches rules or commands."""
     base = {"schema", "role", "hops", "core", "carrier", "dns", "network", "daily_budget_bytes"}
@@ -387,6 +403,7 @@ def profile_validate(p):
             "client_network",
             "upstream",
             "server_name",
+            "upstreams",
             "test_ca",
             "blocklist",
             "allowlist",
@@ -414,6 +431,13 @@ def profile_validate(p):
         ipaddress.IPv4Address(host)
         if not 1 <= int(port) <= 65535 or not re.fullmatch("[A-Za-z0-9.-]{1,253}", d["server_name"]):
             raise ValueError("DNS upstream rejected")
+        if "upstreams" in d:
+            if not isinstance(d["upstreams"], list) or len(d["upstreams"]) > 8:
+                raise ValueError("DNS upstreams rejected")
+            for entry in d["upstreams"]:
+                if not isinstance(entry, dict) or set(entry) != {"addr", "server_name"}:
+                    raise ValueError("DNS upstream entry rejected")
+                _validate_dns_upstream(entry["addr"], entry["server_name"], recursive=bool(d.get("recursive")))
     return p
 
 
@@ -523,7 +547,7 @@ def store_keys(state, keys, secret=None, meta=None):
 
     mode = json.loads(read_private(state / "protection.json"))["mode"]
     for name, value in keys.items():
-        if mode == "nitrokey":
+        if mode in ("nitrokey", "vault-vm"):
             atomic(
                 state / (name + "-key.sealed.json"),
                 canonical(seal_bytes(secret, meta, name, binding(state, name), value)),
@@ -556,8 +580,10 @@ def load_keys(state, names, secret=None, meta=None):
 
     protection = json.loads(read_private(state / "protection.json"))
     mode = protection["mode"]
-    if mode == "nitrokey":
+    if mode in ("nitrokey", "vault-vm"):
         if secret is None:
+            if mode == "vault-vm":
+                raise ValueError("vault-vm keys must be opened inside session_signer")
             secret, meta = hardware_secret(Path(protection["vault"]))
         return {
             n: open_bytes(
@@ -1361,6 +1387,8 @@ def create(
                     d["allowlist"] = "dns-allowlist.txt"
                 if dns.get("blocked_domains"):
                     d["blocked_domains"] = list(dns["blocked_domains"])
+                if dns.get("upstreams"):
+                    d["upstreams"] = [dict(addr=u["addr"], server_name=u["server_name"]) for u in dns["upstreams"]]
             dns_cfg = dict(schema=1, listen="10.77.0.1:1053", client_ip="10.77.0.2", **d)
         profile = dict(
             schema=3,
@@ -1792,6 +1820,8 @@ def mesh_bundles(root, mesh, signer, defense="strong", daily_mib=None, dns=None,
                     d["allowlist"] = "dns-allowlist.txt"
                 if dns.get("blocked_domains"):
                     d["blocked_domains"] = list(dns["blocked_domains"])
+                if dns.get("upstreams"):
+                    d["upstreams"] = [dict(addr=u["addr"], server_name=u["server_name"]) for u in dns["upstreams"]]
             dns_cfg = dict(schema=1, listen="10.77.0.1:1053", client_ip="10.77.0.2", client_network="10.77.0.0/24", **d)
         profile = dict(
             schema=3,

@@ -108,6 +108,28 @@ impl Theme {
     }
 }
 
+/// ASCII rendering of the `cypherpunks` repository wordmark (`docs/assets/cypherpunk-vpn-logo-dark.png`),
+/// rendered in [`Theme::brand`]. Maximum width is 65 columns, fitting standard 80-column terminals cleanly.
+const LOGO_LINES: &[&str] = &[
+    r"                    __                                 __        ",
+    r"  _______  ______  / /_  ___  _____ ____  __  ______  / / ______ ",
+    r" / ___/ / / / __ \/ __ \/ _ \/ ___// __ \/ / / / __ \/ //_/ ___/ ",
+    r"/ /__/ /_/ / /_/ / / / /  __/ /   / /_/ / /_/ / / / / ,< (__  )  ",
+    r"\___/\__, / .___/_/ /_/\___/_/   / .___/\__,_/_/ /_/_/|_/____/   ",
+    r"    /____/_/                    /_/                              ",
+];
+
+/// Render the `cypherpunks` CLI wordmark using the active [`Theme`].
+pub fn logo_lines(theme: Theme) -> Vec<ratatui::text::Line<'static>> {
+    use ratatui::text::{Line, Span};
+
+    let brand = theme.brand();
+    LOGO_LINES
+        .iter()
+        .map(|line| Line::from(Span::styled((*line).to_string(), brand)))
+        .collect()
+}
+
 /// Render styled lines to a string: SGR escapes when the theme allows them, plain
 /// text otherwise. Only the attributes [`Theme`] can produce are translated.
 pub fn to_ansi(lines: &[ratatui::text::Line<'_>], theme: Theme) -> String {
@@ -186,5 +208,20 @@ mod tests {
             to_ansi(&lines, t),
             "\x1b[1;38;2;203;166;247mVPN\x1b[0m\x1b[38;2;205;214;244m ready\x1b[0m\n"
         );
+    }
+
+    #[test]
+    fn ascii_logo_fits_80_columns_and_respects_plain_theme() {
+        let lines = logo_lines(Theme::plain());
+        assert_eq!(lines.len(), 6);
+        for line in &lines {
+            assert!(line.width() <= 66, "logo line too wide: {}", line.width());
+        }
+        let plain = to_ansi(&lines, Theme::plain());
+        assert!(!plain.contains('\x1b'));
+        assert!(plain.contains(r"/____/_/"));
+        assert!(!plain.contains(r"|___/_/"));
+        let colored = to_ansi(&logo_lines(Theme::full()), Theme::full());
+        assert!(colored.contains("\x1b[1;38;2;203;166;247m"));
     }
 }

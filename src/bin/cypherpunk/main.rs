@@ -85,6 +85,9 @@ enum Cmd {
     /// Recheck resumable setup or review a confirmed hardware repair.
     #[command(disable_help_flag = true)]
     Setup(Rest),
+    /// Detect hardware keys and select Standard, Safer, or Safest protection.
+    #[command(disable_help_flag = true)]
+    SecurityLevel(Rest),
     /// Start the VPN service (or --foreground).
     #[command(disable_help_flag = true)]
     Connect(Rest),
@@ -162,6 +165,7 @@ impl Cmd {
             Cmd::Doctor(r) => ("doctor", r.args),
             Cmd::Preflight(r) => ("preflight", r.args),
             Cmd::Setup(r) => ("setup", r.args),
+            Cmd::SecurityLevel(r) => ("security-level", r.args),
             Cmd::Connect(r) => ("connect", r.args),
             Cmd::Disconnect(r) => ("disconnect", r.args),
             Cmd::Run(r) => ("run", r.args),
@@ -200,7 +204,11 @@ fn help(topic: Option<&str>, theme: Theme) -> i32 {
         }
         Some(name) => match topics::find(name) {
             Some(t) => {
-                print(&topics::render(t.body, theme), theme);
+                if name == "overview" {
+                    print(&topics::render_with_logo(t.body, theme), theme);
+                } else {
+                    print(&topics::render(t.body, theme), theme);
+                }
                 0
             }
             None => {
@@ -357,6 +365,10 @@ mod tests {
             (
                 vec!["cypherpunk", "setup", "--repair", "install_udev_rule"],
                 ("setup", vec!["--repair", "install_udev_rule"]),
+            ),
+            (
+                vec!["cypherpunk", "security-level", "--select", "safer"],
+                ("security-level", vec!["--select", "safer"]),
             ),
         ] {
             let parsed = Cli::try_parse_from(argv).expect("new command parses");

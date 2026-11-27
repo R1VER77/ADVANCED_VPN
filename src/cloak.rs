@@ -934,6 +934,28 @@ pub async fn serve_tcp(
     stats: Arc<Stats>,
     front: bool,
 ) -> Result<()> {
+    serve_tcp_clocked(
+        listener,
+        acceptor,
+        wireguard,
+        keys,
+        stats,
+        front,
+        WireClock::from_env().filter(|_| !front),
+    )
+    .await
+}
+
+/// [`serve_tcp`] with an explicit optional [`WireClock`] for constant-rate downlink TCP cells.
+pub async fn serve_tcp_clocked(
+    listener: TcpListener,
+    acceptor: TlsAcceptor,
+    wireguard: SocketAddr,
+    keys: Vec<[u8; TOKEN_LEN]>,
+    stats: Arc<Stats>,
+    front: bool,
+    clock: Option<WireClock>,
+) -> Result<()> {
     ensure!(
         !keys.is_empty() && keys.len() <= 256,
         "one to 256 cloak keys"
@@ -1006,20 +1028,62 @@ pub async fn serve_tcp(
             let (mut reader, mut writer) = tokio::io::split(tls);
             let (udp_down, stats_down) = (udp.clone(), stats.clone());
             let downlink = tokio::spawn(async move {
-                let mut buf = vec![0u8; 2048];
-                loop {
-                    let Ok(n) = udp_down.recv(&mut buf).await else {
-                        break;
-                    };
-                    let Ok(cell) = pack_cell(&buf[..n]) else {
-                        add(&stats_down.dropped);
-                        continue;
-                    };
-                    if writer.write_all(&cell).await.is_ok() {
-                        add(&stats_down.sent);
-                    } else {
-                        add(&stats_down.dropped);
-                        break;
+                if let Some(cl) = clock {
+                    let cap = wire_clock_queue_cap(cl.packets_per_second);
+                    let (qtx, mut qrx) = mpsc::channel::<Bytes>(cap);
+                    let stats_rx = stats_down.clone();
+                    let reader_task = tokio::spawn(async move {
+                        let mut buf = vec![0u8; 2048];
+                        loop {
+                            let Ok(n) = udp_down.recv(&mut buf).await else {
+                                break;
+                            };
+                            if qtx.try_send(Bytes::copy_from_slice(&buf[..n])).is_err() {
+                                add(&stats_rx.dropped);
+                            }
+                        }
+                    });
+                    let mut tick =
+                        tokio::time::interval(Duration::from_nanos(cl.step_ns().max(100_000)));
+                    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                    let decoy_cell = [0u8; TCP_CELL_LEN];
+                    loop {
+                        tick.tick().await;
+                        let cell = match qrx.try_recv() {
+                            Ok(d) => match pack_cell(&d) {
+                                Ok(c) => c,
+                                Err(_) => {
+                                    add(&stats_down.dropped);
+                                    decoy_cell
+                                }
+                            },
+                            Err(mpsc::error::TryRecvError::Empty) => decoy_cell,
+                            Err(mpsc::error::TryRecvError::Disconnected) => break,
+                        };
+                        if writer.write_all(&cell).await.is_ok() {
+                            add(&stats_down.sent);
+                        } else {
+                            add(&stats_down.dropped);
+                            break;
+                        }
+                    }
+                    reader_task.abort();
+                } else {
+                    let mut buf = vec![0u8; 2048];
+                    loop {
+                        let Ok(n) = udp_down.recv(&mut buf).await else {
+                            break;
+                        };
+                        let Ok(cell) = pack_cell(&buf[..n]) else {
+                            add(&stats_down.dropped);
+                            continue;
+                        };
+                        if writer.write_all(&cell).await.is_ok() {
+                            add(&stats_down.sent);
+                        } else {
+                            add(&stats_down.dropped);
+                            break;
+                        }
                     }
                 }
             });
@@ -3281,5 +3345,55 @@ mod tests {
         .await;
         let decoys = server_task.await.unwrap();
         assert_eq!(decoys, 5);
+    }
+
+    #[tokio::test]
+    async fn clocked_tcp_server_downlink_emits_constant_rate_decoy_cells_when_idle() {
+        let (cert, k, pin) = test_cert();
+        let acceptor = TlsAcceptor::from(tls_server_config(cert, k).unwrap());
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let wg = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let key = [0x53u8; TOKEN_LEN];
+        let stats = Arc::new(Stats::default());
+        let clock = WireClock {
+            packets_per_second: 50.0,
+            lookahead: Duration::from_millis(20),
+        };
+        let srv = tokio::spawn(serve_tcp_clocked(
+            listener,
+            acceptor,
+            wg.local_addr().unwrap(),
+            vec![key],
+            stats,
+            false,
+            Some(clock),
+        ));
+
+        let connector = TlsConnector::from(tls_client_config(pin, true).unwrap());
+        let tcp = TcpStream::connect(addr).await.unwrap();
+        let sni = ServerName::try_from("cover.example".to_owned()).unwrap();
+        let mut tls = connector.connect(sni, tcp).await.unwrap();
+        let proof = tls_proof(tls.get_ref().1, &key).unwrap();
+        let req = format!(
+            "GET / HTTP/1.1\r\nHost: cover.example\r\nIf-None-Match: \"{}\"\r\n\r\n",
+            hex::encode(proof)
+        );
+        tls.write_all(req.as_bytes()).await.unwrap();
+        let resp = read_http_header(&mut tls).await.unwrap();
+        assert!(resp.starts_with(b"HTTP/1.1 200 OK"));
+        let mut cell = [0u8; TCP_CELL_LEN];
+        for _ in 0..5 {
+            tokio::time::timeout(Duration::from_secs(2), tls.read_exact(&mut cell))
+                .await
+                .unwrap()
+                .unwrap();
+            let n = u16::from_be_bytes([cell[0], cell[1]]) as usize;
+            assert_eq!(
+                n, 0,
+                "idle clocked server downlink cell must be a zero-length decoy"
+            );
+        }
+        srv.abort();
     }
 }

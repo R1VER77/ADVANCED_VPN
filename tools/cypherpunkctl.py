@@ -1086,6 +1086,8 @@ class ServerFees:
 
     def egress_text(self):
         """The egress table as nft input, replacing any earlier one."""
+        strict_raw = os.environ.get("CPVPN_STRICT_NTS_SERVERS", "").strip()
+        nts_servers = tuple(s.strip() for s in strict_raw.split(",") if s.strip()) if strict_raw else ()
         return reset_table(self.se.EGRESS_TABLE) + self.se.egress_rules(
             self.profile,
             self.cfg,
@@ -1094,6 +1096,9 @@ class ServerFees:
             maintenance=self.maintenance,
             lab_transit=self.lab,
             maintenance_uids=self.update_helper_uids() if self.maintenance else (),
+            nts=True,
+            strict_nts=bool(nts_servers),
+            nts_servers=nts_servers,
         )
 
     def update_helper_uids(self):
@@ -1769,8 +1774,10 @@ def isolate_resolvers(resolver):
     cmd("mount", "--bind", str(resolver), str(target))
 
 
-def run_app(state, argv, uid, gid, lab=False):
-    """Run `argv` as `uid`/`gid` inside the protected namespace, with the host resolver sockets hidden."""
+def run_app(state, argv, uid, gid, lab=False, ephemeral_browser=None, ephemeral_socks=None):
+    """Run `argv` as `uid`/`gid` inside the protected namespace, with the host resolver sockets hidden.
+    When `ephemeral_browser` (`firefox` or `chromium`) is set, launches inside a disposable 0700
+    anti-fingerprinting profile (`tools/tor_lab.py`) that overwrites and wipes all session state on exit."""
     root_guard(lab)
     if not argv:
         raise ValueError("application command required")
@@ -1801,6 +1808,16 @@ def run_app(state, argv, uid, gid, lab=False):
 
     if ctypes.CDLL(None).prctl(38, 1, 0, 0, 0) != 0:
         raise RuntimeError("cannot set no_new_privs")
+    if ephemeral_browser:
+        import tor_lab
+
+        url = argv[1] if len(argv) > 1 else "about:blank"
+        with tor_lab.EphemeralBrowserProfile(ephemeral_browser, socks_proxy=ephemeral_socks) as profile:
+            launch_argv = profile.argv(argv[0], url)
+            if len(argv) > 2:
+                launch_argv.extend(argv[2:])
+            rc = subprocess.run(launch_argv, env=profile.env(dict(os.environ)), check=False).returncode  # noqa: S603
+        raise SystemExit(rc)
     os.execvp(argv[0], argv)
 
 
@@ -2406,9 +2423,37 @@ def doctor(state, check_egress=False):
     return checks
 
 
+_CLI_LOGO_LINES = (
+    r"                    __                                 __        ",
+    r"  _______  ______  / /_  ___  _____ ____  __  ______  / / ______ ",
+    r" / ___/ / / / __ \/ __ \/ _ \/ ___// __ \/ / / / __ \/ //_/ ___/ ",
+    r"/ /__/ /_/ / /_/ / / / /  __/ /   / /_/ / /_/ / / / / ,< (__  )  ",
+    r"\___/\__, / .___/_/ /_/\___/_/   / .___/\__,_/_/ /_/_/|_/____/   ",
+    r"    /____/_/                    /_/                              ",
+)
+
+
+def _render_cli_logo(color=None):
+    """Render the cypherpunks ASCII wordmark in the CLI's Catppuccin Mocha brand colour."""
+    if color is None:
+        color = sys.stdout.isatty() and os.environ.get("TERM") != "dumb" and "NO_COLOR" not in os.environ
+    if not color:
+        return "\n".join(_CLI_LOGO_LINES) + "\n"
+    # Catppuccin Mocha: Mauve (#cba6f7) bold — matches Theme::brand() in the Rust CLI.
+    brand = "\x1b[1;38;2;203;166;247m"
+    reset = "\x1b[0m"
+    return "\n".join(f"{brand}{line}{reset}" for line in _CLI_LOGO_LINES) + "\n"
+
+
+CLI_LOGO = _render_cli_logo(color=False)
+
+
 def build_parser():
     """The controller's command line; also walked by the documentation gate."""
-    p = argparse.ArgumentParser(description=__doc__)
+    p = argparse.ArgumentParser(
+        description=f"{_render_cli_logo()}\n{__doc__}",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     p.add_argument(
         "--state",
         type=Path,
@@ -2594,8 +2639,17 @@ def build_parser():
     location_set.add_argument("--country", required=True)
     location_set.add_argument("--city")
     location_set.add_argument("--chain", help="label a hop in a saved chain instead of the current chain")
-    doc = s.add_parser("doctor", help="self-checks for installation, keys, firewall, resolver and units")
+    doc = s.add_parser("doctor", help="self-checks for installation, keys, firewall and resolver and units")
     doc.add_argument("--check-egress", action="store_true", help="also show the public address seen outside the tunnel")
+    sl = s.add_parser(
+        "security-level",
+        help="detect hardware keys / VM isolation and inspect or select Standard, Safer, or Safest protection",
+    )
+    sl.add_argument(
+        "--select",
+        choices=["standard", "safer", "safest"],
+        help="save the selected protection tier in preferences (refuses unavailable hardware tiers)",
+    )
     s.add_parser("rotate", help="rotate the short-lived session certificates now")
     s.add_parser("guard", help="(re)apply the boot-time kill switch (used by cypherpunk-vpn-guard.service)")
     pref = s.add_parser("preferences", help="change saved connection preferences")
@@ -2636,6 +2690,15 @@ def build_parser():
         type=int,
         default=int(os.environ.get("SUDO_GID", "0")),
         help="group to run as (default: the sudo caller)",
+    )
+    r.add_argument(
+        "--ephemeral-browser",
+        choices=["firefox", "chromium"],
+        help="wrap browser in a disposable 0700 anti-fingerprinting profile wiped on exit",
+    )
+    r.add_argument(
+        "--ephemeral-socks",
+        help="optional local SOCKS5 proxy (e.g. 127.0.0.1:9050) for --ephemeral-browser",
     )
     r.add_argument("command", nargs=argparse.REMAINDER, help="the command, after --")
     mx = s.add_parser("mix", help="the mix lane: a Katzenpost mixnet client inside the protected namespace")
@@ -3177,6 +3240,30 @@ def dispatch(a):
         checks = doctor(a.state.resolve(), a.check_egress)
         text = "\n".join(("ok   " if c["ok"] else "FAIL ") + c["check"] + ": " + c["detail"] for c in checks)
         emit(a, text, checks=checks, healthy=all(c["ok"] for c in checks))
+    elif a.action == "security-level":
+        import vault_vm
+
+        env = vault_vm.detect_security_environment()
+        report = vault_vm.evaluate_tiers(env)
+        selected = None
+        if a.select:
+            root_guard(a.lab)
+            selected = vault_vm.select_tier(a.select, env)
+            state = a.state.resolve()
+            prefs = read_json_private(state / "preferences.json", {})
+            prefs["security_level"] = selected["id"]
+            prefs["protection_mode"] = selected["protection_mode"]
+            save(state / "preferences.json", prefs)
+        lines = [
+            "Recommended tier: %s (hardware keys detected: %d)"
+            % (report["recommended"], report["detected"]["hardware_keys_count"])
+        ]
+        for tier in report["tiers"]:
+            tag = "available" if tier["available"] else "needs: " + "; ".join(tier["missing"])
+            lines.append("  %-8s [%s] %s" % (tier["id"], tag, tier["name"]))
+        if selected is not None:
+            lines.append("Saved security level: %s" % selected["id"])
+        emit(a, "\n".join(lines), **report, selected=selected)
     elif a.action == "reset":
         root_guard(a.lab)
         with supervisor_locks(a.state.resolve()):
@@ -3185,7 +3272,15 @@ def dispatch(a):
     elif a.action == "mix":
         mix_command(a)
     elif a.action == "run":
-        run_app(a.state.resolve(), a.command[1:] if a.command[:1] == ["--"] else a.command, a.uid, a.gid, a.lab)
+        run_app(
+            a.state.resolve(),
+            a.command[1:] if a.command[:1] == ["--"] else a.command,
+            a.uid,
+            a.gid,
+            a.lab,
+            ephemeral_browser=a.ephemeral_browser,
+            ephemeral_socks=a.ephemeral_socks,
+        )
 
 
 if __name__ == "__main__":

@@ -31,6 +31,11 @@ pub const TOPICS: &[Topic] = &[
         body: include_str!("../../../docs/cli/setup.md"),
     },
     Topic {
+        name: "security-level",
+        summary: "detect hardware keys and choose Standard, Safer, or Safest",
+        body: include_str!("../../../docs/cli/security-level.md"),
+    },
+    Topic {
         name: "overview",
         summary: "what cypherpunk is, global options and every command",
         body: include_str!("../../../docs/cli/overview.md"),
@@ -261,16 +266,24 @@ pub fn render(body: &str, t: Theme) -> Vec<Line<'static>> {
     out
 }
 
+/// Render a page preceded by the `cypherpunks VPN` ASCII wordmark banner.
+pub fn render_with_logo(body: &str, t: Theme) -> Vec<Line<'static>> {
+    let mut out = crate::theme::logo_lines(t);
+    out.push(Line::default());
+    out.extend(render(body, t));
+    out
+}
+
 /// The topic list for `cypherpunk help`.
 pub fn index(t: Theme) -> Vec<Line<'static>> {
     let width = TOPICS.iter().map(|x| x.name.len()).max().unwrap_or(0);
-    let mut out = vec![
-        Line::from(vec![
-            Span::styled("cypherpunk help", t.brand()),
-            Span::styled(" TOPIC", t.dim()),
-        ]),
-        Line::default(),
-    ];
+    let mut out = crate::theme::logo_lines(t);
+    out.push(Line::default());
+    out.push(Line::from(vec![
+        Span::styled("cypherpunk help", t.brand()),
+        Span::styled(" TOPIC", t.dim()),
+    ]));
+    out.push(Line::default());
     for x in TOPICS {
         out.push(Line::from(vec![
             Span::styled(format!("  {:<width$}  ", x.name), t.accent()),

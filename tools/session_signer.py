@@ -78,30 +78,43 @@ def certify(state: Path, lane: str, identity_der: bytes, session_spki: bytes, wi
     return b.sign(identity, digest_for(identity)).public_bytes(serialization.Encoding.DER)
 
 
-def sign(state: Path, lanes: dict, carry=(), now=None) -> dict:
-    """The signer's work, in this process: see the module docstring."""
+def sign(state: Path, lanes: dict, carry=(), now=None, passphrase_fn=None) -> dict:
+    """The signer's work, in this process: supports both hardware (`nitrokey`) and
+    hardwareless isolated software (`vault-vm`) protection modes."""
     import session_auth
-    from keyguard import hardware_assertion, read_private
+    from keyguard import hardware_assertion, pinentry, read_private
     from managed_profile import load_keys
+    import vault_vm
 
     protection = json.loads(read_private(state / "protection.json"))
-    if protection["mode"] != "nitrokey":
-        raise ValueError("sessions are hardware-signed only on a hardware-protected device")
+    mode = protection.get("mode")
+    if mode not in ("nitrokey", "vault-vm"):
+        raise ValueError("sessions are signed only on a nitrokey or vault-vm protected device")
     if not lanes or not set(lanes) <= {"outer", "middle", "inner"}:
         raise ValueError("a session names the device's layers")
     now = int(time.time() if now is None else now)
     window = (now - 300, now - 300 + session_auth.MAX_SECONDS)
     spki = {lane: bytes.fromhex(v) for lane, v in lanes.items()}
     statement = session_auth.authorization({lane: hashlib.sha256(v).hexdigest() for lane, v in spki.items()}, *window)
-    secret, meta, assertion = hardware_assertion(Path(protection["vault"]), message=statement)
+    if mode == "nitrokey":
+        secret, meta, assertion = hardware_assertion(Path(protection["vault"]), message=statement)
+        extension = session_auth.extension_value(statement, assertion)
+    else:
+        ask = passphrase_fn or pinentry
+        secret, meta, assertion = vault_vm.VaultVmStore.authorize_session(Path(protection["vault"]), statement, ask())
+        extension = json.dumps(
+            {"mode": "vault-vm", "statement": statement.hex(), "assertion": assertion},
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
     keys = load_keys(state, sorted(lanes) + list(carry), secret, meta)
-    extension = session_auth.extension_value(statement, assertion)
     leaves = {lane: certify(state, lane, keys.pop(lane), spki[lane], window, extension).hex() for lane in sorted(lanes)}
     return dict(
         leaves=leaves,
         carry={name: keys.pop(name).hex() for name in carry},
         not_before=window[0],
         not_after=window[1],
+        protection_mode=mode,
     )
 
 

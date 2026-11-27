@@ -88,6 +88,10 @@ const SLASH_COMMANDS: &[(&str, &str)] = &[
         "show shared-access pilot status and sealed credits",
     ),
     ("hops", "show the enrolled route"),
+    (
+        "security-level",
+        "detect hardware keys and choose Standard, Safer, or Safest",
+    ),
     ("setup", "set up or enroll this device"),
     ("doctor", "check this device"),
     ("info", "show enrollment and preferences"),
@@ -251,7 +255,7 @@ impl App {
         self.busy.is_some()
     }
 
-    fn header_lines(&self) -> Vec<Line<'static>> {
+    fn header_lines(&self, show_logo: bool) -> Vec<Line<'static>> {
         let t = self.theme;
         let status_style = match self.header.status.as_str() {
             "connected" => t.success(),
@@ -259,12 +263,16 @@ impl App {
             _ => t.dim(),
         };
         let label = |l: &str| Span::styled(format!("{l:<12}"), t.dim());
-        let mut lines = vec![
-            Line::from(vec![
-                Span::styled(">_ ", t.dim()),
-                Span::styled("CYPHERPUNK VPN", t.brand()),
-                Span::styled(format!(" (v{})", env!("CARGO_PKG_VERSION")), t.dim()),
-            ]),
+        let mut lines = Vec::new();
+        if show_logo {
+            lines.extend(crate::theme::logo_lines(t));
+        }
+        lines.push(Line::from(vec![
+            Span::styled(">_ ", t.dim()),
+            Span::styled("CYPHERPUNK VPN", t.brand()),
+            Span::styled(format!(" (v{})", env!("CARGO_PKG_VERSION")), t.dim()),
+        ]));
+        lines.extend([
             Line::default(),
             Line::from(vec![
                 label("chain:"),
@@ -280,7 +288,7 @@ impl App {
                 Span::styled(" · service ", t.dim()),
                 Span::styled(self.header.status.clone(), status_style),
             ]),
-        ];
+        ]);
         if self.header.mode.starts_with("applications") && self.header.status == "connected" {
             lines.push(Line::from(Span::styled(
                 "Only apps started through CYPHERPUNK use the VPN.",
@@ -358,7 +366,8 @@ impl App {
     pub fn draw(&self, f: &mut Frame, now: Instant) {
         let area = f.area();
         f.buffer_mut().set_style(area, self.theme.surface());
-        let header = self.header_lines();
+        let show_logo = area.width >= 72 && area.height >= 26;
+        let header = self.header_lines(show_logo);
         let inner_width = header.iter().map(Line::width).max().unwrap_or(0) as u16 + 2;
         let box_width = (inner_width + 2).min(area.width);
         let [top, history, status, footer] = Layout::vertical([
@@ -942,5 +951,13 @@ mod tests {
         let rendered = screen(&app, 100, 17).join("\n");
         assert!(rendered.contains("Only apps started through CYPHERPUNK"));
         assert!(rendered.contains("launch protected apps or m to change scope"));
+    }
+
+    #[test]
+    fn tall_terminal_renders_ascii_wordmark_inside_header_box() {
+        let app = App::new(Theme::plain(), true, header());
+        let rendered = screen(&app, 100, 30).join("\n");
+        assert!(rendered.contains(r"/____/_/"), "{rendered}");
+        assert!(rendered.contains(">_ CYPHERPUNK VPN"), "{rendered}");
     }
 }

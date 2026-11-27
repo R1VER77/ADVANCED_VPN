@@ -656,6 +656,15 @@ def main():
             spki,
             pq_stamper_public=stamper.public,
         )
+        batch_stamps = [
+            [
+                stamper.stamp(entry_cohort, pair[0], issue_checkout_ticket(attester, epoch), now=now),
+                stamper.stamp(exit_cohort, pair[1], issue_checkout_ticket(attester, epoch), now=now),
+            ]
+            for pair in raw_pairs
+        ]
+        attester.wipe()
+        stamper.retire_epoch(now)
         wallet = CreditWallet(root / "wallet.json", args.hardware_vault or (root / "vault"), entry_cohort, exit_cohort)
         meta = {"credential": "Y3JlZGVudGlhbA==", "salt": "c2FsdA=="}
         ctx = (
@@ -669,21 +678,15 @@ def main():
                 keyguard.enroll(wallet.vault)
             if physical:
                 print("Sealing shared credit batch with Nitrokey (touch)...", file=sys.stderr, flush=True)
-            wallet.import_batch(raw_pairs)
+            wallet.import_batch(raw_pairs, pq_stamps=batch_stamps)
             opened_pairs = []
+            pair_stamps = []
             for _ in range(2):
                 if physical:
                     print("Opening sealed credit pair with Nitrokey (touch)...", file=sys.stderr, flush=True)
-                opened_pairs.append(wallet.take_pair(now))
-        pair_stamps = [
-            [
-                stamper.stamp(entry_cohort, pair[0], issue_checkout_ticket(attester, epoch), now=now),
-                stamper.stamp(exit_cohort, pair[1], issue_checkout_ticket(attester, epoch), now=now),
-            ]
-            for pair in opened_pairs
-        ]
-        attester.wipe()
-        stamper.retire_epoch(now)
+                pair, stamps = wallet.take_stamped_pair(now)
+                opened_pairs.append(pair)
+                pair_stamps.append(list(stamps))
 
         # Isolate /run/netns after hardware PIN/touch so desktop pinentry can reach /run/user/<uid>.
         cmd("mount", "--make-rprivate", "/")

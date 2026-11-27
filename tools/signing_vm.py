@@ -161,7 +161,7 @@ class UnixSocketVmTransport:
         return validate_signer_reply(req, reply)
 
 
-def serve_unix_socket_once(socket_path: Path, handler):
+def serve_unix_socket_once(socket_path: Path, handler, *, ready=None):
     """Serve a single length-prefixed signing request on `socket_path` (0600, lab/VM daemon)."""
     if socket_path.exists():
         socket_path.unlink()
@@ -169,6 +169,8 @@ def serve_unix_socket_once(socket_path: Path, handler):
         srv.bind(str(socket_path))
         os.chmod(socket_path, 0o600)
         srv.listen(1)
+        if ready is not None:
+            ready.set()
         conn, _ = srv.accept()
         with conn:
             (size,) = struct.unpack("!I", _recv_exact(conn, 4))

@@ -205,6 +205,9 @@ fn help_pages_are_built_in_and_unknown_topics_fail() {
     assert!(text(&o).starts_with("Privacy and your source address\n"));
     assert!(s.cpvpn(&["enroll", "--help"]).status.success());
     assert!(text(&s.cpvpn(&["enroll", "--help"])).contains("--replace"));
+    assert!(text(&s.cpvpn(&["--help"])).contains(r"/____/_/"));
+    assert!(text(&s.cpvpn(&["help"])).contains(r"/____/_/"));
+    assert!(text(&s.cpvpn(&["security-level", "--help"])).contains("Standard"));
     assert_eq!(s.cpvpn(&["help", "nope"]).status.code(), Some(2));
     assert_eq!(s.log("ctl.log"), "", "help never runs the controller");
 }

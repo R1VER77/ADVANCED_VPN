@@ -143,11 +143,15 @@ class TestSigningVmAndHardwareCarrier(unittest.TestCase):
                     "hardening": {"dumpable": False},
                 }
 
-            t = threading.Thread(target=signing_vm.serve_unix_socket_once, args=(sock_path, fake_vault), daemon=True)
+            ready = threading.Event()
+            t = threading.Thread(
+                target=signing_vm.serve_unix_socket_once,
+                args=(sock_path, fake_vault),
+                kwargs={"ready": ready},
+                daemon=True,
+            )
             t.start()
-            deadline = time.monotonic() + 5
-            while not sock_path.exists() and time.monotonic() < deadline:
-                time.sleep(0.02)
+            self.assertTrue(ready.wait(timeout=5))
             reply = signing_vm.UnixSocketVmTransport(sock_path).request("/vault/state", lanes, carry=("wireguard",))
             t.join(timeout=3)
             self.assertEqual(set(reply["leaves"]), {"outer", "inner"})
@@ -227,11 +231,15 @@ class TestSigningVmAndHardwareCarrier(unittest.TestCase):
                     "not_after": now + 1800,
                 }
 
-            t = threading.Thread(target=signing_vm.serve_unix_socket_once, args=(sock_path, fake_vault), daemon=True)
+            ready = threading.Event()
+            t = threading.Thread(
+                target=signing_vm.serve_unix_socket_once,
+                args=(sock_path, fake_vault),
+                kwargs={"ready": ready},
+                daemon=True,
+            )
             t.start()
-            deadline = time.monotonic() + 5
-            while not sock_path.exists() and time.monotonic() < deadline:
-                time.sleep(0.02)
+            self.assertTrue(ready.wait(timeout=5))
             res = managed_profile.sign_session(
                 {"outer": True, "inner": True},
                 Path(td),
@@ -461,6 +469,149 @@ class TestPhase1And3Hardening(unittest.TestCase):
                     w.import_batch(pairs, pq_stamps=pq_stamps)
             attester.wipe()
             stamper.identity.wipe()
+
+    def test_keyguard_kem_v2_triple_kex_and_v1_compat(self):
+        import keyguard
+
+        # schema=2: X25519 + X448 + ML-KEM-1024 + dual HKDF-SHA-512 XOR HKDF-SHA3-512.
+        priv2, pub2 = keyguard.kem_keypair_v2()
+        self.assertEqual((len(priv2), len(pub2)), (keyguard.KEM_V2_PRIVATE, keyguard.KEM_V2_PUBLIC))
+        env2 = keyguard.kem_seal_v2(pub2, b"secret-psk-material", b"ctx-v2")
+        self.assertEqual(env2["schema"], 2)
+        self.assertEqual(keyguard.kem_open(priv2, env2, b"ctx-v2"), b"secret-psk-material")
+        with self.assertRaises(Exception):
+            keyguard.kem_open(priv2, env2, b"wrong-ctx")
+        with self.assertRaises(ValueError):
+            keyguard.kem_open(b"\x00" * 96, env2, b"ctx-v2")
+
+        # schema=1 legacy envelopes remain 100% compatible.
+        priv1, pub1 = keyguard.kem_keypair()
+        env1 = keyguard.kem_seal(pub1, b"legacy-psk", b"ctx-v1")
+        self.assertEqual(env1["schema"], 1)
+        self.assertEqual(keyguard.kem_open(priv1, env1, b"ctx-v1"), b"legacy-psk")
+
+    def test_managed_profile_multi_dot_upstreams_and_server_fees_nts_wiring(self):
+        import json
+        from unittest import mock
+
+        import cypherpunkctl
+        import managed_profile as mp
+        import server_egress
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            mp.lab_setup(root, "192.0.2.1:443", "198.51.100.2:4444")
+            exit_prof = json.loads((root / "exit/profile.json").read_text())
+            exit_prof["dns"]["upstreams"] = list(mp.DEFAULT_PQ_DOT_UPSTREAMS)
+            mp.profile_validate(exit_prof)
+            # Non-loopback upstreams rejected in recursive mode.
+            bad_rec = json.loads((root / "exit/profile.json").read_text())
+            bad_rec["dns"].update(upstream="127.0.0.1:5335", server_name="localhost", recursive=True, test_ca=None)
+            bad_rec["dns"]["upstreams"] = [{"addr": "8.8.8.8:853", "server_name": "dns.google"}]
+            with self.assertRaises(ValueError):
+                mp.profile_validate(bad_rec)
+
+        # ServerFees.egress_text() enables RFC 8915 NTS by default and supports CPVPN_STRICT_NTS_SERVERS.
+        f = cypherpunkctl.ServerFees.__new__(cypherpunkctl.ServerFees)
+        f.se, f.uid, f.front_uid, f.maintenance, f.lab = server_egress, 1001, None, False, False
+        f.profile = dict(role="exit", network=dict(relay_endpoint="198.51.100.1:443"))
+        f.cfg = dict(core=dict(listen="198.51.100.2:4444"))
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("CPVPN_STRICT_NTS_SERVERS", None)
+            rules = f.egress_text()
+            self.assertIn("tcp dport 4460 accept", rules)
+            self.assertIn("udp dport 123 accept", rules)
+        with mock.patch.dict(os.environ, {"CPVPN_STRICT_NTS_SERVERS": "162.159.200.1,162.159.200.123"}):
+            strict = f.egress_text()
+            self.assertIn("ip daddr { 162.159.200.1, 162.159.200.123 } tcp dport 4460 accept", strict)
+            self.assertNotIn("\n  udp dport 123 accept\n", strict)
+
+    def test_mesh_cli_accepts_shared_import_witness_flags(self):
+        import inspect
+
+        import mesh
+
+        src = inspect.getsource(mesh.main)
+        self.assertIn('"--witness-keys"', src)
+        self.assertIn('"--witness-quorum"', src)
+
+    def test_three_tier_security_levels_and_hardwareless_vault_vm_session_signer(self):
+        import session_signer
+        import vault_vm
+
+        # 1. No hardware key detected -> only Standard (hardwareless vault-vm) is available & recommended.
+        env_no_hw = vault_vm.SecurityEnvironment(
+            hardware_keys=(), tpm2_usable=False, qubes_available=False, kvm_available=False, signing_vm_configured=False
+        )
+        rep = vault_vm.evaluate_tiers(env_no_hw)
+        self.assertEqual(rep["recommended"], "standard")
+        self.assertEqual(vault_vm.select_tier("standard", env_no_hw)["protection_mode"], "vault-vm")
+        with self.assertRaisesRegex(vault_vm.VaultVmError, "unavailable"):
+            vault_vm.select_tier("safer", env_no_hw)
+        with self.assertRaisesRegex(vault_vm.VaultVmError, "unavailable"):
+            vault_vm.select_tier("safest", env_no_hw)
+
+        # 2. Hardware key + Qubes/KVM isolation -> all 3 tiers unlocked, Safest recommended.
+        env_full = vault_vm.SecurityEnvironment(
+            hardware_keys=("Nitrokey 3",),
+            tpm2_usable=True,
+            qubes_available=True,
+            kvm_available=True,
+            signing_vm_configured=False,
+        )
+        rep_full = vault_vm.evaluate_tiers(env_full)
+        self.assertEqual(rep_full["recommended"], "safest")
+        self.assertEqual(vault_vm.select_tier("safer", env_full)["protection_mode"], "nitrokey")
+        self.assertEqual(vault_vm.select_tier("safest", env_full)["transport"], "qrexec")
+
+        # 3. VaultVmStore enroll + authorize_session + verify_assertion + wrong-passphrase refusal.
+        with tempfile.TemporaryDirectory() as td:
+            vault_dir = Path(td) / "vault"
+            with self.assertRaisesRegex(vault_vm.VaultVmError, "at least"):
+                vault_vm.VaultVmStore.enroll(vault_dir, "short", scrypt_n=1 << 14)
+            meta = vault_vm.VaultVmStore.enroll(vault_dir, "cypherpunk-vault-passphrase!", scrypt_n=1 << 14)
+            stmt = b"session-auth-statement-test"
+            secret, opened_meta, assertion = vault_vm.VaultVmStore.authorize_session(
+                vault_dir, stmt, "cypherpunk-vault-passphrase!"
+            )
+            self.assertEqual(len(secret), 32)
+            self.assertEqual(opened_meta["mode"], "vault-vm")
+            vault_vm.VaultVmStore.verify_assertion(meta["consent_public"], stmt, assertion)
+            with self.assertRaises(vault_vm.VaultVmError):
+                vault_vm.VaultVmStore.authorize_session(vault_dir, stmt, "wrong-passphrase-12345")
+            with self.assertRaises(vault_vm.VaultVmError):
+                vault_vm.VaultVmStore.verify_assertion(meta["consent_public"], b"tampered", assertion)
+
+            # End-to-end session_signer.sign() works seamlessly in hardwareless vault-vm mode!
+            import json
+            from cryptography.hazmat.primitives.asymmetric import mldsa
+            import keyguard
+            import managed_profile as mp
+
+            state = Path(td) / "state"
+            mp.lab_setup(state, "192.0.2.1:443", "198.51.100.2:4444")
+            client_dir = state / "client"
+            outer_key = mp.load_keys(client_dir, ["outer"])["outer"]
+            sealed = keyguard.seal_bytes(secret, opened_meta, "outer", mp.binding(client_dir, "outer"), outer_key)
+            keyguard.atomic(client_dir / "outer-key.sealed.json", json.dumps(sealed).encode())
+            (client_dir / "outer-key.der").unlink()
+            keyguard.atomic(
+                client_dir / "protection.json",
+                json.dumps({"mode": "vault-vm", "vault": str(vault_dir)}).encode(),
+            )
+            sess_key = mldsa.MLDSA65PrivateKey.generate()
+            spki_hex = (
+                sess_key.public_key()
+                .public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)
+                .hex()
+            )
+            reply = session_signer.sign(
+                client_dir,
+                {"outer": spki_hex},
+                passphrase_fn=lambda: "cypherpunk-vault-passphrase!",
+            )
+            self.assertEqual(reply["protection_mode"], "vault-vm")
+            self.assertIn("outer", reply["leaves"])
 
 
 if __name__ == "__main__":

@@ -32,6 +32,7 @@ Setup:
 
 - `preflight`: check installation requirements without changing the host
 - `setup`: resume verified setup checks and review hardware repair plans
+- `security-level`: detect hardware keys / VM isolation and choose Standard (hardwareless `vault-vm`), Safer (Nitrokey), or Safest (Split Vault-VM + Nitrokey) protection
 
 - `request`: generate this device's keys and a public request
 - `init`: operator only; sign a chain from the requests

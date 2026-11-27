@@ -288,7 +288,7 @@ def cert_spki_sha256(cert_der: bytes) -> bytes:
 
 
 def _send_json(conn: ssl.SSLSocket, payload: dict):
-    """Send a fixed-size 16,384-byte padded frame so all admission messages look identical on the wire."""
+    """Send a fixed-size 49,152-byte padded frame so all admission messages look identical on the wire."""
     data = json.dumps(payload, separators=(",", ":")).encode("utf-8")
     if len(data) > MAX_PAYLOAD_BYTES:
         raise AdmissionError("admission message too large")
@@ -297,7 +297,7 @@ def _send_json(conn: ssl.SSLSocket, payload: dict):
 
 
 def _recv_json(conn: ssl.SSLSocket) -> dict:
-    """Receive one fixed-size 16,384-byte padded admission frame."""
+    """Receive one fixed-size 49,152-byte padded admission frame."""
     frame = _recv_exact(conn, ADMISSION_FRAME_BYTES)
     (size,) = struct.unpack("!H", frame[:2])
     if not 2 <= size <= MAX_PAYLOAD_BYTES:

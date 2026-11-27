@@ -152,10 +152,17 @@ class SlhDsaKeypair:
             slen = ctypes.c_size_t(0)
             if self._lib.EVP_DigestSign(ctx, None, ctypes.byref(slen), message, len(message)) != 1:
                 raise AdmissionError("SLH-DSA signature size query failed")
-            sig = ctypes.create_string_buffer(slen.value)
-            if self._lib.EVP_DigestSign(ctx, sig, ctypes.byref(slen), message, len(message)) != 1:
-                raise AdmissionError("SLH-DSA signing failed")
-            return bytes(sig.raw[: slen.value])
+            if slen.value != SLHDSA_SIGNATURE_BYTES:
+                raise AdmissionError("unexpected SLH-DSA signature buffer size")
+            sig = ctypes.create_string_buffer(SLHDSA_SIGNATURE_BYTES)
+            try:
+                if self._lib.EVP_DigestSign(ctx, sig, ctypes.byref(slen), message, len(message)) != 1:
+                    raise AdmissionError("SLH-DSA signing failed")
+                if slen.value != SLHDSA_SIGNATURE_BYTES:
+                    raise AdmissionError("unexpected SLH-DSA signature length")
+                return bytes(sig.raw[: slen.value])
+            finally:
+                ctypes.memset(sig, 0, SLHDSA_SIGNATURE_BYTES)
         finally:
             self._lib.EVP_MD_CTX_free(ctx)
 
@@ -251,7 +258,7 @@ class HybridPqPublic:
         """Verify EVERY pinned signature family; fail closed on any missing or invalid leg."""
         if not isinstance(signatures, dict):
             raise AdmissionError("missing multi-family PQ signatures")
-        digest = domain + hashlib.sha3_512(message).digest()
+        digest = domain + hashlib.sha512(message).digest() + hashlib.sha3_512(message).digest()
         try:
             mldsa_sig = base64.b64decode(signatures["mldsa87"], validate=True)
             ed_sig = base64.b64decode(signatures["ed25519"], validate=True)
@@ -286,10 +293,10 @@ class HybridPqIdentity:
         )
 
     def sign(self, domain: bytes, message: bytes) -> dict[str, str]:
-        """Sign `domain || SHA3-512(message)` under every active cryptographic family."""
+        """Sign `domain || SHA-512(message) || SHA3-512(message)` under every active family."""
         if self._mldsa87 is None or self._ed25519 is None:
             raise AdmissionError("hybrid PQ private identity has been wiped")
-        digest = domain + hashlib.sha3_512(message).digest()
+        digest = domain + hashlib.sha512(message).digest() + hashlib.sha3_512(message).digest()
         sigs = {
             "mldsa87": base64.b64encode(self._mldsa87.sign(digest)).decode("ascii"),
             "ed25519": base64.b64encode(self._ed25519.sign(digest)).decode("ascii"),
