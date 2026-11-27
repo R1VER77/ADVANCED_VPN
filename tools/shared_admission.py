@@ -4,8 +4,9 @@ from contextlib import closing
 from dataclasses import dataclass, field
 import hashlib
 import os
-import re
 from pathlib import Path
+import re
+import secrets
 import sqlite3
 
 from cryptography.exceptions import InvalidSignature
@@ -15,6 +16,8 @@ from cryptography.hazmat.primitives.asymmetric import mldsa, padding, rsa
 
 EPOCH_SECONDS = 86400
 SESSION_SECONDS = 3600
+ENTRY_JITTER_MIN_SECONDS = 60
+ENTRY_JITTER_MAX_SECONDS = 300
 TOKEN_TYPE = b"\x00\x02"
 TOKEN_INPUT_BYTES = 98
 TOKEN_SIGNATURE_BYTES = 256
@@ -63,13 +66,14 @@ def verify_token(token: bytes, challenge: bytes, spki: bytes) -> bytes:
 
 @dataclass(frozen=True)
 class Cohort:
-    """One trusted pool, relay role, issuer key and UTC redemption epoch."""
+    """One trusted pool, relay role, issuer key, optional PQ stamper key, and UTC redemption epoch."""
 
     issuer_name: str
     pool_name: str
     role: str
     epoch: int
     issuer_spki: bytes = field(repr=False)
+    pq_stamper_public: object | None = field(default=None, repr=False)
 
     def __post_init__(self):
         if self.role not in ROLES or type(self.epoch) is not int or not 0 <= self.epoch < 2**31:
@@ -193,20 +197,32 @@ def admit(
     carrier_key: bytes,
     session_key: mldsa.MLDSA65PublicKey,
     proof: bytes,
+    pq_stamp: dict | None = None,
 ) -> int:
-    """Verify a spend and session proof before returning a short-lived peer expiry.
+    """Verify a spend, optional multi-family PQ stamp, and session proof before returning expiry.
 
-    The caller supplies the pinned hop ID, locally derived TLS exporter and wall
-    clock. A token is consumed before the caller can install any peer state.
+    The caller supplies the pinned hop ID, locally derived hybrid PQ channel
+    binding and wall clock. A token is consumed before the caller can install
+    any peer state.
     """
     if ledger.role != cohort.role or now // EPOCH_SECONDS != cohort.epoch:
         raise AdmissionError("token epoch or role is inactive")
     if not isinstance(session_key, mldsa.MLDSA65PublicKey):
         raise AdmissionError("session key must be ML-DSA-65")
     digest = verify_token(token, cohort.challenge, cohort.issuer_spki)
+    if cohort.pq_stamper_public is not None:
+        from shared_pq import PQ_STAMP_DOMAIN, pq_stamp_message
+
+        cohort.pq_stamper_public.verify(PQ_STAMP_DOMAIN, pq_stamp_message(cohort, token), pq_stamp)
     try:
         session_key.verify(proof, binding_message(cohort, token, hop_key_id, channel_binding, carrier_key))
     except InvalidSignature:
         raise AdmissionError("invalid session proof") from None
     ledger.consume(digest, cohort.expires)
-    return min(cohort.expires, now + SESSION_SECONDS)
+    # Decouple natural entry and exit lease expiries with independent entry jitter.
+    lifetime = SESSION_SECONDS
+    if cohort.role == "entry":
+        lifetime += ENTRY_JITTER_MIN_SECONDS + secrets.randbelow(
+            ENTRY_JITTER_MAX_SECONDS - ENTRY_JITTER_MIN_SECONDS + 1
+        )
+    return min(cohort.expires, now + lifetime)

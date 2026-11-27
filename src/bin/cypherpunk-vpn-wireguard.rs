@@ -361,9 +361,27 @@ async fn work() -> Result<()> {
                     tx_decoy+=d.tx_decoy_packet_bytes;rx_decoy+=d.rx_decoy_packet_bytes;
                     handshake|=p.stats.last_handshake.is_some();
                 }
-                let stats=serde_json::json!({"schema":1,"daita":true,"handshake":handshake,
-                    "peers":peers.len(),"rx_bytes":rx_bytes,"tx_bytes":tx_bytes,"tx_padding_bytes":tx_padding,
-                    "rx_padding_bytes":rx_padding,"tx_decoy_bytes":tx_decoy,"rx_decoy_bytes":rx_decoy});
+                let stats = if shared {
+                    // Coarsen aggregate counters on shared carriers (64 KiB buckets, no single-peer handshake edge).
+                    const BUCKET: usize = 65536;
+                    serde_json::json!({
+                        "schema": 1,
+                        "coarsened": true,
+                        "daita": true,
+                        "handshake": peers.len() >= 2 && handshake,
+                        "peers": peers.len(),
+                        "rx_bytes": rx_bytes & !(BUCKET - 1),
+                        "tx_bytes": tx_bytes & !(BUCKET - 1),
+                        "tx_padding_bytes": tx_padding & !(BUCKET - 1),
+                        "rx_padding_bytes": rx_padding & !(BUCKET - 1),
+                        "tx_decoy_bytes": tx_decoy & !(BUCKET - 1),
+                        "rx_decoy_bytes": rx_decoy & !(BUCKET - 1),
+                    })
+                } else {
+                    serde_json::json!({"schema":1,"daita":true,"handshake":handshake,
+                        "peers":peers.len(),"rx_bytes":rx_bytes,"tx_bytes":tx_bytes,"tx_padding_bytes":tx_padding,
+                        "rx_padding_bytes":rx_padding,"tx_decoy_bytes":tx_decoy,"rx_decoy_bytes":rx_decoy})
+                };
                 let tmp=c.statistics.with_extension("tmp");std::fs::write(&tmp,serde_json::to_vec(&stats)?)?;std::fs::rename(tmp,&c.statistics)?;
                 // A spent privacy budget stops the carrier; it never disables defenses.
                 if let Some(budget)=c.byte_budget {ensure!((rx_bytes.saturating_add(tx_bytes) as u64) < budget,"traffic budget exhausted");}

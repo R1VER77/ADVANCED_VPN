@@ -83,7 +83,10 @@ const SLASH_COMMANDS: &[(&str, &str)] = &[
     ("settings", "change protection scope and other preferences"),
     ("locations", "view and select saved routes"),
     ("credits", "show the mesh wallet and redemption status"),
-    ("shared", "show shared-access pilot status and sealed credits"),
+    (
+        "shared",
+        "show shared-access pilot status and sealed credits",
+    ),
     ("hops", "show the enrolled route"),
     ("setup", "set up or enroll this device"),
     ("doctor", "check this device"),

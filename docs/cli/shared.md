@@ -28,8 +28,16 @@ Public shared access is **disabled by default** pending protocol review.
 
 ## Privacy disclosures
 
-- **Classical token unforgeability**: RFC 9578 RSA-PSS tokens have classical
-  unforgeability; unlinkability holds against a quantum observer.
+- **Multi-family post-quantum defense-in-depth**: Shared admission channels
+  combine SafeCurves `X25519` + `X448` + `ML-KEM-1024` via a dual-hash
+  `HKDF-SHA-512 ⊕ HKDF-SHA3-512` combiner over `Ed25519` TLS 1.3 (`OP_NO_TICKET`),
+  with mandatory multi-family PQ server confirmation (`ML-DSA-87` + `Ed25519` +
+  FIPS 205 hash-based `SLH-DSA-SHA2-128f` when OpenSSL 3.5 is present).
+- **Composite access credits**: RFC 9578 RSA-PSS provides unconditionally
+  quantum-safe blinding unlinkability; when paired with an independent RFC 9576
+  PQ Epoch Stamper (`ML-DSA-87` + `SLH-DSA-SHA2-128f` + `Ed25519`), credit
+  unforgeability resists both classical and quantum breaks of any single family
+  (requiring non-collusion between the Checkout Attester and PQ Epoch Stamper).
 - **Upstream visibility**: The configured upstream operator sees your source
   address. If the upstream drops, admission and VPN traffic stay blocked.
 - **Application identity**: Websites and apps can still link sessions through

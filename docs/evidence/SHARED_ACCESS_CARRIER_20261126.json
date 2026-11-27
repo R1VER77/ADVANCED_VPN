@@ -29,6 +29,7 @@
     "distinct_psks": true,
     "ipv6_blocked": true,
     "direct_dns_blocked": true,
+    "ephemeral_keys_wiped": true,
     "after_disconnect": {
       "dns": false,
       "https": false
@@ -72,6 +73,7 @@
     "distinct_psks": true,
     "ipv6_blocked": true,
     "direct_dns_blocked": true,
+    "ephemeral_keys_wiped": true,
     "after_disconnect": {
       "dns": false,
       "https": false
@@ -91,6 +93,38 @@
       "disconnected": 1
     },
     "aggregate_logs_hygienic": true
+  },
+  "anonymity_and_pfp_hardening": {
+    "witness_quorum_against_key_tagging": true,
+    "random_lease_allocation": true,
+    "entry_to_exit_masquerade_random_nat": true,
+    "fixed_admission_frame_bytes": 49152,
+    "cover_sni_override_supported": true,
+    "tls13_session_tickets_disabled": true,
+    "tls13_cert_algorithm": "Ed25519 (zero NIST P-256)",
+    "pq_multi_family_channel_kex": "X25519 + X448 + ML-KEM-1024",
+    "pq_dual_hash_kdf_combiner": "HKDF-SHA-512 XOR HKDF-SHA3-512",
+    "pq_multi_family_server_confirmation": "ML-DSA-87 + SLH-DSA-SHA2-128f + Ed25519",
+    "pq_split_authority_credit_stamp": "RFC 9578 RSA-2048-PSS + ML-DSA-87 + SLH-DSA-SHA2-128f + Ed25519",
+    "slhdsa_fips205_active_on_host": true,
+    "full_multi_family_handshake_avg_ms": 68.92,
+    "pq_hybrid_extra_rtts": 0,
+    "default_hop_delay_range_seconds": [
+      0.4,
+      1.5
+    ],
+    "default_silent_entry_disconnect": true,
+    "default_disconnect_wait_seconds": 0.0,
+    "entry_lease_expiry_jitter_seconds": [
+      60,
+      300
+    ],
+    "steady_state_data_plane_latency_added_ms": 0.0,
+    "wallet_shuffled_and_fixed_padded_bytes": 8192,
+    "carrier_stats_coarsened_kib": 64,
+    "carrier_single_peer_handshake_suppressed": true,
+    "ephemeral_hop_grant_and_frame_zeroization": true,
+    "checkout_epoch_key_retirement_and_order_purge": true
   },
   "cli_and_regressions": {
     "rust_tests_passed": 202,

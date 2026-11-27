@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import secrets
 import socket
 import ssl
 import struct
@@ -13,95 +14,258 @@ from threading import Lock, Thread
 import time
 
 from cryptography.exceptions import InvalidSignature
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import mldsa, x25519
-from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import mldsa, mlkem, x448, x25519
 
 from shared_admission import AdmissionError, Cohort, ROLES, ReplayLedger, binding_message
 from shared_carrier import SharedCarrier
+from shared_pq import HybridPqIdentity, HybridPqPublic, dual_hkdf_expand
 
 
-MAX_FRAME_BYTES = 16384
+ADMISSION_FRAME_BYTES = 49152
+MAX_PAYLOAD_BYTES = ADMISSION_FRAME_BYTES - 2
+X448_PUBLIC_BYTES = 56
+MLKEM1024_PUBLIC_BYTES = 1568
+MLKEM1024_CIPHERTEXT_BYTES = 1568
+SERVER_CONFIRM_DOMAIN = b"cpvpn/shared-server-confirm/v2\0"
 
 
-def derive_channel_keys(
-    shared_secret: bytes,
+def _wipe_bytearray(buf: bytearray):
+    """Overwrite a mutable secret buffer with zeros in place."""
+    buf[:] = bytes(len(buf))
+
+
+def _transcript_bytes(
     role: str,
     hop_key_id: bytes,
     client_ephem: bytes,
     server_ephem: bytes,
+    client_x448: bytes,
+    server_x448: bytes,
+    client_mlkem: bytes,
+    server_mlkem_ct: bytes,
     client_nonce: bytes,
     server_nonce: bytes,
-) -> tuple[bytes, bytes]:
-    """Derive distinct 32-byte admission binding and WireGuard PSK inside a pinned TLS 1.3 channel."""
-    if role not in ROLES or any(
-        not isinstance(v, bytes) or len(v) != 32 or not any(v)
-        for v in (shared_secret, hop_key_id, client_ephem, server_ephem, client_nonce, server_nonce)
-    ):
-        raise AdmissionError("invalid channel key derivation inputs")
-    salt = hashlib.sha256(
-        b"cpvpn/shared-channel/v1\0"
+) -> bytes:
+    return (
+        b"cpvpn/shared-channel-pq/v2\0"
         + role.encode("ascii")
         + b"\0"
         + hop_key_id
         + client_ephem
         + server_ephem
+        + client_x448
+        + server_x448
+        + client_mlkem
+        + server_mlkem_ct
         + client_nonce
         + server_nonce
-    ).digest()
-    binding = HKDF(
-        algorithm=hashes.SHA256(),
-        length=32,
-        salt=salt,
-        info=b"cpvpn/shared-admission/channel/v1\0" + role.encode("ascii"),
-    ).derive(shared_secret)
-    psk = HKDF(
-        algorithm=hashes.SHA256(),
-        length=32,
-        salt=salt,
-        info=b"cpvpn/shared-admission/psk/v1\0" + role.encode("ascii"),
-    ).derive(shared_secret)
+    )
+
+
+def derive_channel_keys(
+    shared_x25519: bytes,
+    shared_x448: bytes,
+    pq_secret: bytes,
+    role: str,
+    hop_key_id: bytes,
+    client_ephem: bytes,
+    server_ephem: bytes,
+    client_x448: bytes,
+    server_x448: bytes,
+    client_mlkem: bytes,
+    server_mlkem_ct: bytes,
+    client_nonce: bytes,
+    server_nonce: bytes,
+) -> tuple[bytes, bytes]:
+    """Derive 32-byte admission binding and WireGuard PSK from X25519 + X448 + ML-KEM-1024 via dual HKDF."""
+    if (
+        role not in ROLES
+        or any(
+            not isinstance(v, bytes) or len(v) != 32 or not any(v)
+            for v in (shared_x25519, pq_secret, hop_key_id, client_ephem, server_ephem, client_nonce, server_nonce)
+        )
+        or any(
+            not isinstance(v, bytes) or len(v) != X448_PUBLIC_BYTES or not any(v)
+            for v in (shared_x448, client_x448, server_x448)
+        )
+        or not isinstance(client_mlkem, bytes)
+        or len(client_mlkem) != MLKEM1024_PUBLIC_BYTES
+        or not isinstance(server_mlkem_ct, bytes)
+        or len(server_mlkem_ct) != MLKEM1024_CIPHERTEXT_BYTES
+    ):
+        raise AdmissionError("invalid channel key derivation inputs")
+    transcript = _transcript_bytes(
+        role,
+        hop_key_id,
+        client_ephem,
+        server_ephem,
+        client_x448,
+        server_x448,
+        client_mlkem,
+        server_mlkem_ct,
+        client_nonce,
+        server_nonce,
+    )
+    ikm = bytearray(shared_x25519) + bytearray(shared_x448) + bytearray(pq_secret)
+    try:
+        binding = dual_hkdf_expand(ikm, transcript, b"cpvpn/shared-admission/channel/v2\0" + role.encode("ascii"), 32)
+        psk = dual_hkdf_expand(ikm, transcript, b"cpvpn/shared-admission/psk/v2\0" + role.encode("ascii"), 32)
+    finally:
+        _wipe_bytearray(ikm)
     if binding == psk or not any(binding) or not any(psk):
         raise AdmissionError("invalid derived channel keys")
     return binding, psk
 
 
-def _server_channel_handshake(conn: ssl.SSLSocket, role: str, hop_key_id: bytes) -> tuple[bytes, bytes]:
-    """Perform an ephemeral X25519 + nonce exchange inside the pinned TLS 1.3 connection."""
+def _server_channel_handshake(
+    conn: ssl.SSLSocket, role: str, hop_key_id: bytes, server_pq_identity: HybridPqIdentity
+) -> tuple[bytes, bytes]:
+    """Perform X25519 + X448 + ML-KEM-1024 KEX with multi-family PQ server confirmation."""
     hello = _recv_json(conn)
     if hello.get("op") != "hello":
         raise AdmissionError("expected channel hello")
     client_ephem = bytes.fromhex(hello["client_ephem"])
+    client_x448 = bytes.fromhex(hello["client_x448"])
+    client_mlkem = bytes.fromhex(hello["client_mlkem"])
     client_nonce = bytes.fromhex(hello["client_nonce"])
-    if len(client_ephem) != 32 or len(client_nonce) != 32:
+    if (
+        len(client_ephem) != 32
+        or len(client_x448) != X448_PUBLIC_BYTES
+        or len(client_mlkem) != MLKEM1024_PUBLIC_BYTES
+        or len(client_nonce) != 32
+    ):
         raise AdmissionError("invalid channel hello")
     server_priv = x25519.X25519PrivateKey.generate()
-    server_ephem = server_priv.public_key().public_bytes_raw()
-    server_nonce = os.urandom(32)
-    shared_secret = server_priv.exchange(x25519.X25519PublicKey.from_public_bytes(client_ephem))
-    _send_json(conn, {"ok": True, "server_ephem": server_ephem.hex(), "server_nonce": server_nonce.hex()})
-    return derive_channel_keys(
-        shared_secret, role, hop_key_id, client_ephem, server_ephem, client_nonce, server_nonce
+    server_x448_priv = x448.X448PrivateKey.generate()
+    try:
+        server_ephem = server_priv.public_key().public_bytes_raw()
+        server_x448 = server_x448_priv.public_key().public_bytes_raw()
+        server_nonce = os.urandom(32)
+        shared_x25519 = server_priv.exchange(x25519.X25519PublicKey.from_public_bytes(client_ephem))
+        shared_x448 = server_x448_priv.exchange(x448.X448PublicKey.from_public_bytes(client_x448))
+        pq_secret, server_mlkem_ct = mlkem.MLKEM1024PublicKey.from_public_bytes(client_mlkem).encapsulate()
+    finally:
+        del server_priv, server_x448_priv
+    transcript = _transcript_bytes(
+        role,
+        hop_key_id,
+        client_ephem,
+        server_ephem,
+        client_x448,
+        server_x448,
+        client_mlkem,
+        server_mlkem_ct,
+        client_nonce,
+        server_nonce,
     )
+    server_confirm = server_pq_identity.sign(SERVER_CONFIRM_DOMAIN, transcript)
+    _send_json(
+        conn,
+        {
+            "ok": True,
+            "server_ephem": server_ephem.hex(),
+            "server_x448": server_x448.hex(),
+            "server_mlkem_ct": server_mlkem_ct.hex(),
+            "server_nonce": server_nonce.hex(),
+            "server_confirm": server_confirm,
+        },
+    )
+    try:
+        return derive_channel_keys(
+            shared_x25519,
+            shared_x448,
+            pq_secret,
+            role,
+            hop_key_id,
+            client_ephem,
+            server_ephem,
+            client_x448,
+            server_x448,
+            client_mlkem,
+            server_mlkem_ct,
+            client_nonce,
+            server_nonce,
+        )
+    finally:
+        del shared_x25519, shared_x448, pq_secret
 
 
-def _client_channel_handshake(conn: ssl.SSLSocket, role: str, hop_key_id: bytes) -> tuple[bytes, bytes]:
-    """Client half of the ephemeral X25519 + nonce channel exchange over pinned TLS 1.3."""
+def _client_channel_handshake(
+    conn: ssl.SSLSocket, role: str, hop_key_id: bytes, server_pq_public: HybridPqPublic
+) -> tuple[bytes, bytes]:
+    """Client half of X25519 + X448 + ML-KEM-1024 KEX with pinned multi-family PQ server auth."""
     client_priv = x25519.X25519PrivateKey.generate()
-    client_ephem = client_priv.public_key().public_bytes_raw()
-    client_nonce = os.urandom(32)
-    _send_json(conn, {"op": "hello", "client_ephem": client_ephem.hex(), "client_nonce": client_nonce.hex()})
-    reply = _recv_json(conn)
-    if not reply.get("ok"):
-        raise AdmissionError("channel hello rejected")
-    server_ephem = bytes.fromhex(reply["server_ephem"])
-    server_nonce = bytes.fromhex(reply["server_nonce"])
-    if len(server_ephem) != 32 or len(server_nonce) != 32:
-        raise AdmissionError("invalid channel hello reply")
-    shared_secret = client_priv.exchange(x25519.X25519PublicKey.from_public_bytes(server_ephem))
-    return derive_channel_keys(
-        shared_secret, role, hop_key_id, client_ephem, server_ephem, client_nonce, server_nonce
-    )
+    client_x448_priv = x448.X448PrivateKey.generate()
+    client_kem_priv = mlkem.MLKEM1024PrivateKey.generate()
+    try:
+        client_ephem = client_priv.public_key().public_bytes_raw()
+        client_x448 = client_x448_priv.public_key().public_bytes_raw()
+        client_mlkem = client_kem_priv.public_key().public_bytes(
+            serialization.Encoding.Raw, serialization.PublicFormat.Raw
+        )
+        client_nonce = os.urandom(32)
+        _send_json(
+            conn,
+            {
+                "op": "hello",
+                "client_ephem": client_ephem.hex(),
+                "client_x448": client_x448.hex(),
+                "client_mlkem": client_mlkem.hex(),
+                "client_nonce": client_nonce.hex(),
+            },
+        )
+        reply = _recv_json(conn)
+        if not reply.get("ok"):
+            raise AdmissionError("channel hello rejected")
+        server_ephem = bytes.fromhex(reply["server_ephem"])
+        server_x448 = bytes.fromhex(reply["server_x448"])
+        server_mlkem_ct = bytes.fromhex(reply["server_mlkem_ct"])
+        server_nonce = bytes.fromhex(reply["server_nonce"])
+        if (
+            len(server_ephem) != 32
+            or len(server_x448) != X448_PUBLIC_BYTES
+            or len(server_mlkem_ct) != MLKEM1024_CIPHERTEXT_BYTES
+            or len(server_nonce) != 32
+        ):
+            raise AdmissionError("invalid channel hello reply")
+        transcript = _transcript_bytes(
+            role,
+            hop_key_id,
+            client_ephem,
+            server_ephem,
+            client_x448,
+            server_x448,
+            client_mlkem,
+            server_mlkem_ct,
+            client_nonce,
+            server_nonce,
+        )
+        # Verify ALL pinned multi-family PQ server confirmation signatures BEFORE deriving keys or sending credits.
+        server_pq_public.verify(SERVER_CONFIRM_DOMAIN, transcript, reply.get("server_confirm"))
+        shared_x25519 = client_priv.exchange(x25519.X25519PublicKey.from_public_bytes(server_ephem))
+        shared_x448 = client_x448_priv.exchange(x448.X448PublicKey.from_public_bytes(server_x448))
+        pq_secret = client_kem_priv.decapsulate(server_mlkem_ct)
+    finally:
+        del client_priv, client_x448_priv, client_kem_priv
+    try:
+        return derive_channel_keys(
+            shared_x25519,
+            shared_x448,
+            pq_secret,
+            role,
+            hop_key_id,
+            client_ephem,
+            server_ephem,
+            client_x448,
+            server_x448,
+            client_mlkem,
+            server_mlkem_ct,
+            client_nonce,
+            server_nonce,
+        )
+    finally:
+        del shared_x25519, shared_x448, pq_secret
 
 
 def disconnect_message(role: str, hop_key_id: bytes, channel_binding: bytes, carrier_key: bytes) -> bytes:
@@ -124,18 +288,21 @@ def cert_spki_sha256(cert_der: bytes) -> bytes:
 
 
 def _send_json(conn: ssl.SSLSocket, payload: dict):
+    """Send a fixed-size 16,384-byte padded frame so all admission messages look identical on the wire."""
     data = json.dumps(payload, separators=(",", ":")).encode("utf-8")
-    if len(data) > MAX_FRAME_BYTES:
+    if len(data) > MAX_PAYLOAD_BYTES:
         raise AdmissionError("admission message too large")
-    conn.sendall(struct.pack("!I", len(data)) + data)
+    pad = bytes(MAX_PAYLOAD_BYTES - len(data))
+    conn.sendall(struct.pack("!H", len(data)) + data + pad)
 
 
 def _recv_json(conn: ssl.SSLSocket) -> dict:
-    header = _recv_exact(conn, 4)
-    (size,) = struct.unpack("!I", header)
-    if not 2 <= size <= MAX_FRAME_BYTES:
+    """Receive one fixed-size 16,384-byte padded admission frame."""
+    frame = _recv_exact(conn, ADMISSION_FRAME_BYTES)
+    (size,) = struct.unpack("!H", frame[:2])
+    if not 2 <= size <= MAX_PAYLOAD_BYTES:
         raise AdmissionError("invalid admission frame size")
-    raw = _recv_exact(conn, size)
+    raw = frame[2 : 2 + size]
     try:
         value = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError):
@@ -182,6 +349,7 @@ class AdmissionServer:
         ledger: ReplayLedger,
         carrier: SharedCarrier,
         server_wg_public: bytes,
+        server_pq_identity: HybridPqIdentity | None = None,
     ):
         if len(server_wg_public) != 32 or not any(server_wg_public):
             raise AdmissionError("invalid carrier public key")
@@ -189,9 +357,13 @@ class AdmissionServer:
         self.ledger = ledger
         self.carrier = carrier
         self.server_wg_public = server_wg_public
+        self.server_pq_identity = server_pq_identity or HybridPqIdentity()
+        self.server_pq_public = self.server_pq_identity.public
         self.context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         self.context.minimum_version = ssl.TLSVersion.TLSv1_3
         self.context.maximum_version = ssl.TLSVersion.TLSv1_3
+        # Disable TLS 1.3 session tickets for strict per-connection forward secrecy and anti-tracking.
+        self.context.options |= ssl.OP_NO_TICKET
         self.context.load_cert_chain(str(cert_path), str(key_path))
         from cryptography import x509
 
@@ -220,11 +392,14 @@ class AdmissionServer:
         self._thread.start()
 
     def stop(self):
-        """Stop accepting new admission connections and wait for the listener thread."""
+        """Stop accepting new admission connections, wipe live session/PQ key state, and wait for shutdown."""
         self._stop = True
         with suppress(OSError):
             self._sock.close()
         self._thread.join(timeout=3)
+        with self._lock:
+            self._sessions.clear()
+        self.server_pq_identity.wipe()
 
     def metrics(self) -> dict[str, int]:
         """Return strictly aggregate health and capacity counters."""
@@ -260,7 +435,9 @@ class AdmissionServer:
                 conn = tls_conn
                 if conn.version() != "TLSv1.3":
                     raise AdmissionError("TLS 1.3 required")
-                channel_binding, psk = _server_channel_handshake(conn, self.cohort.role, self.hop_key_id)
+                channel_binding, psk = _server_channel_handshake(
+                    conn, self.cohort.role, self.hop_key_id, self.server_pq_identity
+                )
                 req = _recv_json(conn)
                 op = req.get("op")
                 if op == "admit":
@@ -268,6 +445,7 @@ class AdmissionServer:
                     carrier_key = bytes.fromhex(req["carrier_key"])
                     session_der = bytes.fromhex(req["session_key"])
                     proof = bytes.fromhex(req["proof"])
+                    pq_stamp = req.get("pq_stamp")
                     session_pub = _load_mldsa_public(session_der)
                     assigned, expiry = self.carrier.install_lease(
                         self.cohort,
@@ -279,6 +457,7 @@ class AdmissionServer:
                         carrier_key=carrier_key,
                         session_key=session_pub,
                         proof=proof,
+                        pq_stamp=pq_stamp,
                     )
                     with self._lock:
                         self._reap_sessions(int(time.time()))
@@ -330,13 +509,15 @@ class AdmissionServer:
 
 @dataclass(frozen=True)
 class HopEndpoint:
-    """Pinned server-authenticated admission endpoint for one hop."""
+    """Pinned server-authenticated admission endpoint with mandatory multi-family PQ server auth."""
 
     host: str
     port: int
     server_name: str
     ca_path: Path
     hop_key_id: bytes
+    server_pq_public: HybridPqPublic
+    sni_override: str | None = None
 
 
 @dataclass(frozen=True)
@@ -345,23 +526,33 @@ class HopGrant:
 
     role: str
     endpoint: HopEndpoint
-    client_private: x25519.X25519PrivateKey
-    session_private: mldsa.MLDSA65PrivateKey
+    client_private: x25519.X25519PrivateKey | None
+    session_private: mldsa.MLDSA65PrivateKey | None
     psk: bytes
     server_public: bytes
     assigned_address: str
     expiry: int
     channel_binding: bytes
 
+    def wipe(self):
+        """Destroy ephemeral session keys and derived secrets immediately upon teardown."""
+        object.__setattr__(self, "client_private", None)
+        object.__setattr__(self, "session_private", None)
+        object.__setattr__(self, "psk", b"")
+        object.__setattr__(self, "channel_binding", b"")
+
 
 def _connect_pinned(endpoint: HopEndpoint, *, timeout: float = 5.0) -> ssl.SSLSocket:
     ctx = ssl.create_default_context(cafile=str(endpoint.ca_path))
     ctx.minimum_version = ssl.TLSVersion.TLSv1_3
     ctx.maximum_version = ssl.TLSVersion.TLSv1_3
-    ctx.check_hostname = True
+    # Disable TLS 1.3 session tickets so every admission uses fresh ephemeral key agreement.
+    ctx.options |= ssl.OP_NO_TICKET
+    # When a cover SNI is used, authenticate strictly by pinned SPKI SHA-256.
+    ctx.check_hostname = endpoint.sni_override is None
     raw = socket.create_connection((endpoint.host, endpoint.port), timeout=timeout)
     try:
-        conn = ctx.wrap_socket(raw, server_hostname=endpoint.server_name)
+        conn = ctx.wrap_socket(raw, server_hostname=endpoint.sni_override or endpoint.server_name)
     except BaseException:
         raw.close()
         raise
@@ -375,8 +566,15 @@ def _connect_pinned(endpoint: HopEndpoint, *, timeout: float = 5.0) -> ssl.SSLSo
     return conn
 
 
-def admit_hop(cohort: Cohort, endpoint: HopEndpoint, token: bytes, *, timeout: float = 5.0) -> HopGrant:
-    """Redeem one blind credit over a fresh pinned TLS 1.3 channel with fresh keys."""
+def admit_hop(
+    cohort: Cohort,
+    endpoint: HopEndpoint,
+    token: bytes,
+    *,
+    pq_stamp: dict | None = None,
+    timeout: float = 5.0,
+) -> HopGrant:
+    """Redeem one blind credit over a fresh pinned PQ-authenticated TLS 1.3 channel with fresh keys."""
     session_private = mldsa.MLDSA65PrivateKey.generate()
     client_private = x25519.X25519PrivateKey.generate()
     carrier_key = client_private.public_key().public_bytes_raw()
@@ -385,18 +583,20 @@ def admit_hop(cohort: Cohort, endpoint: HopEndpoint, token: bytes, *, timeout: f
         serialization.PublicFormat.SubjectPublicKeyInfo,
     )
     with _connect_pinned(endpoint, timeout=timeout) as conn:
-        channel_binding, psk = _client_channel_handshake(conn, cohort.role, endpoint.hop_key_id)
-        proof = session_private.sign(binding_message(cohort, token, endpoint.hop_key_id, channel_binding, carrier_key))
-        _send_json(
-            conn,
-            {
-                "op": "admit",
-                "token": token.hex(),
-                "carrier_key": carrier_key.hex(),
-                "session_key": session_der.hex(),
-                "proof": proof.hex(),
-            },
+        channel_binding, psk = _client_channel_handshake(
+            conn, cohort.role, endpoint.hop_key_id, endpoint.server_pq_public
         )
+        proof = session_private.sign(binding_message(cohort, token, endpoint.hop_key_id, channel_binding, carrier_key))
+        payload = {
+            "op": "admit",
+            "token": token.hex(),
+            "carrier_key": carrier_key.hex(),
+            "session_key": session_der.hex(),
+            "proof": proof.hex(),
+        }
+        if pq_stamp is not None:
+            payload["pq_stamp"] = pq_stamp
+        _send_json(conn, payload)
         reply = _recv_json(conn)
         if not reply.get("ok"):
             raise AdmissionError("hop admission rejected")
@@ -417,14 +617,18 @@ def admit_hop(cohort: Cohort, endpoint: HopEndpoint, token: bytes, *, timeout: f
 
 
 def disconnect_hop(grant: HopGrant, *, timeout: float = 5.0):
-    """Send an authenticated disconnect over a fresh pinned TLS 1.3 channel to remove the peer."""
+    """Send an authenticated disconnect over a fresh pinned PQ-authenticated TLS 1.3 channel."""
+    if grant.client_private is None or grant.session_private is None:
+        raise AdmissionError("hop grant keys already wiped")
     carrier_key = grant.client_private.public_key().public_bytes_raw()
     session_der = grant.session_private.public_key().public_bytes(
         serialization.Encoding.DER,
         serialization.PublicFormat.SubjectPublicKeyInfo,
     )
     with _connect_pinned(grant.endpoint, timeout=timeout) as conn:
-        channel_binding, _ = _client_channel_handshake(conn, grant.role, grant.endpoint.hop_key_id)
+        channel_binding, _ = _client_channel_handshake(
+            conn, grant.role, grant.endpoint.hop_key_id, grant.endpoint.server_pq_public
+        )
         proof = grant.session_private.sign(
             disconnect_message(grant.role, grant.endpoint.hop_key_id, channel_binding, carrier_key)
         )
@@ -457,6 +661,16 @@ def upstream_is_ready(interface: str) -> bool:
     return state == "unknown" and bool(int(flags.read_text().strip(), 16) & 0x1)
 
 
+def _uniform_jitter(bounds: tuple[float, float]) -> float:
+    low, high = bounds
+    if low < 0 or high < low:
+        raise AdmissionError("invalid jitter bounds")
+    if high == 0:
+        return 0.0
+    span_ms = int(round((high - low) * 1000))
+    return low + (secrets.randbelow(span_ms + 1) / 1000.0 if span_ms > 0 else 0.0)
+
+
 class SharedSessionClient:
     """Coordinate entry-first, exit-through-entry shared admission with atomic rollback."""
 
@@ -473,6 +687,10 @@ class SharedSessionClient:
         activate_exit,
         teardown_exit,
         upstream_check=upstream_is_ready,
+        hop_delay_range: tuple[float, float] = (0.4, 1.5),
+        disconnect_tail_range: tuple[float, float] = (0.3, 1.0),
+        silent_entry_disconnect: bool = True,
+        sleep_fn=time.sleep,
     ):
         self.entry_cohort = entry_cohort
         self.exit_cohort = exit_cohort
@@ -484,18 +702,32 @@ class SharedSessionClient:
         self.activate_exit = activate_exit
         self.teardown_exit = teardown_exit
         self.upstream_check = upstream_check
+        self.hop_delay_range = hop_delay_range
+        self.disconnect_tail_range = disconnect_tail_range
+        self.silent_entry_disconnect = silent_entry_disconnect
+        self.sleep_fn = sleep_fn
 
-    def connect(self, entry_token: bytes, exit_token: bytes) -> tuple[HopGrant, HopGrant]:
-        """Admit entry via upstream, bring up entry carrier, then admit exit through entry."""
+    def connect(
+        self,
+        entry_token: bytes,
+        exit_token: bytes,
+        *,
+        entry_pq_stamp: dict | None = None,
+        exit_pq_stamp: dict | None = None,
+    ) -> tuple[HopGrant, HopGrant]:
+        """Admit entry via upstream, wait randomized cover delay, then admit exit through entry."""
         if not self.upstream_check(self.upstream_interface):
             raise AdmissionError("required upstream interface is unavailable; refusing direct fallback")
-        entry_grant = admit_hop(self.entry_cohort, self.entry_endpoint, entry_token)
+        entry_grant = admit_hop(self.entry_cohort, self.entry_endpoint, entry_token, pq_stamp=entry_pq_stamp)
         entry_local_up = False
         exit_grant = None
         try:
             self.activate_entry(entry_grant)
             entry_local_up = True
-            exit_grant = admit_hop(self.exit_cohort, self.exit_endpoint, exit_token)
+            delay = _uniform_jitter(self.hop_delay_range)
+            if delay > 0:
+                self.sleep_fn(delay)
+            exit_grant = admit_hop(self.exit_cohort, self.exit_endpoint, exit_token, pq_stamp=exit_pq_stamp)
             self.activate_exit(exit_grant)
             return entry_grant, exit_grant
         except BaseException:
@@ -504,31 +736,42 @@ class SharedSessionClient:
                     self.teardown_exit(exit_grant)
                 with suppress(Exception):
                     disconnect_hop(exit_grant)
+                exit_grant.wipe()
             if entry_local_up:
                 with suppress(Exception):
                     self.teardown_entry(entry_grant)
             with suppress(Exception):
                 disconnect_hop(entry_grant)
+            entry_grant.wipe()
             raise
 
     def disconnect(self, entry_grant: HopGrant, exit_grant: HopGrant):
-        """Remove exit then entry peers cleanly before tearing down local tunnels."""
+        """Disconnect exit, tear down tunnels with zero wait on silent entry expiry, and wipe keys."""
         errors = []
         try:
-            disconnect_hop(exit_grant)
-        except Exception as err:
-            errors.append(err)
-        try:
-            self.teardown_exit(exit_grant)
-        except Exception as err:
-            errors.append(err)
-        try:
-            self.teardown_entry(entry_grant)
-        except Exception as err:
-            errors.append(err)
-        try:
-            disconnect_hop(entry_grant)
-        except Exception as err:
-            errors.append(err)
+            try:
+                disconnect_hop(exit_grant)
+            except Exception as err:
+                errors.append(err)
+            try:
+                self.teardown_exit(exit_grant)
+            except Exception as err:
+                errors.append(err)
+            if not self.silent_entry_disconnect:
+                tail = _uniform_jitter(self.disconnect_tail_range)
+                if tail > 0:
+                    self.sleep_fn(tail)
+            try:
+                self.teardown_entry(entry_grant)
+            except Exception as err:
+                errors.append(err)
+            if not self.silent_entry_disconnect:
+                try:
+                    disconnect_hop(entry_grant)
+                except Exception as err:
+                    errors.append(err)
+        finally:
+            exit_grant.wipe()
+            entry_grant.wipe()
         if errors:
             raise AdmissionError("shared disconnect incomplete") from errors[0]

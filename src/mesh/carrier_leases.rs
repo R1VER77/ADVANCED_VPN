@@ -23,7 +23,7 @@ use tokio::{
 use zeroize::{Zeroize, Zeroizing};
 
 const MESSAGE_SIZE: usize = 77;
-const MAX_LEASE: Duration = Duration::from_secs(3600);
+const MAX_LEASE: Duration = Duration::from_secs(3900);
 const CLIENT_CAPACITY: usize = 253;
 
 struct Lease {

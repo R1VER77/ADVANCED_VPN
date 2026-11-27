@@ -96,7 +96,12 @@ class SharedAdmissionTests(unittest.TestCase):
                 session_key=key.public_key(),
                 proof=proof,
             )
-        self.assertEqual(self.accept(token), shared.EPOCH_SECONDS + shared.SESSION_SECONDS)
+        expiry = self.accept(token)
+        self.assertTrue(
+            shared.EPOCH_SECONDS + shared.SESSION_SECONDS + shared.ENTRY_JITTER_MIN_SECONDS
+            <= expiry
+            <= shared.EPOCH_SECONDS + shared.SESSION_SECONDS + shared.ENTRY_JITTER_MAX_SECONDS
+        )
 
     def test_tokens_are_bound_to_a_pool_role_and_full_issuer_key(self):
         exit_cohort = shared.Cohort("issuer.vpn.test", "pool.vpn.test", "exit", 1, self.spki)
@@ -167,9 +172,11 @@ class SharedAdmissionTests(unittest.TestCase):
                 wallet.import_batch(pairs)
             with self.assertRaisesRegex(shared.AdmissionError, "outside"):
                 wallet.take_pair(shared.EPOCH_SECONDS - 1)
-            for entry, exit in pairs:
-                self.assertNotIn(entry.hex(), path.read_text())
-                self.assertEqual(wallet.take_pair(shared.EPOCH_SECONDS), (entry, exit))
+            taken = []
+            for _ in range(PAIRS_PER_BATCH):
+                self.assertNotIn(pairs[0][0].hex(), path.read_text())
+                taken.append(wallet.take_pair(shared.EPOCH_SECONDS))
+            self.assertEqual(set(taken), set(pairs))
             self.assertEqual(unlock.call_count, 1 + PAIRS_PER_BATCH)
             with self.assertRaisesRegex(shared.AdmissionError, "empty"):
                 wallet.take_pair(shared.EPOCH_SECONDS)

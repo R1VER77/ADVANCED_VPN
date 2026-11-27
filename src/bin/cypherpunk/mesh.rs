@@ -86,7 +86,9 @@ pub fn credit_cells(outcome: &Outcome) -> Vec<Cell> {
     if !outcome.ok() || value["credit_dashboard"] != true {
         return crate::cells::from_outcome("mesh", outcome);
     }
-    let held = value["held_total"].as_u64().or_else(|| value["balance"].as_u64());
+    let held = value["held_total"]
+        .as_u64()
+        .or_else(|| value["balance"].as_u64());
     let pending = value["pending_total"]
         .as_u64()
         .or_else(|| value["pending_next_epoch"].as_u64());

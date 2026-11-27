@@ -1,6 +1,7 @@
 """Forward verified peer grants to the isolated GotaTun carrier via an inherited channel."""
 
 from ipaddress import IPv4Address, IPv4Network
+import secrets
 import socket
 import struct
 from threading import Lock
@@ -46,15 +47,12 @@ class LeaseAllocator:
             if candidate in self._in_use:
                 raise AdmissionError("shared carrier address is occupied")
         else:
-            candidate = None
             base = int(self.network.network_address)
-            for host in range(2, 255):
-                addr = IPv4Address(base + host)
-                if addr not in self._in_use:
-                    candidate = addr
-                    break
-            if candidate is None:
+            free = [IPv4Address(base + host) for host in range(2, 255) if IPv4Address(base + host) not in self._in_use]
+            if not free:
                 raise AdmissionError("shared carrier lease pool is full")
+            # Uniform random selection prevents leaking occupancy or arrival order.
+            candidate = secrets.choice(free)
         self._by_key[carrier_key] = (candidate, expiry)
         self._in_use.add(candidate)
         return candidate
@@ -84,7 +82,7 @@ class SharedCarrier:
         self.leases = LeaseAllocator(role)
         self._lock = Lock()
 
-    def _apply(self, message: bytes):
+    def _apply(self, message: bytes | bytearray):
         try:
             self.control.sendall(message)
             if self.control.recv(1) != b"\x00":
@@ -113,11 +111,14 @@ class SharedCarrier:
             current = int(time.time()) if now is None else now
             expiry = admit(cohort, ledger, token, current, **binding)
             allocated = self.leases.reserve(carrier_key, expiry, address=explicit, now=current)
+            frame = bytearray(b"\x01" + carrier_key + psk + allocated.packed + struct.pack("!Q", expiry))
             try:
-                self._apply(b"\x01" + carrier_key + psk + allocated.packed + struct.pack("!Q", expiry))
+                self._apply(frame)
             except BaseException:
                 self.leases.release(carrier_key)
                 raise
+            finally:
+                frame[:] = bytes(len(frame))
             return str(allocated), expiry
 
     def install(self, cohort, ledger, token, *, address, psk, now: int | None = None, **binding):

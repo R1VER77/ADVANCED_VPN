@@ -34,7 +34,7 @@ from unittest.mock import patch
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import ec, rsa, x25519
+from cryptography.hazmat.primitives.asymmetric import ed25519, rsa, x25519
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "tools"))
@@ -51,6 +51,7 @@ from shared_admission import (  # noqa: E402
     TOKEN_TYPE,
 )
 from shared_carrier import SharedCarrier  # noqa: E402
+from shared_pq import HybridPqIdentity, HybridPqPublic, PqEpochStamper, issue_checkout_ticket  # noqa: E402
 from shared_session import AdmissionServer, HopEndpoint, SharedSessionClient  # noqa: E402
 from shared_wallet import CreditWallet, PAIRS_PER_BATCH  # noqa: E402
 
@@ -85,8 +86,8 @@ def write_private(path: Path, data: bytes):
 
 
 def make_tls(directory: Path, role: str):
-    """Create a disposable pinned TLS 1.3 keypair and certificate for one hop."""
-    key = ec.generate_private_key(ec.SECP256R1())
+    """Create a disposable SafeCurves Ed25519 TLS 1.3 keypair and cert (zero NIST P-256)."""
+    key = ed25519.Ed25519PrivateKey.generate()
     name = x509.Name([x509.NameAttribute(x509.NameOID.COMMON_NAME, f"{role}.vpn.test")])
     now = datetime.now(timezone.utc)
     cert = (
@@ -98,7 +99,7 @@ def make_tls(directory: Path, role: str):
         .not_valid_before(now - timedelta(minutes=2))
         .not_valid_after(now + timedelta(hours=2))
         .add_extension(x509.SubjectAlternativeName([x509.DNSName(f"{role}.vpn.test")]), critical=False)
-        .sign(key, hashes.SHA256())
+        .sign(key, None)
     )
     cert_path = directory / f"{role}.crt"
     key_path = directory / f"{role}.key"
@@ -138,6 +139,7 @@ def launch_hop_worker(namespace: str, role: str, binary: Path, root: Path, cohor
         "pool_name": cohort.pool_name,
         "epoch": cohort.epoch,
         "issuer_spki": cohort.issuer_spki.hex(),
+        "pq_stamper_public": cohort.pq_stamper_public.to_dict() if cohort.pq_stamper_public is not None else None,
         "cert": str(cert),
         "key": str(key),
         "bind_ip": "192.0.2.2" if role == "entry" else "198.51.100.2",
@@ -224,12 +226,16 @@ def run_hop_worker(spec_path: str):
 
     ledger = ReplayLedger(work_dir / f"{role}-replay.sqlite", role)
     ledger.initialize()
+    pq_stamper_pub = (
+        HybridPqPublic.from_dict(spec["pq_stamper_public"]) if spec.get("pq_stamper_public") is not None else None
+    )
     cohort = Cohort(
         spec["issuer_name"],
         spec["pool_name"],
         role,
         spec["epoch"],
         bytes.fromhex(spec["issuer_spki"]),
+        pq_stamper_public=pq_stamper_pub,
     )
     carrier = SharedCarrier(supervisor, role=role)
     wait_peers(stats, 0)
@@ -245,6 +251,7 @@ def run_hop_worker(spec_path: str):
     server.start()
 
     if role == "exit":
+
         class ExitHandler(BaseHTTPRequestHandler):
             def log_message(self, *_):
                 pass
@@ -272,7 +279,17 @@ def run_hop_worker(spec_path: str):
         Thread(target=dns_loop, daemon=True).start()
 
     # Optional short-lease test command over stdin ("short-lease <pub_hex> <psk_hex> <secs>")
-    print(json.dumps({"ready": True, "stats": str(stats), "server_public": server_pub.hex()}), flush=True)
+    print(
+        json.dumps(
+            {
+                "ready": True,
+                "stats": str(stats),
+                "server_public": server_pub.hex(),
+                "server_pq_public": server.server_pq_public.to_dict(),
+            }
+        ),
+        flush=True,
+    )
     try:
         for line in sys.stdin:
             parts = line.strip().split()
@@ -300,7 +317,9 @@ def run_hop_worker(spec_path: str):
             carrier_proc.kill()
 
 
-def configure_client_wg(root: Path, iface: str, client_priv, server_pub: bytes, psk: bytes, addr: str, allowed: str, ep: str, mtu: int):
+def configure_client_wg(
+    root: Path, iface: str, client_priv, server_pub: bytes, psk: bytes, addr: str, allowed: str, ep: str, mtu: int
+):
     """Configure a fresh ephemeral client WireGuard interface with the admitted PSK."""
     priv_p = root / f"{iface}.priv"
     psk_p = root / f"{iface}.psk"
@@ -308,8 +327,21 @@ def configure_client_wg(root: Path, iface: str, client_priv, server_pub: bytes, 
     write_private(psk_p, base64.b64encode(psk) + b"\n")
     try:
         cmd("ip", "link", "add", iface, "type", "wireguard")
-        cmd("wg", "set", iface, "private-key", str(priv_p), "peer", base64.b64encode(server_pub).decode(),
-            "preshared-key", str(psk_p), "allowed-ips", allowed, "endpoint", ep)
+        cmd(
+            "wg",
+            "set",
+            iface,
+            "private-key",
+            str(priv_p),
+            "peer",
+            base64.b64encode(server_pub).decode(),
+            "preshared-key",
+            str(psk_p),
+            "allowed-ips",
+            allowed,
+            "endpoint",
+            ep,
+        )
         cmd("ip", "addr", "add", addr, "dev", iface)
         cmd("ip", "link", "set", iface, "mtu", str(mtu), "up")
     finally:
@@ -322,11 +354,31 @@ def run_client_driver(spec_path: str):
     spec = json.loads(Path(spec_path).read_text())
     root = Path(spec["root"])
     spki = bytes.fromhex(spec["issuer_spki"])
-    entry_cohort = Cohort(spec["issuer_name"], spec["pool_name"], "entry", spec["epoch"], spki)
-    exit_cohort = Cohort(spec["issuer_name"], spec["pool_name"], "exit", spec["epoch"], spki)
-    entry_ep = HopEndpoint("192.0.2.2", 8443, "entry.vpn.test", Path(spec["entry_cert"]), bytes.fromhex(spec["entry_hop"]))
-    exit_ep = HopEndpoint("198.51.100.2", 8444, "exit.vpn.test", Path(spec["exit_cert"]), bytes.fromhex(spec["exit_hop"]))
+    pq_stamper_pub = HybridPqPublic.from_dict(spec["pq_stamper_public"])
+    entry_cohort = Cohort(
+        spec["issuer_name"], spec["pool_name"], "entry", spec["epoch"], spki, pq_stamper_public=pq_stamper_pub
+    )
+    exit_cohort = Cohort(
+        spec["issuer_name"], spec["pool_name"], "exit", spec["epoch"], spki, pq_stamper_public=pq_stamper_pub
+    )
+    entry_ep = HopEndpoint(
+        "192.0.2.2",
+        8443,
+        "entry.vpn.test",
+        Path(spec["entry_cert"]),
+        bytes.fromhex(spec["entry_hop"]),
+        HybridPqPublic.from_dict(spec["entry_pq_public"]),
+    )
+    exit_ep = HopEndpoint(
+        "198.51.100.2",
+        8444,
+        "exit.vpn.test",
+        Path(spec["exit_cert"]),
+        bytes.fromhex(spec["exit_hop"]),
+        HybridPqPublic.from_dict(spec["exit_pq_public"]),
+    )
     pairs = [tuple(bytes.fromhex(t) for t in p) for p in spec["pairs"]]
+    stamps = spec["stamps"]
     entry_stats = Path(spec["entry_stats"])
     exit_stats = Path(spec["exit_stats"])
 
@@ -356,8 +408,15 @@ def run_client_driver(spec_path: str):
 
     def activate_entry(grant):
         configure_client_wg(
-            root, "outer0", grant.client_private, grant.server_public, grant.psk,
-            f"{grant.assigned_address}/24", "10.78.0.1/32,198.51.100.2/32", "192.0.2.2:41194", 1340,
+            root,
+            "outer0",
+            grant.client_private,
+            grant.server_public,
+            grant.psk,
+            f"{grant.assigned_address}/24",
+            "10.78.0.1/32,198.51.100.2/32",
+            "192.0.2.2:41194",
+            1340,
         )
         cmd("ip", "route", "replace", "198.51.100.2/32", "via", "10.78.0.1", "dev", "outer0")
 
@@ -367,8 +426,15 @@ def run_client_driver(spec_path: str):
 
     def activate_exit(grant):
         configure_client_wg(
-            root, "inner0", grant.client_private, grant.server_public, grant.psk,
-            f"{grant.assigned_address}/24", "10.79.0.1/32", "198.51.100.2:41194", 1180,
+            root,
+            "inner0",
+            grant.client_private,
+            grant.server_public,
+            grant.psk,
+            f"{grant.assigned_address}/24",
+            "10.79.0.1/32",
+            "198.51.100.2:41194",
+            1180,
         )
 
     def teardown_exit(_grant):
@@ -384,6 +450,9 @@ def run_client_driver(spec_path: str):
         teardown_entry=teardown_entry,
         activate_exit=activate_exit,
         teardown_exit=teardown_exit,
+        hop_delay_range=(0.1, 0.25),
+        disconnect_tail_range=(0.1, 0.25),
+        silent_entry_disconnect=False,
     )
 
     out = {}
@@ -393,7 +462,7 @@ def run_client_driver(spec_path: str):
     cmd("ip", "link", "set", "up0", "down")
     try:
         try:
-            client.connect(*pairs[0])
+            client.connect(*pairs[0], entry_pq_stamp=stamps[0][0], exit_pq_stamp=stamps[0][1])
             raise RuntimeError("connected despite upstream down")
         except AdmissionError:
             out["blocked_on_upstream_loss"] = True
@@ -403,7 +472,7 @@ def run_client_driver(spec_path: str):
 
     # 2. Partial peer install rollback: valid entry token + invalid (entry-role) exit token.
     try:
-        client.connect(pairs[0][0], pairs[0][0])
+        client.connect(pairs[0][0], pairs[0][0], entry_pq_stamp=stamps[0][0], exit_pq_stamp=stamps[0][0])
         raise RuntimeError("exit accepted entry token")
     except AdmissionError:
         pass
@@ -412,8 +481,8 @@ def run_client_driver(spec_path: str):
     out["after_rollback"] = probe_dns_https(False)
     out["rolled_back_partial_peer"] = True
 
-    # 3. Full two-hop live GotaTun session: DNS + HTTPS + leak checks.
-    entry_grant, exit_grant = client.connect(*pairs[1])
+    # 3. Full two-hop live GotaTun session with multi-family PQ server auth & PQ-stamped credits.
+    entry_grant, exit_grant = client.connect(*pairs[1], entry_pq_stamp=stamps[1][0], exit_pq_stamp=stamps[1][1])
     wait_peers(entry_stats, 1)
     wait_peers(exit_stats, 1)
     out["both_gotatun_peers"] = probe_dns_https(True)
@@ -438,10 +507,16 @@ def run_client_driver(spec_path: str):
     out["ipv6_blocked"] = ipv6_blocked
     out["direct_dns_blocked"] = direct_dns_blocked
 
-    # 5. Clean explicit disconnect removes both peers and blocks traffic.
+    # 5. Clean explicit disconnect removes both peers, wipes ephemeral keys, and blocks traffic.
     client.disconnect(entry_grant, exit_grant)
     wait_peers(entry_stats, 0)
     wait_peers(exit_stats, 0)
+    out["ephemeral_keys_wiped"] = (
+        entry_grant.psk == b""
+        and exit_grant.psk == b""
+        and entry_grant.client_private is None
+        and exit_grant.session_private is None
+    )
     out["after_disconnect"] = probe_dns_https(False)
 
     print(json.dumps(out), flush=True)
@@ -489,7 +564,8 @@ def setup_topology():
 }
 """,
     )
-    # Entry forwards ONLY inner tunnel traffic between cpwg0 and exit (198.51.100.2)
+    # Entry forwards ONLY inner tunnel traffic and masquerades 10.78.0.0/24 with random ports
+    # so the exit never observes the client's entry-assigned tunnel address.
     ns_exec(ENTRY, "/usr/sbin/sysctl", "-qw", "net.ipv4.ip_forward=1")
     ns_exec(
         ENTRY,
@@ -499,15 +575,18 @@ def setup_topology():
         input_text="""table inet shared_entry_fwd {
  chain forward { type filter hook forward priority 0; policy drop;
   iifname "cpwg0" oifname "wan0" ip daddr 198.51.100.2 tcp dport 8444 accept
-  iifname "wan0" oifname "cpwg0" ip saddr 198.51.100.2 tcp sport 8444 accept
+  iifname "wan0" oifname "cpwg0" ip saddr 198.51.100.2 ct state established,related accept
   iifname "cpwg0" oifname "wan0" ip daddr 198.51.100.2 udp dport 41194 accept
-  iifname "wan0" oifname "cpwg0" ip saddr 198.51.100.2 udp sport 41194 accept
+  iifname "wan0" oifname "cpwg0" ip saddr 198.51.100.2 ct state established,related accept
+ }
+}
+table ip shared_entry_nat {
+ chain postrouting { type nat hook postrouting priority 100;
+  oifname "wan0" ip saddr 10.78.0.0/24 masquerade random
  }
 }
 """,
     )
-    # Exit returns packets for entry's shared client range via entry's wan0
-    cmd("ip", "-n", EXIT, "route", "add", "10.78.0.0/24", "via", "198.51.100.1", "dev", "lan0")
 
 
 def issue_batch(epoch: int):
@@ -520,10 +599,7 @@ def issue_batch(epoch: int):
         pair = []
         for cohort in cohorts:
             body = (
-                TOKEN_TYPE
-                + os.urandom(32)
-                + hashlib.sha256(cohort.challenge).digest()
-                + hashlib.sha256(spki).digest()
+                TOKEN_TYPE + os.urandom(32) + hashlib.sha256(cohort.challenge).digest() + hashlib.sha256(spki).digest()
             )
             pair.append(body + issuer.sign(body, PSS, hashes.SHA384()))
         pairs.append(tuple(pair))
@@ -561,9 +637,32 @@ def main():
 
     with tempfile.TemporaryDirectory(prefix="cpvpn-gotatun-shared-") as td:
         root = Path(td)
+        attester = HybridPqIdentity()
+        stamper = PqEpochStamper(root / "pq-stamper.sqlite", attester.public)
+        stamper.initialize()
+        entry_cohort = Cohort(
+            entry_cohort.issuer_name,
+            entry_cohort.pool_name,
+            "entry",
+            epoch,
+            spki,
+            pq_stamper_public=stamper.public,
+        )
+        exit_cohort = Cohort(
+            exit_cohort.issuer_name,
+            exit_cohort.pool_name,
+            "exit",
+            epoch,
+            spki,
+            pq_stamper_public=stamper.public,
+        )
         wallet = CreditWallet(root / "wallet.json", args.hardware_vault or (root / "vault"), entry_cohort, exit_cohort)
         meta = {"credential": "Y3JlZGVudGlhbA==", "salt": "c2FsdA=="}
-        ctx = keyguard.one_pin() if physical else patch("keyguard.hardware_secret", return_value=(secrets.token_bytes(32), meta))
+        ctx = (
+            keyguard.one_pin()
+            if physical
+            else patch("keyguard.hardware_secret", return_value=(secrets.token_bytes(32), meta))
+        )
         with ctx:
             if args.hardware:
                 print("Enrolling disposable Nitrokey credential (PIN + touch)...", file=sys.stderr, flush=True)
@@ -576,6 +675,15 @@ def main():
                 if physical:
                     print("Opening sealed credit pair with Nitrokey (touch)...", file=sys.stderr, flush=True)
                 opened_pairs.append(wallet.take_pair(now))
+        pair_stamps = [
+            [
+                stamper.stamp(entry_cohort, pair[0], issue_checkout_ticket(attester, epoch), now=now),
+                stamper.stamp(exit_cohort, pair[1], issue_checkout_ticket(attester, epoch), now=now),
+            ]
+            for pair in opened_pairs
+        ]
+        attester.wipe()
+        stamper.retire_epoch(now)
 
         # Isolate /run/netns after hardware PIN/touch so desktop pinentry can reach /run/user/<uid>.
         cmd("mount", "--make-rprivate", "/")
@@ -599,13 +707,17 @@ def main():
                         "pool_name": entry_cohort.pool_name,
                         "epoch": epoch,
                         "issuer_spki": spki.hex(),
+                        "pq_stamper_public": stamper.public.to_dict(),
                         "entry_cert": str(e_cert),
                         "exit_cert": str(x_cert),
                         "entry_hop": e_hop.hex(),
                         "exit_hop": x_hop.hex(),
+                        "entry_pq_public": e_info["server_pq_public"],
+                        "exit_pq_public": x_info["server_pq_public"],
                         "entry_stats": e_info["stats"],
                         "exit_stats": x_info["stats"],
                         "pairs": [[a.hex(), b.hex()] for a, b in opened_pairs],
+                        "stamps": pair_stamps,
                     }
                 ).encode(),
             )

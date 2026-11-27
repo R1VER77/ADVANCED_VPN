@@ -110,7 +110,7 @@ def shared_summary(now: float | None = None) -> dict:
 
 def _load_pinned_key(raw: str) -> mldsa.MLDSA65PublicKey:
     text = raw.strip()
-    if Path(text).exists():
+    if len(text) < 256 and "\n" not in text and Path(text).exists():
         text = Path(text).read_text().strip()
     try:
         key = mldsa.MLDSA65PublicKey.from_public_bytes(base64.b64decode(text, validate=True))
@@ -177,7 +177,10 @@ def cmd_import(args) -> dict:
         "token_verification": CRYPTO_DISCLOSURE,
         "rows": [
             {"label": "Pool", "value": entry_cohort.pool_name},
-            {"label": "Sealed", "value": f"{PAIRS_PER_BATCH} pairs ({PAIRS_PER_BATCH * 2} credits) · Nitrokey protected"},
+            {
+                "label": "Sealed",
+                "value": f"{PAIRS_PER_BATCH} pairs ({PAIRS_PER_BATCH * 2} credits) · Nitrokey protected",
+            },
             {"label": "Activates", "value": activates},
             {"label": "Token crypto", "value": CRYPTO_DISCLOSURE},
             {"label": "Public pool", "value": "Disabled pending protocol review"},
@@ -199,8 +202,14 @@ def cmd_status(_args) -> dict:
         **summary,
         "rows": [
             {"label": "Shared access", "value": "Disabled (pilot pending protocol review)"},
-            {"label": "Usable credits", "value": f"{summary['shared_active_credits']} ({summary['shared_active_pairs']} pairs)"},
-            {"label": "Pending next epoch", "value": f"{summary['shared_pending_credits']} ({summary['shared_pending_pairs']} pairs)"},
+            {
+                "label": "Usable credits",
+                "value": f"{summary['shared_active_credits']} ({summary['shared_active_pairs']} pairs)",
+            },
+            {
+                "label": "Pending next epoch",
+                "value": f"{summary['shared_pending_credits']} ({summary['shared_pending_pairs']} pairs)",
+            },
             {"label": "Next epoch", "value": next_utc},
             {"label": "Upstream", "value": summary["upstream_state"]},
             {"label": "Token crypto", "value": CRYPTO_DISCLOSURE},

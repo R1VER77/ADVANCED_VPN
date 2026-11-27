@@ -2,6 +2,7 @@
 
 import base64
 from dataclasses import dataclass
+import hashlib
 import json
 import secrets
 
@@ -13,7 +14,27 @@ from shared_admission import AdmissionError, Cohort, EPOCH_SECONDS, ROLES
 
 
 DIRECTORY_DOMAIN = b"cpvpn/shared-pool/v1\0"
+WITNESS_DOMAIN = b"cpvpn/shared-pool-witness/v1\0"
 DIRECTORY_FIELDS = {"schema", "pool", "issuer", "issuer_spki", "epoch", "nodes", "signature"}
+OPTIONAL_DIRECTORY_FIELDS = {"witnesses", "pq_stamper_public"}
+
+
+def witness_payload(manifest: dict) -> bytes:
+    """Canonical epoch/key commitment signed by independent directory witnesses."""
+    nodes_hash = hashlib.sha256(
+        json.dumps(manifest["nodes"], sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    body = {
+        "schema": manifest["schema"],
+        "pool": manifest["pool"],
+        "issuer": manifest["issuer"],
+        "issuer_spki": manifest["issuer_spki"],
+        "epoch": manifest["epoch"],
+        "nodes_sha256": nodes_hash,
+    }
+    if "pq_stamper_public" in manifest:
+        body["pq_stamper_public"] = manifest["pq_stamper_public"]
+    return WITNESS_DOMAIN + json.dumps(body, sort_keys=True, separators=(",", ":")).encode()
 
 
 @dataclass(frozen=True)
@@ -24,9 +45,22 @@ class SharedPool:
     _nodes: bytes
 
     @classmethod
-    def verify(cls, manifest, pinned_key: mldsa.MLDSA65PublicKey, now: int):
-        """Authenticate the pool and its individual operator-signed descriptors."""
-        if set(manifest) != DIRECTORY_FIELDS or manifest["schema"] != 1:
+    def verify(
+        cls,
+        manifest,
+        pinned_key: mldsa.MLDSA65PublicKey,
+        now: int,
+        *,
+        witness_keys: dict[str, mldsa.MLDSA65PublicKey] | None = None,
+        witness_quorum: int = 0,
+    ):
+        """Authenticate the pool, optional multi-witness quorum, and operator-signed descriptors."""
+        keys = set(manifest)
+        if (
+            not DIRECTORY_FIELDS <= keys
+            or not keys <= (DIRECTORY_FIELDS | OPTIONAL_DIRECTORY_FIELDS)
+            or manifest["schema"] != 1
+        ):
             raise AdmissionError("invalid pool directory format")
         try:
             nodes = manifest["nodes"]
@@ -35,9 +69,36 @@ class SharedPool:
             pinned_key.verify(
                 base64.b64decode(manifest["signature"], validate=True), DIRECTORY_DOMAIN + mesh.canonical(manifest)
             )
+            if witness_quorum > 0 or witness_keys:
+                if not witness_keys or witness_quorum <= 0 or witness_quorum > len(witness_keys):
+                    raise AdmissionError("invalid witness quorum configuration")
+                attestations = manifest.get("witnesses")
+                if not isinstance(attestations, dict):
+                    raise AdmissionError("missing directory witness attestations")
+                commitment = witness_payload(manifest)
+                verified_witnesses = set()
+                for witness_id, sig_b64 in attestations.items():
+                    key = witness_keys.get(witness_id)
+                    if key is None or not isinstance(sig_b64, str):
+                        continue
+                    try:
+                        key.verify(base64.b64decode(sig_b64, validate=True), commitment)
+                    except (InvalidSignature, ValueError):
+                        continue
+                    verified_witnesses.add(witness_id)
+                if len(verified_witnesses) < witness_quorum:
+                    raise AdmissionError("insufficient directory witness quorum against key-tagging")
             spki = base64.b64decode(manifest["issuer_spki"], validate=True)
+            pq_stamper = None
+            if "pq_stamper_public" in manifest:
+                from shared_pq import HybridPqPublic
+
+                pq_stamper = HybridPqPublic.from_dict(manifest["pq_stamper_public"])
             cohorts = tuple(
-                Cohort(manifest["issuer"], manifest["pool"], role, manifest["epoch"], spki) for role in ROLES
+                Cohort(
+                    manifest["issuer"], manifest["pool"], role, manifest["epoch"], spki, pq_stamper_public=pq_stamper
+                )
+                for role in ROLES
             )
             if cohorts[0].epoch not in (now // EPOCH_SECONDS, now // EPOCH_SECONDS + 1):
                 raise AdmissionError("inactive directory epoch")

@@ -251,7 +251,11 @@ fn shared_subcommands_forward_to_mesh_and_show_help() {
     let s = Stubs::new("shared");
     let help = s.cpvpn(&["shared", "--help"]);
     assert!(help.status.success(), "{}", text(&help));
-    assert!(text(&help).contains("Shared access (pilot)"), "{}", text(&help));
+    assert!(
+        text(&help).contains("Shared access (pilot)"),
+        "{}",
+        text(&help)
+    );
 
     s.script(
         "cpvpn-mesh",
@@ -260,7 +264,13 @@ fn shared_subcommands_forward_to_mesh_and_show_help() {
     let o = s.cpvpn(&["shared"]);
     assert!(o.status.success(), "{}", text(&o));
     let out = text(&o);
-    assert!(out.contains("• Shared access  0 usable · 8 pending · pilot disabled"), "{out}");
-    assert!(out.contains("Disabled (pilot pending protocol review)"), "{out}");
+    assert!(
+        out.contains("• Shared access  0 usable · 8 pending · pilot disabled"),
+        "{out}"
+    );
+    assert!(
+        out.contains("Disabled (pilot pending protocol review)"),
+        "{out}"
+    );
     assert_eq!(s.log("mesh.log").trim(), "--json shared status");
 }

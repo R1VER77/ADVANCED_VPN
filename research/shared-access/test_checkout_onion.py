@@ -25,7 +25,9 @@ from checkout_service import (  # noqa: E402
 )
 from shared_admission import Cohort, EPOCH_SECONDS, ROLES, ReplayLedger, admit, binding_message  # noqa: E402
 from zcash_watchers import (  # noqa: E402
+    make_cipherscan_rest_watcher,
     make_http_watcher,
+    make_lightwalletd_grpc_watcher,
     orchard_note_commitment,
 )
 
@@ -54,9 +56,7 @@ class MockWatcherServer:
                     txid = bytes.fromhex(rec["txid"])
                     bhash = bytes.fromhex(rec["block_hash"])
                     recv = bytes.fromhex(rec["receiver"])
-                    proof = orchard_note_commitment(
-                        parent.ivk, txid, bhash, rec["height"], recv, rec["amount"]
-                    )
+                    proof = orchard_note_commitment(parent.ivk, txid, bhash, rec["height"], recv, rec["amount"])
                     payload = {**rec, "found": True, "decryption_proof": proof.hex()}
                     body = json.dumps(payload).encode()
                     self.send_response(200)
@@ -160,12 +160,24 @@ class TestOnionCheckout(unittest.TestCase):
                     records_b[(txid.hex(), order_resp["receiver"])] = rec
                     return txid
 
+                # Reject mismatched pinned issuer SPKI (key-tagging defense).
+                with self.assertRaisesRegex(CheckoutError, "unpinned issuer key"):
+                    purchase_blind_batch(
+                        host="127.0.0.1",
+                        port=service.port,
+                        signer_script=self.signer,
+                        pay_fn=pay_confirmed,
+                        allow_loopback_test=True,
+                        pinned_issuer_spki=b"\xff" * 342,
+                    )
+
                 batch = purchase_blind_batch(
                     host="127.0.0.1",
                     port=service.port,
                     signer_script=self.signer,
                     pay_fn=pay_confirmed,
                     allow_loopback_test=True,
+                    pinned_issuer_spki=bytes.fromhex(self.issuer_keys["issuerSpki"]),
                 )
                 # No order_id or txid leaked into exported client batch.
                 self.assertEqual(set(batch), {"issuer_name", "pool_name", "epoch", "issuer_spki", "pairs"})
@@ -261,6 +273,36 @@ class TestOnionCheckout(unittest.TestCase):
                         pay_fn=pay_transparent,
                         allow_loopback_test=True,
                     )
+
+                # 5. Epoch retirement destroys signing key and pending orders (forward privacy).
+                service.retire_epoch()
+                self.assertNotIn("privateKeyPkcs8", service.issuer_keys)
+                self.assertEqual(service._orders, {})
+                txid4 = os.urandom(32)
+
+                def pay_after_retire(order_resp):
+                    rec = {
+                        "network": "testnet",
+                        "pool": "orchard",
+                        "txid": txid4.hex(),
+                        "block_hash": (b"\xdd" * 32).hex(),
+                        "height": 2_900_000,
+                        "tip_height": 2_900_012,
+                        "receiver": order_resp["receiver"],
+                        "amount": order_resp["price_zat"],
+                    }
+                    records_a[(txid4.hex(), order_resp["receiver"])] = rec
+                    records_b[(txid4.hex(), order_resp["receiver"])] = rec
+                    return txid4
+
+                with self.assertRaisesRegex(CheckoutError, "retired"):
+                    purchase_blind_batch(
+                        host="127.0.0.1",
+                        port=service.port,
+                        signer_script=self.signer,
+                        pay_fn=pay_after_retire,
+                        allow_loopback_test=True,
+                    )
             finally:
                 service.stop()
                 srv_a.stop()
@@ -279,6 +321,80 @@ class TestOnionCheckout(unittest.TestCase):
                 self.assertEqual(len(onion), 62)  # 56-char Tor v3 onion + ".onion"
             finally:
                 bridge.stop()
+
+    def test_live_protocol_watcher_adapters_cross_verify_and_reject_mainnet(self):
+        """Lightwalletd gRPC and Cipherscan REST adapters enforce testnet, 10 confs, and exact agreement."""
+        from checkout_policy import Order, confirmed
+
+        txid = bytes.fromhex("ab" * 32)
+        block_hash = bytes.fromhex("0000235ebecc6fb984095404651c70381e53bc7666e1df9b29e7f28adead1d23")
+        receiver = b"\x55" * 43
+        raw_tx = b"orchard-shielded-tx-fixture"
+        height, tip = 4_668_260, 4_668_278
+
+        def enc_varint(n: int) -> bytes:
+            out = bytearray()
+            while True:
+                b = n & 0x7F
+                n >>= 7
+                out.append(b | (0x80 if n else 0))
+                if not n:
+                    return bytes(out)
+
+        def fake_grpc(_host, _port, method, _payload, _socks, chain=b"test"):
+            if method == "GetLightdInfo":
+                return b"\x22" + enc_varint(len(chain)) + chain
+            if method == "GetLatestBlock":
+                return b"\x08" + enc_varint(tip)
+            if method == "GetTransaction":
+                return b"\x0a" + enc_varint(len(raw_tx)) + raw_tx + b"\x10" + enc_varint(height)
+            if method == "GetBlock":
+                return b"\x1a\x20" + block_hash[::-1]
+            raise AssertionError(method)
+
+        def fake_http(**kwargs):
+            path = kwargs["path"]
+            if path == "/api/info":
+                return 200, {"height": tip}
+            if path == f"/api/tx/{txid.hex()}":
+                return 200, {"block_height": height, "hex": raw_tx.hex()}
+            if path == f"/api/block/{height}":
+                return 200, {"hash": block_hash.hex()}
+            return 404, {}
+
+        def decrypt(raw: bytes, recv: bytes):
+            return 100_000 if raw == raw_tx and recv == receiver else None
+
+        w1 = make_lightwalletd_grpc_watcher(
+            operator="zec.rocks",
+            host="testnet.zec.rocks",
+            port=443,
+            socks_port=9050,
+            decrypt_raw_tx=decrypt,
+            grpc_fn=fake_grpc,
+        )
+        w2 = make_cipherscan_rest_watcher(
+            operator="cipherscan",
+            host="api.testnet.cipherscan.app",
+            port=443,
+            socks_port=9050,
+            decrypt_raw_tx=decrypt,
+            http_fn=fake_http,
+        )
+        order = Order(id=b"\x01" * 16, receiver=receiver, price=100_000, expires_at=9999999999)
+        confirmed(order, txid, (w1, w2))
+
+        # Mainnet lightwalletd must be rejected unconditionally.
+        w_main = make_lightwalletd_grpc_watcher(
+            operator="zec.rocks",
+            host="mainnet.zec.rocks",
+            port=443,
+            socks_port=9050,
+            decrypt_raw_tx=decrypt,
+            grpc_fn=lambda *a: fake_grpc(*a, chain=b"main"),
+        )
+        with self.assertRaisesRegex(CheckoutError, "payment confirmation unavailable"):
+            confirmed(order, txid, (w_main, w2))
 
 
 if __name__ == "__main__":

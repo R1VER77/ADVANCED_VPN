@@ -146,8 +146,8 @@ class CheckoutService:
             raise CheckoutError("checkout service must bind strictly to 127.0.0.1 behind Tor")
         self.issuer_name = issuer_name
         self.pool_name = pool_name
-        self.issuer_keys = issuer_keys
-        self.issuer_spki = bytes.fromhex(issuer_keys["issuerSpki"])
+        self.issuer_keys = dict(issuer_keys)
+        self.issuer_spki = bytes.fromhex(self.issuer_keys["issuerSpki"])
         self.issuer_key_id = hashlib.sha256(self.issuer_spki).digest()
         self.signer_script = signer_script
         self.watchers = tuple(watchers)
@@ -163,13 +163,30 @@ class CheckoutService:
         self.port = self._server.server_address[1]
         self._thread = Thread(target=self._server.serve_forever, daemon=True)
 
+    def _purge_expired_orders(self, now: int):
+        """Evict expired orders from RAM and prune expired retry blobs from SQLite."""
+        expired = [oid for oid, order in self._orders.items() if order.expires_at <= now]
+        for oid in expired:
+            self._orders.pop(oid, None)
+        with suppress(CheckoutError):
+            self.ledger.prune(now)
+
+    def retire_epoch(self):
+        """Destroy the epoch's blind-signing private key and pending order receivers (forward privacy)."""
+        with self._lock:
+            self.issuer_keys.pop("privateKeyPkcs8", None)
+            self._orders.clear()
+
     def _mint(self, requests: tuple[bytes, ...]) -> tuple[bytes, ...]:
+        private_key = self.issuer_keys.get("privateKeyPkcs8")
+        if not private_key:
+            raise CheckoutError("issuer epoch key has been retired")
         reply = run_signer(
             self.signer_script,
             {
                 "op": "blind-sign",
                 "issuerName": self.issuer_name,
-                "privateKeyPkcs8": self.issuer_keys["privateKeyPkcs8"],
+                "privateKeyPkcs8": private_key,
                 "publicKeySpki": self.issuer_keys["publicKeySpki"],
                 "requests": [r.hex() for r in requests],
             },
@@ -232,6 +249,7 @@ class CheckoutService:
                             expires_at=now + service.order_ttl,
                         )
                         with service._lock:
+                            service._purge_expired_orders(now)
                             service._orders[order.id] = order
                         self._send(
                             200,
@@ -246,11 +264,13 @@ class CheckoutService:
                             },
                         )
                     elif self.path == "/v1/issue":
+                        now = int(service.now_fn())
                         body = self._read_json()
                         order_id = bytes.fromhex(body["order_id"])
                         txid = bytes.fromhex(body["txid"])
                         requests = tuple(bytes.fromhex(item) for item in body["requests"])
                         with service._lock:
+                            service._purge_expired_orders(now)
                             order = service._orders.get(order_id)
                         if order is None:
                             raise CheckoutError("unknown order")
@@ -260,7 +280,7 @@ class CheckoutService:
                             requests,
                             service.watchers,
                             service._mint,
-                            now=int(service.now_fn()),
+                            now=now,
                         )
                         self._send(200, {"ok": True, "responses": [r.hex() for r in responses]})
                     else:
@@ -275,10 +295,11 @@ class CheckoutService:
         self._thread.start()
 
     def stop(self):
-        """Shut down the loopback checkout HTTP server."""
+        """Shut down the loopback checkout HTTP server and drop live order/key state."""
         self._server.shutdown()
         self._server.server_close()
         self._thread.join(timeout=3)
+        self.retire_epoch()
 
 
 def purchase_blind_batch(
@@ -289,6 +310,7 @@ def purchase_blind_batch(
     pay_fn,
     socks_proxy: tuple[str, int] | None = None,
     allow_loopback_test: bool = False,
+    pinned_issuer_spki: bytes | None = None,
 ) -> dict:
     """Execute a blind testnet checkout and return a verified batch with zero order/payment metadata."""
     if not host.endswith(".onion") and not (allow_loopback_test and host == "127.0.0.1"):
@@ -296,13 +318,13 @@ def purchase_blind_batch(
     if host.endswith(".onion") and socks_proxy is None:
         raise CheckoutError("Tor SOCKS5 proxy is required for .onion checkout")
 
-    status, health = http_json_request(
-        host=host, port=port, method="GET", path="/v1/health", socks_proxy=socks_proxy
-    )
+    status, health = http_json_request(host=host, port=port, method="GET", path="/v1/health", socks_proxy=socks_proxy)
     if status != 200 or not health.get("ok") or health.get("public_sales_enabled") is not False:
         raise CheckoutError("checkout health check failed")
     if (health.get("network"), health.get("pool")) != ("testnet", "orchard"):
         raise CheckoutError("checkout is not configured for shielded testnet")
+    if pinned_issuer_spki is not None and bytes.fromhex(health.get("issuer_spki", "")) != pinned_issuer_spki:
+        raise CheckoutError("checkout advertised an unpinned issuer key (possible key-tagging)")
 
     status, order_resp = http_json_request(
         host=host, port=port, method="POST", path="/v1/order", body={}, socks_proxy=socks_proxy
